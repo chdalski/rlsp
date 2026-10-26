@@ -62,7 +62,7 @@ schema-failure Warning instead of applying part of it.
 - [x] Task 3: `definitions`/`$defs` are no longer parsed into the
       tree
 - [x] Task 4: consumers follow reference nodes
-- [ ] Task 5: remote documents are cached raw and parsed only as
+- [x] Task 5: remote documents are cached raw and parsed only as
       targets
 - [ ] Task 6: each `$ref` target is parsed once and shared
 - [ ] Task 7: a schema over the size budget is rejected with a
@@ -175,21 +175,21 @@ as its own schema receives. The cache keeps fetched documents
 separately from parsed schemas, and a remote document is parsed
 only through the targets a parse references.
 
-- [ ] The cache holds raw documents and parsed schemas
+- [x] The cache holds raw documents and parsed schemas
       separately, each first-insertion-wins; a remote `$ref`
       parses only its target, never the whole fetched document
       on its own
-- [ ] A URL first fetched as a remote `$ref` target and later
+- [x] A URL first fetched as a remote `$ref` target and later
       used as a document's own schema is parsed as that
       document's schema, with remote resolution
-- [ ] No comment describes a cache entry as one raw value with
+- [x] No comment describes a cache entry as one raw value with
       its parsed schema, or a cached schema as resolved when its
       document was first fetched
-- [ ] The existing `src/schema.rs` cache, `$id`-spoofing, and
+- [x] The existing `src/schema.rs` cache, `$id`-spoofing, and
       remote-reference tests and the `tests/lsp_lifecycle/`
       schema suites pass with their assertions unchanged — only
       edits for the cache's new shape
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ### Task 6: Parse each `$ref` target once and share it
 

@@ -396,11 +396,7 @@ impl Backend {
     #[doc(hidden)]
     pub fn seed_schema_cache(&self, schema_url: &str, schema: crate::schema::ParsedSchema) {
         if let Ok(mut cache) = self.schema_cache.lock() {
-            cache.insert(
-                schema_url.to_string(),
-                serde_json::Value::Null,
-                Arc::new(schema),
-            );
+            cache.insert(schema_url.to_string(), Arc::new(schema));
         }
     }
 
@@ -477,7 +473,7 @@ impl Backend {
                 .and_then(|cache| cache.get(&url).cloned());
 
             let schema = if let Some(s) = cached {
-                // Already resolved when first fetched — no further ref resolution needed.
+                // Already parsed as this URL's own schema, with remote `$ref` resolution.
                 Some(s)
             } else {
                 // Take the cache out of the Mutex so it can be moved into
@@ -507,30 +503,28 @@ impl Backend {
                     return;
                 };
 
-                // Merge the returned cache back into the live cache.  Use insert()
-                // for each entry so the first-write-wins invariant is preserved:
-                // any URL inserted by a concurrent process_schema call during the
-                // spawn_blocking window is not overwritten.
+                // Merge the returned cache back into the live cache.  merge()
+                // keeps the first-write-wins invariant: any URL inserted by a
+                // concurrent process_schema call during the spawn_blocking
+                // window is not overwritten.
                 if let Ok(mut guard) = self.schema_cache.lock() {
-                    for (key, (value, schema)) in returned_cache.into_inner() {
-                        guard.insert(key, value, schema);
-                    }
+                    guard.merge(returned_cache);
                 }
 
-                let fetched = match fetch_result {
-                    Ok((value, schema)) => Some((value, Arc::new(schema))),
+                match fetch_result {
+                    Ok((document, schema)) => {
+                        let schema = Arc::new(schema);
+                        if let Ok(mut cache) = self.schema_cache.lock() {
+                            cache.insert_document(url.clone(), document);
+                            cache.insert(url, Arc::clone(&schema));
+                        }
+                        Some(schema)
+                    }
                     Err(e) => {
                         self.log_schema_failure(source, &url, &e).await;
                         None
                     }
-                };
-
-                if let Some((ref v, ref s)) = fetched
-                    && let Ok(mut cache) = self.schema_cache.lock()
-                {
-                    cache.insert(url, v.clone(), Arc::clone(s));
                 }
-                fetched.map(|(_, s)| s)
             };
 
             if let Some(s) = schema {

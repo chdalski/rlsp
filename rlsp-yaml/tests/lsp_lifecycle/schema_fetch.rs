@@ -13,8 +13,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use rlsp_yaml::server::Backend;
 use rstest::rstest;
 use serde_json::json;
+use tower_lsp::LspService;
 use tower_lsp::lsp_types::NumberOrString;
 
 use super::helpers::*;
@@ -49,8 +51,8 @@ impl Reply {
     }
 }
 
-/// A `CONNECT` proxy that serves one canned [`Reply`] for `schema.invalid:80`
-/// and answers every other tunnel target with 502.
+/// A `CONNECT` proxy that serves a canned [`Reply`] per request path for
+/// `schema.invalid:80` and answers every other tunnel target with 502.
 struct FakeProxy {
     addr: SocketAddr,
     /// The `CONNECT` line, then the tunneled request line and `Host` header, of
@@ -60,7 +62,15 @@ struct FakeProxy {
 }
 
 impl FakeProxy {
+    /// Serve `reply` for every path.
     fn start(reply: Reply) -> Self {
+        Self::start_routes(vec![("*", reply)])
+    }
+
+    /// Serve the reply of the route whose path matches the request, or the one
+    /// registered for `*`; any other path gets 404.
+    fn start_routes(mut routes: Vec<(&'static str, Reply)>) -> Self {
+        routes.push(("*", Reply::not_found()));
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake proxy");
         listener.set_nonblocking(true).expect("nonblocking");
         let addr = listener.local_addr().expect("local addr");
@@ -72,7 +82,7 @@ impl FakeProxy {
             while !thread_stop.load(Ordering::Relaxed) {
                 match listener.accept() {
                     Ok((stream, _)) => {
-                        let _ = serve_connection(stream, &reply, &thread_seen);
+                        let _ = serve_connection(stream, &routes, &thread_seen);
                     }
                     Err(_) => std::thread::sleep(Duration::from_millis(10)),
                 }
@@ -110,7 +120,7 @@ fn read_head(stream: &mut TcpStream) -> std::io::Result<String> {
 
 fn serve_connection(
     mut stream: TcpStream,
-    reply: &Reply,
+    routes: &[(&str, Reply)],
     seen: &Mutex<Vec<String>>,
 ) -> std::io::Result<()> {
     stream.set_nonblocking(false)?;
@@ -132,13 +142,17 @@ fn serve_connection(
         .find(|l| l.to_ascii_lowercase().starts_with("host:"))
         .unwrap_or_default()
         .to_string();
-    seen.lock().expect("seen lock").extend([request_line, host]);
-
+    let path = request_line.split_whitespace().nth(1).unwrap_or_default();
+    let (_, reply) = routes
+        .iter()
+        .find(|(route, _)| *route == path || *route == "*")
+        .expect("start_routes registers a fallback route");
     let Reply {
         status,
         content_type,
         body,
     } = reply;
+    seen.lock().expect("seen lock").extend([request_line, host]);
     let content_type = content_type.map_or(String::new(), |ct| format!("Content-Type: {ct}\r\n"));
     write!(
         stream,
@@ -335,4 +349,176 @@ async fn should_not_warn_when_schema_fetch_succeeds_or_is_cached() {
         "the second document must hit the cache"
     );
     assert!(warnings.is_empty(), "got: {warnings:?}");
+}
+
+// ---- remote `$ref` documents ----
+
+fn json_reply(body: &str) -> Reply {
+    Reply::ok(Some("application/json"), body.to_string())
+}
+
+/// A schema that types `count` by the remote reference `target`.
+fn count_ref_schema(target: &str) -> String {
+    format!(r#"{{"properties":{{"count":{{"$ref":"http://{SCHEMA_HOST}/{target}"}}}}}}"#)
+}
+
+fn requests_for(proxy: &FakeProxy, path: &str) -> usize {
+    let request_line = format!("GET {path} HTTP/1.1");
+    proxy
+        .seen()
+        .iter()
+        .filter(|line| **line == request_line)
+        .count()
+}
+
+fn diagnostic_codes(service: &LspService<Backend>, uri: &str) -> Vec<NumberOrString> {
+    service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist")
+        .into_iter()
+        .filter_map(|d| d.code)
+        .collect()
+}
+
+#[tokio::test]
+async fn should_resolve_remote_refs_when_a_ref_target_is_later_used_as_own_schema() {
+    let own_schema = r#"{"properties":{"count":{"$ref":"http://schema.invalid/x.json#/definitions/D"}},"definitions":{"D":{"type":"integer"}}}"#;
+    let proxy = FakeProxy::start_routes(vec![
+        (
+            "/s.json",
+            json_reply(&count_ref_schema("x.json#/definitions/D")),
+        ),
+        ("/x.json", json_reply(own_schema)),
+    ]);
+    let (mut service, _log) = start_server(proxy_options(&proxy.url())).await;
+
+    open_with_modeline(
+        &mut service,
+        "file:///test/a.yaml",
+        "http://schema.invalid/s.json",
+    )
+    .await;
+    open_with_modeline(
+        &mut service,
+        "file:///test/b.yaml",
+        "http://schema.invalid/x.json",
+    )
+    .await;
+
+    // x.json was fetched as a `$ref` target of s.json; as b.yaml's own schema
+    // its `count` reference resolves, so the integer type applies.
+    assert_eq!(
+        diagnostic_codes(&service, "file:///test/b.yaml"),
+        [schema_type()]
+    );
+    assert_eq!(requests_for(&proxy, "/x.json"), 1, "no second fetch");
+}
+
+#[tokio::test]
+async fn should_reuse_the_own_schema_document_when_it_is_later_a_ref_target() {
+    let proxy = FakeProxy::start_routes(vec![
+        (
+            "/x.json",
+            json_reply(r#"{"definitions":{"D":{"type":"integer"}}}"#),
+        ),
+        (
+            "/s.json",
+            json_reply(&count_ref_schema("x.json#/definitions/D")),
+        ),
+    ]);
+    let (mut service, _log) = start_server(proxy_options(&proxy.url())).await;
+
+    open_with_modeline(
+        &mut service,
+        "file:///test/a.yaml",
+        "http://schema.invalid/x.json",
+    )
+    .await;
+    open_with_modeline(
+        &mut service,
+        "file:///test/b.yaml",
+        "http://schema.invalid/s.json",
+    )
+    .await;
+
+    assert_eq!(
+        diagnostic_codes(&service, "file:///test/b.yaml"),
+        [schema_type()]
+    );
+    assert_eq!(requests_for(&proxy, "/x.json"), 1, "document is cached");
+}
+
+#[tokio::test]
+async fn should_fetch_a_remote_document_once_for_several_refs() {
+    let schema = format!(
+        r#"{{"properties":{{"count":{{"$ref":"http://{SCHEMA_HOST}/x.json#/definitions/D"}},"other":{{"$ref":"http://{SCHEMA_HOST}/x.json#/definitions/E"}}}}}}"#
+    );
+    let proxy = FakeProxy::start_routes(vec![
+        ("/s.json", json_reply(&schema)),
+        (
+            "/x.json",
+            json_reply(r#"{"definitions":{"D":{"type":"integer"},"E":{"type":"string"}}}"#),
+        ),
+    ]);
+    let (mut service, _log) = start_server(proxy_options(&proxy.url())).await;
+
+    open_with_modeline(
+        &mut service,
+        "file:///test/a.yaml",
+        "http://schema.invalid/s.json",
+    )
+    .await;
+
+    assert_eq!(
+        diagnostic_codes(&service, "file:///test/a.yaml"),
+        [schema_type()]
+    );
+    assert_eq!(requests_for(&proxy, "/x.json"), 1);
+}
+
+#[tokio::test]
+async fn should_resolve_a_pointer_into_a_remote_document_that_is_not_a_schema() {
+    let proxy = FakeProxy::start_routes(vec![
+        ("/s.json", json_reply(&count_ref_schema("arr.json#/0"))),
+        ("/arr.json", json_reply(r#"[{"type":"integer"}]"#)),
+    ]);
+    let (mut service, _log) = start_server(proxy_options(&proxy.url())).await;
+
+    open_with_modeline(
+        &mut service,
+        "file:///test/a.yaml",
+        "http://schema.invalid/s.json",
+    )
+    .await;
+
+    assert_eq!(
+        diagnostic_codes(&service, "file:///test/a.yaml"),
+        [schema_type()]
+    );
+}
+
+#[tokio::test]
+async fn should_not_resolve_a_remote_ref_to_a_document_exceeding_the_depth_limit() {
+    // Past MAX_JSON_DEPTH (50), inside serde_json's own recursion limit (128).
+    let deep = format!("{}{}", "[".repeat(60), "]".repeat(60));
+    let target = format!(r#"{{"definitions":{{"D":{{"type":"integer"}}}},"x-deep":{deep}}}"#);
+    let proxy = FakeProxy::start_routes(vec![
+        (
+            "/s.json",
+            json_reply(&count_ref_schema("deep.json#/definitions/D")),
+        ),
+        ("/deep.json", json_reply(&target)),
+    ]);
+    let (mut service, _log) = start_server(proxy_options(&proxy.url())).await;
+
+    open_with_modeline(
+        &mut service,
+        "file:///test/a.yaml",
+        "http://schema.invalid/s.json",
+    )
+    .await;
+
+    assert!(diagnostic_codes(&service, "file:///test/a.yaml").is_empty());
+    assert_eq!(requests_for(&proxy, "/deep.json"), 1, "the fetch was tried");
 }

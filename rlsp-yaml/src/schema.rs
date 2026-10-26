@@ -424,17 +424,25 @@ pub struct SchemaStoreCatalog {
     pub entries: Vec<SchemaStoreEntry>,
 }
 
-/// In-memory cache of parsed JSON Schemas, keyed by normalized URL.
+/// In-memory cache of fetched schema documents and parsed schemas, both keyed
+/// by normalized URL.
 ///
-/// Each entry stores the raw `Value` alongside the shared `ParsedSchema` so that
-/// fragment-bearing `$ref` values (`other.json#/definitions/Foo`) can navigate
-/// the raw document with a JSON Pointer after the initial fetch.
+/// The two maps are independent:
 ///
-/// Schemas are keyed by **fetch URL**, never by a document's self-declared
-/// `$id`, to prevent `$id`-spoofing cache poisoning.
+/// - `documents` holds raw fetched JSON.  A remote `$ref` stores the document
+///   it fetches here and parses only the target it points at, so fragment-bearing
+///   refs (`other.json#/definitions/Foo`) navigate the raw document with a JSON
+///   Pointer.
+/// - `schemas` holds the [`ParsedSchema`] of a whole document used as a
+///   document's own schema, parsed with remote `$ref` resolution.
+///
+/// Entries are keyed by **fetch URL**, never by a document's self-declared
+/// `$id`, to prevent `$id`-spoofing cache poisoning.  In each map the first
+/// insertion for a URL wins.
 #[derive(Debug, Default)]
 pub struct SchemaCache {
-    inner: HashMap<String, (Value, Arc<ParsedSchema>)>,
+    documents: HashMap<String, Value>,
+    schemas: HashMap<String, Arc<ParsedSchema>>,
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -448,34 +456,52 @@ impl SchemaCache {
         Self::default()
     }
 
-    /// Return a cached schema by URL, or `None` on a cache miss.
+    /// Return the parsed schema of the whole document at `url`, or `None` on a
+    /// cache miss.
     #[must_use]
     pub fn get(&self, url: &str) -> Option<&Arc<ParsedSchema>> {
-        self.inner.get(url).map(|(_, s)| s)
+        self.schemas.get(url)
     }
 
-    /// Insert a schema into the cache.  The first insertion for a given URL
-    /// wins; subsequent calls for the same key are silently ignored.
-    pub fn insert(&mut self, url: String, value: Value, schema: Arc<ParsedSchema>) {
-        self.inner.entry(url).or_insert((value, schema));
+    /// Insert the parsed schema of the whole document at `url`.  The first
+    /// insertion for a given URL wins; subsequent calls for the same key are
+    /// silently ignored.
+    pub fn insert(&mut self, url: String, schema: Arc<ParsedSchema>) {
+        self.schemas.entry(url).or_insert(schema);
     }
 
-    /// Return a cached (raw value, parsed schema) pair by URL, or `None`.
+    /// Return the raw document fetched from `url`, or `None` on a cache miss.
     #[must_use]
-    fn get_raw(&self, url: &str) -> Option<&(Value, Arc<ParsedSchema>)> {
-        self.inner.get(url)
+    pub fn get_document(&self, url: &str) -> Option<&Value> {
+        self.documents.get(url)
     }
 
-    /// Return whether the URL is already in the cache (avoids a fetch).
+    /// Insert the raw document fetched from `url`.  The first insertion for a
+    /// given URL wins; subsequent calls for the same key are silently ignored.
+    pub fn insert_document(&mut self, url: String, document: Value) {
+        self.documents.entry(url).or_insert(document);
+    }
+
+    /// Return whether the raw document at `url` is already in the cache
+    /// (avoids a fetch).
     #[must_use]
-    pub fn contains(&self, url: &str) -> bool {
-        self.inner.contains_key(url)
+    pub fn contains_document(&self, url: &str) -> bool {
+        self.documents.contains_key(url)
     }
 
-    /// Consume `self` and return the underlying map, for use when merging a
-    /// returned cache back into the live cache after a `spawn_blocking` pass.
-    pub(crate) fn into_inner(self) -> HashMap<String, (Value, Arc<ParsedSchema>)> {
-        self.inner
+    /// Move the entries of `other` into `self`, for merging a returned cache
+    /// back into the live cache after a `spawn_blocking` pass.  Each map keeps
+    /// its first-insertion-wins invariant: an entry `self` already holds is not
+    /// overwritten, so a URL inserted concurrently during the pass survives.
+    /// The two maps merge independently, so a URL's document and parsed schema
+    /// may come from different fetches.
+    pub fn merge(&mut self, other: Self) {
+        for (url, document) in other.documents {
+            self.insert_document(url, document);
+        }
+        for (url, schema) in other.schemas {
+            self.insert(url, schema);
+        }
     }
 }
 
@@ -655,7 +681,31 @@ fn fetch_json(agent: &ureq::Agent, url: &str) -> Result<Value, SchemaError> {
     serde_json::from_slice(&buf).map_err(|e| SchemaError::ParseFailed(e.to_string()))
 }
 
-/// Fetch a JSON Schema from `url`, returning the raw `Value` and parsed schema.
+/// Fetch the JSON document at `url` without parsing it as a schema.
+///
+/// `url` is validated with [`validate_and_normalize_url`] before any network
+/// request, and the document is only returned once it passed the size and
+/// nesting limits — nothing unchecked reaches the cache.
+///
+/// # Errors
+///
+/// - [`SchemaError::UrlNotPermitted`] when `url` fails the SSRF guard.
+/// - [`SchemaError::FetchFailed`] on network failure, a 4xx/5xx HTTP status,
+///   or a 3xx response (redirects are not followed).
+/// - [`SchemaError::ResponseTooLarge`] when the body exceeds `MAX_SCHEMA_BYTES`.
+/// - [`SchemaError::ParseFailed`] when the body is not valid JSON.
+/// - [`SchemaError::TooDeep`] when the JSON nests beyond the depth limit.
+fn fetch_document(url: &str, proxy: Option<&str>) -> Result<Value, SchemaError> {
+    validate_and_normalize_url(url)?;
+
+    let value = fetch_json(&build_agent(proxy), url)?;
+
+    check_json_depth(&value, 0)?;
+    Ok(value)
+}
+
+/// Fetch a JSON Schema from `url`, returning the raw `Value` and the parsed
+/// schema of the whole document.
 ///
 /// `url` is validated with [`validate_and_normalize_url`] before any network
 /// request.  This function is blocking; call it via
@@ -664,11 +714,13 @@ fn fetch_json(agent: &ureq::Agent, url: &str) -> Result<Value, SchemaError> {
 /// When `proxy` is `Some`, requests are routed through the given proxy URL.
 ///
 /// When `ctx` is `Some`, remote `$ref` URIs within the fetched schema are
-/// resolved one level deep (depth-1 remote resolution).  `$ref`s inside those
-/// resolved remote documents are not followed further — this is intentional to
-/// cap the blast radius of a malicious schema that chains many remote refs.
-/// The breadth guard (`MAX_REMOTE_FETCH_COUNT`) and dedup set in `ctx` enforce
-/// an absolute cap even if this design decision is revisited later.
+/// resolved one level deep (depth-1 remote resolution), and a document already
+/// held by the context's cache under the normalized `url` is used instead of
+/// fetching it again.  `$ref`s inside those resolved remote documents are not
+/// followed further — this is intentional to cap the blast radius of a
+/// malicious schema that chains many remote refs.  The breadth guard
+/// (`MAX_REMOTE_FETCH_COUNT`) and dedup set in `ctx` enforce an absolute cap
+/// even if this design decision is revisited later.
 ///
 /// # Errors
 ///
@@ -683,19 +735,21 @@ pub fn fetch_schema_raw(
     proxy: Option<&str>,
     ctx: Option<&mut ParseContext<'_>>,
 ) -> Result<(Value, ParsedSchema), SchemaError> {
-    // Validate and normalise the URL before issuing any network request.
-    validate_and_normalize_url(url)?;
+    // Validate and normalise the URL before the cache lookup or any network
+    // request: the cache never answers for a URL the guard rejects.
+    let url = validate_and_normalize_url(url)?;
 
-    let value = fetch_json(&build_agent(proxy), url)?;
-
-    check_json_depth(&value, 0)?;
+    let value = match ctx.as_deref().and_then(|ctx| ctx.cache.get_document(&url)) {
+        Some(cached) => cached.clone(),
+        None => fetch_document(&url, proxy)?,
+    };
 
     let schema = ctx
         .map_or_else(
             || parse_schema(&value),
             |ctx| {
                 SchemaParser::new(&value, Some(ctx))
-                    .parse(&value, Some(url), 0)
+                    .parse(&value, Some(&url), 0)
                     .map(ParsedSchema::new)
             },
         )
@@ -1319,12 +1373,13 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
     /// - `#name`   → named anchor (`$anchor` or `$dynamicAnchor`) in root
     ///
     /// **Remote refs** (everything else — requires the remote context):
-    /// - `https://example.com/other.json`          → fetch entire document
+    /// - `https://example.com/other.json`          → fetch, then parse the entire document as the target
     /// - `https://example.com/other.json#/defs/Foo` → fetch + JSON Pointer
     /// - `sub.json` resolved against `base_uri`
     ///
-    /// Every target is parsed by a fresh parser without a remote context, so
-    /// `$ref`s inside a target are not fetched (depth-1 remote resolution).
+    /// A fetched remote document is cached raw; only the target is parsed, by a
+    /// fresh parser without a remote context, so `$ref`s inside a target are
+    /// not fetched (depth-1 remote resolution).
     ///
     /// Returns `None` if the ref cannot be resolved or limits are exceeded.
     fn resolve_ref(
@@ -1363,32 +1418,31 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
         let absolute_uri = resolve_uri(base_uri, uri_part)?;
         let normalized = validate_and_normalize_url(&absolute_uri).ok()?;
 
-        // Dedup + breadth guard: skip if already visited or limit reached.
-        if !ctx.cache.contains(&normalized) && !ctx.try_visit(&normalized) {
-            return None;
+        // Fetch the document unless it is cached (first insertion wins —
+        // prevents $id-spoofing overwrite).  Dedup + breadth guard: skip if
+        // already visited or the limit is reached.  The document is stored raw:
+        // only the target below is parsed, never the whole document.
+        if !ctx.cache.contains_document(&normalized) {
+            if !ctx.try_visit(&normalized) {
+                return None;
+            }
+            let document = fetch_document(&normalized, ctx.proxy).ok()?;
+            ctx.cache.insert_document(normalized.clone(), document);
         }
 
-        // Fetch and cache (first insertion wins — prevents $id-spoofing overwrite).
-        // Pass ctx=None so that $refs inside the fetched remote document are not
-        // themselves resolved remotely — intentional depth-1 remote resolution limit.
-        if !ctx.cache.contains(&normalized) {
-            let (value, schema) = fetch_schema_raw(&normalized, ctx.proxy, None).ok()?;
-            ctx.cache
-                .insert(normalized.clone(), value, Arc::new(schema));
-        }
-
-        let (remote_value, _) = ctx.cache.get_raw(&normalized)?;
-        let remote_value = remote_value.clone(); // clone to release borrow on cache
+        let remote_value = ctx.cache.get_document(&normalized)?;
 
         let target = match fragment {
-            // No fragment — parse the entire fetched document.
-            None | Some("") => &remote_value,
+            // No fragment — the whole fetched document is the target.
+            None | Some("") => remote_value,
             // JSON Pointer fragment.
             Some(frag) if frag.starts_with('/') => remote_value.pointer(frag)?,
             // Named anchor in the remote document.
-            Some(name) => find_anchor_in_value(name, &remote_value)?,
+            Some(name) => find_anchor_in_value(name, remote_value)?,
         };
-        SchemaParser::new(&remote_value, None).parse(target, Some(&normalized), depth + 1)
+        // A fresh parser without a remote context keeps the depth-1 rule: $refs
+        // inside the target are not fetched.
+        SchemaParser::new(remote_value, None).parse(target, Some(&normalized), depth + 1)
     }
 }
 
@@ -1845,7 +1899,7 @@ mod tests {
         let url = "https://example.com/schema.json";
         let mut cache = SchemaCache::new();
         let schema = Arc::new(ParsedSchema::new(JsonSchema::default()));
-        cache.insert(url.to_string(), Value::Null, Arc::clone(&schema));
+        cache.insert(url.to_string(), Arc::clone(&schema));
 
         let first = cache.get(url).expect("should be cached");
         let second = cache.get(url).expect("should be cached");
@@ -1864,7 +1918,6 @@ mod tests {
         });
         cache.insert(
             "https://example.com/schema.json".to_string(),
-            Value::Null,
             Arc::new(schema),
         );
 
@@ -1889,12 +1942,10 @@ mod tests {
 
         cache.insert(
             "https://example.com/schema.json".to_string(),
-            Value::Null,
             Arc::new(schema_a),
         );
         cache.insert(
             "https://example.com/schema.json".to_string(),
-            Value::Null,
             Arc::new(schema_b),
         );
 
@@ -1902,6 +1953,111 @@ mod tests {
             .get("https://example.com/schema.json")
             .expect("should be cached");
         assert_eq!(result.root.description.as_deref(), Some("first"));
+    }
+
+    fn parsed_with_description(description: &str) -> Arc<ParsedSchema> {
+        Arc::new(ParsedSchema::new(JsonSchema {
+            description: Some(description.to_string()),
+            ..JsonSchema::default()
+        }))
+    }
+
+    #[test]
+    fn empty_cache_misses_in_both_maps() {
+        let cache = SchemaCache::new();
+        let url = "https://example.com/schema.json";
+
+        assert!(cache.get(url).is_none());
+        assert!(cache.get_document(url).is_none());
+        assert!(!cache.contains_document(url));
+    }
+
+    #[test]
+    fn documents_and_parsed_schemas_are_stored_independently() {
+        let url = "https://example.com/schema.json";
+        let mut documents_only = SchemaCache::new();
+        documents_only.insert_document(url.to_string(), json!({ "type": "string" }));
+        let mut schemas_only = SchemaCache::new();
+        schemas_only.insert(url.to_string(), parsed_with_description("x"));
+
+        assert!(documents_only.get(url).is_none());
+        assert_eq!(
+            documents_only.get_document(url),
+            Some(&json!({ "type": "string" }))
+        );
+        assert!(schemas_only.get_document(url).is_none());
+        assert!(!schemas_only.contains_document(url));
+    }
+
+    // The document map keys by fetch URL and keeps the first document, so a
+    // fetched document cannot replace another URL's entry by claiming its URL
+    // through `$id`.
+    #[test]
+    fn dollar_id_spoofing_cannot_overwrite_document_entry() {
+        let url = "https://json-schema.org/draft/2020-12/schema";
+        let mut cache = SchemaCache::new();
+        cache.insert_document(url.to_string(), json!({ "description": "legitimate" }));
+
+        cache.insert_document(
+            url.to_string(),
+            json!({ "$id": url, "description": "malicious" }),
+        );
+
+        assert_eq!(
+            cache.get_document(url),
+            Some(&json!({ "description": "legitimate" }))
+        );
+    }
+
+    #[test]
+    fn merge_into_an_empty_cache_takes_both_maps() {
+        let url = "https://example.com/schema.json";
+        let schema = parsed_with_description("x");
+        let mut other = SchemaCache::new();
+        other.insert_document(url.to_string(), json!({ "type": "string" }));
+        other.insert(url.to_string(), Arc::clone(&schema));
+        let mut cache = SchemaCache::new();
+
+        cache.merge(other);
+
+        assert_eq!(cache.get_document(url), Some(&json!({ "type": "string" })));
+        assert!(Arc::ptr_eq(cache.get(url).expect("merged"), &schema));
+    }
+
+    #[test]
+    fn merge_keeps_existing_entries_first_wins() {
+        let url = "https://example.com/schema.json";
+        let mut cache = SchemaCache::new();
+        cache.insert_document(url.to_string(), json!({ "description": "first" }));
+        cache.insert(url.to_string(), parsed_with_description("first"));
+        let mut other = SchemaCache::new();
+        other.insert_document(url.to_string(), json!({ "description": "second" }));
+        other.insert(url.to_string(), parsed_with_description("second"));
+
+        cache.merge(other);
+
+        assert_eq!(
+            cache.get_document(url),
+            Some(&json!({ "description": "first" }))
+        );
+        assert_eq!(
+            cache.get(url).expect("kept").root.description.as_deref(),
+            Some("first")
+        );
+    }
+
+    #[test]
+    fn merge_unions_entries_across_maps() {
+        let url = "https://example.com/schema.json";
+        let mut cache = SchemaCache::new();
+        cache.insert_document(url.to_string(), json!({ "type": "string" }));
+        let mut other = SchemaCache::new();
+        other.insert(url.to_string(), parsed_with_description("x"));
+
+        cache.merge(other);
+
+        assert!(cache.contains_document(url));
+        assert!(cache.get(url).is_some());
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -2738,7 +2894,7 @@ mod tests {
         // Remote fetch was blocked — schema is an unresolved reference node without sub-schema content.
         assert_eq!(unresolved_ref(&schema), Some("http://127.0.0.1/evil.json"));
         // Nothing was added to the cache (fetch never happened).
-        assert!(cache.get("http://127.0.0.1/evil.json").is_none());
+        assert!(!cache.contains_document("http://127.0.0.1/evil.json"));
     }
 
     // Sec-R2: relative $ref is resolved against base URI before SSRF guard runs.
@@ -2757,7 +2913,7 @@ mod tests {
         .unwrap();
         // Blocked — unresolved reference kept, no cached fetch.
         assert_eq!(unresolved_ref(&schema), Some("evil.json"));
-        assert!(cache.get("http://127.0.0.1/evil.json").is_none());
+        assert!(!cache.contains_document("http://127.0.0.1/evil.json"));
     }
 
     // Sec-R3: circular remote refs (A → B → A) are broken by the visited-URL dedup.
@@ -2768,20 +2924,9 @@ mod tests {
         let json_a = json!({ "$ref": "https://example.com/b.json" });
         let json_b = json!({ "$ref": "https://example.com/a.json" });
 
-        let schema_a = parse_schema(&json_a).unwrap();
-        let schema_b = parse_schema(&json_b).unwrap();
-
         let mut cache = SchemaCache::new();
-        cache.insert(
-            "https://example.com/a.json".to_string(),
-            json_a.clone(),
-            Arc::new(schema_a),
-        );
-        cache.insert(
-            "https://example.com/b.json".to_string(),
-            json_b,
-            Arc::new(schema_b),
-        );
+        cache.insert_document("https://example.com/a.json".to_string(), json_a.clone());
+        cache.insert_document("https://example.com/b.json".to_string(), json_b);
 
         // Resolving A should terminate — the cycle is broken when B tries to
         // re-visit A (already in visited set).
@@ -2789,6 +2934,21 @@ mod tests {
         let result = resolve_with("https://example.com/a.json", &json_a, None, Some(&mut ctx));
         // Must terminate; result may be None or a partial schema.
         let _ = result;
+    }
+
+    // A target is parsed without a remote context, so a cycle between remote
+    // documents ends at the first hop: the target's own `$ref` stays unresolved.
+    #[test]
+    fn circular_remote_refs_end_at_the_first_hop() {
+        let url_a = "https://example.com/a.json";
+        let url_b = "https://example.com/b.json";
+        let json_a = json!({ "$ref": url_b });
+        let mut cache = cache_with(&[(url_a, json_a.clone()), (url_b, json!({ "$ref": url_a }))]);
+        let mut ctx = ParseContext::new(&mut cache, None);
+
+        let result = resolve_with(url_a, &json_a, None, Some(&mut ctx)).expect("resolves");
+
+        assert_eq!(unresolved_ref(&result), Some(url_b));
     }
 
     // Sec-R4: breadth fan-out stops after MAX_REMOTE_FETCH_COUNT distinct URLs.
@@ -2820,7 +2980,6 @@ mod tests {
 
         cache.insert(
             "https://json-schema.org/draft/2020-12/schema".to_string(),
-            Value::Null,
             Arc::new(ParsedSchema::new(JsonSchema {
                 description: Some("legitimate".to_string()),
                 ..JsonSchema::default()
@@ -2830,7 +2989,6 @@ mod tests {
         // A malicious schema tries to claim the same URL via $id.
         cache.insert(
             "https://json-schema.org/draft/2020-12/schema".to_string(),
-            Value::Null,
             Arc::new(ParsedSchema::new(JsonSchema {
                 description: Some("malicious".to_string()),
                 ..JsonSchema::default()
@@ -2856,7 +3014,7 @@ mod tests {
         let schema = parse_with(&value, None, Some(&mut ctx)).unwrap();
         // SSRF guard blocks — unresolved reference kept, nothing cached.
         assert_eq!(unresolved_ref(&schema), Some("file:///etc/passwd"));
-        assert!(cache.get("file:///etc/passwd").is_none());
+        assert!(!cache.contains_document("file:///etc/passwd"));
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -2873,10 +3031,9 @@ mod tests {
         // Pre-populate cache with a valid HTTPS URL (no actual network call).
         let ref_url = "https://example.com/other.json";
         let remote_value: Value = json!({ "type": "string", "description": "remote schema" });
-        let remote_schema = parse_schema(&remote_value).unwrap();
 
         let mut cache = SchemaCache::new();
-        cache.insert(ref_url.to_string(), remote_value, Arc::new(remote_schema));
+        cache.insert_document(ref_url.to_string(), remote_value);
 
         let root = json!({});
         let mut ctx = ParseContext::new(&mut cache, None);
@@ -2898,11 +3055,10 @@ mod tests {
                 }
             }
         });
-        let remote_schema = parse_schema(&remote_value).unwrap();
 
         let mut cache = SchemaCache::new();
         let url = "https://example.com/types.json".to_string();
-        cache.insert(url.clone(), remote_value, Arc::new(remote_schema));
+        cache.insert_document(url.clone(), remote_value);
 
         let root = json!({});
         let ref_str = format!("{url}#/definitions/Address");
@@ -2923,10 +3079,9 @@ mod tests {
         // Pre-populate cache with a valid HTTPS URL so no real network call is made.
         let ref_url = "https://example.com/address.json";
         let remote_value: Value = json!({ "type": "object", "description": "an address" });
-        let remote_schema = parse_schema(&remote_value).unwrap();
 
         let mut cache = SchemaCache::new();
-        cache.insert(ref_url.to_string(), remote_value, Arc::new(remote_schema));
+        cache.insert_document(ref_url.to_string(), remote_value);
 
         let root = json!({
             "type": "object",
@@ -2991,9 +3146,8 @@ mod tests {
         // Pre-populate the cache with the $ref target — mirrors what would
         // happen if the referenced schema had already been fetched.
         let remote_value: Value = json!({ "type": "object", "description": "an address" });
-        let remote_schema = parse_schema(&remote_value).unwrap();
         let mut cache = SchemaCache::new();
-        cache.insert(ref_url.to_string(), remote_value, Arc::new(remote_schema));
+        cache.insert_document(ref_url.to_string(), remote_value);
 
         // Call exactly the code path that fetch_schema_raw uses when ctx=Some.
         let mut ctx = ParseContext::new(&mut cache, None);
@@ -3010,7 +3164,7 @@ mod tests {
         );
         // The ParseContext cache is populated with the $ref target entry.
         assert!(
-            cache.get(ref_url).is_some(),
+            cache.contains_document(ref_url),
             "ctx cache should contain the resolved $ref target"
         );
     }
@@ -3375,8 +3529,7 @@ mod tests {
     fn cache_with(entries: &[(&str, Value)]) -> SchemaCache {
         let mut cache = SchemaCache::new();
         for (url, value) in entries {
-            let schema = parse_schema(value).expect("fixture parses");
-            cache.insert((*url).to_string(), value.clone(), Arc::new(schema));
+            cache.insert_document((*url).to_string(), value.clone());
         }
         cache
     }
@@ -3758,7 +3911,7 @@ mod tests {
         let value = json!({ "$ref": url });
         let schema = parse_with(&value, None, Some(&mut ctx)).expect("parses");
         assert_eq!(unresolved_ref(&schema), Some(url));
-        assert!(!cache.contains(url));
+        assert!(!cache.contains_document(url));
     }
 
     #[rstest]
@@ -3801,6 +3954,206 @@ mod tests {
         });
         parse_with(&value, None, Some(&mut ctx)).expect("parses");
         assert!(ctx.visited.is_empty());
-        assert!(!ctx.cache.contains(url));
+        assert!(!ctx.cache.contains_document(url));
+    }
+
+    // ── Raw document cache: remote targets are parsed, documents are not ─────
+
+    #[test]
+    fn remote_ref_pointer_into_a_non_schema_document_resolves() {
+        let url = "https://example.com/list.json";
+        let mut cache = cache_with(&[(url, json!([{ "description": "ITEM" }]))]);
+        let mut ctx = ParseContext::new(&mut cache, None);
+
+        let resolved = resolve_with(&format!("{url}#/0"), &json!({}), None, Some(&mut ctx));
+
+        assert_eq!(
+            resolved
+                .expect("pointer target parses")
+                .description
+                .as_deref(),
+            Some("ITEM")
+        );
+    }
+
+    #[test]
+    fn remote_ref_to_a_whole_non_schema_document_stays_unresolved() {
+        let url = "https://example.com/list.json";
+        let mut cache = cache_with(&[(url, json!([{ "description": "ITEM" }]))]);
+        let value = json!({ "$ref": url });
+        let mut ctx = ParseContext::new(&mut cache, None);
+
+        let schema = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+
+        assert_eq!(unresolved_ref(&schema), Some(url));
+    }
+
+    #[rstest]
+    #[case::whole_document("")]
+    #[case::empty_fragment("#")]
+    #[case::pointer_fragment("#/definitions/D")]
+    #[case::anchor_fragment("#anchor")]
+    fn remote_ref_leaves_the_parsed_schema_map_untouched(#[case] fragment: &str) {
+        let url = "https://example.com/doc.json";
+        let mut cache = cache_with(&[(
+            url,
+            json!({ "definitions": { "D": { "$anchor": "anchor" } }, "$anchor": "anchor" }),
+        )]);
+        let mut ctx = ParseContext::new(&mut cache, None);
+
+        let resolved = resolve_with(
+            &format!("{url}{fragment}"),
+            &json!({}),
+            None,
+            Some(&mut ctx),
+        );
+
+        assert!(resolved.is_some(), "the ref resolves");
+        assert!(cache.get(url).is_none());
+        assert!(cache.contains_document(url));
+    }
+
+    #[test]
+    fn remote_ref_ignores_a_parsed_schema_without_its_document() {
+        let url = "https://example.com/doc.json";
+        let mut cache = SchemaCache::new();
+        cache.insert(url.to_string(), parsed_with_description("PARSED"));
+        let mut ctx = ParseContext::new(&mut cache, None);
+        for i in 0..MAX_REMOTE_FETCH_COUNT {
+            assert!(ctx.try_visit(&format!("https://example.com/s{i}.json")));
+        }
+        let value = json!({ "$ref": url });
+
+        let schema = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+
+        assert_eq!(unresolved_ref(&schema), Some(url));
+        assert!(!cache.contains_document(url));
+    }
+
+    #[test]
+    fn remote_ref_url_is_normalized_to_the_cache_key() {
+        let mut cache = cache_with(&[(
+            "https://example.com/Doc.json",
+            json!({ "description": "REMOTE" }),
+        )]);
+        let mut ctx = ParseContext::new(&mut cache, None);
+
+        let resolved = resolve_with(
+            "HTTPS://EXAMPLE.com/Doc.json",
+            &json!({}),
+            None,
+            Some(&mut ctx),
+        );
+
+        assert_eq!(
+            resolved.expect("resolves").description.as_deref(),
+            Some("REMOTE")
+        );
+    }
+
+    #[test]
+    fn cached_document_for_a_blocked_url_is_not_served() {
+        let url = "http://127.0.0.1/evil.json";
+        let mut cache = cache_with(&[(url, json!({ "description": "EVIL" }))]);
+        let value = json!({ "$ref": url });
+        let mut ctx = ParseContext::new(&mut cache, None);
+
+        let schema = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+
+        assert_eq!(unresolved_ref(&schema), Some(url));
+    }
+
+    // ── fetch_schema_raw with a cached document (offline) ───────────────────
+
+    #[test]
+    fn fetch_schema_raw_uses_the_cached_document_and_resolves_remote_refs() {
+        let own = "https://schema.invalid/own.json";
+        let target = "https://schema.invalid/target.json";
+        let own_document = json!({ "properties": { "home": { "$ref": target } } });
+        let mut cache = cache_with(&[
+            (own, own_document.clone()),
+            (target, json!({ "description": "an address" })),
+        ]);
+        let mut ctx = ParseContext::new(&mut cache, None);
+
+        let (value, parsed) =
+            fetch_schema_raw(own, None, Some(&mut ctx)).expect("cached document parses");
+
+        assert_eq!(value, own_document);
+        let home = parsed
+            .root
+            .properties
+            .as_ref()
+            .and_then(|p| p.get("home"))
+            .expect("home property");
+        assert_eq!(
+            parsed.resolve(home).description.as_deref(),
+            Some("an address")
+        );
+    }
+
+    #[test]
+    fn fetch_schema_raw_resolves_a_self_reference_through_the_cached_document() {
+        let own = "https://schema.invalid/own.json";
+        let own_document = json!({
+            "properties": { "count": { "$ref": format!("{own}#/definitions/D") } },
+            "definitions": { "D": { "type": "integer" } }
+        });
+        let mut cache = cache_with(&[(own, own_document)]);
+        let mut ctx = ParseContext::new(&mut cache, None);
+
+        let (_, parsed) =
+            fetch_schema_raw(own, None, Some(&mut ctx)).expect("cached document parses");
+
+        let count = parsed
+            .root
+            .properties
+            .as_ref()
+            .and_then(|p| p.get("count"))
+            .expect("count property");
+        assert_eq!(schema_type_str(parsed.resolve(count)), Some("integer"));
+    }
+
+    #[test]
+    fn fetch_schema_raw_of_a_cached_non_schema_document_fails_to_parse() {
+        let own = "https://schema.invalid/list.json";
+        let mut cache = cache_with(&[(own, json!([1]))]);
+        let mut ctx = ParseContext::new(&mut cache, None);
+
+        let result = fetch_schema_raw(own, None, Some(&mut ctx));
+
+        assert!(
+            matches!(result, Err(SchemaError::ParseFailed(_))),
+            "got {result:?}"
+        );
+    }
+
+    #[test]
+    fn fetch_schema_raw_rejects_a_blocked_url_even_when_its_document_is_cached() {
+        let url = "http://127.0.0.1/x.json";
+        let mut cache = cache_with(&[(url, json!({ "type": "string" }))]);
+        let mut ctx = ParseContext::new(&mut cache, None);
+
+        let result = fetch_schema_raw(url, None, Some(&mut ctx));
+
+        assert!(
+            matches!(result, Err(SchemaError::UrlNotPermitted(_))),
+            "got {result:?}"
+        );
+    }
+
+    #[rstest]
+    #[case::loopback_ipv4("http://127.0.0.1:1/schema.json")]
+    #[case::localhost("http://localhost:1/schema.json")]
+    #[case::link_local("http://169.254.169.254/schema.json")]
+    #[case::private("http://10.0.0.1/schema.json")]
+    #[case::file_scheme("file:///etc/passwd")]
+    fn fetch_document_rejects_blocked_urls(#[case] url: &str) {
+        let result = fetch_document(url, None);
+
+        assert!(
+            matches!(result, Err(SchemaError::UrlNotPermitted(_))),
+            "got {result:?}"
+        );
     }
 }
