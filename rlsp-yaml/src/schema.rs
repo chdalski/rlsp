@@ -9,10 +9,15 @@ use std::sync::Arc;
 use serde_json::Value;
 use tower_lsp::lsp_types::Url;
 
+use budget::{Meter, Meters, estimate_bytes, estimate_value};
+
 pub use association::*;
+pub use budget::SizeBudget;
 
 /// Schema association management: glob-pattern-to-schema-URL mappings.
 pub mod association;
+/// Memory budgets of one schema parse.
+mod budget;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -31,6 +36,33 @@ const MAX_JSON_DEPTH: usize = 50;
 /// Maximum number of distinct remote schema URLs fetched during a single `$ref`
 /// resolution pass.  Caps both breadth fan-out and circular-remote-ref loops.
 const MAX_REMOTE_FETCH_COUNT: usize = 20;
+
+// Estimated heap that the parse charges to its parsed budget (see `budget`).
+
+/// A schema node: twice its size, because a node lives in a `Vec`, `HashMap`,
+/// or `Box` that has grown, and the growth leaves up to as much room unused.
+const NODE_BYTES: usize = 2 * size_of::<JsonSchema>();
+
+/// What the allocator adds to the bytes a heap allocation asks for: a header
+/// and the rounding up to its chunk size.
+const ALLOCATION_OVERHEAD: usize = 32;
+
+/// A `String` of `len` bytes: its header and its heap.
+const fn string_bytes(len: usize) -> usize {
+    size_of::<String>() + ALLOCATION_OVERHEAD + len
+}
+
+/// A `String` of `len` bytes in a `Vec`, whose growth leaves room for as many
+/// headers again.
+const fn listed_string_bytes(len: usize) -> usize {
+    2 * size_of::<String>() + ALLOCATION_OVERHEAD + len
+}
+
+/// An entry of a hash table. The table doubles when it fills, and the old one
+/// is alive while the entries move, so an entry counts three times.
+const fn table_entry_bytes<K, V>() -> usize {
+    3 * (size_of::<K>() + size_of::<V>() + 1)
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Types
@@ -51,6 +83,8 @@ pub enum SchemaError {
     TooDeep,
     /// Remote fetch count exceeded `MAX_REMOTE_FETCH_COUNT` in one resolution pass.
     TooManyRemoteFetches,
+    /// The parse exceeded a memory budget: the schema is not applied.
+    TooLarge(SizeBudget),
 }
 
 impl std::fmt::Display for SchemaError {
@@ -67,6 +101,7 @@ impl std::fmt::Display for SchemaError {
                     "Remote fetch count exceeded limit ({MAX_REMOTE_FETCH_COUNT})"
                 )
             }
+            Self::TooLarge(_) => write!(f, "Schema is too large to parse within its memory budget"),
         }
     }
 }
@@ -496,6 +531,12 @@ impl SchemaCache {
         self.documents.contains_key(url)
     }
 
+    /// Drop the raw document at `url`, which a parse that failed for its size
+    /// fetched and must not leave behind.
+    fn remove_document(&mut self, url: &str) {
+        self.documents.remove(url);
+    }
+
     /// Move the entries of `other` into `self`, for merging a returned cache
     /// back into the live cache after a `spawn_blocking` pass.  Each map keeps
     /// its first-insertion-wins invariant: an entry `self` already holds is not
@@ -646,13 +687,22 @@ fn build_agent(proxy: Option<&str>) -> ureq::Agent {
 /// The body is read only after the status is checked, through the decompressed
 /// reader, and never beyond `MAX_SCHEMA_BYTES + 1` bytes.
 ///
+/// A document that a schema parse reads passes the `raw` budget of the parse:
+/// the heap its text deserializes to is estimated from the text and charged
+/// before `serde_json` allocates any of it.
+///
 /// # Errors
 ///
 /// - [`SchemaError::FetchFailed`] on network failure, a 4xx/5xx HTTP status,
 ///   or a 3xx response (redirects are not followed).
 /// - [`SchemaError::ResponseTooLarge`] when the body exceeds `MAX_SCHEMA_BYTES`.
+/// - [`SchemaError::TooLarge`] when the estimate exceeds the `raw` budget.
 /// - [`SchemaError::ParseFailed`] when the body is not valid JSON.
-fn fetch_json(agent: &ureq::Agent, url: &str) -> Result<Value, SchemaError> {
+fn fetch_json(
+    agent: &ureq::Agent,
+    url: &str,
+    raw: Option<&mut Meter>,
+) -> Result<Value, SchemaError> {
     let response = agent
         .get(url)
         .call()
@@ -685,6 +735,12 @@ fn fetch_json(agent: &ureq::Agent, url: &str) -> Result<Value, SchemaError> {
         return Err(SchemaError::ResponseTooLarge);
     }
 
+    if let Some(raw) = raw
+        && !raw.charge(estimate_bytes(&buf))
+    {
+        return Err(SchemaError::TooLarge(SizeBudget::Raw));
+    }
+
     serde_json::from_slice(&buf).map_err(|e| SchemaError::ParseFailed(e.to_string()))
 }
 
@@ -700,12 +756,13 @@ fn fetch_json(agent: &ureq::Agent, url: &str) -> Result<Value, SchemaError> {
 /// - [`SchemaError::FetchFailed`] on network failure, a 4xx/5xx HTTP status,
 ///   or a 3xx response (redirects are not followed).
 /// - [`SchemaError::ResponseTooLarge`] when the body exceeds `MAX_SCHEMA_BYTES`.
+/// - [`SchemaError::TooLarge`] when the document would exceed the `raw` budget.
 /// - [`SchemaError::ParseFailed`] when the body is not valid JSON.
 /// - [`SchemaError::TooDeep`] when the JSON nests beyond the depth limit.
-fn fetch_document(url: &str, proxy: Option<&str>) -> Result<Value, SchemaError> {
+fn fetch_document(url: &str, proxy: Option<&str>, raw: &mut Meter) -> Result<Value, SchemaError> {
     validate_and_normalize_url(url)?;
 
-    let value = fetch_json(&build_agent(proxy), url)?;
+    let value = fetch_json(&build_agent(proxy), url, Some(raw))?;
 
     check_json_depth(&value, 0)?;
     Ok(value)
@@ -730,12 +787,17 @@ fn fetch_document(url: &str, proxy: Option<&str>) -> Result<Value, SchemaError> 
 /// even if this design decision is revisited later.  The parsed schema holds
 /// each `$ref` target once, as [`parse_schema`] describes.
 ///
+/// The parse is bounded in memory, together with the documents it reads: see
+/// [`SchemaError::TooLarge`]. When it fails for that reason, the documents it
+/// fetched for the `$ref`s are not kept in the cache.
+///
 /// # Errors
 ///
 /// - [`SchemaError::UrlNotPermitted`] when `url` fails the SSRF guard.
 /// - [`SchemaError::FetchFailed`] on network failure, a 4xx/5xx HTTP status,
 ///   or a 3xx response (redirects are not followed).
 /// - [`SchemaError::ResponseTooLarge`] when the body exceeds `MAX_SCHEMA_BYTES`.
+/// - [`SchemaError::TooLarge`] when the parse exceeds a memory budget.
 /// - [`SchemaError::ParseFailed`] when the body is not JSON or not a schema.
 /// - [`SchemaError::TooDeep`] when the JSON nests beyond the depth limit.
 pub fn fetch_schema_raw(
@@ -743,19 +805,30 @@ pub fn fetch_schema_raw(
     proxy: Option<&str>,
     ctx: Option<&mut ParseContext<'_>>,
 ) -> Result<(Value, ParsedSchema), SchemaError> {
+    fetch_schema_within(url, proxy, ctx, &mut Meters::production())
+}
+
+/// [`fetch_schema_raw`] with the budgets of `meters`.
+fn fetch_schema_within(
+    url: &str,
+    proxy: Option<&str>,
+    ctx: Option<&mut ParseContext<'_>>,
+    meters: &mut Meters,
+) -> Result<(Value, ParsedSchema), SchemaError> {
     // Validate and normalise the URL before the cache lookup or any network
     // request: the cache never answers for a URL the guard rejects.
     let url = validate_and_normalize_url(url)?;
 
     let value = match ctx.as_deref().and_then(|ctx| ctx.cache.get_document(&url)) {
-        Some(cached) => cached.clone(),
-        None => fetch_document(&url, proxy)?,
+        Some(cached) => {
+            // The cache keeps its copy and the caller gets another one.
+            charge_document(&mut meters.raw, cached, 2)?;
+            cached.clone()
+        }
+        None => fetch_document(&url, proxy, &mut meters.raw)?,
     };
 
-    let schema = match ctx {
-        Some(ctx) => parse_document(&value, Some(&url), Some(ctx))?,
-        None => parse_schema(&value)?,
-    };
+    let schema = parse_document(&value, Some(&url), ctx, meters)?;
     Ok((value, schema))
 }
 
@@ -778,7 +851,7 @@ const SCHEMASTORE_CATALOG_URL: &str = "https://www.schemastore.org/api/json/cata
 /// - [`SchemaError::ResponseTooLarge`] when the body exceeds `MAX_SCHEMA_BYTES`.
 /// - [`SchemaError::ParseFailed`] when the body is not JSON or not a catalog.
 pub fn fetch_schemastore_catalog(proxy: Option<&str>) -> Result<SchemaStoreCatalog, SchemaError> {
-    let value = fetch_json(&build_agent(proxy), SCHEMASTORE_CATALOG_URL)?;
+    let value = fetch_json(&build_agent(proxy), SCHEMASTORE_CATALOG_URL, None)?;
 
     parse_schemastore_catalog(&value)
         .ok_or_else(|| SchemaError::ParseFailed("not a SchemaStore catalog".to_string()))
@@ -901,50 +974,6 @@ impl<'a> ParseContext<'a> {
     }
 }
 
-/// Populate scalar/string/numeric constraint fields on `schema` from `obj`.
-fn parse_scalar_fields(obj: &serde_json::Map<String, Value>, schema: &mut JsonSchema) {
-    // title / description / pattern / anchors
-    schema.title = string_field(obj, "title");
-    schema.description = string_field(obj, "description");
-    schema.pattern = string_field(obj, "pattern");
-    schema.anchor = string_field(obj, "$anchor");
-    schema.dynamic_anchor = string_field(obj, "$dynamicAnchor");
-    schema.deprecated = obj.get("deprecated").and_then(Value::as_bool);
-
-    // numeric constraints
-    schema.minimum = obj.get("minimum").and_then(Value::as_f64);
-    schema.maximum = obj.get("maximum").and_then(Value::as_f64);
-    schema.min_length = obj.get("minLength").and_then(Value::as_u64);
-    schema.max_length = obj.get("maxLength").and_then(Value::as_u64);
-
-    // exclusiveMinimum: Draft-06+ uses a number; Draft-04 uses a boolean
-    if let Some(excl_min) = obj.get("exclusiveMinimum") {
-        if excl_min.is_number() {
-            schema.exclusive_minimum = excl_min.as_f64();
-        } else if excl_min.is_boolean() {
-            schema.exclusive_minimum_draft04 = excl_min.as_bool();
-        }
-    }
-    // exclusiveMaximum: same dual-form pattern
-    if let Some(excl_max) = obj.get("exclusiveMaximum") {
-        if excl_max.is_number() {
-            schema.exclusive_maximum = excl_max.as_f64();
-        } else if excl_max.is_boolean() {
-            schema.exclusive_maximum_draft04 = excl_max.as_bool();
-        }
-    }
-    schema.multiple_of = obj.get("multipleOf").and_then(Value::as_f64);
-    schema.const_value = obj.get("const").cloned();
-
-    // default / examples / enum / format
-    schema.default = obj.get("default").cloned();
-    schema.examples = obj.get("examples").and_then(Value::as_array).cloned();
-    schema.enum_values = obj.get("enum").and_then(Value::as_array).cloned();
-    schema.format = string_field(obj, "format");
-    schema.content_encoding = string_field(obj, "contentEncoding");
-    schema.content_media_type = string_field(obj, "contentMediaType");
-}
-
 /// Resolve `relative` against `base`, returning an absolute URI string.
 ///
 /// If `relative` is already an absolute URI it is returned as-is.
@@ -985,10 +1014,6 @@ fn parse_type(value: Option<&Value>) -> Option<SchemaType> {
     }
 }
 
-fn string_field(obj: &serde_json::Map<String, Value>, key: &str) -> Option<String> {
-    obj.get(key)?.as_str().map(String::from)
-}
-
 /// Parse a `serde_json::Value` into a [`ParsedSchema`].
 ///
 /// Boolean schemas:
@@ -1000,29 +1025,60 @@ fn string_field(obj: &serde_json::Map<String, Value>, key: &str) -> Option<Strin
 /// reference node wherever a `$ref` stands, and the target table holds the
 /// schema it refers to.
 ///
+/// The parse is bounded in memory: `value` and the schema built from it have
+/// a budget each, in estimated heap bytes (128 MiB and 256 MiB). A parse that
+/// exceeds one fails; it never returns part of a schema.
+///
 /// # Errors
 ///
 /// - [`SchemaError::TooDeep`] when the JSON nests beyond the depth limit.
+/// - [`SchemaError::TooLarge`] when the parse exceeds a memory budget.
 /// - [`SchemaError::ParseFailed`] when the root is not a JSON object or
 ///   boolean `true`.
 pub fn parse_schema(value: &Value) -> Result<ParsedSchema, SchemaError> {
-    parse_document(value, None, None)
+    parse_within(value, None, None, &mut Meters::production())
+}
+
+/// Parse the schema document `value`, which the caller already holds, within
+/// the budgets of `meters`: the heap of `value` counts against the raw one.
+fn parse_within(
+    value: &Value,
+    url: Option<&str>,
+    ctx: Option<&mut ParseContext<'_>>,
+    meters: &mut Meters,
+) -> Result<ParsedSchema, SchemaError> {
+    charge_document(&mut meters.raw, value, 1)?;
+    parse_document(value, url, ctx, meters)
+}
+
+/// Charge `copies` times the estimated heap of the deserialized `document` to
+/// the `raw` budget.
+fn charge_document(raw: &mut Meter, document: &Value, copies: usize) -> Result<(), SchemaError> {
+    // The estimate recurses as deep as the document nests.
+    check_json_depth(document, 0)?;
+    if raw.charge(estimate_value(document).saturating_mul(copies)) {
+        Ok(())
+    } else {
+        Err(SchemaError::TooLarge(SizeBudget::Raw))
+    }
 }
 
 /// Parse the schema document `value`, fetched from `url` when it has one.
 ///
 /// With a `ctx`, remote `$ref`s of the document resolve one level deep, as
-/// [`fetch_schema_raw`] describes.
+/// [`fetch_schema_raw`] describes. The documents it reads other than `value`
+/// are charged to the raw budget of `meters` as they are read.
 fn parse_document(
     value: &Value,
     url: Option<&str>,
     ctx: Option<&mut ParseContext<'_>>,
+    meters: &mut Meters,
 ) -> Result<ParsedSchema, SchemaError> {
     check_json_depth(value, 0)?;
     if !matches!(value, Value::Object(_) | Value::Bool(true)) {
         return Err(SchemaError::ParseFailed("not a JSON Schema".to_string()));
     }
-    SchemaParser::new(value, url, ctx).parse_all(value, url)
+    SchemaParser::new(value, url, ctx, meters).parse_all(value, url)
 }
 
 /// Index of a document in the document table of one parse; the root document
@@ -1124,8 +1180,8 @@ struct Document<'r> {
     anchors: Option<HashMap<String, Path>>,
 }
 
-/// The state of one parse: the documents it reads, the remote context, and
-/// the table of targets.
+/// The state of one parse: the documents it reads, the remote context, the
+/// table of targets, and the budgets.
 ///
 /// Each place that a `$ref` names gets one target, parsed once from a
 /// worklist, so the parse recurses only as deep as the JSON nests.
@@ -1136,11 +1192,20 @@ struct Document<'r> {
 /// node wherever a target sits, inside the root or inside another target, so
 /// every JSON object is parsed at most once and the parse has at most as many
 /// schema nodes as the documents have objects.
+///
+/// Before the parse makes an allocation that grows with its input it charges
+/// an estimate to the parsed budget; once a budget is exceeded it makes no
+/// further allocation of that kind, fetches nothing, and fails as a whole, so
+/// that the places that read a missing schema as "no schema" cannot let a
+/// partly built one through.
 struct SchemaParser<'r, 'c> {
     documents: Vec<Document<'r>>,
     /// Fetched documents by URL; `None` for a document that cannot be used.
     remote_documents: HashMap<String, Option<DocId>>,
     ctx: Option<&'r mut ParseContext<'c>>,
+    meters: &'r mut Meters,
+    /// The URLs of the documents this parse added to the cache.
+    fetched: Vec<String>,
     root_key: LocationKey,
     target_ids: HashMap<LocationKey, usize>,
     /// The place of each target, by target id.
@@ -1292,29 +1357,46 @@ const fn is_schema_value(value: &Value) -> bool {
 
 /// Index the `$anchor` and `$dynamicAnchor` names of `root` to their paths.
 /// The first object in document order wins, as for a search of the tree.
-fn index_anchors(root: &Value) -> HashMap<String, Path> {
+///
+/// Each anchor is charged to `meter` before it is indexed, and the index stops
+/// growing once `meter` is exceeded.
+fn index_anchors(root: &Value, meter: &mut Meter) -> HashMap<String, Path> {
     let mut index = HashMap::new();
-    index_anchors_below(root, &mut Vec::new(), &mut index);
+    index_anchors_below(root, &mut Vec::new(), &mut index, meter);
     index
 }
 
-fn index_anchors_below(value: &Value, path: &mut Vec<Rc<str>>, index: &mut HashMap<String, Path>) {
+fn index_anchors_below(
+    value: &Value,
+    path: &mut Vec<Rc<str>>,
+    index: &mut HashMap<String, Path>,
+    meter: &mut Meter,
+) {
     match value {
         Value::Object(obj) => {
             for keyword in ["$anchor", "$dynamicAnchor"] {
                 if let Some(Value::String(name)) = obj.get(keyword)
                     && !index.contains_key(name)
+                    && !meter.is_over()
                 {
-                    index.insert(name.clone(), Path::from(path.as_slice()));
+                    // The name, its entry, and a path of tokens that no other
+                    // path may share.
+                    let entry = table_entry_bytes::<String, Path>()
+                        + string_bytes(name.len())
+                        + path.len() * (size_of::<Rc<str>>() + 2 * ALLOCATION_OVERHEAD)
+                        + ALLOCATION_OVERHEAD;
+                    if meter.charge(entry) {
+                        index.insert(name.clone(), Path::from(path.as_slice()));
+                    }
                 }
             }
             for (key, member) in obj {
-                index_anchors_in(member, key, path, index);
+                index_anchors_in(member, key, path, index, meter);
             }
         }
         Value::Array(items) => {
             for (position, member) in items.iter().enumerate() {
-                index_anchors_in(member, &position.to_string(), path, index);
+                index_anchors_in(member, &position.to_string(), path, index, meter);
             }
         }
         Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
@@ -1326,10 +1408,11 @@ fn index_anchors_in(
     token: &str,
     path: &mut Vec<Rc<str>>,
     index: &mut HashMap<String, Path>,
+    meter: &mut Meter,
 ) {
-    if matches!(member, Value::Object(_) | Value::Array(_)) {
+    if !meter.is_over() && matches!(member, Value::Object(_) | Value::Array(_)) {
         path.push(Rc::from(token));
-        index_anchors_below(member, path, index);
+        index_anchors_below(member, path, index, meter);
         path.pop();
     }
 }
@@ -1346,7 +1429,12 @@ fn document_name(raw: &str) -> Option<String> {
 }
 
 impl<'r, 'c> SchemaParser<'r, 'c> {
-    fn new(root: &'r Value, url: Option<&str>, ctx: Option<&'r mut ParseContext<'c>>) -> Self {
+    fn new(
+        root: &'r Value,
+        url: Option<&str>,
+        ctx: Option<&'r mut ParseContext<'c>>,
+        meters: &'r mut Meters,
+    ) -> Self {
         let declared = root
             .as_object()
             .and_then(declared_id)
@@ -1366,6 +1454,8 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
             }],
             remote_documents: HashMap::new(),
             ctx,
+            meters,
+            fetched: Vec::new(),
             root_key: LocationKey {
                 doc: ROOT_DOC,
                 address: address_of(root),
@@ -1381,34 +1471,124 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
 
     /// Discover the targets, then build the root schema and every target, and
     /// assemble the result.
-    fn parse_all(mut self, root: &Value, url: Option<&str>) -> Result<ParsedSchema, SchemaError> {
+    ///
+    /// A budget that is exceeded in discovery ends the parse before any node
+    /// is built, and one that is exceeded while building ends it at once.
+    fn parse_all(&mut self, root: &Value, url: Option<&str>) -> Result<ParsedSchema, SchemaError> {
         let scope = Scope {
             doc: ROOT_DOC,
             base: url.map(Rc::from),
         };
         self.discover_node(root, &scope);
         let mut discovered = 0;
-        while let Some(location) = self.target_locations.get(discovered).cloned() {
+        while !self.meters.is_over()
+            && let Some(location) = self.target_locations.get(discovered).cloned()
+        {
             self.discover_location(&location);
             discovered += 1;
         }
+        self.finish_if_over()?;
 
         // A reference to the root makes the root a target like any other.
-        let root_schema = match self.target_ids.get(&self.root_key) {
-            Some(&id) => reference_node(id),
+        let root_schema = match self.target_ids.get(&self.root_key).copied() {
+            Some(id) => {
+                if self.charge_node() {
+                    reference_node(id)
+                } else {
+                    JsonSchema::default()
+                }
+            }
             None => self.parse_node(root, &scope).unwrap_or_default(),
         };
         // Building a target can find another one that discovery did not.
         let mut built = 0;
-        while let Some(location) = self.target_locations.get(built).cloned() {
+        while !self.meters.is_over()
+            && let Some(location) = self.target_locations.get(built).cloned()
+        {
             let schema = self.parse_target(&location);
             if let Some(slot) = self.targets.get_mut(built) {
                 *slot = Some(schema);
             }
             built += 1;
         }
-        let targets = self.targets.into_iter().map(Option::unwrap_or_default);
+        self.finish_if_over()?;
+
+        let targets = std::mem::take(&mut self.targets)
+            .into_iter()
+            .map(Option::unwrap_or_default);
         ParsedSchema::with_targets(root_schema, targets.collect())
+    }
+
+    /// Fail with the budget that is exceeded, if one is, and drop the
+    /// documents this parse added to the cache: a parse that was too large
+    /// must not leave what it fetched behind.
+    fn finish_if_over(&mut self) -> Result<(), SchemaError> {
+        let Some(budget) = self.meters.exceeded() else {
+            return Ok(());
+        };
+        if let Some(ctx) = self.ctx.as_deref_mut() {
+            for url in &self.fetched {
+                ctx.cache.remove_document(url);
+            }
+        }
+        Err(SchemaError::TooLarge(budget))
+    }
+
+    /// Charge `bytes` to the parsed budget; `false` once it is exceeded, and
+    /// the caller then leaves out the allocation it was about to make.
+    const fn charge(&mut self, bytes: usize) -> bool {
+        self.meters.parsed.charge(bytes)
+    }
+
+    /// Charge the parsed budget for a schema node; `false` once it is
+    /// exceeded, and the caller then builds no node.
+    const fn charge_node(&mut self) -> bool {
+        #[cfg(test)]
+        {
+            if self.meters.nodes == 0 {
+                self.meters.spent_before_first_node = self.meters.parsed.spent();
+            }
+            self.meters.nodes += 1;
+        }
+        self.charge(NODE_BYTES)
+    }
+
+    /// A copy of `value`, or `None` once the parsed budget is exceeded.
+    fn copy_string(&mut self, value: &str) -> Option<String> {
+        self.charge(string_bytes(value.len()))
+            .then(|| value.to_string())
+    }
+
+    /// A copy of the string at `key` of `obj`.
+    fn string_field(&mut self, obj: &serde_json::Map<String, Value>, key: &str) -> Option<String> {
+        self.copy_string(obj.get(key)?.as_str()?)
+    }
+
+    /// The strings among `items`, copied up to the parsed budget.
+    fn copy_strings(&mut self, items: &[Value]) -> Vec<String> {
+        items
+            .iter()
+            .filter_map(Value::as_str)
+            .take_while(|text| self.charge(listed_string_bytes(text.len())))
+            .map(String::from)
+            .collect()
+    }
+
+    /// A copy of `value`, or `None` once the parsed budget is exceeded. The
+    /// copy is charged before it is made.
+    fn copy_value(&mut self, value: &Value) -> Option<Value> {
+        (!self.meters.is_over() && self.charge(estimate_value(value))).then(|| value.clone())
+    }
+
+    /// A copy of `values`, or `None` once the parsed budget is exceeded.
+    fn copy_values(&mut self, values: &[Value]) -> Option<Vec<Value>> {
+        if self.meters.is_over() {
+            return None;
+        }
+        let bytes = values.iter().fold(0, |total: usize, value| {
+            total.saturating_add(estimate_value(value))
+        });
+        self.charge(bytes).then(|| values.to_vec())
     }
 
     fn source(&self, doc: DocId) -> Source<'r> {
@@ -1418,19 +1598,32 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
     }
 
     /// The id of the target for `location`, allocated before the target is
-    /// parsed so that references to it from inside itself terminate.
-    fn target_id(&mut self, location: &Location) -> usize {
+    /// parsed so that references to it from inside itself terminate; `None`
+    /// once the parsed budget is exceeded.
+    fn target_id(&mut self, location: &Location) -> Option<usize> {
         if let Some(&id) = self.target_ids.get(&location.key) {
-            return id;
+            return Some(id);
+        }
+        // The slot for the target, its place, and the table entry that finds
+        // it. The path of the place is shared with the places that name it,
+        // and was charged where it was made.
+        let bytes = 2 * size_of::<Option<JsonSchema>>()
+            + 2 * size_of::<Location>()
+            + table_entry_bytes::<LocationKey, usize>();
+        if !self.charge(bytes) {
+            return None;
         }
         let id = self.targets.len();
         self.targets.push(None);
         self.target_locations.push(location.clone());
         self.target_ids.insert(location.key, id);
-        id
+        Some(id)
     }
 
     fn parse_target(&mut self, location: &Location) -> JsonSchema {
+        if !self.charge_node() {
+            return JsonSchema::default();
+        }
         let source = self.source(location.key.doc);
         let Some(Value::Object(obj)) = navigate(source.value(), &location.path) else {
             return JsonSchema::default();
@@ -1462,9 +1655,17 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
         if let Some(base) = self.bases.get(&key) {
             return Rc::clone(base);
         }
+        // The resolved URI is at most `MAX_URL_LENGTH` long, or `raw` itself;
+        // it is made before it is charged, and the memo entry after.
         let resolved: Rc<str> =
             Rc::from(resolve_uri(parent_base, raw).unwrap_or_else(|| raw.to_string()));
-        self.bases.insert(key, Rc::clone(&resolved));
+        let bytes = table_entry_bytes::<LocationKey, Rc<str>>()
+            + size_of::<Rc<str>>()
+            + ALLOCATION_OVERHEAD
+            + resolved.len();
+        if self.charge(bytes) {
+            self.bases.insert(key, Rc::clone(&resolved));
+        }
         resolved
     }
 
@@ -1503,6 +1704,9 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
     /// where it sits it is a reference node.
     fn parse_node(&mut self, value: &Value, scope: &Scope) -> Option<JsonSchema> {
         if is_schema_value(value) {
+            if self.meters.is_over() || !self.charge_node() {
+                return None;
+            }
             let key = LocationKey {
                 doc: scope.doc,
                 address: address_of(value),
@@ -1535,7 +1739,9 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
         };
         let Some(location) = self.locate(text, scope.doc, scope.base.as_deref()) else {
             return match keyword {
-                Keyword::Ref => Reference::Unresolved(Arc::from(text)),
+                Keyword::Ref => self
+                    .unresolved(text)
+                    .map_or(Reference::Permissive, Reference::Unresolved),
                 Keyword::DynamicRef => Reference::Plain,
             };
         };
@@ -1544,6 +1750,13 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
             Settled::Unresolved(text) => Reference::Unresolved(text),
             Settled::Permissive => Reference::Permissive,
         }
+    }
+
+    /// A copy of `reference`, the value of a `$ref` that cannot be resolved;
+    /// not made once the parsed budget is exceeded.
+    fn unresolved(&mut self, reference: &str) -> Option<Arc<str>> {
+        self.charge(size_of::<Arc<str>>() + ALLOCATION_OVERHEAD + reference.len())
+            .then(|| Arc::from(reference))
     }
 
     /// The reference node for the `$ref` or `$dynamicRef` of `obj`, which
@@ -1555,7 +1768,10 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
         scope: &Scope,
     ) -> Option<JsonSchema> {
         match self.reference_of(obj, scope) {
-            Reference::Content(content) => Some(reference_node(self.target_id(&content))),
+            Reference::Content(content) => Some(
+                self.target_id(&content)
+                    .map_or_else(JsonSchema::default, reference_node),
+            ),
             Reference::Unresolved(text) => Some(JsonSchema {
                 reference: Some(SchemaRef::Unresolved(text)),
                 ..JsonSchema::default()
@@ -1592,9 +1808,13 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
             doc: scope.doc,
             address: address_of(value),
         };
-        if !self.walked.insert(key) {
+        if self.walked.contains(&key)
+            || self.meters.is_over()
+            || !self.charge(table_entry_bytes::<LocationKey, ()>())
+        {
             return;
         }
+        self.walked.insert(key);
         match self.reference_of(obj, scope) {
             Reference::Content(content) => {
                 self.target_id(&content);
@@ -1638,9 +1858,18 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
             if let Some(known) = self.settled.get(&current.key) {
                 break known.clone();
             }
+            if self.meters.is_over() {
+                break Settled::Permissive;
+            }
             if !on_chain.insert(current.key) {
                 break Settled::Permissive;
             }
+            // The chain, its set, and the memo entry that it ends up as.
+            self.charge(
+                size_of::<LocationKey>()
+                    + table_entry_bytes::<LocationKey, ()>()
+                    + table_entry_bytes::<LocationKey, Settled>(),
+            );
             chain.push(current.key);
             let source = self.source(current.key.doc);
             let keyword = match navigate(source.value(), &current.path) {
@@ -1659,7 +1888,9 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
                 Some(next) => current = next,
                 None => {
                     break match keyword {
-                        Keyword::Ref => Settled::Unresolved(Arc::from(text)),
+                        Keyword::Ref => self
+                            .unresolved(text)
+                            .map_or(Settled::Permissive, Settled::Unresolved),
                         Keyword::DynamicRef => Settled::Content(current),
                     };
                 }
@@ -1721,22 +1952,37 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
     /// `$id`-spoofing overwrite; the dedup and breadth guard skip a URL that
     /// was already visited or beyond the limit. A document is read as it is
     /// stored, raw: only the targets that references name are parsed.
+    ///
+    /// The document is charged to the raw budget once, when the parse first
+    /// reads it: from the bytes of the response before they are deserialized,
+    /// or from the value when the cache held it. Nothing is fetched once a
+    /// budget is exceeded.
     fn remote_document(&mut self, url: &str) -> Option<DocId> {
         if let Some(&known) = self.remote_documents.get(url) {
             return known;
         }
+        if self.meters.is_over() {
+            return None;
+        }
         let ctx = self.ctx.as_deref_mut()?; // remote resolution requires a context
-        if !ctx.cache.contains_document(url) {
+        let in_cache = ctx.cache.contains_document(url);
+        if !in_cache {
             if !ctx.try_visit(url) {
                 return None;
             }
-            let document = fetch_document(url, ctx.proxy).ok()?;
+            let document = fetch_document(url, ctx.proxy, &mut self.meters.raw).ok()?;
             ctx.cache.insert_document(url.to_string(), document);
+            self.fetched.push(url.to_string());
         }
         let shared = ctx.cache.shared_document(url)?;
         // The cache is public: a document put there may not have passed the
         // depth check of a fetch.
-        let id = check_json_depth(&shared, 0).ok().map(|()| {
+        let charged = if in_cache {
+            charge_document(&mut self.meters.raw, &shared, 1)
+        } else {
+            check_json_depth(&shared, 0)
+        };
+        let id = charged.ok().map(|()| {
             self.documents.push(Document {
                 source: Source::Shared(shared),
                 url: Some(url.to_string()),
@@ -1757,13 +2003,24 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
         let (value, path) = if fragment.is_empty() {
             (root, Path::default())
         } else if fragment.starts_with('/') {
-            (root.pointer(fragment)?, pointer_path(fragment))
+            let value = root.pointer(fragment)?;
+            // Each token is an `Rc<str>` of its own, and the path is a slice
+            // of them; the tokens are as long as the fragment together.
+            let tokens = fragment.matches('/').count();
+            let path_bytes = tokens * (size_of::<Rc<str>>() + ALLOCATION_OVERHEAD)
+                + ALLOCATION_OVERHEAD
+                + fragment.len();
+            if !self.charge(path_bytes) {
+                return None;
+            }
+            (value, pointer_path(fragment))
         } else {
+            let parsed_meter = &mut self.meters.parsed;
             let path = self
                 .documents
                 .get_mut(doc.0)?
                 .anchors
-                .get_or_insert_with(|| index_anchors(root))
+                .get_or_insert_with(|| index_anchors(root, parsed_meter))
                 .get(fragment)
                 .cloned()?;
             (navigate(root, &path)?, path)
@@ -1780,6 +2037,60 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
     // ──────────────────────────────────────────────────────────────────────────
     // Keywords
     // ──────────────────────────────────────────────────────────────────────────
+
+    /// Populate scalar/string/numeric constraint fields on `schema` from `obj`.
+    fn parse_scalar_fields(
+        &mut self,
+        obj: &serde_json::Map<String, Value>,
+        schema: &mut JsonSchema,
+    ) {
+        // title / description / pattern / anchors
+        schema.title = self.string_field(obj, "title");
+        schema.description = self.string_field(obj, "description");
+        schema.pattern = self.string_field(obj, "pattern");
+        schema.anchor = self.string_field(obj, "$anchor");
+        schema.dynamic_anchor = self.string_field(obj, "$dynamicAnchor");
+        schema.deprecated = obj.get("deprecated").and_then(Value::as_bool);
+
+        // numeric constraints
+        schema.minimum = obj.get("minimum").and_then(Value::as_f64);
+        schema.maximum = obj.get("maximum").and_then(Value::as_f64);
+        schema.min_length = obj.get("minLength").and_then(Value::as_u64);
+        schema.max_length = obj.get("maxLength").and_then(Value::as_u64);
+
+        // exclusiveMinimum: Draft-06+ uses a number; Draft-04 uses a boolean
+        if let Some(excl_min) = obj.get("exclusiveMinimum") {
+            if excl_min.is_number() {
+                schema.exclusive_minimum = excl_min.as_f64();
+            } else if excl_min.is_boolean() {
+                schema.exclusive_minimum_draft04 = excl_min.as_bool();
+            }
+        }
+        // exclusiveMaximum: same dual-form pattern
+        if let Some(excl_max) = obj.get("exclusiveMaximum") {
+            if excl_max.is_number() {
+                schema.exclusive_maximum = excl_max.as_f64();
+            } else if excl_max.is_boolean() {
+                schema.exclusive_maximum_draft04 = excl_max.as_bool();
+            }
+        }
+        schema.multiple_of = obj.get("multipleOf").and_then(Value::as_f64);
+        schema.const_value = obj.get("const").and_then(|value| self.copy_value(value));
+
+        // default / examples / enum / format
+        schema.default = obj.get("default").and_then(|value| self.copy_value(value));
+        schema.examples = obj
+            .get("examples")
+            .and_then(Value::as_array)
+            .and_then(|values| self.copy_values(values));
+        schema.enum_values = obj
+            .get("enum")
+            .and_then(Value::as_array)
+            .and_then(|values| self.copy_values(values));
+        schema.format = self.string_field(obj, "format");
+        schema.content_encoding = self.string_field(obj, "contentEncoding");
+        schema.content_media_type = self.string_field(obj, "contentMediaType");
+    }
 
     /// Parse the contents of `contentSchema` from the schema object.
     fn parse_content_schema(
@@ -1803,8 +2114,10 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
         if let Some(map) = obj.get("properties").and_then(Value::as_object) {
             let mut props = HashMap::new();
             for (k, v) in map {
-                if let Some(s) = self.parse_node(v, scope) {
-                    props.insert(k.clone(), s);
+                if let Some(s) = self.parse_node(v, scope)
+                    && let Some(key) = self.copy_string(k)
+                {
+                    props.insert(key, s);
                 }
             }
             if !props.is_empty() {
@@ -1818,8 +2131,10 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
         if let Some(map) = obj.get("patternProperties").and_then(Value::as_object) {
             let mut pat_props = Vec::new();
             for (k, v) in map {
-                if let Some(s) = self.parse_node(v, scope) {
-                    pat_props.push((k.clone(), s));
+                if let Some(s) = self.parse_node(v, scope)
+                    && let Some(key) = self.copy_string(k)
+                {
+                    pat_props.push((key, s));
                 }
             }
             if !pat_props.is_empty() {
@@ -1938,21 +2253,24 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
 
         // $id (Draft-06+) / id (Draft-04) — update base URI for sub-schemas
         let (declared, child_scope) = self.enter(obj, scope);
-        schema.id = declared.map(|base| base.to_string());
+        schema.id = declared.and_then(|base| self.copy_string(&base));
         let scope = &child_scope;
 
         // type
-        schema.schema_type = parse_type(obj.get("type"));
+        let type_keyword = obj.get("type");
+        schema.schema_type = self
+            .charge_type_strings(type_keyword)
+            .then(|| parse_type(type_keyword))
+            .flatten();
 
-        parse_scalar_fields(obj, &mut schema);
+        self.parse_scalar_fields(obj, &mut schema);
         self.parse_content_schema(&mut schema, obj, scope);
 
         // required
-        schema.required = obj.get("required").and_then(Value::as_array).map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        });
+        schema.required = obj
+            .get("required")
+            .and_then(Value::as_array)
+            .map(|arr| self.copy_strings(arr));
 
         self.parse_object_fields(obj, scope, &mut schema);
         self.parse_array_fields(obj, scope, &mut schema);
@@ -1978,6 +2296,19 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
         schema
     }
 
+    /// Charge the strings of the `type` keyword at `value` to the parsed
+    /// budget, before `parse_type` copies them; `false` once it is exceeded.
+    fn charge_type_strings(&mut self, value: Option<&Value>) -> bool {
+        match value {
+            Some(Value::String(text)) => self.charge(string_bytes(text.len())),
+            Some(Value::Array(items)) => items
+                .iter()
+                .filter_map(Value::as_str)
+                .all(|text| self.charge(listed_string_bytes(text.len()))),
+            _ => true,
+        }
+    }
+
     /// Parse `dependencies` (Draft-04), `dependentRequired`, and `dependentSchemas`
     /// (Draft 2019-09) from a schema object, merging into a unified pair of maps.
     /// 2019-09 entries take precedence over Draft-04 `dependencies` on key collision.
@@ -1994,14 +2325,15 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
             for (key, val) in deps {
                 if let Some(arr) = val.as_array() {
                     // Array of strings → dependentRequired
-                    let reqs: Vec<String> = arr
-                        .iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect();
-                    dep_req.insert(key.clone(), reqs);
-                } else if let Some(schema) = self.parse_node(val, scope) {
+                    let reqs = self.copy_strings(arr);
+                    if let Some(key) = self.copy_string(key) {
+                        dep_req.insert(key, reqs);
+                    }
+                } else if let Some(schema) = self.parse_node(val, scope)
+                    && let Some(key) = self.copy_string(key)
+                {
                     // Sub-schema → dependentSchemas
-                    dep_sch.insert(key.clone(), schema);
+                    dep_sch.insert(key, schema);
                 }
             }
         }
@@ -2010,11 +2342,10 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
         if let Some(Value::Object(dr)) = obj.get("dependentRequired") {
             for (key, val) in dr {
                 if let Some(arr) = val.as_array() {
-                    let reqs: Vec<String> = arr
-                        .iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect();
-                    dep_req.insert(key.clone(), reqs);
+                    let reqs = self.copy_strings(arr);
+                    if let Some(key) = self.copy_string(key) {
+                        dep_req.insert(key, reqs);
+                    }
                 }
             }
         }
@@ -2022,8 +2353,10 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
         // Draft 2019-09 `dependentSchemas` — merges over Draft-04 entries
         if let Some(Value::Object(ds)) = obj.get("dependentSchemas") {
             for (key, val) in ds {
-                if let Some(schema) = self.parse_node(val, scope) {
-                    dep_sch.insert(key.clone(), schema);
+                if let Some(schema) = self.parse_node(val, scope)
+                    && let Some(key) = self.copy_string(key)
+                {
+                    dep_sch.insert(key, schema);
                 }
             }
         }
@@ -4600,7 +4933,8 @@ mod tests {
     fn fetch_json_accepts_valid_json_regardless_of_content_type(#[case] headers: &[(&str, &str)]) {
         let server = CannedServer::start(200, headers, br#"{"type":"object"}"#.to_vec(), false);
 
-        let value = fetch_json(&build_agent(None), &server.url).expect("valid JSON must load");
+        let value =
+            fetch_json(&build_agent(None), &server.url, None).expect("valid JSON must load");
 
         assert_eq!(value, json!({"type": "object"}));
     }
@@ -4615,7 +4949,7 @@ mod tests {
     ) {
         let server = CannedServer::start(200, &[("Content-Type", content_type)], body, false);
 
-        let result = fetch_json(&build_agent(None), &server.url);
+        let result = fetch_json(&build_agent(None), &server.url, None);
 
         let Err(SchemaError::ParseFailed(msg)) = result else {
             panic!("expected ParseFailed, got {result:?}");
@@ -4637,7 +4971,7 @@ mod tests {
     ) {
         let server = CannedServer::start(200, &[], json_body_of_len(len), chunked);
 
-        let result = fetch_json(&build_agent(None), &server.url);
+        let result = fetch_json(&build_agent(None), &server.url, None);
 
         if accepted {
             let value = result.expect("body of exactly MAX_SCHEMA_BYTES must load");
@@ -4712,7 +5046,7 @@ mod tests {
             false,
         );
 
-        let result = fetch_json(&build_agent(None), &server.url);
+        let result = fetch_json(&build_agent(None), &server.url, None);
 
         assert!(
             matches!(result, Err(SchemaError::ResponseTooLarge)),
@@ -4738,7 +5072,7 @@ mod tests {
             false,
         );
 
-        let result = fetch_json(&build_agent(None), &server.url);
+        let result = fetch_json(&build_agent(None), &server.url, None);
 
         let Err(SchemaError::FetchFailed(msg)) = result else {
             panic!("expected FetchFailed, got {result:?}");
@@ -4760,7 +5094,7 @@ mod tests {
             false,
         );
 
-        let result = fetch_json(&build_agent(None), &server.url);
+        let result = fetch_json(&build_agent(None), &server.url, None);
 
         let Err(SchemaError::FetchFailed(msg)) = result else {
             panic!("expected FetchFailed, got {result:?}");
@@ -4778,7 +5112,7 @@ mod tests {
         let url = format!("http://{}/schema.json", listener.local_addr().unwrap());
         drop(listener);
 
-        let result = fetch_json(&build_agent(None), &url);
+        let result = fetch_json(&build_agent(None), &url, None);
 
         assert!(
             matches!(result, Err(SchemaError::FetchFailed(_))),
@@ -4833,7 +5167,7 @@ mod tests {
         base_uri: Option<&str>,
         ctx: Option<&mut ParseContext<'_>>,
     ) -> Result<ParsedSchema, SchemaError> {
-        parse_document(value, base_uri, ctx)
+        parse_document(value, base_uri, ctx, &mut Meters::production())
     }
 
     /// The parse of a document that consists of the `$ref` `ref_str` alone,
@@ -5432,7 +5766,7 @@ mod tests {
     #[case::private("http://10.0.0.1/schema.json")]
     #[case::file_scheme("file:///etc/passwd")]
     fn fetch_document_rejects_blocked_urls(#[case] url: &str) {
-        let result = fetch_document(url, None);
+        let result = fetch_document(url, None, &mut Meter::new(usize::MAX));
 
         assert!(
             matches!(result, Err(SchemaError::UrlNotPermitted(_))),
@@ -6236,5 +6570,763 @@ mod tests {
         ids.1.sort_unstable();
         assert_eq!(ids.0, ids.1);
         assert_eq!(node_count(&first), node_count(&second));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Memory budgets
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /// Parse `value` with the given budgets and return the result with the
+    /// meters, to read what the parse charged.
+    fn metered(
+        value: &Value,
+        url: Option<&str>,
+        ctx: Option<&mut ParseContext<'_>>,
+        parsed_limit: usize,
+        raw_limit: usize,
+    ) -> (Result<ParsedSchema, SchemaError>, Meters) {
+        let mut meters = Meters::new(parsed_limit, raw_limit);
+        let result = parse_within(value, url, ctx, &mut meters);
+        (result, meters)
+    }
+
+    /// What parsing `value` without any limit charges: the parsed budget, then
+    /// the raw one.
+    fn charges_of(value: &Value) -> (usize, usize) {
+        let (result, meters) = metered(value, None, None, usize::MAX, usize::MAX);
+        result.expect("parses without limits");
+        (meters.parsed.spent(), meters.raw.spent())
+    }
+
+    const FIXTURES: [(&str, &str); 5] = [
+        (
+            "draft-07",
+            include_str!("../tests/fixtures/schemas/json-schema-draft-07.json"),
+        ),
+        (
+            "cloud-init",
+            include_str!("../tests/fixtures/schemas/cloud-init.json"),
+        ),
+        (
+            "github-workflow",
+            include_str!("../tests/fixtures/schemas/github-workflow.json"),
+        ),
+        (
+            "compose-spec",
+            include_str!("../tests/fixtures/schemas/compose-spec.json"),
+        ),
+        (
+            "kubernetes-deployment",
+            include_str!("../tests/fixtures/schemas/kubernetes-deployment-apps-v1.json"),
+        ),
+    ];
+
+    /// The budgets are 256 MiB parsed and 128 MiB raw; real schemas use at most
+    /// half of each.
+    #[test]
+    fn real_schemas_use_at_most_half_of_each_budget() {
+        for (name, text) in FIXTURES {
+            let value: Value = serde_json::from_str(text).expect("fixture is JSON");
+
+            let (parsed, raw) = charges_of(&value);
+
+            eprintln!(
+                "{name}: {} bytes, parsed charge {parsed}, raw charge {raw}, raw estimate of the text {}",
+                text.len(),
+                estimate_bytes(text.as_bytes())
+            );
+            assert!(
+                parsed <= budget::PARSED_BUDGET / 2,
+                "{name}: parsed {parsed}"
+            );
+            assert!(raw <= budget::RAW_BUDGET / 2, "{name}: raw {raw}");
+            assert!(
+                estimate_bytes(text.as_bytes()) <= budget::RAW_BUDGET / 2,
+                "{name}: raw estimate of the text"
+            );
+        }
+    }
+
+    #[test]
+    fn too_large_says_so_for_either_budget_and_differs_from_a_large_response() {
+        let parsed = SchemaError::TooLarge(SizeBudget::Parsed).to_string();
+        let raw = SchemaError::TooLarge(SizeBudget::Raw).to_string();
+
+        assert_eq!(parsed, raw);
+        assert!(parsed.contains("too large"), "{parsed}");
+        assert_ne!(parsed, SchemaError::ResponseTooLarge.to_string());
+    }
+
+    /// Documents that between them put every kind of allocation the parse
+    /// charges to the parsed budget in play.
+    #[rstest]
+    #[case::empty_object(json!({}))]
+    #[case::true_schema(json!(true))]
+    #[case::nested_properties(json!({"properties": {"a": {"properties": {"b": {}}}}}))]
+    #[case::three_empty_schemas(json!({"allOf": [{}, {}, {}]}))]
+    #[case::copied_values(json!({
+        "enum": [1, "a", {"b": [2, null]}],
+        "const": {"k": [true]},
+        "default": [],
+        "examples": ["x", {"y": 1}]
+    }))]
+    #[case::string_lists(json!({
+        "type": ["string", "null"],
+        "required": ["a", "bb"],
+        "dependentRequired": {"a": ["b", "c"]}
+    }))]
+    #[case::copied_strings(json!({
+        "title": "t", "description": "d", "pattern": "^p$", "format": "f",
+        "contentEncoding": "base64", "contentMediaType": "text/plain",
+        "$id": "https://example.com/s.json", "$anchor": "n"
+    }))]
+    #[case::keys(json!({
+        "properties": {"alpha": {}},
+        "patternProperties": {"^b": {}},
+        "dependencies": {"c": {}, "d": ["e"]},
+        "dependentSchemas": {"f": {}}
+    }))]
+    #[case::shared_target(json!({
+        "properties": {"a": {"$ref": "#/definitions/D"}, "b": {"$ref": "#/definitions/D"}},
+        "definitions": {"D": {"type": "string"}}
+    }))]
+    #[case::unresolved_reference(json!({"properties": {"a": {"$ref": "#/definitions/Missing"}}}))]
+    #[case::reference_cycle(json!({
+        "properties": {"a": {"$ref": "#/definitions/A"}},
+        "definitions": {"A": {"$ref": "#/definitions/A"}}
+    }))]
+    #[case::anchor(json!({
+        "properties": {"a": {"$ref": "#n"}},
+        "definitions": {"D": {"$anchor": "n", "type": "string"}}
+    }))]
+    #[case::self_reference(json!({"properties": {"a": {"$ref": "#"}}}))]
+    #[case::base_uris(json!({
+        "$id": "https://example.com/root.json",
+        "properties": {"a": {"$id": "sub.json", "type": "string"}}
+    }))]
+    fn charge_boundary_is_exact_for_both_budgets(#[case] document: Value) {
+        let (parsed, raw) = charges_of(&document);
+        let unlimited = node_count(&parse_schema(&document).expect("parses"));
+
+        for (parsed_limit, raw_limit) in [(parsed, usize::MAX), (usize::MAX, raw)] {
+            let (result, _) = metered(&document, None, None, parsed_limit, raw_limit);
+            assert_eq!(
+                node_count(&result.expect("a parse that charges the limit is accepted")),
+                unlimited
+            );
+        }
+        let (over_parsed, _) = metered(&document, None, None, parsed - 1, usize::MAX);
+        let (over_raw, _) = metered(&document, None, None, usize::MAX, raw - 1);
+        assert!(
+            matches!(over_parsed, Err(SchemaError::TooLarge(SizeBudget::Parsed))),
+            "{over_parsed:?}"
+        );
+        assert!(
+            matches!(over_raw, Err(SchemaError::TooLarge(SizeBudget::Raw))),
+            "{over_raw:?}"
+        );
+    }
+
+    #[test]
+    fn charges_do_not_change_from_parse_to_parse() {
+        let document = json!({
+            "properties": {"a": {"$ref": "#/definitions/A"}, "b": {"$ref": "#/definitions/A"}},
+            "definitions": {"A": {"properties": {"x": {"enum": [1, 2]}}}}
+        });
+
+        let first = charges_of(&document);
+
+        for _ in 0..5 {
+            assert_eq!(charges_of(&document), first);
+        }
+    }
+
+    /// The limits to try below `charge`: a spread of them, and the ones next to it.
+    fn limits_below(charge: usize) -> Vec<usize> {
+        let step = (charge / 40).max(1);
+        (0..charge)
+            .step_by(step)
+            .chain([charge - 1, charge.saturating_sub(2), 1])
+            .collect()
+    }
+
+    /// A parse that exceeds a budget never returns a schema, whichever place
+    /// of the schema it exceeds the budget in: the places that read a missing
+    /// sub-schema as "no schema" must not let a partly built one through.
+    #[rstest]
+    fn no_budget_below_the_charge_yields_a_schema(
+        #[values(
+            "properties",
+            "patternProperties",
+            "prefixItems",
+            "items",
+            "tuple-items",
+            "additionalItems",
+            "additionalProperties",
+            "unevaluatedProperties",
+            "unevaluatedItems",
+            "contains",
+            "contentSchema",
+            "propertyNames",
+            "not",
+            "if",
+            "then",
+            "else",
+            "allOf",
+            "anyOf",
+            "oneOf",
+            "dependencies",
+            "dependentSchemas"
+        )]
+        keyword: &str,
+    ) {
+        let leaf = json!({"const": [1, 2, 3], "description": "leaf"});
+        let document = nest(keyword, 3, leaf);
+        let (parsed, raw) = charges_of(&document);
+
+        for limit in limits_below(parsed) {
+            let (result, _) = metered(&document, None, None, limit, usize::MAX);
+            assert!(
+                matches!(result, Err(SchemaError::TooLarge(SizeBudget::Parsed))),
+                "{keyword}, parsed limit {limit}: {result:?}"
+            );
+        }
+        for limit in limits_below(raw) {
+            let (result, _) = metered(&document, None, None, usize::MAX, limit);
+            assert!(
+                matches!(result, Err(SchemaError::TooLarge(SizeBudget::Raw))),
+                "{keyword}, raw limit {limit}: {result:?}"
+            );
+        }
+    }
+
+    #[rstest]
+    #[case::fixtures_parsed(true)]
+    #[case::fixtures_raw(false)]
+    fn no_budget_below_the_charge_yields_a_schema_for_real_schemas(#[case] parsed_budget: bool) {
+        for (name, text) in FIXTURES {
+            let value: Value = serde_json::from_str(text).expect("fixture is JSON");
+            let (parsed, raw) = charges_of(&value);
+            let charge = if parsed_budget { parsed } else { raw };
+
+            for limit in limits_below(charge) {
+                let (result, _) = if parsed_budget {
+                    metered(&value, None, None, limit, usize::MAX)
+                } else {
+                    metered(&value, None, None, usize::MAX, limit)
+                };
+                assert!(
+                    matches!(result, Err(SchemaError::TooLarge(_))),
+                    "{name}, limit {limit}: {result:?}"
+                );
+            }
+        }
+    }
+
+    /// The charge of `document` with the one change `grown` makes to it,
+    /// minus the charge of `document`.
+    #[rstest]
+    #[case::node_in_properties(
+        json!({"properties": {"a": {}}}),
+        json!({"properties": {"a": {}, "b": {}}}),
+        2 * size_of::<JsonSchema>()
+    )]
+    #[case::node_in_all_of(
+        json!({"allOf": [{}]}),
+        json!({"allOf": [{}, {}]}),
+        2 * size_of::<JsonSchema>()
+    )]
+    #[case::copied_enum_value(
+        json!({"enum": [0]}),
+        json!({"enum": [0, 0]}),
+        size_of::<Value>()
+    )]
+    #[case::copied_const_string(
+        json!({"const": "a"}),
+        json!({"const": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}),
+        64
+    )]
+    #[case::copied_default_object(
+        json!({"default": {}}),
+        json!({"default": {"k": [1, 2, 3]}}),
+        size_of::<Value>()
+    )]
+    #[case::copied_examples_value(
+        json!({"examples": [1]}),
+        json!({"examples": [1, {"a": 1}]}),
+        size_of::<Value>()
+    )]
+    #[case::required_string(
+        json!({"required": ["a"]}),
+        json!({"required": ["a", "a"]}),
+        size_of::<String>() + 1
+    )]
+    #[case::type_string(
+        json!({"type": ["string"]}),
+        json!({"type": ["string", "null"]}),
+        size_of::<String>() + 4
+    )]
+    #[case::dependent_required_string(
+        json!({"dependentRequired": {"a": ["b"]}}),
+        json!({"dependentRequired": {"a": ["b", "c"]}}),
+        size_of::<String>() + 1
+    )]
+    #[case::title(
+        json!({"title": "a"}),
+        json!({"title": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}),
+        64
+    )]
+    #[case::description(
+        json!({"description": "a"}),
+        json!({"description": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}),
+        64
+    )]
+    #[case::pattern(
+        json!({"pattern": "a"}),
+        json!({"pattern": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}),
+        64
+    )]
+    #[case::format(
+        json!({"format": "a"}),
+        json!({"format": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}),
+        64
+    )]
+    #[case::content_encoding(
+        json!({"contentEncoding": "a"}),
+        json!({"contentEncoding": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}),
+        64
+    )]
+    #[case::content_media_type(
+        json!({"contentMediaType": "a"}),
+        json!({"contentMediaType": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}),
+        64
+    )]
+    #[case::anchor_keyword(
+        json!({"$anchor": "a"}),
+        json!({"$anchor": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}),
+        64
+    )]
+    #[case::dynamic_anchor(
+        json!({"$dynamicAnchor": "a"}),
+        json!({"$dynamicAnchor": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}),
+        64
+    )]
+    #[case::property_name(
+        json!({"properties": {"a": {}}}),
+        json!({"properties": {"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {}}}),
+        64
+    )]
+    #[case::pattern_property_name(
+        json!({"patternProperties": {"a": {}}}),
+        json!({"patternProperties": {"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {}}}),
+        64
+    )]
+    #[case::dependency_name(
+        json!({"dependencies": {"a": ["b"]}}),
+        json!({"dependencies": {"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": ["b"]}}),
+        64
+    )]
+    #[case::id(
+        json!({"$id": "https://example.com/a"}),
+        json!({"$id": "https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}),
+        64
+    )]
+    #[case::unresolved_reference_text(
+        json!({"$ref": "#/a"}),
+        json!({"$ref": "#/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}),
+        64
+    )]
+    #[case::target_slot(
+        json!({"properties": {"a": {"$ref": "#/definitions/A"}}, "definitions": {"A": {}}}),
+        json!({"properties": {"a": {"$ref": "#/definitions/A"}, "b": {"$ref": "#/definitions/B"}},
+               "definitions": {"A": {}, "B": {}}}),
+        3 * size_of::<JsonSchema>()
+    )]
+    #[case::visited_object_in_a_target(
+        json!({"properties": {"a": {"$ref": "#/definitions/A"}}, "definitions": {"A": {}}}),
+        json!({"properties": {"a": {"$ref": "#/definitions/A"}},
+               "definitions": {"A": {"properties": {"x": {}}}}}),
+        2 * size_of::<JsonSchema>()
+    )]
+    #[case::anchor_in_the_index(
+        json!({"properties": {"a": {"$ref": "#n"}}, "definitions": {"D": {"$anchor": "n"}}}),
+        json!({"properties": {"a": {"$ref": "#n"}},
+               "definitions": {"D": {"$anchor": "n"}, "E": {"$anchor": "m"}}}),
+        64
+    )]
+    #[case::pointer_token(
+        json!({"properties": {"a": {"$ref": "#/definitions/D"}}, "definitions": {"D": {}}}),
+        json!({"properties": {"a": {"$ref": "#/definitions/DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"}},
+               "definitions": {"DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD": {}}}),
+        64
+    )]
+    fn parsed_charge_grows_with_each_allocation_class(
+        #[case] small: Value,
+        #[case] grown: Value,
+        #[case] at_least: usize,
+    ) {
+        let (before, _) = charges_of(&small);
+        let (after, _) = charges_of(&grown);
+
+        assert!(
+            after >= before + at_least,
+            "charged {} more, expected at least {at_least}",
+            after.saturating_sub(before)
+        );
+    }
+
+    #[rstest]
+    #[case::one_reference(1)]
+    #[case::two_references(2)]
+    #[case::ten_references(10)]
+    fn a_shared_target_is_charged_once_whatever_the_number_of_references(
+        #[case] references: usize,
+    ) {
+        let properties: serde_json::Map<String, Value> = (0..references)
+            .map(|i| (format!("p{i}"), json!({"$ref": "#/definitions/D"})))
+            .collect();
+        let with = |count: usize| {
+            let mut value = json!({"definitions": {"D": {"const": [1, 2, 3]}}});
+            value["properties"] =
+                Value::Object(properties.clone().into_iter().take(count).collect());
+            charges_of(&value).0
+        };
+
+        let one = with(1);
+        let many = with(references);
+
+        // Each further reference costs a reference node, a property name, and
+        // a visit; it never costs the target again.
+        let per_reference = (many - one) / (references - 1).max(1);
+        assert!(
+            references == 1 || per_reference < 3 * size_of::<JsonSchema>(),
+            "{per_reference} bytes per further reference"
+        );
+    }
+
+    #[test]
+    fn siblings_of_a_reference_are_not_charged() {
+        let plain =
+            json!({"properties": {"a": {"$ref": "#/definitions/D"}}, "definitions": {"D": {}}});
+        let with_siblings = json!({
+            "properties": {"a": {"$ref": "#/definitions/D", "const": [1, 2, 3], "description": "never built"}},
+            "definitions": {"D": {}}
+        });
+
+        assert_eq!(charges_of(&plain).0, charges_of(&with_siblings).0);
+    }
+
+    #[test]
+    fn unreferenced_definitions_are_charged_to_the_raw_budget_only() {
+        let plain = json!({"properties": {"a": {}}});
+        let with_definitions = json!({
+            "properties": {"a": {}},
+            "definitions": {"D": {"const": [1, 2, 3]}},
+            "$defs": {"E": {"enum": [1, 2]}},
+            "x-padding": [1, 2, 3, {"a": 1}]
+        });
+
+        let (parsed_plain, raw_plain) = charges_of(&plain);
+        let (parsed_with, raw_with) = charges_of(&with_definitions);
+
+        assert_eq!(parsed_plain, parsed_with);
+        assert!(raw_with > raw_plain);
+    }
+
+    /// Four distinct targets that each of five schemas references once.
+    fn distinct_targets_document() -> Value {
+        let references: Vec<Value> = (0..4)
+            .map(|i| json!({"$ref": format!("#/definitions/T{i}")}))
+            .collect();
+        let definitions: serde_json::Map<String, Value> = (0..4)
+            .map(|i| (format!("T{i}"), json!({"type": "string"})))
+            .collect();
+        json!({"allOf": references, "definitions": definitions})
+    }
+
+    #[test]
+    fn exceeding_the_budget_while_discovering_targets_builds_no_node() {
+        let document = distinct_targets_document();
+        let mut meters = Meters::new(usize::MAX, usize::MAX);
+        parse_within(&document, None, None, &mut meters).expect("parses");
+        let discovery = meters.spent_before_first_node;
+        assert!(discovery > 0 && meters.nodes > 0);
+
+        let (result, meters) = metered(&document, None, None, discovery - 1, usize::MAX);
+        assert!(matches!(
+            result,
+            Err(SchemaError::TooLarge(SizeBudget::Parsed))
+        ));
+        assert_eq!(
+            meters.nodes, 0,
+            "a node was built during a failed discovery"
+        );
+
+        let (result, meters) = metered(&document, None, None, discovery, usize::MAX);
+        assert!(matches!(
+            result,
+            Err(SchemaError::TooLarge(SizeBudget::Parsed))
+        ));
+        assert!(meters.nodes > 0, "the build starts once discovery fits");
+    }
+
+    #[test]
+    fn exceeding_the_budget_while_building_stops_the_build() {
+        let document = distinct_targets_document();
+        let (_, full) = metered(&document, None, None, usize::MAX, usize::MAX);
+        // Room for the discovery and one node: the second node is refused.
+        let limit = full.spent_before_first_node + NODE_BYTES;
+
+        let (result, meters) = metered(&document, None, None, limit, usize::MAX);
+
+        assert!(matches!(
+            result,
+            Err(SchemaError::TooLarge(SizeBudget::Parsed))
+        ));
+        assert_eq!(meters.nodes, 2, "the build went on after the budget");
+        assert!(meters.nodes < full.nodes);
+    }
+
+    #[test]
+    fn deep_documents_are_rejected_as_too_deep_before_any_charge() {
+        let mut deep = json!({});
+        for _ in 0..=MAX_JSON_DEPTH {
+            deep = json!({ "not": deep });
+        }
+
+        let (result, meters) = metered(&deep, None, None, 0, 0);
+
+        assert!(matches!(result, Err(SchemaError::TooDeep)), "{result:?}");
+        assert_eq!(meters.raw.spent(), 0);
+    }
+
+    #[test]
+    fn a_document_that_is_no_schema_is_rejected_as_such_within_budget() {
+        let (result, _) = metered(&json!(false), None, None, usize::MAX, usize::MAX);
+
+        assert!(matches!(result, Err(SchemaError::ParseFailed(_))));
+    }
+
+    #[test]
+    fn the_counters_belong_to_one_parse() {
+        let document = distinct_targets_document();
+        let (parsed, raw) = charges_of(&document);
+        let mut cache = SchemaCache::new();
+        let mut ctx = ParseContext::new(&mut cache, None);
+
+        for _ in 0..2 {
+            let mut meters = Meters::new(parsed, raw);
+            parse_within(&document, None, Some(&mut ctx), &mut meters)
+                .expect("a fresh parse starts at zero");
+        }
+    }
+
+    const REMOTE_URL: &str = "https://schema.invalid/d.json";
+
+    fn root_with_remote_reference() -> Value {
+        json!({"properties": {"a": {"$ref": format!("{REMOTE_URL}#/definitions/D")}}})
+    }
+
+    fn remote_document() -> Value {
+        json!({"definitions": {"D": {"properties": {"x": {}, "y": {}}}}, "x-unread": [1, 2, 3]})
+    }
+
+    /// Fetch `ROOT_URL` from a cache that holds the root and the remote document.
+    fn fetch_with_remote(
+        parsed_limit: usize,
+        raw_limit: usize,
+    ) -> (Result<(Value, ParsedSchema), SchemaError>, Meters) {
+        let mut cache = cache_with(&[
+            (ROOT_URL, root_with_remote_reference()),
+            (REMOTE_URL, remote_document()),
+        ]);
+        let mut ctx = ParseContext::new(&mut cache, None);
+        let mut meters = Meters::new(parsed_limit, raw_limit);
+        let result = fetch_schema_within(ROOT_URL, None, Some(&mut ctx), &mut meters);
+        (result, meters)
+    }
+
+    #[test]
+    fn the_budgets_cover_the_root_and_the_documents_fetched_for_it() {
+        let (result, meters) = fetch_with_remote(usize::MAX, usize::MAX);
+        result.expect("parses");
+        let (parsed, raw) = (meters.parsed.spent(), meters.raw.spent());
+
+        // The root is cached: the cache keeps a copy and the caller gets one.
+        assert_eq!(
+            raw,
+            2 * estimate_value(&root_with_remote_reference()) + estimate_value(&remote_document())
+        );
+        let (alone, _) = charges_of(&root_with_remote_reference());
+        assert!(
+            parsed > alone,
+            "the remote target is charged: {parsed} vs {alone}"
+        );
+
+        let (at_parsed, _) = fetch_with_remote(parsed, usize::MAX);
+        let (over_parsed, _) = fetch_with_remote(parsed - 1, usize::MAX);
+        let (at_raw, _) = fetch_with_remote(usize::MAX, raw);
+        let (over_raw, _) = fetch_with_remote(usize::MAX, raw - 1);
+        assert!(at_parsed.is_ok() && at_raw.is_ok());
+        assert!(matches!(
+            over_parsed,
+            Err(SchemaError::TooLarge(SizeBudget::Parsed))
+        ));
+        assert!(matches!(
+            over_raw,
+            Err(SchemaError::TooLarge(SizeBudget::Raw))
+        ));
+    }
+
+    #[test]
+    fn a_remote_document_is_charged_once_for_several_references() {
+        let reference =
+            |fragment: &str| json!({"$ref": format!("{REMOTE_URL}#/definitions/{fragment}")});
+        let remote = json!({"definitions": {"D": {}, "E": {}}});
+        let raw_with = |root: Value| {
+            let mut cache = cache_with(&[(ROOT_URL, root), (REMOTE_URL, remote.clone())]);
+            let mut ctx = ParseContext::new(&mut cache, None);
+            let mut meters = Meters::new(usize::MAX, usize::MAX);
+            fetch_schema_within(ROOT_URL, None, Some(&mut ctx), &mut meters).expect("parses");
+            meters.raw.spent()
+                - 2 * estimate_value(&cache.get_document(ROOT_URL).cloned().unwrap_or_default())
+        };
+
+        let once = raw_with(json!({"properties": {"a": reference("D")}}));
+        let thrice = raw_with(
+            json!({"properties": {"a": reference("D"), "b": reference("D"), "c": reference("E")}}),
+        );
+
+        assert_eq!(once, estimate_value(&remote));
+        assert_eq!(thrice, estimate_value(&remote));
+    }
+
+    #[test]
+    fn no_further_document_is_read_once_a_budget_is_exceeded() {
+        let remote_a = "https://schema.invalid/a.json";
+        let remote_b = "https://schema.invalid/b.json";
+        let root = json!({"properties": {
+            "a": {"$ref": remote_a}, "b": {"$ref": remote_b}
+        }});
+        let mut cache = cache_with(&[
+            (ROOT_URL, root.clone()),
+            (remote_a, json!({})),
+            (remote_b, json!({})),
+        ]);
+        let mut ctx = ParseContext::new(&mut cache, None);
+        // The root alone fits (twice, as it is cached), the first document does not.
+        let limit = 2 * estimate_value(&root) + estimate_value(&json!({})) - 1;
+        let mut meters = Meters::new(usize::MAX, limit);
+
+        let result = fetch_schema_within(ROOT_URL, None, Some(&mut ctx), &mut meters);
+
+        assert!(
+            matches!(result, Err(SchemaError::TooLarge(SizeBudget::Raw))),
+            "{result:?}"
+        );
+        assert_eq!(
+            meters.raw.spent(),
+            2 * estimate_value(&root) + estimate_value(&json!({})),
+            "the second document was charged after the budget was exceeded"
+        );
+    }
+
+    #[test]
+    fn a_cached_document_the_budget_cannot_hold_is_rejected_as_too_large() {
+        let mut cache = cache_with(&[(ROOT_URL, json!({"enum": [0, 0, 0]}))]);
+        let mut ctx = ParseContext::new(&mut cache, None);
+        let mut meters = Meters::new(usize::MAX, 10);
+
+        let result = fetch_schema_within(ROOT_URL, None, Some(&mut ctx), &mut meters);
+
+        assert!(
+            matches!(result, Err(SchemaError::TooLarge(SizeBudget::Raw))),
+            "{result:?}"
+        );
+    }
+
+    // ── The estimate of a response, charged before it is deserialized ───────
+
+    /// Fetch `body` from a canned server with `raw` as the raw budget.
+    fn fetch_body_within(body: &[u8], raw: &mut Meter) -> Result<Value, SchemaError> {
+        let server = CannedServer::start(200, &[], body.to_vec(), false);
+        fetch_json(&build_agent(None), &server.url, Some(raw))
+    }
+
+    #[test]
+    fn a_response_is_charged_to_the_raw_budget_by_its_estimate() {
+        let body = br#"{"properties":{"a":{"type":"string"}}}"#;
+        let mut raw = Meter::new(usize::MAX);
+
+        let value = fetch_body_within(body, &mut raw).expect("valid JSON");
+
+        assert_eq!(raw.spent(), estimate_bytes(body));
+        assert_eq!(raw.spent(), estimate_value(&value));
+    }
+
+    #[test]
+    fn a_response_whose_estimate_fits_the_budget_exactly_is_accepted() {
+        let body = br#"{"a":[1,2,3]}"#;
+
+        let mut at = Meter::new(estimate_bytes(body));
+        let mut over = Meter::new(estimate_bytes(body) - 1);
+
+        assert!(fetch_body_within(body, &mut at).is_ok());
+        assert!(matches!(
+            fetch_body_within(body, &mut over),
+            Err(SchemaError::TooLarge(SizeBudget::Raw))
+        ));
+    }
+
+    #[test]
+    fn a_response_is_rejected_by_its_estimate_before_it_is_deserialized() {
+        // Not valid JSON: deserializing it would fail with `ParseFailed`.
+        let body = b"[[[[[[[[[[[[[[[[[[[[[[[[";
+        let mut raw = Meter::new(estimate_bytes(body) - 1);
+
+        let result = fetch_body_within(body, &mut raw);
+
+        assert!(
+            matches!(result, Err(SchemaError::TooLarge(SizeBudget::Raw))),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn the_response_size_limit_comes_before_the_raw_budget() {
+        let body = vec![b' '; MAX_SCHEMA_BYTES as usize + 1];
+        let mut raw = Meter::new(0);
+
+        let result = fetch_body_within(&body, &mut raw);
+
+        assert!(
+            matches!(result, Err(SchemaError::ResponseTooLarge)),
+            "{result:?}"
+        );
+        assert_eq!(raw.spent(), 0);
+    }
+
+    #[test]
+    fn a_response_without_a_budget_is_not_charged() {
+        let server = CannedServer::start(200, &[], br#"{"a":1}"#.to_vec(), false);
+
+        let value = fetch_json(&build_agent(None), &server.url, None).expect("valid JSON");
+
+        assert_eq!(value, json!({"a": 1}));
+    }
+
+    /// Text that is large and legitimate must not be rejected by the estimate.
+    #[test]
+    fn long_strings_and_padding_cost_their_length_not_a_multiple_of_it() {
+        let description = format!(
+            r#"{{"description":"{}"}}"#,
+            "x".repeat(5 * 1024 * 1024 - 32)
+        );
+        let padded = format!(r#"{{"type":"string"{}}}"#, " ".repeat(5 * 1024 * 1024 - 32));
+
+        for text in [description, padded] {
+            assert!(text.len() as u64 <= MAX_SCHEMA_BYTES);
+            assert!(estimate_bytes(text.as_bytes()) <= text.len() + 1024);
+        }
     }
 }

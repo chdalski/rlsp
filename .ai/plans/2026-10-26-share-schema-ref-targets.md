@@ -13,7 +13,7 @@ schema parser copies every `$ref` target and cuts recursion only
 at depth 32. Parse each `$ref` target once and share it, so that a
 parsed schema grows linearly with its source documents and
 recursive schemas are no longer cut at a fixed depth, and reject a
-schema whose parsed size exceeds a fixed budget with the existing
+schema whose parse exceeds a fixed memory budget with the existing
 schema-failure Warning instead of applying part of it.
 
 ## Context
@@ -65,8 +65,8 @@ schema-failure Warning instead of applying part of it.
 - [x] Task 5: remote documents are cached raw and parsed only as
       targets
 - [x] Task 6: each `$ref` target is parsed once and shared
-- [ ] Task 7: a schema over the size budget is rejected with a
-      Warning
+- [x] Task 7: a schema whose parse exceeds the memory budget is
+      rejected with a Warning
 - [ ] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
@@ -246,38 +246,66 @@ BSD-3-Clause.
       `$ref` depth
 - [x] Build, tests, clippy, and fmt pass
 
-### Task 7: Reject a schema over the size budget
+### Task 7: Reject a schema whose parse exceeds the memory budget
 
-One counter per parse covers the root document and every target
-in every document fetched for it: one unit per schema node, and
-one unit per JSON value copied into `enum`, `const`, `default`, or
-`examples`, counting every nested array element and object member
-value; a shared target counts once. A parse that exceeds the
-budget fails, and the schema is not applied at all.
+One parse — the root document and every document fetched for it —
+has two budgets, both in estimated heap bytes. The parsed-size
+budget is charged before every allocation that grows with the
+input — among them the discovery tables (visited objects, alias
+memo, base URIs, target slots, anchor index), each schema node (at
+twice `size_of::<JsonSchema>()`), each JSON value copied into
+`enum`, `const`, `default`, or `examples`, string lists such as
+`required`, `type`, and `dependentRequired`, and every copied
+string and map key (`description`, `title`, `pattern`, `$ref`
+text, property names). The raw-document budget is charged with an
+estimate of the deserialized size of every document the parse
+uses — the root, each fetched document, and each document taken
+from the cache — taken from a fetched document's bytes before they
+are deserialized. A parse that exceeds either budget fails, and
+the schema is not applied at all.
 
-- [ ] `parse_schema` and `fetch_schema_raw` return a new
-      `SchemaError` variant, distinct from `ResponseTooLarge`, for
-      a parse over the budget; a schema at the budget parses, and
-      one unit over it is rejected
-- [ ] The budget is exactly twice the units a schema of
-      `MAX_SCHEMA_BYTES` needs at the highest units-per-byte ratio
-      among the vendored fixtures and the draft-07 meta-schema,
-      rounded up; the handoff reports each one's measured units
-      and ratio
-- [ ] When a schema is rejected, the client receives the existing
+- [x] `parse_schema` and `fetch_schema_raw` return a new
+      `SchemaError` variant, distinct from `ResponseTooLarge`,
+      when either budget is exceeded; for each budget, a schema
+      whose charge equals the budget parses and one charge over it
+      is rejected
+- [x] Exceeding a budget during target discovery fails the parse
+      before any schema node is built, and once a budget is
+      exceeded no further document is fetched
+- [x] A parse never returns a partially built schema: an exceeded
+      budget in discovery, in the build, or in the last target
+      yields the error
+- [x] The parsed-size budget is 256 MiB and the raw-document
+      budget 128 MiB; each vendored fixture and the draft-07
+      meta-schema use at most half of each budget, and the handoff
+      reports each one's charge under both budgets
+- [x] Six adversarial shapes — empty objects, distinct targets
+      each referenced once, anchors nested 45 levels deep, a
+      `required` list of one-character strings, an `enum` of small
+      values, and an array of one-entry objects — each built at
+      its densest form in a root plus 20 fetched documents of up
+      to `MAX_SCHEMA_BYTES` each, are rejected with the new error;
+      the handoff names the budget each one exceeded
+- [x] For each of the six shapes, the largest instance that both
+      budgets accept parses with a peak heap of at most 400 MiB
+      above the heap before the parse, measured by a test with a
+      counting allocator; the handoff reports these peaks and those
+      of the fixtures and the draft-07 meta-schema
+- [x] When a schema is rejected, the client receives the existing
       schema-failure Warning naming the URL and stating that the
-      schema is too large, and no schema diagnostic is published;
-      Kubernetes auto-detection stays silent
-- [ ] An integration test in `rlsp-yaml/tests/lsp_lifecycle/`
-      opens a document whose schema exceeds the budget and
-      asserts the Warning and the absence of schema diagnostics
-- [ ] `rlsp-yaml/docs/configuration.md` tells the reader that a
-      schema's parsed size is bounded at twice what a 5 MiB schema
-      of the densest measured real schemas needs, and what they
-      see when a schema exceeds it
-- [ ] The `rlsp-yaml/docs/feature-log.md` entry for shared
-      `$ref` targets also records the size bound
-- [ ] Build, tests, clippy, and fmt pass
+      schema is too large, with no text taken from the schema, and
+      no schema diagnostic is published; Kubernetes
+      auto-detection stays silent
+- [x] An integration test in `rlsp-yaml/tests/lsp_lifecycle/`
+      opens a document whose schema exceeds a budget and asserts
+      the Warning and the absence of schema diagnostics
+- [x] `rlsp-yaml/docs/configuration.md` tells the reader that
+      parsing a schema, together with the documents it
+      references, is bounded in memory, what the bounds are, and
+      what they see when a schema exceeds them
+- [x] The `rlsp-yaml/docs/feature-log.md` entry for shared
+      `$ref` targets also records the memory bound
+- [x] Build, tests, clippy, and fmt pass
 
 ## Non-Goals
 
@@ -290,6 +318,9 @@ budget fails, and the schema is not applied at all.
 - Dynamic-scope `$dynamicRef` semantics
 - The lost boolean `false` sub-schema in `parse_schema_with_root`
   (`unevaluatedItems: false` and similar keywords)
+- Evicting fetched documents from the cache across schemas
+- Validating `kind` and `apiVersion` before they form the
+  Kubernetes schema URL (separate plan after this one)
 
 ## Decisions
 
@@ -310,9 +341,19 @@ budget fails, and the schema is not applied at all.
 - **Targets keyed by location and parsed from a worklist:** keying
   by `$ref` text parses one object several times, and parsing at
   the first reference recurses as deep as the reference chain.
-- **Budget counts copied JSON values too:** `enum`, `const`,
-  `default`, and `examples` copy their values, so a node count
-  alone does not bound memory.
+- **Budget in estimated heap bytes:** a schema node costs 1–2 KB
+  and a copied JSON value 32–340 B, so equal units calibrated on
+  real schemas let an attacker spend the budget on the costliest
+  kind; charging an estimate at every allocation that grows with
+  the input bounds memory directly, discovery included.
+- **Raw documents have their own budget:** deserialized JSON is
+  many times larger than its text, so its estimate is charged
+  before deserializing, and documents taken from the cache count
+  too, since the parse holds them as well.
+- **Fixed budgets of 256 MiB parsed and 128 MiB raw:** a memory
+  target set on purpose bounds one parse at 400 MiB, the read
+  buffer and estimation slack included; real schemas are checked
+  to use at most half of each budget.
 - **Remote `$ref`s inside local targets resolve:** one resolution
   path without a per-target flag; the fetch limit and SSRF guard
   still apply.

@@ -7,159 +7,17 @@
 //! `http://` target through the `http://` proxy with `CONNECT` and leaves name
 //! resolution to the proxy, so the production fetch path runs without network
 //! access.
-use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-
 use rlsp_yaml::server::Backend;
 use rstest::rstest;
 use serde_json::json;
 use tower_lsp::LspService;
 use tower_lsp::lsp_types::NumberOrString;
 
+use super::fake_proxy::{FakeProxy, Reply, SCHEMA_HOST};
 use super::helpers::*;
 
-const SCHEMA_HOST: &str = "schema.invalid";
 const SCHEMA_URL: &str = "http://schema.invalid/schema.json";
 const OBJECT_SCHEMA: &str = r#"{"type":"object","properties":{"count":{"type":"integer"}}}"#;
-
-/// The canned response served for the tunneled `GET`.
-struct Reply {
-    /// Status code and reason phrase, e.g. `404 Not Found`.
-    status: &'static str,
-    content_type: Option<&'static str>,
-    body: String,
-}
-
-impl Reply {
-    const fn ok(content_type: Option<&'static str>, body: String) -> Self {
-        Self {
-            status: "200 OK",
-            content_type,
-            body,
-        }
-    }
-
-    fn not_found() -> Self {
-        Self {
-            status: "404 Not Found",
-            content_type: Some("text/plain"),
-            body: "not found".to_string(),
-        }
-    }
-}
-
-/// A `CONNECT` proxy that serves a canned [`Reply`] per request path for
-/// `schema.invalid:80` and answers every other tunnel target with 502.
-struct FakeProxy {
-    addr: SocketAddr,
-    /// The `CONNECT` line, then the tunneled request line and `Host` header, of
-    /// each served request.
-    seen: Arc<Mutex<Vec<String>>>,
-    stop: Arc<AtomicBool>,
-}
-
-impl FakeProxy {
-    /// Serve `reply` for every path.
-    fn start(reply: Reply) -> Self {
-        Self::start_routes(vec![("*", reply)])
-    }
-
-    /// Serve the reply of the route whose path matches the request, or the one
-    /// registered for `*`; any other path gets 404.
-    fn start_routes(mut routes: Vec<(&'static str, Reply)>) -> Self {
-        routes.push(("*", Reply::not_found()));
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake proxy");
-        listener.set_nonblocking(true).expect("nonblocking");
-        let addr = listener.local_addr().expect("local addr");
-        let seen = Arc::new(Mutex::new(Vec::new()));
-        let stop = Arc::new(AtomicBool::new(false));
-
-        let (thread_seen, thread_stop) = (seen.clone(), stop.clone());
-        std::thread::spawn(move || {
-            while !thread_stop.load(Ordering::Relaxed) {
-                match listener.accept() {
-                    Ok((stream, _)) => {
-                        let _ = serve_connection(stream, &routes, &thread_seen);
-                    }
-                    Err(_) => std::thread::sleep(Duration::from_millis(10)),
-                }
-            }
-        });
-
-        Self { addr, seen, stop }
-    }
-
-    fn url(&self) -> String {
-        format!("http://{}", self.addr)
-    }
-
-    fn seen(&self) -> Vec<String> {
-        self.seen.lock().expect("seen lock").clone()
-    }
-}
-
-impl Drop for FakeProxy {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-    }
-}
-
-/// Read up to and including the blank line that ends an HTTP head.
-fn read_head(stream: &mut TcpStream) -> std::io::Result<String> {
-    let mut head = Vec::new();
-    let mut byte = [0u8; 1];
-    while !head.ends_with(b"\r\n\r\n") {
-        stream.read_exact(&mut byte)?;
-        head.push(byte[0]);
-    }
-    Ok(String::from_utf8_lossy(&head).into_owned())
-}
-
-fn serve_connection(
-    mut stream: TcpStream,
-    routes: &[(&str, Reply)],
-    seen: &Mutex<Vec<String>>,
-) -> std::io::Result<()> {
-    stream.set_nonblocking(false)?;
-    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-
-    let connect = read_head(&mut stream)?;
-    let connect_line = connect.lines().next().unwrap_or_default().to_string();
-    let allowed = connect_line.starts_with(&format!("CONNECT {SCHEMA_HOST}:80 "));
-    seen.lock().expect("seen lock").push(connect_line);
-    if !allowed {
-        return stream.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n");
-    }
-    stream.write_all(b"HTTP/1.1 200 Connection established\r\n\r\n")?;
-
-    let request = read_head(&mut stream)?;
-    let mut lines = request.lines();
-    let request_line = lines.next().unwrap_or_default().to_string();
-    let host = lines
-        .find(|l| l.to_ascii_lowercase().starts_with("host:"))
-        .unwrap_or_default()
-        .to_string();
-    let path = request_line.split_whitespace().nth(1).unwrap_or_default();
-    let (_, reply) = routes
-        .iter()
-        .find(|(route, _)| *route == path || *route == "*")
-        .expect("start_routes registers a fallback route");
-    let Reply {
-        status,
-        content_type,
-        body,
-    } = reply;
-    seen.lock().expect("seen lock").extend([request_line, host]);
-    let content_type = content_type.map_or(String::new(), |ct| format!("Content-Type: {ct}\r\n"));
-    write!(
-        stream,
-        "HTTP/1.1 {status}\r\n{content_type}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    )
-}
 
 fn proxy_options(proxy_url: &str) -> serde_json::Value {
     json!({ "httpProxy": proxy_url })
@@ -722,4 +580,131 @@ async fn should_attempt_a_failing_remote_ref_once() {
     .await;
 
     assert_eq!(requests_for(&proxy, "/gone.json"), 1);
+}
+
+// ---- schemas over the memory budget ----
+
+/// A schema that types `count` as an integer and carries `padding` as members
+/// that no schema keyword reads or that this test's keywords make expensive.
+fn padded_schema(padding: &str) -> String {
+    format!(r#"{{"properties":{{"count":{{"type":"integer"}}}},{padding}}}"#)
+}
+
+/// `count` of `item` as the elements of an array under `key`.
+fn array_member(key: &str, item: &str, count: usize) -> String {
+    format!(r#""{key}":[{}]"#, vec![item; count].join(","))
+}
+
+/// A body past the raw budget: the one-entry objects deserialize to far more
+/// memory than their text, and no keyword reads them.
+fn raw_heavy_padding() -> String {
+    array_member("x-pad", r#"{"a":1}"#, 200_000)
+}
+
+/// A body past the parsed budget only: 150 000 empty schemas.
+fn parsed_heavy_padding() -> String {
+    array_member("allOf", "{}", 150_000)
+}
+
+#[tokio::test]
+async fn should_publish_schema_diagnostic_when_the_padding_stays_within_the_budgets() {
+    let body = padded_schema(&array_member("x-pad", r#"{"a":1}"#, 1_000));
+    let proxy = FakeProxy::start(json_reply(&body));
+
+    let codes = schema_diagnostic_codes(&proxy.url()).await;
+
+    assert_eq!(codes, [schema_type()]);
+}
+
+#[rstest]
+#[case::raw_budget(raw_heavy_padding())]
+#[case::parsed_budget(parsed_heavy_padding())]
+#[tokio::test]
+async fn should_warn_and_publish_no_schema_diagnostics_when_a_schema_exceeds_a_memory_budget(
+    #[case] padding: String,
+) {
+    let proxy = FakeProxy::start(json_reply(&padded_schema(&padding)));
+    let (mut service, mut log) = start_server(proxy_options(&proxy.url())).await;
+    let uri = "file:///test/too-large.yaml";
+
+    open_with_modeline(&mut service, uri, SCHEMA_URL).await;
+    let warnings = warnings_before_sentinel(&mut service, &mut log).await;
+
+    assert_eq!(warnings.len(), 1, "got: {warnings:?}");
+    assert!(warnings[0].contains(SCHEMA_URL), "got: {warnings:?}");
+    assert!(warnings[0].contains("too large"), "got: {warnings:?}");
+    assert!(!warnings[0].contains("size limit"), "got: {warnings:?}");
+    assert!(diagnostic_codes(&service, uri).is_empty());
+    assert_eq!(
+        proxy.seen().len(),
+        3,
+        "the schema fetch must have been tried"
+    );
+}
+
+#[tokio::test]
+async fn should_warn_on_every_open_when_a_schema_exceeds_a_memory_budget() {
+    let proxy = FakeProxy::start(json_reply(&padded_schema(&raw_heavy_padding())));
+    let (mut service, mut log) = start_server(proxy_options(&proxy.url())).await;
+
+    open_with_modeline(&mut service, "file:///test/first.yaml", SCHEMA_URL).await;
+    open_with_modeline(&mut service, "file:///test/second.yaml", SCHEMA_URL).await;
+    let warnings = warnings_before_sentinel(&mut service, &mut log).await;
+
+    assert_eq!(warnings.len(), 2, "got: {warnings:?}");
+    for uri in ["file:///test/first.yaml", "file:///test/second.yaml"] {
+        assert!(diagnostic_codes(&service, uri).is_empty(), "{uri}");
+    }
+}
+
+#[tokio::test]
+async fn should_not_repeat_text_of_a_schema_that_exceeds_a_memory_budget_in_the_warning() {
+    let canary = "CANARY-9c1e";
+    let padding = format!(
+        r##""$id":"http://{canary}.invalid/s.json","description":"{canary}","properties":{{"{canary}":{{"$ref":"#/{canary}"}}}},{}"##,
+        raw_heavy_padding()
+    );
+    let body = format!("{{{padding}}}");
+    let proxy = FakeProxy::start(json_reply(&body));
+    let (mut service, mut log) = start_server(proxy_options(&proxy.url())).await;
+
+    open_with_modeline(&mut service, "file:///test/canary.yaml", SCHEMA_URL).await;
+    let warnings = warnings_before_sentinel(&mut service, &mut log).await;
+
+    assert_eq!(warnings.len(), 1, "got: {warnings:?}");
+    assert!(warnings[0].contains("too large"), "got: {warnings:?}");
+    assert!(!warnings[0].contains(canary), "got: {warnings:?}");
+}
+
+#[tokio::test]
+async fn should_warn_naming_the_schema_and_fetch_no_more_when_a_remote_ref_exceeds_the_budget() {
+    let root = r#"{"properties":{"a":{"$ref":"http://schema.invalid/a.json"},"b":{"$ref":"http://schema.invalid/b.json"},"c":{"$ref":"http://schema.invalid/c.json"}}}"#;
+    let big = format!("{{{}}}", raw_heavy_padding());
+    let proxy = FakeProxy::start_routes(vec![
+        ("/schema.json", json_reply(root)),
+        ("/a.json", json_reply(&big)),
+        ("/b.json", json_reply("{}")),
+        ("/c.json", json_reply("{}")),
+    ]);
+    let (mut service, mut log) = start_server(proxy_options(&proxy.url())).await;
+    let uri = "file:///test/remote-too-large.yaml";
+
+    open_with_modeline(&mut service, uri, SCHEMA_URL).await;
+    let warnings = warnings_before_sentinel(&mut service, &mut log).await;
+
+    assert_eq!(warnings.len(), 1, "got: {warnings:?}");
+    assert!(warnings[0].contains(SCHEMA_URL), "got: {warnings:?}");
+    assert!(warnings[0].contains("too large"), "got: {warnings:?}");
+    assert!(diagnostic_codes(&service, uri).is_empty());
+    assert_eq!(requests_for(&proxy, "/a.json"), 1);
+    assert_eq!(
+        requests_for(&proxy, "/b.json"),
+        0,
+        "fetched after the budget"
+    );
+    assert_eq!(
+        requests_for(&proxy, "/c.json"),
+        0,
+        "fetched after the budget"
+    );
 }

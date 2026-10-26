@@ -668,6 +668,10 @@ Schemas are fetched over HTTP/HTTPS and cached in memory for the session.
 
 Each `$ref` target is parsed once and shared, so recursive schemas, such as the JSON Schema meta-schemas, are followed without a fixed `$ref` depth, within the limits of [Schema Validation Limits](#schema-validation-limits).
 
+**Memory bound** — parsing a schema, together with the documents it references, is bounded in memory. One parse, which reads the schema and every document fetched for its `$ref`s, has two budgets, in estimated heap bytes: 128 MiB for the documents as the server holds them once deserialized (a JSON text takes many times its length in memory), and 256 MiB for the schema built from them. The two budgets are what the server enforces. They are estimates, calibrated so that one parse stays within a memory target of 400 MiB, including the buffer a response is read into; the target was measured on documents of the densest forms and is not a guarantee. Real schemas use a small part of this: the Kubernetes Deployment schema (about 710 KiB of text) uses under 4 MiB of each budget.
+
+A schema that exceeds a budget is not applied at all, because a partial schema could report problems that the whole schema would not. No schema diagnostic is published for the file, and the server sends a `window/logMessage` of type Warning to the client's log that names the schema URL and says the schema is too large. Auto-detected Kubernetes schemas stay silent, like other failures to load them. Documents fetched for a rejected schema are not kept. The server does not remember a rejected schema: it is fetched and parsed, up to the budget, again each time the file is checked.
+
 **SSRF protection** — the server blocks schema URLs that resolve to:
 - Loopback addresses (`127.0.0.0/8`, `::1`, `localhost`)
 - Private networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`)

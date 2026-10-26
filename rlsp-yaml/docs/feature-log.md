@@ -34,7 +34,7 @@ corresponding plan file under `.ai/plans/`.
 ### Shared `$ref` Targets [completed]
 
 **Date:** 2026-10-26
-**Description:** Each `$ref` target is parsed once and shared, so self-referencing schemas such as the JSON Schema meta-schemas load and are no longer cut at a fixed `$ref` depth. Documents nested deeper than 32 schema levels are validated against the full recursive schema and report the diagnostics it implies. A `$ref` that points to a remote document now also resolves inside definitions and other targets that the schema reaches through a local `$ref`, subject to the same fetch limit and URL restrictions as before.
+**Description:** Each `$ref` target is parsed once and shared, so self-referencing schemas such as the JSON Schema meta-schemas load and are no longer cut at a fixed `$ref` depth. Documents nested deeper than 32 schema levels are validated against the full recursive schema and report the diagnostics it implies. A `$ref` that points to a remote document now also resolves inside definitions and other targets that the schema reaches through a local `$ref`, subject to the same fetch limit and URL restrictions as before. Parsing a schema is bounded in memory: one parse, with the documents it references, has a budget of 128 MiB for the deserialized documents and 256 MiB for the schema built from them, and a schema that exceeds one is rejected as a whole with a Warning in the client log instead of being applied in part.
 **Complexity:** High
 **Tier:** 1
 

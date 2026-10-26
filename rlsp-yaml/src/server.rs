@@ -2788,6 +2788,20 @@ mod tests {
         assert!(message.contains("not permitted"));
     }
 
+    #[rstest]
+    #[case::parsed_budget(schema::SizeBudget::Parsed)]
+    #[case::raw_budget(schema::SizeBudget::Raw)]
+    fn schema_failure_message_says_the_schema_is_too_large(#[case] budget: schema::SizeBudget) {
+        let message = schema_failure_message(
+            "http://schema.invalid/schema.json",
+            &schema::SchemaError::TooLarge(budget),
+        );
+
+        assert!(message.contains("http://schema.invalid/schema.json"));
+        assert!(message.contains("too large"));
+        assert!(!message.contains("size limit"));
+    }
+
     /// The message builders that echo a schema URL, each given a URL only.
     fn failure_message(url: &str) -> String {
         schema_failure_message(url, &fetch_failed("http status: 404"))
