@@ -58,7 +58,7 @@ schema-failure Warning instead of applying part of it.
 - [x] Design review of the approach
 - [x] Task 1: parse results are shared, not copied, by the cache
       and every consumer
-- [ ] Task 2: one parser struct carries per-parse state
+- [x] Task 2: one parser struct carries per-parse state
 - [ ] Task 3: `definitions`/`$defs` are no longer parsed into the
       tree
 - [ ] Task 4: consumers follow reference nodes
@@ -101,15 +101,15 @@ as fields. Behavior is unchanged: local `$ref` targets are still
 parsed without remote resolution and without a base URI, and the
 depth limits still apply as today.
 
-- [ ] Parse state lives in one parser struct; no parse function
+- [x] Parse state lives in one parser struct; no parse function
       threads the root document, base URI, remote context, and
       depth as separate arguments
-- [ ] The `src/schema.rs` tests for `$ref`, `$id` and base URIs,
+- [x] The `src/schema.rs` tests for `$ref`, `$id` and base URIs,
       anchors, `$dynamicRef`, remote references, the SSRF guard,
       and the cache pass with their assertions unchanged — only
       call-shape edits in tests that call parse internals
       directly
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ### Task 3: Stop parsing `definitions`/`$defs` into the tree
 
