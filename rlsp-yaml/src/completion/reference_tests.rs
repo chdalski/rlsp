@@ -454,9 +454,7 @@ fn a_target_with_more_properties_than_the_item_limit_is_cut_at_the_limit() {
 #[test]
 fn a_reference_without_a_target_offers_nothing() {
     let dangling = JsonSchema {
-        reference: Some(crate::schema::SchemaRef::Unresolved(
-            "#/missing".to_string(),
-        )),
+        reference: Some(crate::schema::SchemaRef::Unresolved("#/missing".into())),
         ..JsonSchema::default()
     };
     let schema = with_targets(
@@ -497,4 +495,19 @@ fn the_required_snippet_of_a_reference_is_built_from_its_target() {
         .find(|i| i.label == "(all required)")
         .and_then(|i| i.insert_text.as_deref());
     assert_eq!(snippet, Some("port: ${1:0}\nhost: ${2:\"\"}"));
+}
+
+#[test]
+fn keys_are_offered_at_every_level_of_a_recursive_parsed_schema() {
+    let schema = crate::schema::parse_schema(&serde_json::json!({
+        "properties": { "name": { "type": "string" }, "child": { "$ref": "#" } }
+    }))
+    .expect("recursive schema parses");
+    let docs = parse_docs("child:\n  child:\n    child:\n      other: 1\n");
+
+    let items = complete_at(&docs, pos(3, 6), Some(&schema));
+
+    let mut found = labels(&items);
+    found.sort_unstable();
+    assert_eq!(found, ["child", "name"], "once each, at the fourth level");
 }

@@ -133,7 +133,7 @@ mod tests {
     #[test]
     fn uses_url_when_the_root_is_an_unresolved_reference() {
         let schema = ParsedSchema::new(JsonSchema {
-            reference: Some(SchemaRef::Unresolved("#/missing".to_string())),
+            reference: Some(SchemaRef::Unresolved("#/missing".into())),
             ..JsonSchema::default()
         });
         let lenses = code_lenses("https://example.com/schema.json", Some(&schema));
@@ -153,5 +153,18 @@ mod tests {
             lenses[0].command.as_ref().unwrap().title,
             "https://example.com/schema.json"
         );
+    }
+
+    #[test]
+    fn uses_the_title_of_the_target_of_a_parsed_root_reference() {
+        let schema = crate::schema::parse_schema(&serde_json::json!({
+            "$ref": "#/definitions/Root",
+            "definitions": { "Root": { "title": "Root Title" } }
+        }))
+        .expect("parses");
+
+        let lenses = code_lenses("https://example.com/schema.json", Some(&schema));
+
+        assert_eq!(lenses[0].command.as_ref().unwrap().title, "Root Title");
     }
 }

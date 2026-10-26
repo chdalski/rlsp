@@ -1957,8 +1957,26 @@ mod tests {
         }
 
         #[rstest]
+        #[case::json_pointer(json!({ "$ref": "#/definitions/Name" }))]
+        #[case::anchor(json!({ "$ref": "#name" }))]
+        fn hover_on_a_property_of_a_parsed_schema_reads_the_description_behind_its_reference(
+            #[case] reference: JsonValue,
+        ) {
+            let schema = crate::schema::parse_schema(&json!({
+                "properties": { "name": reference },
+                "definitions": { "Name": { "$anchor": "name", "description": "The name" } }
+            }))
+            .expect("parses");
+            let docs = parse_docs("name: x\n");
+
+            let hover = hover_at(&docs, pos(0, 0), Some(&schema)).expect("hover");
+
+            assert!(hover_content(&hover).contains("**Description:** The name"));
+        }
+
+        #[rstest]
         #[case::unresolved(JsonSchema {
-            reference: Some(crate::schema::SchemaRef::Unresolved("#/missing".to_string())),
+            reference: Some(crate::schema::SchemaRef::Unresolved("#/missing".into())),
             ..JsonSchema::default()
         })]
         #[case::target_outside_the_table(reference_to(7))]

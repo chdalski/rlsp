@@ -662,10 +662,11 @@ Schemas are fetched over HTTP/HTTPS and cached in memory for the session.
 - Maximum URL length: 2048 characters
 - Maximum response size: 5 MiB
 - Maximum JSON nesting depth: 50
-- Maximum `$ref` resolution depth: 32
 - Redirects: disabled
 - Connection timeout: 5 seconds
 - Total request timeout: 15 seconds
+
+Each `$ref` target is parsed once and shared, so recursive schemas, such as the JSON Schema meta-schemas, are followed without a fixed `$ref` depth, within the limits of [Schema Validation Limits](#schema-validation-limits).
 
 **SSRF protection** — the server blocks schema URLs that resolve to:
 - Loopback addresses (`127.0.0.0/8`, `::1`, `localhost`)

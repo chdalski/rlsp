@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Read as _;
 use std::net::IpAddr;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -23,11 +24,9 @@ pub(crate) const MAX_SCHEMA_BYTES: u64 = 5 * 1024 * 1024;
 /// Maximum URL length (matches `document_links.rs`).
 const MAX_URL_LENGTH: usize = 2048;
 
-/// Maximum JSON nesting depth allowed during schema parsing.
+/// Maximum JSON nesting depth allowed during schema parsing; the parser recurses
+/// no deeper than the documents it reads nest.
 const MAX_JSON_DEPTH: usize = 50;
-
-/// Maximum `$ref` resolution depth to prevent stack overflow on circular refs.
-const MAX_REF_DEPTH: usize = 32;
 
 /// Maximum number of distinct remote schema URLs fetched during a single `$ref`
 /// resolution pass.  Caps both breadth fan-out and circular-remote-ref loops.
@@ -108,7 +107,7 @@ pub enum SchemaRef {
     /// A schema in the target table of the [`ParsedSchema`] that holds the node.
     Target(TargetId),
     /// A `$ref` that could not be resolved, with its text.
-    Unresolved(String),
+    Unresolved(Arc<str>),
 }
 
 /// The result of parsing a schema document.
@@ -441,7 +440,7 @@ pub struct SchemaStoreCatalog {
 /// insertion for a URL wins.
 #[derive(Debug, Default)]
 pub struct SchemaCache {
-    documents: HashMap<String, Value>,
+    documents: HashMap<String, Arc<Value>>,
     schemas: HashMap<String, Arc<ParsedSchema>>,
 }
 
@@ -473,13 +472,21 @@ impl SchemaCache {
     /// Return the raw document fetched from `url`, or `None` on a cache miss.
     #[must_use]
     pub fn get_document(&self, url: &str) -> Option<&Value> {
-        self.documents.get(url)
+        self.documents.get(url).map(|document| &**document)
+    }
+
+    /// Return the raw document fetched from `url` as a shared handle, for a
+    /// parse that reads it while the cache is written to.
+    pub(crate) fn shared_document(&self, url: &str) -> Option<Arc<Value>> {
+        self.documents.get(url).cloned()
     }
 
     /// Insert the raw document fetched from `url`.  The first insertion for a
     /// given URL wins; subsequent calls for the same key are silently ignored.
     pub fn insert_document(&mut self, url: String, document: Value) {
-        self.documents.entry(url).or_insert(document);
+        self.documents
+            .entry(url)
+            .or_insert_with(|| Arc::new(document));
     }
 
     /// Return whether the raw document at `url` is already in the cache
@@ -497,7 +504,7 @@ impl SchemaCache {
     /// may come from different fetches.
     pub fn merge(&mut self, other: Self) {
         for (url, document) in other.documents {
-            self.insert_document(url, document);
+            self.documents.entry(url).or_insert(document);
         }
         for (url, schema) in other.schemas {
             self.insert(url, schema);
@@ -720,7 +727,8 @@ fn fetch_document(url: &str, proxy: Option<&str>) -> Result<Value, SchemaError> 
 /// followed further — this is intentional to cap the blast radius of a
 /// malicious schema that chains many remote refs.  The breadth guard
 /// (`MAX_REMOTE_FETCH_COUNT`) and dedup set in `ctx` enforce an absolute cap
-/// even if this design decision is revisited later.
+/// even if this design decision is revisited later.  The parsed schema holds
+/// each `$ref` target once, as [`parse_schema`] describes.
 ///
 /// # Errors
 ///
@@ -744,16 +752,10 @@ pub fn fetch_schema_raw(
         None => fetch_document(&url, proxy)?,
     };
 
-    let schema = ctx
-        .map_or_else(
-            || parse_schema(&value),
-            |ctx| {
-                SchemaParser::new(&value, Some(ctx))
-                    .parse(&value, Some(&url), 0)
-                    .map(ParsedSchema::new)
-            },
-        )
-        .ok_or_else(|| SchemaError::ParseFailed("not a JSON Schema".to_string()))?;
+    let schema = match ctx {
+        Some(ctx) => parse_document(&value, Some(&url), Some(ctx))?,
+        None => parse_schema(&value)?,
+    };
     Ok((value, schema))
 }
 
@@ -948,6 +950,11 @@ fn parse_scalar_fields(obj: &serde_json::Map<String, Value>, schema: &mut JsonSc
 /// If `relative` is already an absolute URI it is returned as-is.
 /// Returns `None` when `base` is `None` or when joining fails.
 fn resolve_uri(base: Option<&str>, relative: &str) -> Option<String> {
+    // Bound the work of parsing before doing it: a URL beyond the limit is
+    // rejected by the SSRF guard anyway.
+    if relative.len() > MAX_URL_LENGTH || base.is_some_and(|b| b.len() > MAX_URL_LENGTH) {
+        return None;
+    }
     if Url::parse(relative).is_ok() {
         return Some(relative.to_string());
     }
@@ -984,43 +991,805 @@ fn string_field(obj: &serde_json::Map<String, Value>, key: &str) -> Option<Strin
 
 /// Parse a `serde_json::Value` into a [`ParsedSchema`].
 ///
-/// Returns `None` if the value is not a JSON object (or boolean — see below).
-///
 /// Boolean schemas:
 /// - `true`  → empty (permissive) schema
-/// - `false` → `None` (no schema representation for "reject everything")
-#[must_use]
-pub fn parse_schema(value: &Value) -> Option<ParsedSchema> {
-    SchemaParser::new(value, None)
-        .parse(value, None, 0)
-        .map(ParsedSchema::new)
+/// - `false` → [`SchemaError::ParseFailed`] (no schema representation for
+///   "reject everything")
+///
+/// Each `$ref` target is parsed once and shared: the parsed schema holds a
+/// reference node wherever a `$ref` stands, and the target table holds the
+/// schema it refers to.
+///
+/// # Errors
+///
+/// - [`SchemaError::TooDeep`] when the JSON nests beyond the depth limit.
+/// - [`SchemaError::ParseFailed`] when the root is not a JSON object or
+///   boolean `true`.
+pub fn parse_schema(value: &Value) -> Result<ParsedSchema, SchemaError> {
+    parse_document(value, None, None)
 }
 
-/// The state that stays constant while one document is parsed: the document
-/// that `$ref` fragments resolve against and the optional remote context.
+/// Parse the schema document `value`, fetched from `url` when it has one.
 ///
-/// The base URI and depth vary per sub-schema, so they are arguments of the
-/// parse methods instead.
+/// With a `ctx`, remote `$ref`s of the document resolve one level deep, as
+/// [`fetch_schema_raw`] describes.
+fn parse_document(
+    value: &Value,
+    url: Option<&str>,
+    ctx: Option<&mut ParseContext<'_>>,
+) -> Result<ParsedSchema, SchemaError> {
+    check_json_depth(value, 0)?;
+    if !matches!(value, Value::Object(_) | Value::Bool(true)) {
+        return Err(SchemaError::ParseFailed("not a JSON Schema".to_string()));
+    }
+    SchemaParser::new(value, url, ctx).parse_all(value, url)
+}
+
+/// Index of a document in the document table of one parse; the root document
+/// is the one being parsed, the others are fetched for its remote `$ref`s.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct DocId(usize);
+
+const ROOT_DOC: DocId = DocId(0);
+
+/// Tokens of a JSON Pointer, unescaped. Shared between the locations that
+/// name the same place, so a location costs the same however long the keys on
+/// its path are.
+type Path = Rc<[Rc<str>]>;
+
+/// Identity of a place in a document: the address of its value, which holds
+/// still while the parse holds the document. A JSON pointer, an anchor, and
+/// the document's URL that name the same value name the same key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct LocationKey {
+    doc: DocId,
+    address: usize,
+}
+
+/// A place in a document, with the path that leads to it from the root.
+#[derive(Debug, Clone)]
+struct Location {
+    key: LocationKey,
+    path: Path,
+}
+
+/// What a `$ref` settles to once chains of `$ref`-only schemas are followed.
+#[derive(Debug, Clone)]
+enum Settled {
+    /// A schema that is not a `$ref` itself.
+    Content(Location),
+    /// A `$ref` in the chain that cannot be resolved, with its text. The text
+    /// is shared, so a long chain and every place that reaches it hold one copy.
+    Unresolved(Arc<str>),
+    /// A chain that ends in itself.
+    Permissive,
+}
+
+/// Which keyword a reference was written with.
+#[derive(Debug, Clone, Copy)]
+enum Keyword {
+    Ref,
+    DynamicRef,
+}
+
+/// What a schema object's `$ref` or `$dynamicRef` stands for.
+#[derive(Debug, Clone)]
+enum Reference {
+    /// The schema at this place, a target.
+    Content(Location),
+    /// A reference that cannot be resolved, with its text.
+    Unresolved(Arc<str>),
+    /// A chain of references that ends in itself.
+    Permissive,
+    /// No reference: the keywords of the object apply.
+    Plain,
+}
+
+/// Where a schema is parsed: its document and the base URI that its relative
+/// references resolve against.
+#[derive(Debug, Clone)]
+struct Scope {
+    doc: DocId,
+    base: Option<Rc<str>>,
+}
+
+/// A document of one parse. The root document is borrowed from the caller;
+/// fetched documents are shared with the cache.
+#[derive(Debug, Clone)]
+enum Source<'r> {
+    Borrowed(&'r Value),
+    Shared(Arc<Value>),
+}
+
+impl Source<'_> {
+    fn value(&self) -> &Value {
+        match self {
+            Source::Borrowed(value) => value,
+            Source::Shared(value) => value,
+        }
+    }
+}
+
+static NULL: Value = Value::Null;
+
+struct Document<'r> {
+    source: Source<'r>,
+    /// The URL the document was fetched from; the base URI of its root.
+    url: Option<String>,
+    /// Normalized URLs that name this document, so that a `$ref` to one of
+    /// them is a reference into the document itself.
+    names: Vec<String>,
+    /// `$anchor` and `$dynamicAnchor` names to their paths, built on the
+    /// first anchor reference into the document.
+    anchors: Option<HashMap<String, Path>>,
+}
+
+/// The state of one parse: the documents it reads, the remote context, and
+/// the table of targets.
+///
+/// Each place that a `$ref` names gets one target, parsed once from a
+/// worklist, so the parse recurses only as deep as the JSON nests.
+///
+/// The parse has two passes. The discovery pass walks the schema positions of
+/// the root and of every target and settles each reference, so that all
+/// targets are known before any is built. The build pass then emits a reference
+/// node wherever a target sits, inside the root or inside another target, so
+/// every JSON object is parsed at most once and the parse has at most as many
+/// schema nodes as the documents have objects.
 struct SchemaParser<'r, 'c> {
-    root: &'r Value,
+    documents: Vec<Document<'r>>,
+    /// Fetched documents by URL; `None` for a document that cannot be used.
+    remote_documents: HashMap<String, Option<DocId>>,
     ctx: Option<&'r mut ParseContext<'c>>,
+    root_key: LocationKey,
+    target_ids: HashMap<LocationKey, usize>,
+    /// The place of each target, by target id.
+    target_locations: Vec<Location>,
+    /// Parsed targets by id; `None` until the build pass reaches them.
+    targets: Vec<Option<JsonSchema>>,
+    /// Schema objects the discovery pass has walked.
+    walked: HashSet<LocationKey>,
+    settled: HashMap<LocationKey, Settled>,
+    /// The base URI that the `$id` of a schema object establishes, by object.
+    bases: HashMap<LocationKey, Rc<str>>,
+}
+
+fn address_of<T>(value: &T) -> usize {
+    std::ptr::from_ref(value).addr()
+}
+
+/// The `$id` (Draft-06+) or `id` (Draft-04) of a schema object.
+fn declared_id(obj: &serde_json::Map<String, Value>) -> Option<&str> {
+    obj.get("$id")
+        .or_else(|| obj.get("id"))
+        .and_then(Value::as_str)
+}
+
+/// The reference a schema object holds, `$ref` before `$dynamicRef`.
+fn reference_keyword(obj: &serde_json::Map<String, Value>) -> Option<(&str, Keyword)> {
+    if let Some(Value::String(text)) = obj.get("$ref") {
+        return Some((text, Keyword::Ref));
+    }
+    if let Some(Value::String(text)) = obj.get("$dynamicRef") {
+        return Some((text, Keyword::DynamicRef));
+    }
+    None
+}
+
+/// Whether the array form of `items` is read as a tuple: `prefixItems` holds
+/// no schema, so it does not take that role. Parse and discovery share this.
+fn reads_tuple_items(obj: &serde_json::Map<String, Value>) -> bool {
+    let prefix_holds_a_schema = obj
+        .get("prefixItems")
+        .and_then(Value::as_array)
+        .is_some_and(|items| items.iter().any(is_schema_value));
+    obj.get("items").is_some_and(Value::is_array) && !prefix_holds_a_schema
+}
+
+/// Whether `additionalItems` is read: only next to a tuple written in the
+/// array form of `items`, without any `prefixItems`. Parse and discovery share
+/// this.
+fn reads_additional_items(obj: &serde_json::Map<String, Value>) -> bool {
+    obj.get("items").is_some_and(Value::is_array) && obj.get("prefixItems").is_none()
+}
+
+/// The values at the schema positions of `obj`: the ones `parse_object` reads
+/// as sub-schemas, wherever the references among them lead.
+fn schema_children(obj: &serde_json::Map<String, Value>) -> Vec<&Value> {
+    let values_of = |key: &str| -> Vec<&Value> {
+        obj.get(key)
+            .and_then(Value::as_object)
+            .map_or_else(Vec::new, |map| map.values().collect())
+    };
+    let items_of = |key: &str| -> Vec<&Value> {
+        obj.get(key)
+            .and_then(Value::as_array)
+            .map_or_else(Vec::new, |items| items.iter().collect())
+    };
+    let single = |key: &str| {
+        obj.get(key)
+            .filter(|value| !matches!(value, Value::Bool(false)))
+    };
+    let tuple_items = reads_tuple_items(obj);
+    let dependencies = match obj.get("dependencies") {
+        Some(Value::Object(map)) => map.values().filter(|value| !value.is_array()).collect(),
+        _ => Vec::new(),
+    };
+
+    let mut children = values_of("properties");
+    children.extend(values_of("patternProperties"));
+    children.extend(items_of("prefixItems"));
+    match obj.get("items") {
+        Some(Value::Array(items)) if tuple_items => children.extend(items),
+        Some(Value::Array(_)) | None => {}
+        Some(items) => children.push(items),
+    }
+    if reads_additional_items(obj) {
+        children.extend(single("additionalItems"));
+    }
+    children.extend(dependencies);
+    children.extend(values_of("dependentSchemas"));
+    children.extend(items_of("allOf"));
+    children.extend(items_of("anyOf"));
+    children.extend(items_of("oneOf"));
+    for key in [
+        "contentSchema",
+        "contains",
+        "propertyNames",
+        "not",
+        "if",
+        "then",
+        "else",
+        "unevaluatedItems",
+    ] {
+        children.extend(obj.get(key));
+    }
+    children.extend(single("additionalProperties"));
+    children.extend(single("unevaluatedProperties"));
+    children
+}
+
+fn reference_node(target: usize) -> JsonSchema {
+    JsonSchema {
+        reference: Some(SchemaRef::Target(TargetId::new(target))),
+        ..JsonSchema::default()
+    }
+}
+
+/// The tokens of a JSON Pointer (RFC 6901), unescaped.
+fn pointer_path(pointer: &str) -> Path {
+    pointer
+        .split('/')
+        .skip(1)
+        .map(|token| Rc::from(token.replace("~1", "/").replace("~0", "~")))
+        .collect()
+}
+
+/// An array index token as `serde_json` reads it: no sign, no leading zero.
+fn array_index(token: &str) -> Option<usize> {
+    if token.starts_with('+') || (token.starts_with('0') && token.len() > 1) {
+        return None;
+    }
+    token.parse().ok()
+}
+
+fn child<'a>(node: &'a Value, token: &str) -> Option<&'a Value> {
+    match node {
+        Value::Object(map) => map.get(token),
+        Value::Array(items) => array_index(token).and_then(|index| items.get(index)),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => None,
+    }
+}
+
+fn navigate<'a>(root: &'a Value, path: &[Rc<str>]) -> Option<&'a Value> {
+    path.iter().try_fold(root, |node, token| child(node, token))
+}
+
+/// Whether `value` can be the target of a reference.
+const fn is_schema_value(value: &Value) -> bool {
+    matches!(value, Value::Object(_) | Value::Bool(true))
+}
+
+/// Index the `$anchor` and `$dynamicAnchor` names of `root` to their paths.
+/// The first object in document order wins, as for a search of the tree.
+fn index_anchors(root: &Value) -> HashMap<String, Path> {
+    let mut index = HashMap::new();
+    index_anchors_below(root, &mut Vec::new(), &mut index);
+    index
+}
+
+fn index_anchors_below(value: &Value, path: &mut Vec<Rc<str>>, index: &mut HashMap<String, Path>) {
+    match value {
+        Value::Object(obj) => {
+            for keyword in ["$anchor", "$dynamicAnchor"] {
+                if let Some(Value::String(name)) = obj.get(keyword)
+                    && !index.contains_key(name)
+                {
+                    index.insert(name.clone(), Path::from(path.as_slice()));
+                }
+            }
+            for (key, member) in obj {
+                index_anchors_in(member, key, path, index);
+            }
+        }
+        Value::Array(items) => {
+            for (position, member) in items.iter().enumerate() {
+                index_anchors_in(member, &position.to_string(), path, index);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+fn index_anchors_in(
+    member: &Value,
+    token: &str,
+    path: &mut Vec<Rc<str>>,
+    index: &mut HashMap<String, Path>,
+) {
+    if matches!(member, Value::Object(_) | Value::Array(_)) {
+        path.push(Rc::from(token));
+        index_anchors_below(member, path, index);
+        path.pop();
+    }
+}
+
+/// The normalized form of `raw` without its fragment, if it is a URL that
+/// passes the SSRF guard.
+fn document_name(raw: &str) -> Option<String> {
+    if raw.len() > MAX_URL_LENGTH {
+        return None;
+    }
+    let mut url = Url::parse(raw).ok()?;
+    url.set_fragment(None);
+    validate_and_normalize_url(url.as_str()).ok()
 }
 
 impl<'r, 'c> SchemaParser<'r, 'c> {
-    const fn new(root: &'r Value, ctx: Option<&'r mut ParseContext<'c>>) -> Self {
-        Self { root, ctx }
+    fn new(root: &'r Value, url: Option<&str>, ctx: Option<&'r mut ParseContext<'c>>) -> Self {
+        let declared = root
+            .as_object()
+            .and_then(declared_id)
+            .and_then(|raw| resolve_uri(url, raw));
+        let names = url
+            .map(String::from)
+            .into_iter()
+            .chain(declared)
+            .filter_map(|name| document_name(&name))
+            .collect();
+        Self {
+            documents: vec![Document {
+                source: Source::Borrowed(root),
+                url: url.map(String::from),
+                names,
+                anchors: None,
+            }],
+            remote_documents: HashMap::new(),
+            ctx,
+            root_key: LocationKey {
+                doc: ROOT_DOC,
+                address: address_of(root),
+            },
+            target_ids: HashMap::new(),
+            target_locations: Vec::new(),
+            targets: Vec::new(),
+            walked: HashSet::new(),
+            settled: HashMap::new(),
+            bases: HashMap::new(),
+        }
     }
+
+    /// Discover the targets, then build the root schema and every target, and
+    /// assemble the result.
+    fn parse_all(mut self, root: &Value, url: Option<&str>) -> Result<ParsedSchema, SchemaError> {
+        let scope = Scope {
+            doc: ROOT_DOC,
+            base: url.map(Rc::from),
+        };
+        self.discover_node(root, &scope);
+        let mut discovered = 0;
+        while let Some(location) = self.target_locations.get(discovered).cloned() {
+            self.discover_location(&location);
+            discovered += 1;
+        }
+
+        // A reference to the root makes the root a target like any other.
+        let root_schema = match self.target_ids.get(&self.root_key) {
+            Some(&id) => reference_node(id),
+            None => self.parse_node(root, &scope).unwrap_or_default(),
+        };
+        // Building a target can find another one that discovery did not.
+        let mut built = 0;
+        while let Some(location) = self.target_locations.get(built).cloned() {
+            let schema = self.parse_target(&location);
+            if let Some(slot) = self.targets.get_mut(built) {
+                *slot = Some(schema);
+            }
+            built += 1;
+        }
+        let targets = self.targets.into_iter().map(Option::unwrap_or_default);
+        ParsedSchema::with_targets(root_schema, targets.collect())
+    }
+
+    fn source(&self, doc: DocId) -> Source<'r> {
+        self.documents
+            .get(doc.0)
+            .map_or(Source::Borrowed(&NULL), |document| document.source.clone())
+    }
+
+    /// The id of the target for `location`, allocated before the target is
+    /// parsed so that references to it from inside itself terminate.
+    fn target_id(&mut self, location: &Location) -> usize {
+        if let Some(&id) = self.target_ids.get(&location.key) {
+            return id;
+        }
+        let id = self.targets.len();
+        self.targets.push(None);
+        self.target_locations.push(location.clone());
+        self.target_ids.insert(location.key, id);
+        id
+    }
+
+    fn parse_target(&mut self, location: &Location) -> JsonSchema {
+        let source = self.source(location.key.doc);
+        let Some(Value::Object(obj)) = navigate(source.value(), &location.path) else {
+            return JsonSchema::default();
+        };
+        let scope = Scope {
+            doc: location.key.doc,
+            base: self.enclosing_base(location),
+        };
+        self.parse_object(obj, &scope)
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Base URIs
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /// The base URI that `raw`, the `$id` of `obj`, establishes below `obj`.
+    /// Resolved once per object.
+    fn resolve_id(
+        &mut self,
+        doc: DocId,
+        obj: &serde_json::Map<String, Value>,
+        parent_base: Option<&str>,
+        raw: &str,
+    ) -> Rc<str> {
+        let key = LocationKey {
+            doc,
+            address: address_of(obj),
+        };
+        if let Some(base) = self.bases.get(&key) {
+            return Rc::clone(base);
+        }
+        let resolved: Rc<str> =
+            Rc::from(resolve_uri(parent_base, raw).unwrap_or_else(|| raw.to_string()));
+        self.bases.insert(key, Rc::clone(&resolved));
+        resolved
+    }
+
+    /// The base URI in force around `location`: the document's URL, moved by
+    /// the `$id` of each object on the way to the location.
+    fn enclosing_base(&mut self, location: &Location) -> Option<Rc<str>> {
+        let doc = location.key.doc;
+        let source = self.source(doc);
+        let mut base: Option<Rc<str>> = self
+            .documents
+            .get(doc.0)
+            .and_then(|document| document.url.as_deref())
+            .map(Rc::from);
+        let mut node = source.value();
+        for token in location.path.iter() {
+            if let Value::Object(obj) = node
+                && let Some(raw) = declared_id(obj)
+            {
+                base = Some(self.resolve_id(doc, obj, base.as_deref(), raw));
+            }
+            let Some(next) = child(node, token) else {
+                break;
+            };
+            node = next;
+        }
+        base
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Schema nodes
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /// Parse the schema `value`; `None` for a value that is no schema.
+    ///
+    /// A schema that a reference names is a target, built once on its own;
+    /// where it sits it is a reference node.
+    fn parse_node(&mut self, value: &Value, scope: &Scope) -> Option<JsonSchema> {
+        if is_schema_value(value) {
+            let key = LocationKey {
+                doc: scope.doc,
+                address: address_of(value),
+            };
+            if let Some(&id) = self.target_ids.get(&key) {
+                return Some(reference_node(id));
+            }
+        }
+        match value {
+            Value::Bool(true) => Some(JsonSchema::default()),
+            Value::Object(obj) => {
+                if let Some(reference) = self.parse_reference(obj, scope) {
+                    return Some(reference);
+                }
+                Some(self.parse_object(obj, scope))
+            }
+            Value::Bool(false)
+            | Value::Null
+            | Value::Number(_)
+            | Value::String(_)
+            | Value::Array(_) => None,
+        }
+    }
+
+    /// What the `$ref` or `$dynamicRef` of `obj` stands for. An unresolved
+    /// `$dynamicRef` is [`Reference::Plain`]: the keywords next to it apply.
+    fn reference_of(&mut self, obj: &serde_json::Map<String, Value>, scope: &Scope) -> Reference {
+        let Some((text, keyword)) = reference_keyword(obj) else {
+            return Reference::Plain;
+        };
+        let Some(location) = self.locate(text, scope.doc, scope.base.as_deref()) else {
+            return match keyword {
+                Keyword::Ref => Reference::Unresolved(Arc::from(text)),
+                Keyword::DynamicRef => Reference::Plain,
+            };
+        };
+        match self.settle(location) {
+            Settled::Content(content) => Reference::Content(content),
+            Settled::Unresolved(text) => Reference::Unresolved(text),
+            Settled::Permissive => Reference::Permissive,
+        }
+    }
+
+    /// The reference node for the `$ref` or `$dynamicRef` of `obj`, which
+    /// stands for the schema it names whatever else `obj` holds; `None` when
+    /// `obj` has no reference.
+    fn parse_reference(
+        &mut self,
+        obj: &serde_json::Map<String, Value>,
+        scope: &Scope,
+    ) -> Option<JsonSchema> {
+        match self.reference_of(obj, scope) {
+            Reference::Content(content) => Some(reference_node(self.target_id(&content))),
+            Reference::Unresolved(text) => Some(JsonSchema {
+                reference: Some(SchemaRef::Unresolved(text)),
+                ..JsonSchema::default()
+            }),
+            Reference::Permissive => Some(JsonSchema::default()),
+            Reference::Plain => None,
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Discovery
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /// Walk the schema positions below the target at `location`.
+    fn discover_location(&mut self, location: &Location) {
+        let source = self.source(location.key.doc);
+        let Some(value) = navigate(source.value(), &location.path) else {
+            return;
+        };
+        let scope = Scope {
+            doc: location.key.doc,
+            base: self.enclosing_base(location),
+        };
+        self.discover_node(value, &scope);
+    }
+
+    /// Settle the references in `value` and below, once per object. The
+    /// positions are those `parse_object` reads.
+    fn discover_node(&mut self, value: &Value, scope: &Scope) {
+        let Value::Object(obj) = value else {
+            return;
+        };
+        let key = LocationKey {
+            doc: scope.doc,
+            address: address_of(value),
+        };
+        if !self.walked.insert(key) {
+            return;
+        }
+        match self.reference_of(obj, scope) {
+            Reference::Content(content) => {
+                self.target_id(&content);
+            }
+            Reference::Unresolved(_) | Reference::Permissive => {}
+            Reference::Plain => {
+                let (_, below) = self.enter(obj, scope);
+                for child in schema_children(obj) {
+                    self.discover_node(child, &below);
+                }
+            }
+        }
+    }
+
+    /// The `$id` base that `obj` declares, and the scope for what is below it.
+    fn enter(
+        &mut self,
+        obj: &serde_json::Map<String, Value>,
+        scope: &Scope,
+    ) -> (Option<Rc<str>>, Scope) {
+        let Some(raw) = declared_id(obj) else {
+            return (None, scope.clone());
+        };
+        let base = self.resolve_id(scope.doc, obj, scope.base.as_deref(), raw);
+        let below = Scope {
+            doc: scope.doc,
+            base: Some(Rc::clone(&base)),
+        };
+        (Some(base), below)
+    }
+
+    /// Follow `location` through schemas that consist of a reference to the
+    /// schema that stands for them. A step costs the same however long the
+    /// chain is, and every location on the chain is remembered, so a long
+    /// chain is walked once.
+    fn settle(&mut self, start: Location) -> Settled {
+        let mut chain: Vec<LocationKey> = Vec::new();
+        let mut on_chain: HashSet<LocationKey> = HashSet::new();
+        let mut current = start;
+        let result = loop {
+            if let Some(known) = self.settled.get(&current.key) {
+                break known.clone();
+            }
+            if !on_chain.insert(current.key) {
+                break Settled::Permissive;
+            }
+            chain.push(current.key);
+            let source = self.source(current.key.doc);
+            let keyword = match navigate(source.value(), &current.path) {
+                Some(Value::Object(obj)) => reference_keyword(obj),
+                _ => None,
+            };
+            let Some((text, keyword)) = keyword else {
+                break Settled::Content(current);
+            };
+            let base = if text.starts_with('#') {
+                None
+            } else {
+                self.enclosing_base(&current)
+            };
+            match self.locate(text, current.key.doc, base.as_deref()) {
+                Some(next) => current = next,
+                None => {
+                    break match keyword {
+                        Keyword::Ref => Settled::Unresolved(Arc::from(text)),
+                        Keyword::DynamicRef => Settled::Content(current),
+                    };
+                }
+            }
+        };
+        for key in chain {
+            self.settled.insert(key, result.clone());
+        }
+        result
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // $ref resolution
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /// Find the place that a `$ref` value names, handling both local fragment
+    /// refs and remote URIs. `doc` is the document that holds the `$ref` and
+    /// `base` the base URI its relative references resolve against.
+    ///
+    /// **Fragment refs** (start with `#`) name a place in `doc`:
+    /// - `#`       → the document root
+    /// - `#/a/b`   → JSON Pointer (RFC 6901)
+    /// - `#name`   → named anchor (`$anchor` or `$dynamicAnchor`)
+    ///
+    /// **URI refs** (everything else) are resolved against `base` and checked
+    /// by the SSRF guard. A URI that names `doc` itself, by its URL or by the
+    /// `$id` of the root document, names a place in `doc`. Otherwise it
+    /// names a place in a fetched document, which only the root document may
+    /// reach and only with the remote context: the `$ref`s of a fetched
+    /// document that name other documents stay unresolved (depth-1 remote
+    /// resolution).
+    ///
+    /// Returns `None` if the ref cannot be resolved, limits are exceeded, or
+    /// the place is not a schema.
+    fn locate(&mut self, ref_str: &str, doc: DocId, base: Option<&str>) -> Option<Location> {
+        let (uri_part, fragment) = ref_str.split_once('#').unwrap_or((ref_str, ""));
+        if ref_str.starts_with('#') {
+            return self.in_document(doc, fragment);
+        }
+
+        let absolute_uri = resolve_uri(base, uri_part)?;
+        let normalized = validate_and_normalize_url(&absolute_uri).ok()?;
+        let names_doc = self
+            .documents
+            .get(doc.0)
+            .is_some_and(|document| document.names.contains(&normalized));
+        let target_doc = if names_doc {
+            doc
+        } else if doc == ROOT_DOC {
+            self.remote_document(&normalized)?
+        } else {
+            return None;
+        };
+        self.in_document(target_doc, fragment)
+    }
+
+    /// The fetched document at `url` (normalized), fetching it unless the
+    /// cache holds it. First insertion wins in the cache, which prevents
+    /// `$id`-spoofing overwrite; the dedup and breadth guard skip a URL that
+    /// was already visited or beyond the limit. A document is read as it is
+    /// stored, raw: only the targets that references name are parsed.
+    fn remote_document(&mut self, url: &str) -> Option<DocId> {
+        if let Some(&known) = self.remote_documents.get(url) {
+            return known;
+        }
+        let ctx = self.ctx.as_deref_mut()?; // remote resolution requires a context
+        if !ctx.cache.contains_document(url) {
+            if !ctx.try_visit(url) {
+                return None;
+            }
+            let document = fetch_document(url, ctx.proxy).ok()?;
+            ctx.cache.insert_document(url.to_string(), document);
+        }
+        let shared = ctx.cache.shared_document(url)?;
+        // The cache is public: a document put there may not have passed the
+        // depth check of a fetch.
+        let id = check_json_depth(&shared, 0).ok().map(|()| {
+            self.documents.push(Document {
+                source: Source::Shared(shared),
+                url: Some(url.to_string()),
+                names: vec![url.to_string()],
+                anchors: None,
+            });
+            DocId(self.documents.len() - 1)
+        });
+        self.remote_documents.insert(url.to_string(), id);
+        id
+    }
+
+    /// The schema in `doc` that `fragment` names: the root for the empty
+    /// fragment, a JSON Pointer when it starts with `/`, an anchor otherwise.
+    fn in_document(&mut self, doc: DocId, fragment: &str) -> Option<Location> {
+        let source = self.source(doc);
+        let root = source.value();
+        let (value, path) = if fragment.is_empty() {
+            (root, Path::default())
+        } else if fragment.starts_with('/') {
+            (root.pointer(fragment)?, pointer_path(fragment))
+        } else {
+            let path = self
+                .documents
+                .get_mut(doc.0)?
+                .anchors
+                .get_or_insert_with(|| index_anchors(root))
+                .get(fragment)
+                .cloned()?;
+            (navigate(root, &path)?, path)
+        };
+        is_schema_value(value).then(|| Location {
+            key: LocationKey {
+                doc,
+                address: address_of(value),
+            },
+            path,
+        })
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Keywords
+    // ──────────────────────────────────────────────────────────────────────────
 
     /// Parse the contents of `contentSchema` from the schema object.
     fn parse_content_schema(
         &mut self,
         schema: &mut JsonSchema,
         obj: &serde_json::Map<String, Value>,
-        base_uri: Option<&str>,
-        depth: usize,
+        scope: &Scope,
     ) {
         if let Some(cs) = obj.get("contentSchema") {
-            schema.content_schema = self.parse(cs, base_uri, depth + 1).map(Box::new);
+            schema.content_schema = self.parse_node(cs, scope).map(Box::new);
         }
     }
 
@@ -1028,14 +1797,13 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
     fn parse_object_fields(
         &mut self,
         obj: &serde_json::Map<String, Value>,
-        base_uri: Option<&str>,
-        depth: usize,
+        scope: &Scope,
         schema: &mut JsonSchema,
     ) {
         if let Some(map) = obj.get("properties").and_then(Value::as_object) {
             let mut props = HashMap::new();
             for (k, v) in map {
-                if let Some(s) = self.parse(v, base_uri, depth + 1) {
+                if let Some(s) = self.parse_node(v, scope) {
                     props.insert(k.clone(), s);
                 }
             }
@@ -1050,7 +1818,7 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
         if let Some(map) = obj.get("patternProperties").and_then(Value::as_object) {
             let mut pat_props = Vec::new();
             for (k, v) in map {
-                if let Some(s) = self.parse(v, base_uri, depth + 1) {
+                if let Some(s) = self.parse_node(v, scope) {
                     pat_props.push((k.clone(), s));
                 }
             }
@@ -1064,15 +1832,14 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
     fn parse_array_fields(
         &mut self,
         obj: &serde_json::Map<String, Value>,
-        base_uri: Option<&str>,
-        depth: usize,
+        scope: &Scope,
         schema: &mut JsonSchema,
     ) {
         // prefixItems (Draft 2020-12)
         if let Some(arr) = obj.get("prefixItems").and_then(Value::as_array) {
             let mut items = Vec::new();
             for v in arr {
-                if let Some(s) = self.parse(v, base_uri, depth + 1) {
+                if let Some(s) = self.parse_node(v, scope) {
                     items.push(s);
                 }
             }
@@ -1083,10 +1850,10 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
 
         // items — object form (single schema) or array form (Draft-04 tuple → prefixItems)
         match obj.get("items") {
-            Some(Value::Array(arr)) if schema.prefix_items.is_none() => {
+            Some(Value::Array(arr)) if reads_tuple_items(obj) => {
                 let mut items = Vec::new();
                 for v in arr {
-                    if let Some(s) = self.parse(v, base_uri, depth + 1) {
+                    if let Some(s) = self.parse_node(v, scope) {
                         items.push(s);
                     }
                 }
@@ -1095,20 +1862,20 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
                 }
             }
             Some(v) => {
-                schema.items = self.parse(v, base_uri, depth + 1).map(Box::new);
+                schema.items = self.parse_node(v, scope).map(Box::new);
             }
             None => {}
         }
 
         // additionalItems — only relevant in Draft-04/07 tuple mode (array-form items, not prefixItems)
-        if obj.get("items").is_some_and(Value::is_array) && obj.get("prefixItems").is_none() {
+        if reads_additional_items(obj) {
             schema.additional_items =
-                self.parse_additional_properties(obj.get("additionalItems"), base_uri, depth);
+                self.parse_additional_properties(obj.get("additionalItems"), scope);
         }
 
         schema.contains = obj
             .get("contains")
-            .and_then(|v| self.parse(v, base_uri, depth + 1))
+            .and_then(|v| self.parse_node(v, scope))
             .map(Box::new);
         schema.min_items = obj.get("minItems").and_then(Value::as_u64);
         schema.max_items = obj.get("maxItems").and_then(Value::as_u64);
@@ -1121,107 +1888,64 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
     fn parse_combinator_fields(
         &mut self,
         obj: &serde_json::Map<String, Value>,
-        base_uri: Option<&str>,
-        depth: usize,
+        scope: &Scope,
         schema: &mut JsonSchema,
     ) {
-        schema.all_of = self.parse_schema_array(obj.get("allOf"), base_uri, depth);
-        schema.any_of = self.parse_schema_array(obj.get("anyOf"), base_uri, depth);
-        schema.one_of = self.parse_schema_array(obj.get("oneOf"), base_uri, depth);
+        schema.all_of = self.parse_schema_array(obj.get("allOf"), scope);
+        schema.any_of = self.parse_schema_array(obj.get("anyOf"), scope);
+        schema.one_of = self.parse_schema_array(obj.get("oneOf"), scope);
         schema.not = obj
             .get("not")
-            .and_then(|v| self.parse(v, base_uri, depth + 1))
+            .and_then(|v| self.parse_node(v, scope))
             .map(Box::new);
 
         // if / then / else (Draft-07)
         schema.if_schema = obj
             .get("if")
-            .and_then(|v| self.parse(v, base_uri, depth + 1))
+            .and_then(|v| self.parse_node(v, scope))
             .map(Box::new);
         schema.then_schema = obj
             .get("then")
-            .and_then(|v| self.parse(v, base_uri, depth + 1))
+            .and_then(|v| self.parse_node(v, scope))
             .map(Box::new);
         schema.else_schema = obj
             .get("else")
-            .and_then(|v| self.parse(v, base_uri, depth + 1))
+            .and_then(|v| self.parse_node(v, scope))
             .map(Box::new);
     }
 
     /// Populate `unevaluatedProperties` and `unevaluatedItems` on `schema`
-    /// from `obj`. Extracted to keep `parse` under 100 lines.
+    /// from `obj`. Extracted to keep `parse_object` short.
     fn parse_extension_fields(
         &mut self,
         obj: &serde_json::Map<String, Value>,
-        base_uri: Option<&str>,
-        depth: usize,
+        scope: &Scope,
         schema: &mut JsonSchema,
     ) {
         // unevaluatedProperties / unevaluatedItems (Draft 2019-09)
         schema.unevaluated_properties =
-            self.parse_additional_properties(obj.get("unevaluatedProperties"), base_uri, depth);
+            self.parse_additional_properties(obj.get("unevaluatedProperties"), scope);
         schema.unevaluated_items = obj
             .get("unevaluatedItems")
-            .and_then(|v| self.parse(v, base_uri, depth + 1))
+            .and_then(|v| self.parse_node(v, scope))
             .map(Box::new);
     }
 
-    fn parse(&mut self, value: &Value, base_uri: Option<&str>, depth: usize) -> Option<JsonSchema> {
-        if depth > MAX_REF_DEPTH {
-            return None;
-        }
-
-        match value {
-            Value::Bool(true) => return Some(JsonSchema::default()),
-            Value::Bool(false)
-            | Value::Null
-            | Value::Number(_)
-            | Value::String(_)
-            | Value::Array(_) => {
-                return None;
-            }
-            Value::Object(_) => {}
-        }
-
-        let obj = value.as_object()?;
+    /// Parse the keywords of the schema object `obj`, which is not a
+    /// reference.
+    fn parse_object(&mut self, obj: &serde_json::Map<String, Value>, scope: &Scope) -> JsonSchema {
         let mut schema = JsonSchema::default();
 
-        // $ref — resolve immediately and return the referenced schema
-        if let Some(Value::String(ref_str)) = obj.get("$ref") {
-            schema.reference = Some(SchemaRef::Unresolved(ref_str.clone()));
-            if let Some(resolved) = self.resolve_ref(ref_str, base_uri, depth + 1) {
-                return Some(resolved);
-            }
-            return Some(schema);
-        }
-
-        // $dynamicRef — same resolution as $ref for single-document schemas
-        if let Some(Value::String(ref_str)) = obj.get("$dynamicRef")
-            && let Some(resolved) = self.resolve_ref(ref_str, base_uri, depth + 1)
-        {
-            return Some(resolved);
-        }
-        // Fall through if unresolved — parse remaining fields
-
         // $id (Draft-06+) / id (Draft-04) — update base URI for sub-schemas
-        let raw_id = obj
-            .get("$id")
-            .or_else(|| obj.get("id"))
-            .and_then(Value::as_str);
-        let effective_base: Option<String> = if let Some(raw) = raw_id {
-            let resolved = resolve_uri(base_uri, raw).unwrap_or_else(|| raw.to_string());
-            schema.id = Some(resolved.clone());
-            Some(resolved)
-        } else {
-            base_uri.map(String::from)
-        };
-        let effective_base = effective_base.as_deref();
+        let (declared, child_scope) = self.enter(obj, scope);
+        schema.id = declared.map(|base| base.to_string());
+        let scope = &child_scope;
 
         // type
         schema.schema_type = parse_type(obj.get("type"));
 
         parse_scalar_fields(obj, &mut schema);
-        self.parse_content_schema(&mut schema, obj, effective_base, depth);
+        self.parse_content_schema(&mut schema, obj, scope);
 
         // required
         schema.required = obj.get("required").and_then(Value::as_array).map(|arr| {
@@ -1230,31 +1954,28 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
                 .collect()
         });
 
-        self.parse_object_fields(obj, effective_base, depth, &mut schema);
-        self.parse_array_fields(obj, effective_base, depth, &mut schema);
+        self.parse_object_fields(obj, scope, &mut schema);
+        self.parse_array_fields(obj, scope, &mut schema);
 
         // additionalProperties
-        schema.additional_properties = self.parse_additional_properties(
-            obj.get("additionalProperties"),
-            effective_base,
-            depth,
-        );
+        schema.additional_properties =
+            self.parse_additional_properties(obj.get("additionalProperties"), scope);
 
         // propertyNames
         schema.property_names = obj
             .get("propertyNames")
-            .and_then(|v| self.parse(v, effective_base, depth + 1))
+            .and_then(|v| self.parse_node(v, scope))
             .map(Box::new);
 
         // dependencies (Draft-04) / dependentRequired + dependentSchemas (Draft 2019-09)
-        let (dep_req, dep_sch) = self.parse_dependencies(obj, effective_base, depth);
+        let (dep_req, dep_sch) = self.parse_dependencies(obj, scope);
         schema.dependent_required = dep_req;
         schema.dependent_schemas = dep_sch;
 
-        self.parse_combinator_fields(obj, effective_base, depth, &mut schema);
-        self.parse_extension_fields(obj, effective_base, depth, &mut schema);
+        self.parse_combinator_fields(obj, scope, &mut schema);
+        self.parse_extension_fields(obj, scope, &mut schema);
 
-        Some(schema)
+        schema
     }
 
     /// Parse `dependencies` (Draft-04), `dependentRequired`, and `dependentSchemas`
@@ -1263,8 +1984,7 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
     fn parse_dependencies(
         &mut self,
         obj: &serde_json::Map<String, Value>,
-        base_uri: Option<&str>,
-        depth: usize,
+        scope: &Scope,
     ) -> ParsedDependencies {
         let mut dep_req: HashMap<String, Vec<String>> = HashMap::new();
         let mut dep_sch: HashMap<String, JsonSchema> = HashMap::new();
@@ -1279,7 +1999,7 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
                         .filter_map(|v| v.as_str().map(String::from))
                         .collect();
                     dep_req.insert(key.clone(), reqs);
-                } else if let Some(schema) = self.parse(val, base_uri, depth + 1) {
+                } else if let Some(schema) = self.parse_node(val, scope) {
                     // Sub-schema → dependentSchemas
                     dep_sch.insert(key.clone(), schema);
                 }
@@ -1302,7 +2022,7 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
         // Draft 2019-09 `dependentSchemas` — merges over Draft-04 entries
         if let Some(Value::Object(ds)) = obj.get("dependentSchemas") {
             for (key, val) in ds {
-                if let Some(schema) = self.parse(val, base_uri, depth + 1) {
+                if let Some(schema) = self.parse_node(val, scope) {
                     dep_sch.insert(key.clone(), schema);
                 }
             }
@@ -1324,8 +2044,7 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
     fn parse_additional_properties(
         &mut self,
         value: Option<&Value>,
-        base_uri: Option<&str>,
-        depth: usize,
+        scope: &Scope,
     ) -> Option<AdditionalProperties> {
         match value? {
             Value::Bool(false) => Some(AdditionalProperties::Denied),
@@ -1336,7 +2055,7 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
             | Value::String(_)
             | Value::Array(_)
             | Value::Object(_)) => self
-                .parse(v, base_uri, depth + 1)
+                .parse_node(v, scope)
                 .map(|s| AdditionalProperties::Schema(Box::new(s))),
         }
     }
@@ -1344,13 +2063,12 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
     fn parse_schema_array(
         &mut self,
         value: Option<&Value>,
-        base_uri: Option<&str>,
-        depth: usize,
+        scope: &Scope,
     ) -> Option<Vec<JsonSchema>> {
         let arr = value?.as_array()?;
         let mut schemas = Vec::new();
         for v in arr {
-            if let Some(s) = self.parse(v, base_uri, depth + 1) {
+            if let Some(s) = self.parse_node(v, scope) {
                 schemas.push(s);
             }
         }
@@ -1359,125 +2077,6 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
         } else {
             Some(schemas)
         }
-    }
-
-    // ──────────────────────────────────────────────────────────────────────────
-    // $ref resolution
-    // ──────────────────────────────────────────────────────────────────────────
-
-    /// Resolve a `$ref` value, handling both local fragment refs and remote URIs.
-    ///
-    /// **Local refs** (start with `#`):
-    /// - `#`       → root schema
-    /// - `#/a/b`   → JSON Pointer (RFC 6901) into root
-    /// - `#name`   → named anchor (`$anchor` or `$dynamicAnchor`) in root
-    ///
-    /// **Remote refs** (everything else — requires the remote context):
-    /// - `https://example.com/other.json`          → fetch, then parse the entire document as the target
-    /// - `https://example.com/other.json#/defs/Foo` → fetch + JSON Pointer
-    /// - `sub.json` resolved against `base_uri`
-    ///
-    /// A fetched remote document is cached raw; only the target is parsed, by a
-    /// fresh parser without a remote context, so `$ref`s inside a target are
-    /// not fetched (depth-1 remote resolution).
-    ///
-    /// Returns `None` if the ref cannot be resolved or limits are exceeded.
-    fn resolve_ref(
-        &mut self,
-        ref_str: &str,
-        base_uri: Option<&str>,
-        depth: usize,
-    ) -> Option<JsonSchema> {
-        if depth > MAX_REF_DEPTH {
-            return None;
-        }
-
-        // ── Local fragment ref ────────────────────────────────────────────────
-        if let Some(pointer) = ref_str.strip_prefix('#') {
-            let root = self.root;
-            let target = if pointer.is_empty() {
-                root
-            } else if pointer.starts_with('/') {
-                root.pointer(pointer)?
-            } else {
-                // Named anchor lookup
-                find_anchor_in_value(pointer, root)?
-            };
-            return SchemaParser::new(root, None).parse(target, None, depth + 1);
-        }
-
-        // ── Remote ref ────────────────────────────────────────────────────────
-        let ctx = self.ctx.as_deref_mut()?; // remote resolution requires a context
-
-        // Split on first `#` to separate the URI from the optional fragment.
-        let (uri_part, fragment) = ref_str.find('#').map_or((ref_str, None), |pos| {
-            (&ref_str[..pos], Some(&ref_str[pos + 1..]))
-        });
-
-        // Resolve the URI part against the current base, then validate (SSRF guard).
-        let absolute_uri = resolve_uri(base_uri, uri_part)?;
-        let normalized = validate_and_normalize_url(&absolute_uri).ok()?;
-
-        // Fetch the document unless it is cached (first insertion wins —
-        // prevents $id-spoofing overwrite).  Dedup + breadth guard: skip if
-        // already visited or the limit is reached.  The document is stored raw:
-        // only the target below is parsed, never the whole document.
-        if !ctx.cache.contains_document(&normalized) {
-            if !ctx.try_visit(&normalized) {
-                return None;
-            }
-            let document = fetch_document(&normalized, ctx.proxy).ok()?;
-            ctx.cache.insert_document(normalized.clone(), document);
-        }
-
-        let remote_value = ctx.cache.get_document(&normalized)?;
-
-        let target = match fragment {
-            // No fragment — the whole fetched document is the target.
-            None | Some("") => remote_value,
-            // JSON Pointer fragment.
-            Some(frag) if frag.starts_with('/') => remote_value.pointer(frag)?,
-            // Named anchor in the remote document.
-            Some(name) => find_anchor_in_value(name, remote_value)?,
-        };
-        // A fresh parser without a remote context keeps the depth-1 rule: $refs
-        // inside the target are not fetched.
-        SchemaParser::new(remote_value, None).parse(target, Some(&normalized), depth + 1)
-    }
-}
-
-/// Walk `value` recursively, returning the first JSON object that has
-/// `"$anchor": name` or `"$dynamicAnchor": name`.
-fn find_anchor_in_value<'a>(name: &str, value: &'a Value) -> Option<&'a Value> {
-    match value {
-        Value::Object(obj) => {
-            let has_anchor = obj
-                .get("$anchor")
-                .and_then(Value::as_str)
-                .is_some_and(|a| a == name);
-            let has_dynamic = obj
-                .get("$dynamicAnchor")
-                .and_then(Value::as_str)
-                .is_some_and(|a| a == name);
-            if has_anchor || has_dynamic {
-                return Some(value);
-            }
-            for v in obj.values() {
-                if let Some(found) = find_anchor_in_value(name, v) {
-                    return Some(found);
-                }
-            }
-            None
-        }
-        Value::Array(arr) => {
-            for v in arr {
-                if let Some(found) = find_anchor_in_value(name, v) {
-                    return Some(found);
-                }
-            }
-            None
-        }
-        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => None,
     }
 }
 
@@ -1515,7 +2114,7 @@ mod tests {
 
     fn unresolved(ref_text: &str) -> JsonSchema {
         JsonSchema {
-            reference: Some(SchemaRef::Unresolved(ref_text.to_string())),
+            reference: Some(SchemaRef::Unresolved(ref_text.into())),
             ..JsonSchema::default()
         }
     }
@@ -1772,14 +2371,29 @@ mod tests {
         assert_eq!(s.one_of.as_ref().map(Vec::len), Some(2));
     }
 
+    #[rstest]
+    #[case::null(Value::Null)]
+    #[case::string(Value::String("not a schema".into()))]
+    #[case::number(json!(1))]
+    #[case::array(json!([{"type": "string"}]))]
+    #[case::boolean_false(Value::Bool(false))]
+    fn parse_schema_rejects_a_root_that_is_not_a_schema_object(#[case] root: Value) {
+        let result = parse_schema(&root);
+
+        assert!(
+            matches!(result, Err(SchemaError::ParseFailed(_))),
+            "got {result:?}"
+        );
+    }
+
     #[test]
     fn should_return_none_for_null_input() {
-        assert!(parse_schema(&Value::Null).is_none());
+        assert!(parse_schema(&Value::Null).is_err());
     }
 
     #[test]
     fn should_return_none_for_non_object_json() {
-        assert!(parse_schema(&Value::String("not a schema".into())).is_none());
+        assert!(parse_schema(&Value::String("not a schema".into())).is_err());
     }
 
     #[test]
@@ -1803,7 +2417,7 @@ mod tests {
     // boolean false → None
     #[test]
     fn should_parse_boolean_false_schema() {
-        assert!(parse_schema(&Value::Bool(false)).is_none());
+        assert!(parse_schema(&Value::Bool(false)).is_err());
     }
 
     // deprecated: true parses to Some(true)
@@ -1824,8 +2438,9 @@ mod tests {
             "$ref": "#/definitions/MyType",
             "definitions": {"MyType": {"type": "string"}}
         });
-        let s = parse_schema(&v).expect("should resolve").root;
-        assert_eq!(schema_type_str(&s), Some("string"));
+        let parsed = parse_schema(&v).expect("should resolve");
+        let s = parsed.resolved_root();
+        assert_eq!(schema_type_str(s), Some("string"));
     }
 
     #[test]
@@ -1834,8 +2449,9 @@ mod tests {
             "$ref": "#/$defs/MyType",
             "$defs": {"MyType": {"type": "string"}}
         });
-        let s = parse_schema(&v).expect("should resolve").root;
-        assert_eq!(schema_type_str(&s), Some("string"));
+        let parsed = parse_schema(&v).expect("should resolve");
+        let s = parsed.resolved_root();
+        assert_eq!(schema_type_str(s), Some("string"));
         assert!(s.reference.is_none());
     }
 
@@ -1855,10 +2471,14 @@ mod tests {
             },
             "definitions": {"Bar": {"type": "integer"}}
         });
-        let s = parse_schema(&v).expect("should parse").root;
-        let props = s.properties.as_ref().expect("should have properties");
+        let parsed = parse_schema(&v).expect("should parse");
+        let props = parsed
+            .resolved_root()
+            .properties
+            .as_ref()
+            .expect("should have properties");
         let foo = props.get("foo").expect("should have foo");
-        assert_eq!(schema_type_str(foo), Some("integer"));
+        assert_eq!(schema_type_str(parsed.resolve(foo)), Some("integer"));
     }
 
     // circular ref must terminate
@@ -1872,6 +2492,679 @@ mod tests {
         });
         // Must complete in finite time; result doesn't matter
         let _ = parse_schema(&v);
+    }
+
+    // ── Parsed once and shared ───────────────────────────────────────────────
+
+    /// The id of the target that the reference node `schema` refers to.
+    fn target_of(schema: &JsonSchema) -> Option<usize> {
+        match schema.reference {
+            Some(SchemaRef::Target(id)) => Some(id.0),
+            Some(SchemaRef::Unresolved(_)) | None => None,
+        }
+    }
+
+    /// The property `key` of `schema`, as parsed: a reference node stays one.
+    fn property<'a>(schema: &'a JsonSchema, key: &str) -> &'a JsonSchema {
+        schema
+            .properties
+            .as_ref()
+            .and_then(|properties| properties.get(key))
+            .unwrap_or_else(|| panic!("property {key}"))
+    }
+
+    /// The number of schema nodes in a parse: the root and every target, with
+    /// their children.
+    fn node_count(parsed: &ParsedSchema) -> usize {
+        debug_of(parsed).matches("JsonSchema {").count()
+    }
+
+    fn json_value_count(value: &Value) -> usize {
+        1 + match value {
+            Value::Object(map) => map.values().map(json_value_count).sum(),
+            Value::Array(items) => items.iter().map(json_value_count).sum(),
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => 0,
+        }
+    }
+
+    /// A parse is well formed when every reference node refers to a target
+    /// that exists and no target is a reference node.
+    fn assert_well_formed(parsed: &ParsedSchema) {
+        let referenced: Vec<usize> = debug_of(parsed)
+            .split("Target(TargetId(")
+            .skip(1)
+            .filter_map(|rest| rest.split(')').next()?.parse().ok())
+            .collect();
+        assert!(
+            referenced.iter().all(|&id| id < parsed.targets.len()),
+            "a reference to a target outside the table: {referenced:?}"
+        );
+        assert!(
+            parsed.targets.iter().all(|t| t.reference.is_none()),
+            "a target is a reference node"
+        );
+    }
+
+    #[test]
+    fn node_count_counts_every_schema_node_of_a_parse() {
+        let parsed = parse_schema(&json!({
+            "properties": { "a": { "type": "string" }, "b": { "items": { "type": "integer" } } }
+        }))
+        .expect("parses");
+
+        assert_eq!(node_count(&parsed), 4);
+    }
+
+    #[test]
+    fn fan_out_self_reference_parses_one_shared_target() {
+        let reference = json!({ "$ref": "#/definitions/N" });
+        let v = json!({
+            "$ref": "#/definitions/N",
+            "definitions": { "N": { "properties": {
+                "a": reference, "b": reference, "c": reference, "d": reference
+            } } }
+        });
+
+        let parsed = parse_schema(&v).expect("parses");
+
+        assert_well_formed(&parsed);
+        assert_eq!(parsed.targets.len(), 1);
+        let shared = target_of(&parsed.root).expect("the root is a reference");
+        for key in ["a", "b", "c", "d"] {
+            let node = property(parsed.resolved_root(), key);
+            assert_eq!(target_of(node), Some(shared), "property {key}");
+        }
+        assert!(node_count(&parsed) <= json_value_count(&v));
+    }
+
+    #[test]
+    fn layered_fan_out_parses_in_size_linear_in_the_source() {
+        let layers = 30;
+        let mut definitions = serde_json::Map::new();
+        for i in 0..layers {
+            let next = json!({ "$ref": format!("#/definitions/L{}", i + 1) });
+            definitions.insert(
+                format!("L{i}"),
+                json!({ "properties": { "a": next, "b": next, "c": next, "d": next } }),
+            );
+        }
+        definitions.insert(format!("L{layers}"), json!({ "type": "string" }));
+        let v = json!({ "$ref": "#/definitions/L0", "definitions": definitions });
+
+        let parsed = parse_schema(&v).expect("parses");
+
+        assert_well_formed(&parsed);
+        assert_eq!(parsed.targets.len(), layers + 1);
+        assert!(node_count(&parsed) <= json_value_count(&v));
+    }
+
+    // Each case names one place that two `$ref`s reach by different routes.
+    #[rstest]
+    #[case::pointer_twice(
+        json!({ "properties": {
+            "a": { "$ref": "#/definitions/A" }, "b": { "$ref": "#/definitions/A" } },
+            "definitions": { "A": { "type": "string" } } })
+    )]
+    #[case::pointer_and_anchor(
+        json!({ "properties": {
+            "a": { "$ref": "#/definitions/A" }, "b": { "$ref": "#anchor" } },
+            "definitions": { "A": { "$anchor": "anchor", "type": "string" } } })
+    )]
+    #[case::pointer_and_dynamic_anchor(
+        json!({ "properties": {
+            "a": { "$ref": "#/definitions/A" }, "b": { "$dynamicRef": "#anchor" } },
+            "definitions": { "A": { "$dynamicAnchor": "anchor", "type": "string" } } })
+    )]
+    #[case::ref_and_dynamic_ref_to_one_anchor(
+        json!({ "properties": {
+            "a": { "$ref": "#anchor" }, "b": { "$dynamicRef": "#anchor" } },
+            "definitions": { "A": { "$anchor": "anchor", "type": "string" } } })
+    )]
+    #[case::direct_and_through_an_alias_chain(
+        json!({ "properties": {
+            "a": { "$ref": "#/definitions/A" }, "b": { "$ref": "#/definitions/Alias" } },
+            "definitions": { "A": { "type": "string" },
+                             "Alias": { "$ref": "#/definitions/Alias2" },
+                             "Alias2": { "$ref": "#/definitions/A" } } })
+    )]
+    #[case::root_by_hash_and_by_empty_fragment_url(
+        json!({ "$id": "https://example.com/s.json#", "type": "object", "properties": {
+            "a": { "$ref": "#" }, "b": { "$ref": "https://example.com/s.json" },
+            "c": { "$ref": "https://example.com/s.json#" }, "d": { "$ref": "s.json" } } })
+    )]
+    fn one_location_named_in_two_ways_is_one_target(#[case] v: Value) {
+        let parsed = parse_schema(&v).expect("parses");
+
+        assert_well_formed(&parsed);
+        assert_eq!(parsed.targets.len(), 1);
+        let root = parsed.resolved_root();
+        let ids: Vec<_> = ["a", "b", "c", "d"]
+            .iter()
+            .filter(|key| {
+                root.properties
+                    .as_ref()
+                    .is_some_and(|p| p.contains_key(**key))
+            })
+            .map(|key| target_of(property(root, key)))
+            .collect();
+        assert!(ids.len() >= 2 && ids.iter().all(|id| id.is_some() && *id == ids[0]));
+    }
+
+    #[test]
+    fn recursive_schema_shares_one_target() {
+        let v = json!({
+            "type": "object",
+            "properties": { "p": { "$ref": "#" }, "q": { "$ref": "#" } }
+        });
+
+        let parsed = parse_schema(&v).expect("parses");
+
+        assert_well_formed(&parsed);
+        assert_eq!(parsed.targets.len(), 1);
+        let root = parsed.resolved_root();
+        assert_eq!(
+            target_of(property(root, "p")),
+            target_of(property(root, "q"))
+        );
+        assert!(target_of(property(root, "p")).is_some());
+        assert_eq!(
+            schema_type_str(parsed.resolve(property(root, "p"))),
+            Some("object")
+        );
+        assert_eq!(target_of(&parsed.root), target_of(property(root, "p")));
+    }
+
+    #[test]
+    fn ref_to_root_hash_resolves_to_root_content() {
+        let v = json!({
+            "properties": { "child": { "$ref": "#" } },
+            "type": "object"
+        });
+
+        let parsed = parse_schema(&v).expect("should parse");
+
+        let child = property(parsed.resolved_root(), "child");
+        assert_eq!(schema_type_str(parsed.resolve(child)), Some("object"));
+        assert_eq!(schema_type_str(parsed.resolved_root()), Some("object"));
+    }
+
+    #[test]
+    fn ref_into_the_interior_of_the_tree_terminates() {
+        let v = json!({ "properties": { "a": { "properties": {
+            "b": { "$ref": "#/properties/a" }, "c": { "type": "string" } } } } });
+
+        let parsed = parse_schema(&v).expect("parses");
+
+        assert_well_formed(&parsed);
+        assert_eq!(parsed.targets.len(), 1);
+        // `a` is the target, so it sits in the root as a reference node.
+        let a = property(parsed.resolved_root(), "a");
+        assert!(target_of(a).is_some());
+        let b = property(parsed.resolve(a), "b");
+        assert_eq!(target_of(b), target_of(a));
+        assert_eq!(
+            schema_type_str(property(parsed.resolve(b), "c")),
+            Some("string")
+        );
+        assert!(node_count(&parsed) <= json_value_count(&v));
+    }
+
+    // A target is built once, however deep inside other schemas it sits: where
+    // it sits it is a reference node, so the parse has no more nodes than the
+    // source has JSON values.
+    #[rstest]
+    #[case::one_level(1)]
+    #[case::ten_levels(10)]
+    #[case::twenty_levels(20)]
+    fn targets_nested_in_each_other_are_parsed_once(#[case] levels: usize) {
+        let leaves: serde_json::Map<String, Value> = (0..1000)
+            .map(|i| (format!("leaf{i}"), json!({ "type": "string" })))
+            .collect();
+        let nest = (0..levels).fold(
+            json!({ "properties": leaves }),
+            |inner, _| json!({ "properties": { "n": inner } }),
+        );
+        // The outermost level is `#/x-nest`; each reference names one level.
+        let references: serde_json::Map<String, Value> = (0..levels)
+            .map(|level| {
+                let path = format!("#/x-nest{}", "/properties/n".repeat(level));
+                (format!("r{level}"), json!({ "$ref": path }))
+            })
+            .collect();
+        let v = json!({ "x-nest": nest, "properties": references });
+
+        let parsed = parse_schema(&v).expect("parses");
+
+        assert_well_formed(&parsed);
+        assert_eq!(parsed.targets.len(), levels);
+        assert!(
+            node_count(&parsed) <= json_value_count(&v),
+            "{} nodes for {} JSON values",
+            node_count(&parsed),
+            json_value_count(&v)
+        );
+    }
+
+    // The same holds for the targets of a fetched document.
+    #[test]
+    fn targets_nested_in_a_fetched_document_are_parsed_once() {
+        let url = "https://example.com/nest.json";
+        let levels = 10;
+        let leaves: serde_json::Map<String, Value> = (0..200)
+            .map(|i| (format!("leaf{i}"), json!({ "type": "string" })))
+            .collect();
+        let nest = (0..levels).fold(
+            json!({ "properties": leaves }),
+            |inner, _| json!({ "properties": { "n": inner } }),
+        );
+        let document = json!({ "x-nest": nest });
+        let references: serde_json::Map<String, Value> = (0..levels)
+            .map(|level| {
+                let path = format!("{url}#/x-nest{}", "/properties/n".repeat(level));
+                (format!("r{level}"), json!({ "$ref": path }))
+            })
+            .collect();
+        let root = json!({ "properties": references });
+        let mut cache = cache_with(&[(url, document.clone())]);
+        let mut ctx = ParseContext::new(&mut cache, None);
+
+        let parsed = parse_with(&root, None, Some(&mut ctx)).expect("parses");
+
+        assert_well_formed(&parsed);
+        assert_eq!(parsed.targets.len(), levels);
+        assert!(node_count(&parsed) <= json_value_count(&root) + json_value_count(&document));
+    }
+
+    // Discovery reads the same positions as the build, also where `prefixItems`
+    // and the array form of `items` meet.
+    #[rstest]
+    #[case::prefix_items_without_a_schema(json!({ "prefixItems": [false] }))]
+    #[case::prefix_items_not_an_array(json!({ "prefixItems": 5 }))]
+    #[case::prefix_items_empty(json!({ "prefixItems": [] }))]
+    #[case::no_prefix_items(json!({}))]
+    fn tuple_items_are_discovered_where_the_build_reads_them(#[case] header: Value) {
+        let mut b = json!({ "items": [{ "$ref": "#/definitions/A/properties/p" }] });
+        b.as_object_mut()
+            .expect("object")
+            .extend(header.as_object().expect("object").clone());
+        let v = json!({
+            "properties": { "a": { "$ref": "#/definitions/A" }, "b": { "$ref": "#/definitions/B" } },
+            "definitions": { "A": { "properties": { "p": { "type": "string" } } }, "B": b }
+        });
+
+        let parsed = parse_schema(&v).expect("parses");
+
+        let a = parsed.resolve(property(parsed.resolved_root(), "a"));
+        assert!(target_of(property(a, "p")).is_some(), "built inline");
+        assert!(node_count(&parsed) <= json_value_count(&v));
+    }
+
+    #[rstest]
+    #[case::prefix_items_empty(json!({ "prefixItems": [] }))]
+    #[case::prefix_items_not_an_array(json!({ "prefixItems": 5 }))]
+    #[case::no_items_array(json!({ "items": { "type": "string" } }))]
+    fn additional_items_that_the_build_does_not_read_are_not_resolved(#[case] header: Value) {
+        let url = "https://schema.invalid/never.json";
+        let mut cache = SchemaCache::new();
+        let mut ctx = ParseContext::new(&mut cache, Some(CLOSED_PROXY));
+        let mut value = json!({ "items": [], "additionalItems": { "$ref": url } });
+        value
+            .as_object_mut()
+            .expect("object")
+            .extend(header.as_object().expect("object").clone());
+
+        parse_with(&value, None, Some(&mut ctx)).expect("parses");
+
+        assert!(
+            ctx.visited.is_empty(),
+            "a position the build skips was resolved"
+        );
+    }
+
+    #[test]
+    fn target_inside_another_target_is_a_reference_node_there() {
+        let v = json!({
+            "properties": { "a": { "$ref": "#/definitions/A" }, "b": { "$ref": "#/definitions/A/properties/p" } },
+            "definitions": { "A": { "properties": { "p": { "type": "string" } } } }
+        });
+
+        let parsed = parse_schema(&v).expect("parses");
+
+        let root = parsed.resolved_root();
+        let a = parsed.resolve(property(root, "a"));
+        assert_eq!(target_of(property(a, "p")), target_of(property(root, "b")));
+        assert_eq!(parsed.targets.len(), 2);
+        assert!(node_count(&parsed) <= json_value_count(&v));
+    }
+
+    // Discovery must walk every position that `parse_object` reads: a target
+    // found only by building another target would be parsed inline there too.
+    #[test]
+    fn every_subschema_keyword_is_discovered_before_the_targets_are_built() {
+        for keyword in SUBSCHEMA_KEYWORDS {
+            let value = json!({
+                "properties": { "a": { "$ref": "#/definitions/A" }, "b": { "$ref": "#/definitions/B" } },
+                "definitions": {
+                    "A": { "properties": { "p": { "type": "string" } } },
+                    "B": wrap(keyword, &json!({ "$ref": "#/definitions/A/properties/p" }))
+                }
+            });
+
+            let parsed = parse_schema(&value).expect("parses");
+
+            let root = parsed.resolved_root();
+            let a = parsed.resolve(property(root, "a"));
+            assert!(
+                target_of(property(a, "p")).is_some(),
+                "keyword {keyword}: the nested target was built inline"
+            );
+        }
+    }
+
+    #[test]
+    fn ref_into_the_siblings_of_a_ref_still_resolves_by_syntax() {
+        let v = json!({
+            "$ref": "#/definitions/A/properties/x",
+            "definitions": {
+                "A": { "$ref": "#/definitions/B", "properties": { "x": { "type": "string" } } },
+                "B": { "type": "integer" }
+            }
+        });
+
+        let parsed = parse_schema(&v).expect("parses");
+
+        assert_eq!(schema_type_str(parsed.resolved_root()), Some("string"));
+    }
+
+    #[test]
+    fn a_pointer_does_not_traverse_through_a_ref() {
+        let v = json!({
+            "$ref": "#/definitions/A/properties/x",
+            "definitions": { "A": { "$ref": "#/definitions/B" }, "B": { "properties": {} } }
+        });
+
+        let parsed = parse_schema(&v).expect("parses");
+
+        assert_eq!(
+            unresolved_ref(&parsed.root),
+            Some("#/definitions/A/properties/x")
+        );
+    }
+
+    // ── Chains of references and cycles ──────────────────────────────────────
+
+    fn alias_chain(hops: usize, end: Value) -> Value {
+        let mut chain = serde_json::Map::new();
+        for i in 0..hops {
+            chain.insert(
+                format!("R{i}"),
+                json!({ "$ref": format!("#/x-chain/R{}", i + 1) }),
+            );
+        }
+        chain.insert(format!("R{hops}"), end);
+        json!({ "$ref": "#/x-chain/R0", "x-chain": chain })
+    }
+
+    // A chain of references resolves in one step, however long it is; the
+    // 15 and 16 hop chains used to be the longest that fit a fixed depth.
+    #[rstest]
+    #[case::one_hop(1)]
+    #[case::formerly_the_longest(15)]
+    #[case::formerly_cut(16)]
+    #[case::beyond_any_old_limit(100)]
+    fn alias_chain_resolves_in_one_step_to_its_content(#[case] hops: usize) {
+        let v = alias_chain(hops, json!({ "description": "LEAF" }));
+
+        let parsed = parse_schema(&v).expect("parses");
+
+        assert_well_formed(&parsed);
+        assert_eq!(parsed.resolved_root().description.as_deref(), Some("LEAF"));
+        assert!(parsed.resolved_root().reference.is_none());
+        assert_eq!(parsed.targets.len(), 1);
+    }
+
+    #[test]
+    fn alias_chain_that_ends_in_true_resolves_to_a_permissive_schema() {
+        let parsed = parse_schema(&alias_chain(3, json!(true))).expect("parses");
+
+        assert!(target_of(&parsed.root).is_some());
+        assert!(parsed.resolved_root().schema_type.is_none());
+    }
+
+    #[rstest]
+    #[case::boolean_false(json!(false))]
+    #[case::number(json!(5))]
+    #[case::string(json!("s"))]
+    #[case::null(Value::Null)]
+    #[case::array(json!([]))]
+    fn ref_to_a_value_that_is_no_schema_stays_unresolved(#[case] end: Value) {
+        let v = alias_chain(2, end);
+
+        let parsed = parse_schema(&v).expect("parses");
+
+        // The text is the one of the reference that failed, the last of the chain.
+        assert_eq!(unresolved_ref(&parsed.root), Some("#/x-chain/R2"));
+    }
+
+    // A chain of `$ref`-only schemas that comes back to itself matches
+    // anything, whatever sits next to the references.
+    #[rstest]
+    #[case::itself(json!({ "$ref": "#/definitions/A", "definitions": {
+        "A": { "$ref": "#/definitions/A" } } }))]
+    #[case::two_nodes(json!({ "$ref": "#/definitions/A", "definitions": {
+        "A": { "$ref": "#/definitions/B" }, "B": { "$ref": "#/definitions/A" } } }))]
+    #[case::three_nodes(json!({ "$ref": "#/definitions/A", "definitions": {
+        "A": { "$ref": "#/definitions/B" }, "B": { "$ref": "#/definitions/C" },
+        "C": { "$ref": "#/definitions/A" } } }))]
+    #[case::root_to_itself(json!({ "$ref": "#" }))]
+    #[case::root_through_a_definition(json!({ "$ref": "#/definitions/A", "definitions": {
+        "A": { "$ref": "#" } } }))]
+    #[case::cycle_members_with_ignored_siblings(json!({ "$ref": "#/definitions/A",
+        "definitions": { "A": { "$ref": "#/definitions/B", "type": "string" },
+                         "B": { "$ref": "#/definitions/A" } } }))]
+    #[case::leading_into_a_cycle(json!({ "$ref": "#/definitions/X", "definitions": {
+        "X": { "$ref": "#/definitions/A" }, "A": { "$ref": "#/definitions/B" },
+        "B": { "$ref": "#/definitions/A" } } }))]
+    #[case::entered_through_a_dynamic_ref(json!({ "$dynamicRef": "#/definitions/A", "type": "string",
+        "definitions": { "A": { "$ref": "#/definitions/A" } } }))]
+    fn pure_ref_cycle_is_permissive(#[case] v: Value) {
+        let parsed = parse_schema(&v).expect("parses");
+
+        assert_well_formed(&parsed);
+        let root = parsed.resolved_root();
+        assert!(root.reference.is_none());
+        assert!(root.schema_type.is_none());
+        assert!(root.properties.is_none());
+    }
+
+    #[test]
+    fn alias_chain_that_ends_in_a_missing_pointer_stays_unresolved_with_that_text() {
+        let v = json!({
+            "$ref": "#/x/A", "x": { "A": { "$ref": "#/x/B" }, "B": { "$ref": "#/x/Missing" } }
+        });
+
+        let parsed = parse_schema(&v).expect("parses");
+
+        assert_eq!(unresolved_ref(&parsed.root), Some("#/x/Missing"));
+    }
+
+    #[rstest]
+    #[case::ref_keyword("$ref")]
+    #[case::dynamic_ref_keyword("$dynamicRef")]
+    fn alias_chain_through_anchors_resolves(#[case] keyword: &str) {
+        let v = json!({
+            keyword: "#first",
+            "x": { "$anchor": "first", "$ref": "#second" },
+            "y": { "$anchor": "second", "$dynamicRef": "#/z" },
+            "z": { "type": "string" }
+        });
+
+        let parsed = parse_schema(&v).expect("parses");
+
+        assert_eq!(schema_type_str(parsed.resolved_root()), Some("string"));
+        assert_eq!(parsed.targets.len(), 1);
+    }
+
+    // The empty reference is the document's own URL: the document with a
+    // base, nothing without one.
+    #[test]
+    fn empty_ref_names_the_document_when_it_has_a_url_and_is_unresolved_otherwise() {
+        let value = json!({ "type": "object", "properties": { "p": { "$ref": "" } } });
+        let mut cache = SchemaCache::new();
+        let mut ctx = ParseContext::new(&mut cache, None);
+
+        let with_url = parse_with(&value, Some(ROOT_URL), Some(&mut ctx)).expect("parses");
+        let without_url = parse_schema(&value).expect("parses");
+
+        let p = property(with_url.resolved_root(), "p");
+        assert_eq!(schema_type_str(with_url.resolve(p)), Some("object"));
+        assert_eq!(
+            unresolved_ref(property(without_url.resolved_root(), "p")),
+            Some("")
+        );
+    }
+
+    #[test]
+    fn pointer_through_the_documents_own_url_names_the_same_target_as_a_local_pointer() {
+        let own = "https://schema.invalid/own.json";
+        let document = json!({
+            "properties": {
+                "a": { "$ref": "#/definitions/D" },
+                "b": { "$ref": format!("{own}#/definitions/D") }
+            },
+            "definitions": { "D": { "type": "integer" } }
+        });
+        let mut cache = cache_with(&[(own, document)]);
+        let mut ctx = ParseContext::new(&mut cache, None);
+
+        let (_, parsed) = fetch_schema_raw(own, None, Some(&mut ctx)).expect("parses");
+
+        let root = parsed.resolved_root();
+        assert_eq!(
+            target_of(property(root, "a")),
+            target_of(property(root, "b"))
+        );
+        assert_eq!(parsed.targets.len(), 1);
+        assert!(ctx.visited.is_empty());
+    }
+
+    // The text of the failing reference is stored once, however long the chain
+    // and however many places reach it.
+    #[test]
+    fn unresolved_text_of_a_long_chain_is_shared_by_every_place_that_reaches_it() {
+        let count = 2_000;
+        let missing = format!("#/definitions/{}", "x".repeat(256 * 1024));
+        let mut definitions = serde_json::Map::new();
+        let mut properties = serde_json::Map::new();
+        for i in 0..count {
+            definitions.insert(
+                format!("d{i}"),
+                json!({ "$ref": format!("#/definitions/d{}", i + 1) }),
+            );
+            properties.insert(
+                format!("p{i}"),
+                json!({ "$ref": format!("#/definitions/d{i}") }),
+            );
+        }
+        definitions.insert(format!("d{count}"), json!({ "$ref": missing }));
+        let value = json!({ "properties": properties, "definitions": definitions });
+
+        let parsed = parse_schema(&value).expect("parses");
+
+        let texts: Vec<&Arc<str>> = parsed
+            .resolved_root()
+            .properties
+            .as_ref()
+            .expect("properties")
+            .values()
+            .filter_map(|p| match &p.reference {
+                Some(SchemaRef::Unresolved(text)) => Some(text),
+                Some(SchemaRef::Target(_)) | None => None,
+            })
+            .collect();
+        assert_eq!(texts.len(), count);
+        assert_eq!(&**texts[0], missing);
+        assert!(texts.iter().all(|text| Arc::ptr_eq(text, texts[0])));
+    }
+
+    // ── Scale ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn ten_thousand_alias_chain_parses_on_a_small_stack() {
+        test_support::on_a_small_stack(|| {
+            let hops = 10_000;
+            let v = alias_chain(hops, json!({ "type": "string" }));
+
+            let parsed = parse_schema(&v).expect("parses");
+
+            assert_eq!(schema_type_str(parsed.resolved_root()), Some("string"));
+            assert_eq!(parsed.targets.len(), 1);
+        });
+    }
+
+    #[test]
+    fn ten_thousand_alias_chain_that_comes_back_to_itself_is_permissive() {
+        test_support::on_a_small_stack(|| {
+            let hops = 10_000;
+            let mut v = alias_chain(hops, json!({ "$ref": "#/x-chain/R0" }));
+            v["$ref"] = json!("#/x-chain/R5000");
+
+            let parsed = parse_schema(&v).expect("parses");
+
+            assert!(parsed.resolved_root().schema_type.is_none());
+            assert!(parsed.resolved_root().reference.is_none());
+        });
+    }
+
+    #[test]
+    fn ten_thousand_aliases_all_used_are_walked_once() {
+        test_support::on_a_small_stack(|| {
+            let hops = 10_000;
+            let mut v = alias_chain(hops, json!({ "type": "string" }));
+            let mut properties = serde_json::Map::new();
+            for i in 0..hops {
+                properties.insert(
+                    format!("p{i}"),
+                    json!({ "$ref": format!("#/x-chain/R{i}") }),
+                );
+            }
+            v["properties"] = Value::Object(properties);
+
+            let parsed = parse_schema(&v).expect("parses");
+
+            assert_eq!(parsed.targets.len(), 1);
+        });
+    }
+
+    #[test]
+    fn ten_thousand_distinct_targets_parse_on_a_small_stack() {
+        test_support::on_a_small_stack(|| {
+            let length = 10_000;
+            let mut definitions = serde_json::Map::new();
+            for i in 0..length {
+                definitions.insert(
+                    format!("d{i}"),
+                    json!({ "type": "object", "properties": {
+                        "next": { "$ref": format!("#/definitions/d{}", i + 1) } } }),
+                );
+            }
+            definitions.insert(format!("d{length}"), json!({ "type": "string" }));
+            let v = json!({ "$ref": "#/definitions/d0", "definitions": definitions });
+
+            let parsed = parse_schema(&v).expect("parses");
+
+            assert_well_formed(&parsed);
+            assert_eq!(parsed.targets.len(), length + 1);
+            assert!(node_count(&parsed) <= json_value_count(&v));
+            let mut hops = 0;
+            let mut node = parsed.resolved_root();
+            while let Some(next) = node.properties.as_ref().and_then(|p| p.get("next")) {
+                node = parsed.resolve(next);
+                hops += 1;
+            }
+            assert_eq!(hops, length);
+            assert_eq!(schema_type_str(node), Some("string"));
+        });
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -2098,6 +3391,24 @@ mod tests {
         let _ = parse_schema(&v);
     }
 
+    // Sec-7: parse_schema rejects a deeply nested schema
+    #[rstest]
+    #[case::sixty_levels(60)]
+    #[case::one_hundred_levels(100)]
+    fn parse_schema_rejects_a_schema_nested_beyond_the_json_depth_limit(#[case] levels: usize) {
+        let mut v = json!({"type": "string"});
+        for _ in 0..levels {
+            v = json!({"type": "object", "properties": {"x": v}});
+        }
+
+        let result = parse_schema(&v);
+
+        assert!(
+            matches!(result, Err(SchemaError::TooDeep)),
+            "got {result:?}"
+        );
+    }
+
     // ftp:// scheme — kept standalone: extra assertion on error message text
     #[test]
     fn should_reject_ftp_scheme() {
@@ -2169,7 +3480,7 @@ mod tests {
         }
         let result = parse_schema(&v);
         assert!(
-            result.is_some(),
+            result.is_ok(),
             "schema within depth limit should be accepted"
         );
     }
@@ -2318,16 +3629,11 @@ mod tests {
     fn ref_without_hash_prefix_yields_unresolved_reference_only() {
         // $ref without '#' prefix cannot be resolved locally — returns a reference node
         let v = json!({"$ref": "http://example.com/other-schema.json"});
-        let result = parse_schema(&v);
-        // resolve_ref returns None for non-# refs; SchemaParser::parse returns Some(schema)
-        // with only the unresolved reference set
-        if let Some(s) = result {
-            assert_eq!(
-                unresolved_ref(&s.root),
-                Some("http://example.com/other-schema.json")
-            );
-        }
-        // None is also acceptable (no crash guarantee)
+        let parsed = parse_schema(&v).expect("a reference that does not resolve still parses");
+        assert_eq!(
+            unresolved_ref(&parsed.root),
+            Some("http://example.com/other-schema.json")
+        );
     }
 
     // ── parse_schema_array edge cases ─────────────────────────────────────────
@@ -2650,9 +3956,9 @@ mod tests {
                 }
             }
         });
-        let schema = parse_schema(&value).unwrap().root;
-        let foo = schema.properties.unwrap();
-        let foo_schema = foo.get("foo").unwrap();
+        let parsed = parse_schema(&value).unwrap();
+        let foo = parsed.root.properties.as_ref().unwrap();
+        let foo_schema = parsed.resolve(foo.get("foo").unwrap());
         assert_eq!(
             foo_schema.schema_type,
             Some(SchemaType::Single("string".to_string()))
@@ -2674,9 +3980,9 @@ mod tests {
                 }
             }
         });
-        let schema = parse_schema(&value).unwrap().root;
-        let bar_schema = schema.properties.unwrap();
-        let bar = bar_schema.get("bar").unwrap();
+        let parsed = parse_schema(&value).unwrap();
+        let bar_schema = parsed.root.properties.as_ref().unwrap();
+        let bar = parsed.resolve(bar_schema.get("bar").unwrap());
         assert_eq!(
             bar.schema_type,
             Some(SchemaType::Single("integer".to_string()))
@@ -2698,9 +4004,9 @@ mod tests {
                 }
             }
         });
-        let schema = parse_schema(&value).unwrap().root;
-        let val_schema = schema.properties.unwrap();
-        let val = val_schema.get("val").unwrap();
+        let parsed = parse_schema(&value).unwrap();
+        let val_schema = parsed.root.properties.as_ref().unwrap();
+        let val = parsed.resolve(val_schema.get("val").unwrap());
         assert_eq!(
             val.schema_type,
             Some(SchemaType::Single("boolean".to_string()))
@@ -2735,9 +4041,9 @@ mod tests {
                 "x": { "$ref": "#nested" }
             }
         });
-        let schema = parse_schema(&value).unwrap().root;
-        let x = schema.properties.unwrap();
-        let x_schema = x.get("x").unwrap();
+        let parsed = parse_schema(&value).unwrap();
+        let x = parsed.root.properties.as_ref().unwrap();
+        let x_schema = parsed.resolve(x.get("x").unwrap());
         assert_eq!(
             x_schema.schema_type,
             Some(SchemaType::Single("number".to_string()))
@@ -2755,9 +4061,9 @@ mod tests {
                 "Name": { "type": "string" }
             }
         });
-        let schema = parse_schema(&value).unwrap().root;
-        let name = schema.properties.unwrap();
-        let name_schema = name.get("name").unwrap();
+        let parsed = parse_schema(&value).unwrap();
+        let name = parsed.root.properties.as_ref().unwrap();
+        let name_schema = parsed.resolve(name.get("name").unwrap());
         assert_eq!(
             name_schema.schema_type,
             Some(SchemaType::Single("string".to_string()))
@@ -2803,7 +4109,8 @@ mod tests {
     fn relative_dollar_id_is_resolved_against_base_uri() {
         // Use SchemaParser::parse directly to supply a base URI
         let value = json!({ "$id": "sub.json", "type": "object" });
-        let schema = parse_with(&value, Some("https://example.com/root.json"), None).unwrap();
+        let parsed = parse_with(&value, Some("https://example.com/root.json"), None).unwrap();
+        let schema = parsed.resolved_root();
         assert_eq!(schema.id, Some("https://example.com/sub.json".to_string()));
     }
 
@@ -2890,9 +4197,10 @@ mod tests {
         // SchemaParser::parse + ParseContext attempts to fetch; SSRF guard blocks it.
         // The $ref falls back to an unresolved reference node (no remote traversal).
         let mut ctx = ParseContext::new(&mut cache, None);
-        let schema = parse_with(&value, None, Some(&mut ctx)).unwrap();
+        let parsed = parse_with(&value, None, Some(&mut ctx)).unwrap();
+        let schema = parsed.resolved_root();
         // Remote fetch was blocked — schema is an unresolved reference node without sub-schema content.
-        assert_eq!(unresolved_ref(&schema), Some("http://127.0.0.1/evil.json"));
+        assert_eq!(unresolved_ref(schema), Some("http://127.0.0.1/evil.json"));
         // Nothing was added to the cache (fetch never happened).
         assert!(!cache.contains_document("http://127.0.0.1/evil.json"));
     }
@@ -2905,14 +4213,15 @@ mod tests {
         // which is blocked by SSRF.
         let value = json!({ "$ref": "evil.json" });
         let mut cache = SchemaCache::new();
-        let schema = parse_with(
+        let parsed = parse_with(
             &value,
             Some("http://127.0.0.1/"),
             Some(&mut ParseContext::new(&mut cache, None)),
         )
         .unwrap();
+        let schema = parsed.resolved_root();
         // Blocked — unresolved reference kept, no cached fetch.
-        assert_eq!(unresolved_ref(&schema), Some("evil.json"));
+        assert_eq!(unresolved_ref(schema), Some("evil.json"));
         assert!(!cache.contains_document("http://127.0.0.1/evil.json"));
     }
 
@@ -2925,30 +4234,31 @@ mod tests {
         let json_b = json!({ "$ref": "https://example.com/a.json" });
 
         let mut cache = SchemaCache::new();
-        cache.insert_document("https://example.com/a.json".to_string(), json_a.clone());
+        cache.insert_document("https://example.com/a.json".to_string(), json_a);
         cache.insert_document("https://example.com/b.json".to_string(), json_b);
 
         // Resolving A should terminate — the cycle is broken when B tries to
         // re-visit A (already in visited set).
         let mut ctx = ParseContext::new(&mut cache, None);
-        let result = resolve_with("https://example.com/a.json", &json_a, None, Some(&mut ctx));
+        let result = resolve_with("https://example.com/a.json", None, Some(&mut ctx));
         // Must terminate; result may be None or a partial schema.
         let _ = result;
     }
 
-    // A target is parsed without a remote context, so a cycle between remote
-    // documents ends at the first hop: the target's own `$ref` stays unresolved.
+    // A fetched document resolves no references to other documents, so a cycle
+    // between remote documents ends at the first hop: the document's own `$ref`
+    // stays unresolved.
     #[test]
     fn circular_remote_refs_end_at_the_first_hop() {
         let url_a = "https://example.com/a.json";
         let url_b = "https://example.com/b.json";
         let json_a = json!({ "$ref": url_b });
-        let mut cache = cache_with(&[(url_a, json_a.clone()), (url_b, json!({ "$ref": url_a }))]);
+        let mut cache = cache_with(&[(url_a, json_a), (url_b, json!({ "$ref": url_a }))]);
         let mut ctx = ParseContext::new(&mut cache, None);
 
-        let result = resolve_with(url_a, &json_a, None, Some(&mut ctx)).expect("resolves");
+        let result = resolve_with(url_a, None, Some(&mut ctx)).expect("resolves");
 
-        assert_eq!(unresolved_ref(&result), Some(url_b));
+        assert_eq!(unresolved_ref(result.resolved_root()), Some(url_b));
     }
 
     // Sec-R4: breadth fan-out stops after MAX_REMOTE_FETCH_COUNT distinct URLs.
@@ -3011,9 +4321,10 @@ mod tests {
         let value = json!({ "$ref": "file:///etc/passwd" });
         let mut cache = SchemaCache::new();
         let mut ctx = ParseContext::new(&mut cache, None);
-        let schema = parse_with(&value, None, Some(&mut ctx)).unwrap();
+        let parsed = parse_with(&value, None, Some(&mut ctx)).unwrap();
+        let schema = parsed.resolved_root();
         // SSRF guard blocks — unresolved reference kept, nothing cached.
-        assert_eq!(unresolved_ref(&schema), Some("file:///etc/passwd"));
+        assert_eq!(unresolved_ref(schema), Some("file:///etc/passwd"));
         assert!(!cache.contains_document("file:///etc/passwd"));
     }
 
@@ -3035,13 +4346,15 @@ mod tests {
         let mut cache = SchemaCache::new();
         cache.insert_document(ref_url.to_string(), remote_value);
 
-        let root = json!({});
         let mut ctx = ParseContext::new(&mut cache, None);
-        let resolved = resolve_with(ref_url, &root, None, Some(&mut ctx));
+        let resolved = resolve_with(ref_url, None, Some(&mut ctx));
 
         assert!(resolved.is_some(), "remote ref should resolve from cache");
-        let s = resolved.unwrap();
-        assert_eq!(s.description.as_deref(), Some("remote schema"));
+        let resolved = resolved.unwrap();
+        assert_eq!(
+            resolved.resolved_root().description.as_deref(),
+            Some("remote schema")
+        );
     }
 
     // Remote-2: $ref with JSON Pointer fragment navigates the fetched document.
@@ -3060,17 +4373,19 @@ mod tests {
         let url = "https://example.com/types.json".to_string();
         cache.insert_document(url.clone(), remote_value);
 
-        let root = json!({});
         let ref_str = format!("{url}#/definitions/Address");
         let mut ctx = ParseContext::new(&mut cache, None);
-        let resolved = resolve_with(&ref_str, &root, None, Some(&mut ctx));
+        let resolved = resolve_with(&ref_str, None, Some(&mut ctx));
 
         assert!(
             resolved.is_some(),
             "fragment ref into remote doc should resolve"
         );
-        let s = resolved.unwrap();
-        assert_eq!(s.description.as_deref(), Some("an address"));
+        let resolved = resolved.unwrap();
+        assert_eq!(
+            resolved.resolved_root().description.as_deref(),
+            Some("an address")
+        );
     }
 
     // Remote ctx threading: $ref inside properties is resolved remotely.
@@ -3091,17 +4406,20 @@ mod tests {
         });
 
         let mut ctx = ParseContext::new(&mut cache, None);
-        let schema = parse_with(&root, None, Some(&mut ctx));
+        let parsed = parse_with(&root, None, Some(&mut ctx));
 
-        assert!(schema.is_some(), "outer schema should parse");
-        let schema = schema.unwrap();
-        let props = schema
+        assert!(parsed.is_ok(), "outer schema should parse");
+        let parsed = parsed.unwrap();
+        let props = parsed
+            .resolved_root()
             .properties
             .as_ref()
             .expect("properties should be present");
-        let address = props
-            .get("address")
-            .expect("address property should be present");
+        let address = parsed.resolve(
+            props
+                .get("address")
+                .expect("address property should be present"),
+        );
         assert_eq!(
             address.description.as_deref(),
             Some("an address"),
@@ -3151,12 +4469,13 @@ mod tests {
 
         // Call exactly the code path that fetch_schema_raw uses when ctx=Some.
         let mut ctx = ParseContext::new(&mut cache, None);
-        let schema = parse_with(&body, Some(top_level_url), Some(&mut ctx))
+        let parsed = parse_with(&body, Some(top_level_url), Some(&mut ctx))
             .expect("should parse top-level schema");
+        let schema = parsed.resolved_root();
 
         // The $ref should have been resolved from the pre-populated cache.
         let props = schema.properties.as_ref().expect("should have properties");
-        let home = props.get("home").expect("should have home property");
+        let home = parsed.resolve(props.get("home").expect("should have home property"));
         assert_eq!(
             home.description.as_deref(),
             Some("an address"),
@@ -3513,17 +4832,23 @@ mod tests {
         value: &Value,
         base_uri: Option<&str>,
         ctx: Option<&mut ParseContext<'_>>,
-    ) -> Option<JsonSchema> {
-        SchemaParser::new(value, ctx).parse(value, base_uri, 0)
+    ) -> Result<ParsedSchema, SchemaError> {
+        parse_document(value, base_uri, ctx)
     }
 
+    /// The parse of a document that consists of the `$ref` `ref_str` alone,
+    /// fetched from `base_uri`; `None` when `ref_str` itself is unresolved (a
+    /// target that holds an unresolved reference is a resolution).
     fn resolve_with(
         ref_str: &str,
-        root: &Value,
         base_uri: Option<&str>,
         ctx: Option<&mut ParseContext<'_>>,
-    ) -> Option<JsonSchema> {
-        SchemaParser::new(root, ctx).resolve_ref(ref_str, base_uri, 0)
+    ) -> Option<ParsedSchema> {
+        let parsed = parse_with(&json!({ "$ref": ref_str }), base_uri, ctx).ok()?;
+        match &parsed.root.reference {
+            Some(SchemaRef::Unresolved(text)) if &**text == ref_str => None,
+            Some(SchemaRef::Unresolved(_) | SchemaRef::Target(_)) | None => Some(parsed),
+        }
     }
 
     fn cache_with(entries: &[(&str, Value)]) -> SchemaCache {
@@ -3537,13 +4862,14 @@ mod tests {
     /// The text of the unresolved `$ref` that `schema` stands for.
     fn unresolved_ref(schema: &JsonSchema) -> Option<&str> {
         match &schema.reference {
-            Some(SchemaRef::Unresolved(text)) => Some(text),
+            Some(SchemaRef::Unresolved(text)) => Some(&**text),
             Some(SchemaRef::Target(_)) | None => None,
         }
     }
 
-    fn debug_of(schema: &JsonSchema) -> String {
-        format!("{schema:?}")
+    /// The debug text of the whole parse: the root and the target table.
+    fn debug_of(parsed: &ParsedSchema) -> String {
+        format!("{parsed:?}")
     }
 
     /// Every keyword that holds child schemas, so a keyword that stops
@@ -3589,22 +4915,34 @@ mod tests {
         (0..levels).fold(leaf, |inner, _| wrap(keyword, &inner))
     }
 
-    #[test]
-    fn every_subschema_keyword_parses_to_the_depth_limit() {
-        for keyword in SUBSCHEMA_KEYWORDS {
-            let value = nest(keyword, MAX_REF_DEPTH, json!({ "description": "LEAF" }));
-            let schema = parse_schema(&value).expect("parses").root;
-            assert!(debug_of(&schema).contains("LEAF"), "keyword {keyword}");
+    /// How many JSON levels one [`wrap`] of `keyword` adds.
+    fn json_levels_per_wrap(keyword: &str) -> usize {
+        match keyword {
+            "properties" | "patternProperties" | "dependencies" | "dependentSchemas"
+            | "prefixItems" | "allOf" | "anyOf" | "oneOf" | "tuple-items" => 2,
+            _ => 1,
         }
     }
 
+    // The schemas nest as deep as the JSON does: nothing cuts them at a fixed
+    // schema depth below `MAX_JSON_DEPTH`.
+    // Runs on a thread with the 2 MiB stack of a tokio blocking thread, where
+    // the server parses: the unoptimized build of the deepest parse fits it.
     #[test]
-    fn every_subschema_keyword_truncates_beyond_the_depth_limit() {
-        for keyword in SUBSCHEMA_KEYWORDS {
-            let value = nest(keyword, MAX_REF_DEPTH + 1, json!({ "description": "LEAF" }));
-            let schema = parse_schema(&value).expect("parses").root;
-            assert!(!debug_of(&schema).contains("LEAF"), "keyword {keyword}");
-        }
+    fn every_subschema_keyword_parses_to_the_json_depth_limit() {
+        std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(|| {
+                for keyword in SUBSCHEMA_KEYWORDS {
+                    let levels = (MAX_JSON_DEPTH - 1) / json_levels_per_wrap(keyword);
+                    let value = nest(keyword, levels, json!({ "description": "LEAF" }));
+                    let parsed = parse_schema(&value).expect("parses");
+                    assert!(debug_of(&parsed).contains("LEAF"), "keyword {keyword}");
+                }
+            })
+            .expect("thread spawns")
+            .join()
+            .expect("the parse fits the stack");
     }
 
     #[test]
@@ -3619,8 +4957,8 @@ mod tests {
                 keyword,
                 &json!({ "$ref": "https://example.com/child.json" }),
             );
-            let schema = parse_with(&value, None, Some(&mut ctx)).expect("parses");
-            assert!(debug_of(&schema).contains("REMOTE"), "keyword {keyword}");
+            let parsed = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+            assert!(debug_of(&parsed).contains("REMOTE"), "keyword {keyword}");
         }
     }
 
@@ -3629,9 +4967,9 @@ mod tests {
         for keyword in SUBSCHEMA_KEYWORDS {
             let mut value = wrap(keyword, &json!({ "$id": "leaf.json" }));
             value["$id"] = json!("https://example.com/root.json");
-            let schema = parse_schema(&value).expect("parses").root;
+            let parsed = parse_schema(&value).expect("parses");
             assert!(
-                debug_of(&schema).contains("https://example.com/leaf.json"),
+                debug_of(&parsed).contains("https://example.com/leaf.json"),
                 "keyword {keyword}"
             );
         }
@@ -3654,8 +4992,9 @@ mod tests {
             "description": "SIBLING",
             "x-targets": { "T": { "type": "string" } }
         });
-        let schema = parse_schema(&value).expect("parses").root;
-        assert_eq!(schema_type_str(&schema), Some("string"));
+        let parsed = parse_schema(&value).expect("parses");
+        let schema = parsed.resolved_root();
+        assert_eq!(schema_type_str(schema), Some("string"));
         assert!(schema.description.is_none());
     }
 
@@ -3667,46 +5006,55 @@ mod tests {
         assert!(schema.reference.is_none());
     }
 
+    // A `$ref` inside a target that a local `$ref` names resolves like any
+    // other: with the remote context.
     #[test]
-    fn local_ref_target_is_parsed_without_ctx() {
+    fn remote_ref_inside_a_local_target_resolves() {
         let url = "https://example.com/addr.json";
         let mut cache = cache_with(&[(url, json!({ "description": "REMOTE" }))]);
         let mut ctx = ParseContext::new(&mut cache, None);
         let value = json!({
-            "x-targets": { "T": { "$ref": url } },
+            "x-targets": {
+                "T": { "$ref": url },
+                "U": { "properties": { "p": { "$ref": url } } }
+            },
             "properties": {
                 "a": { "$ref": "#/x-targets/T" },
-                "b": { "$ref": url }
+                "b": { "$ref": url },
+                "c": { "$ref": "#/x-targets/U" }
             }
         });
-        let schema = parse_with(&value, None, Some(&mut ctx)).expect("parses");
-        let props = schema.properties.as_ref().expect("properties");
-        assert_eq!(
-            props["b"].description.as_deref(),
-            Some("REMOTE"),
-            "a direct remote ref resolves with ctx"
-        );
-        assert_eq!(unresolved_ref(&props["a"]), Some(url));
-        assert!(
-            props["a"].description.is_none(),
-            "a local target is parsed without ctx"
-        );
+
+        let parsed = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+
+        assert_well_formed(&parsed);
+        let root = parsed.resolved_root();
+        let a = property(root, "a");
+        assert_eq!(parsed.resolve(a).description.as_deref(), Some("REMOTE"));
+        assert_eq!(target_of(a), target_of(property(root, "b")));
+        let p = property(parsed.resolve(property(root, "c")), "p");
+        assert_eq!(target_of(p), target_of(a));
     }
 
-    // Characterization: a local target is parsed without a base URI, so its
-    // relative `$id` stays unresolved.
+    // A local target is parsed against the base URI in force where it sits:
+    // the `$id` of its nearest enclosing object, or the document's URL.
     #[rstest]
     #[case::pointer("#/x-targets/T")]
     #[case::anchor("#anch")]
-    fn local_ref_target_is_parsed_without_base_uri(#[case] ref_str: &str) {
+    fn local_ref_target_resolves_its_id_against_the_enclosing_base(#[case] ref_str: &str) {
         let value = json!({
             "$id": "https://example.com/root.json",
             "x-targets": { "T": { "$anchor": "anch", "$id": "child.json" } },
             "properties": { "p": { "$ref": ref_str } }
         });
-        let schema = parse_schema(&value).expect("parses").root;
-        let p = &schema.properties.as_ref().expect("properties")["p"];
-        assert_eq!(p.id.as_deref(), Some("child.json"));
+
+        let parsed = parse_schema(&value).expect("parses");
+
+        let p = property(parsed.resolved_root(), "p");
+        assert_eq!(
+            parsed.resolve(p).id.as_deref(),
+            Some("https://example.com/child.json")
+        );
     }
 
     #[rstest]
@@ -3730,8 +5078,9 @@ mod tests {
                 "x": { "$id": "https://example.com/other/x.json", keyword: "y.json" }
             }
         });
-        let schema = parse_with(&value, None, Some(&mut ctx)).expect("parses");
-        let x = &schema.properties.as_ref().expect("properties")["x"];
+        let parsed = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+        let schema = parsed.resolved_root();
+        let x = parsed.resolve(&schema.properties.as_ref().expect("properties")["x"]);
         assert_eq!(x.description.as_deref(), Some("PARENT"));
     }
 
@@ -3740,8 +5089,9 @@ mod tests {
         let mut cache = SchemaCache::new();
         let mut ctx = ParseContext::new(&mut cache, None);
         let value = json!({ "$ref": "other.json" });
-        let schema = parse_with(&value, None, Some(&mut ctx)).expect("parses");
-        assert_eq!(unresolved_ref(&schema), Some("other.json"));
+        let parsed = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+        let schema = parsed.resolved_root();
+        assert_eq!(unresolved_ref(schema), Some("other.json"));
         assert!(ctx.visited.is_empty());
     }
 
@@ -3756,8 +5106,9 @@ mod tests {
             }),
         )]);
         let mut ctx = ParseContext::new(&mut cache, None);
-        let schema = resolve_with(url, &json!({}), None, Some(&mut ctx)).expect("resolves");
-        let a = &schema.properties.as_ref().expect("properties")["a"];
+        let parsed = resolve_with(url, None, Some(&mut ctx)).expect("resolves");
+        let schema = parsed.resolved_root();
+        let a = parsed.resolve(&schema.properties.as_ref().expect("properties")["a"]);
         assert_eq!(a.description.as_deref(), Some("D-REMOTE"));
     }
 
@@ -3770,7 +5121,8 @@ mod tests {
             (b_url, json!({ "description": "B" })),
         ]);
         let mut ctx = ParseContext::new(&mut cache, None);
-        let schema = resolve_with(a_url, &json!({}), None, Some(&mut ctx)).expect("resolves");
+        let parsed = resolve_with(a_url, None, Some(&mut ctx)).expect("resolves");
+        let schema = parsed.resolved_root();
         let p = &schema.properties.as_ref().expect("properties")["p"];
         assert_eq!(unresolved_ref(p), Some(b_url));
         assert!(
@@ -3793,7 +5145,8 @@ mod tests {
             }),
         )]);
         let mut ctx = ParseContext::new(&mut cache, None);
-        let schema = resolve_with(ref_str, &json!({}), None, Some(&mut ctx)).expect("resolves");
+        let parsed = resolve_with(ref_str, None, Some(&mut ctx)).expect("resolves");
+        let schema = parsed.resolved_root();
         assert_eq!(schema.id.as_deref(), Some("https://example.com/sub.json"));
     }
 
@@ -3807,75 +5160,10 @@ mod tests {
         )]);
         let mut ctx = ParseContext::new(&mut cache, None);
         let value = json!({ "$ref": ref_str });
-        let schema = parse_with(&value, None, Some(&mut ctx)).expect("parses");
-        assert_eq!(unresolved_ref(&schema), Some(ref_str));
+        let parsed = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+        let schema = parsed.resolved_root();
+        assert_eq!(unresolved_ref(schema), Some(ref_str));
         assert!(schema.description.is_none());
-    }
-
-    // The `$ref` leaf sits at depth `levels`; resolve_ref runs at `levels + 1`
-    // and the target is parsed at `levels + 2`.
-    #[rstest]
-    #[case::local_fits(false, MAX_REF_DEPTH - 2, true)]
-    #[case::local_too_deep(false, MAX_REF_DEPTH - 1, false)]
-    #[case::remote_fits(true, MAX_REF_DEPTH - 2, true)]
-    #[case::remote_too_deep(true, MAX_REF_DEPTH - 1, false)]
-    fn ref_target_must_fit_the_depth_budget(
-        #[case] remote: bool,
-        #[case] levels: usize,
-        #[case] resolved: bool,
-    ) {
-        let url = "https://example.com/target.json";
-        let mut cache = cache_with(&[(url, json!({ "description": "TARGET" }))]);
-        let mut ctx = ParseContext::new(&mut cache, None);
-        let ref_str = if remote { url } else { "#/x-targets/T" };
-        let mut value = nest("properties", levels, json!({ "$ref": ref_str }));
-        value["x-targets"] = json!({ "T": { "description": "TARGET" } });
-        let schema = parse_with(&value, None, Some(&mut ctx)).expect("parses");
-        assert_eq!(debug_of(&schema).contains("TARGET"), resolved);
-    }
-
-    // The root `$ref` is at depth 0, so the target is parsed at depth 2.
-    #[rstest]
-    #[case::local_fits(false, MAX_REF_DEPTH - 2, true)]
-    #[case::local_too_deep(false, MAX_REF_DEPTH - 1, false)]
-    #[case::remote_fits(true, MAX_REF_DEPTH - 2, true)]
-    #[case::remote_too_deep(true, MAX_REF_DEPTH - 1, false)]
-    fn ref_target_continues_the_depth_count(
-        #[case] remote: bool,
-        #[case] levels: usize,
-        #[case] leaf_present: bool,
-    ) {
-        let url = "https://example.com/target.json";
-        let target = nest("properties", levels, json!({ "description": "LEAF" }));
-        let mut cache = cache_with(&[(url, target.clone())]);
-        let mut ctx = ParseContext::new(&mut cache, None);
-        let value = if remote {
-            json!({ "$ref": url })
-        } else {
-            json!({ "$ref": "#/x-targets/T", "x-targets": { "T": target } })
-        };
-        let schema = parse_with(&value, None, Some(&mut ctx)).expect("parses");
-        assert_eq!(debug_of(&schema).contains("LEAF"), leaf_present);
-    }
-
-    // Each `$ref` hop costs two depth units, so the chain target `R{hops}`
-    // is parsed at depth `2 + 2 * hops`.
-    #[rstest]
-    #[case::fits(15, true)]
-    #[case::too_deep(16, false)]
-    fn ref_chain_hops_cost_two_depth_units_each(#[case] hops: usize, #[case] resolved: bool) {
-        let mut chain = serde_json::Map::new();
-        for i in 0..hops {
-            chain.insert(
-                format!("R{i}"),
-                json!({ "$ref": format!("#/x-chain/R{}", i + 1) }),
-            );
-        }
-        chain.insert(format!("R{hops}"), json!({ "description": "LEAF" }));
-        let value = json!({ "$ref": "#/x-chain/R0", "x-chain": chain });
-        let schema = parse_schema(&value).expect("parses").root;
-        assert_eq!(schema.description.as_deref() == Some("LEAF"), resolved);
-        assert_eq!(schema.reference.is_none(), resolved);
     }
 
     #[test]
@@ -3883,8 +5171,8 @@ mod tests {
         let value = json!({
             "properties": { "p": { "$ref": "#" }, "q": { "$ref": "#" } }
         });
-        let schema = parse_schema(&value).expect("parses").root;
-        assert!(schema.properties.is_some());
+        let parsed = parse_schema(&value).expect("parses");
+        assert!(parsed.resolved_root().properties.is_some());
     }
 
     #[test]
@@ -3896,7 +5184,8 @@ mod tests {
             assert!(ctx.try_visit(&format!("https://example.com/s{i}.json")));
         }
         let value = json!({ "$ref": url });
-        let schema = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+        let parsed = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+        let schema = parsed.resolved_root();
         assert_eq!(schema.description.as_deref(), Some("CACHED"));
     }
 
@@ -3909,8 +5198,9 @@ mod tests {
             assert!(ctx.try_visit(&format!("https://example.com/s{i}.json")));
         }
         let value = json!({ "$ref": url });
-        let schema = parse_with(&value, None, Some(&mut ctx)).expect("parses");
-        assert_eq!(unresolved_ref(&schema), Some(url));
+        let parsed = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+        let schema = parsed.resolved_root();
+        assert_eq!(unresolved_ref(schema), Some(url));
         assert!(!cache.contains_document(url));
     }
 
@@ -3925,8 +5215,9 @@ mod tests {
         let mut cache = SchemaCache::new();
         let mut ctx = ParseContext::new(&mut cache, None);
         let value = json!({ "$ref": ref_str });
-        let schema = parse_with(&value, base, Some(&mut ctx)).expect("parses");
-        assert_eq!(unresolved_ref(&schema), Some(ref_str));
+        let parsed = parse_with(&value, base, Some(&mut ctx)).expect("parses");
+        let schema = parsed.resolved_root();
+        assert_eq!(unresolved_ref(schema), Some(ref_str));
         assert!(ctx.visited.is_empty());
     }
 
@@ -3939,8 +5230,8 @@ mod tests {
             "definitions": { "D": { "$ref": url } },
             "$defs": { "E": { "$ref": url } }
         });
-        let schema = parse_with(&value, None, Some(&mut ctx)).expect("parses");
-        assert!(!debug_of(&schema).contains("REMOTE"));
+        let parsed = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+        assert!(!debug_of(&parsed).contains("REMOTE"));
     }
 
     #[test]
@@ -3965,13 +5256,11 @@ mod tests {
         let mut cache = cache_with(&[(url, json!([{ "description": "ITEM" }]))]);
         let mut ctx = ParseContext::new(&mut cache, None);
 
-        let resolved = resolve_with(&format!("{url}#/0"), &json!({}), None, Some(&mut ctx));
+        let resolved = resolve_with(&format!("{url}#/0"), None, Some(&mut ctx));
 
+        let resolved = resolved.expect("pointer target parses");
         assert_eq!(
-            resolved
-                .expect("pointer target parses")
-                .description
-                .as_deref(),
+            resolved.resolved_root().description.as_deref(),
             Some("ITEM")
         );
     }
@@ -3983,9 +5272,10 @@ mod tests {
         let value = json!({ "$ref": url });
         let mut ctx = ParseContext::new(&mut cache, None);
 
-        let schema = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+        let parsed = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+        let schema = parsed.resolved_root();
 
-        assert_eq!(unresolved_ref(&schema), Some(url));
+        assert_eq!(unresolved_ref(schema), Some(url));
     }
 
     #[rstest]
@@ -4001,12 +5291,7 @@ mod tests {
         )]);
         let mut ctx = ParseContext::new(&mut cache, None);
 
-        let resolved = resolve_with(
-            &format!("{url}{fragment}"),
-            &json!({}),
-            None,
-            Some(&mut ctx),
-        );
+        let resolved = resolve_with(&format!("{url}{fragment}"), None, Some(&mut ctx));
 
         assert!(resolved.is_some(), "the ref resolves");
         assert!(cache.get(url).is_none());
@@ -4024,9 +5309,10 @@ mod tests {
         }
         let value = json!({ "$ref": url });
 
-        let schema = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+        let parsed = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+        let schema = parsed.resolved_root();
 
-        assert_eq!(unresolved_ref(&schema), Some(url));
+        assert_eq!(unresolved_ref(schema), Some(url));
         assert!(!cache.contains_document(url));
     }
 
@@ -4038,15 +5324,11 @@ mod tests {
         )]);
         let mut ctx = ParseContext::new(&mut cache, None);
 
-        let resolved = resolve_with(
-            "HTTPS://EXAMPLE.com/Doc.json",
-            &json!({}),
-            None,
-            Some(&mut ctx),
-        );
+        let resolved =
+            resolve_with("HTTPS://EXAMPLE.com/Doc.json", None, Some(&mut ctx)).expect("resolves");
 
         assert_eq!(
-            resolved.expect("resolves").description.as_deref(),
+            resolved.resolved_root().description.as_deref(),
             Some("REMOTE")
         );
     }
@@ -4058,9 +5340,10 @@ mod tests {
         let value = json!({ "$ref": url });
         let mut ctx = ParseContext::new(&mut cache, None);
 
-        let schema = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+        let parsed = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+        let schema = parsed.resolved_root();
 
-        assert_eq!(unresolved_ref(&schema), Some(url));
+        assert_eq!(unresolved_ref(schema), Some(url));
     }
 
     // ── fetch_schema_raw with a cached document (offline) ───────────────────
@@ -4155,5 +5438,803 @@ mod tests {
             matches!(result, Err(SchemaError::UrlNotPermitted(_))),
             "got {result:?}"
         );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // parse_schema errors and the JSON depth limit
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /// A document whose deepest value, a scalar, sits `depth` levels down.
+    fn document_with_leaf_at_depth(depth: usize) -> Value {
+        let leaf = (1..depth).fold(json!(1), |inner, _| json!([inner]));
+        json!({ "x-deep": leaf })
+    }
+
+    #[rstest]
+    #[case::at_the_limit(MAX_JSON_DEPTH, true)]
+    #[case::one_level_beyond(MAX_JSON_DEPTH + 1, false)]
+    fn parse_schema_applies_the_json_depth_limit(#[case] depth: usize, #[case] accepted: bool) {
+        let result = parse_schema(&document_with_leaf_at_depth(depth));
+
+        assert_eq!(result.is_ok(), accepted, "got {result:?}");
+        if !accepted {
+            assert!(matches!(result, Err(SchemaError::TooDeep)));
+        }
+    }
+
+    #[test]
+    fn too_deep_is_reported_before_a_root_that_is_no_schema() {
+        let mut value = json!(1);
+        for _ in 0..60 {
+            value = json!([value]);
+        }
+
+        let result = parse_schema(&value);
+
+        assert!(
+            matches!(result, Err(SchemaError::TooDeep)),
+            "got {result:?}"
+        );
+    }
+
+    #[rstest]
+    #[case::boolean_false(json!(false), true)]
+    #[case::nested_beyond_the_limit(document_with_leaf_at_depth(MAX_JSON_DEPTH + 1), false)]
+    fn fetch_schema_raw_reports_the_errors_of_a_cached_document(
+        #[case] document: Value,
+        #[case] parse_failed: bool,
+    ) {
+        let own = "https://schema.invalid/own.json";
+        let mut cache = cache_with(&[(own, document)]);
+        let mut ctx = ParseContext::new(&mut cache, None);
+
+        let result = fetch_schema_raw(own, None, Some(&mut ctx));
+
+        match result {
+            Err(SchemaError::ParseFailed(_)) => assert!(parse_failed),
+            Err(SchemaError::TooDeep) => assert!(!parse_failed),
+            other => panic!("got {other:?}"),
+        }
+    }
+
+    #[rstest]
+    #[case::not_an_object(json!([1]))]
+    #[case::too_deep(document_with_leaf_at_depth(MAX_JSON_DEPTH + 1))]
+    fn schema_errors_do_not_quote_the_document(#[case] document: Value) {
+        let mut marked = document;
+        if let Value::Array(items) = &mut marked {
+            items.push(json!("MARKER-FROM-THE-DOCUMENT"));
+        } else {
+            marked["x-marker"] = json!("MARKER-FROM-THE-DOCUMENT");
+        }
+
+        let message = parse_schema(&marked).expect_err("is rejected").to_string();
+
+        assert!(!message.contains("MARKER"), "got {message}");
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Real schemas: the parse is no larger than its source
+    // ══════════════════════════════════════════════════════════════════════════
+
+    #[rstest]
+    #[case::draft_07_meta_schema(include_str!("../tests/fixtures/schemas/json-schema-draft-07.json"))]
+    #[case::cloud_init(include_str!("../tests/fixtures/schemas/cloud-init.json"))]
+    #[case::github_workflow(include_str!("../tests/fixtures/schemas/github-workflow.json"))]
+    #[case::compose_spec(include_str!("../tests/fixtures/schemas/compose-spec.json"))]
+    #[case::kubernetes_deployment(
+        include_str!("../tests/fixtures/schemas/kubernetes-deployment-apps-v1.json")
+    )]
+    fn parsed_fixture_has_no_more_nodes_than_its_source_has_json_values(#[case] raw: &str) {
+        let source: Value = serde_json::from_str(raw).expect("fixture is JSON");
+
+        let parsed = parse_schema(&source).expect("fixture is a schema");
+
+        assert_well_formed(&parsed);
+        assert!(node_count(&parsed) <= json_value_count(&source));
+        assert!(
+            !debug_of(&parsed).contains("Unresolved("),
+            "a fixture reference is unresolved"
+        );
+    }
+
+    #[test]
+    fn draft_07_meta_schema_references_to_the_root_share_one_target() {
+        let source: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/schemas/json-schema-draft-07.json"
+        ))
+        .expect("fixture is JSON");
+
+        let parsed = parse_schema(&source).expect("parses");
+
+        let root = parsed.resolved_root();
+        let root_id = target_of(&parsed.root).expect("`#` makes the root a target");
+        let items = property(root, "items");
+        let not = property(root, "not");
+        let first_of_items = items.any_of.as_ref().and_then(|v| v.first());
+        assert_eq!(
+            target_of(not).or_else(|| target_of(first_of_items.expect("items anyOf"))),
+            Some(root_id)
+        );
+        let mut ids = target_ids_of(&parsed);
+        ids.sort_unstable();
+        ids.dedup();
+        assert!(
+            ids.len() < 30,
+            "the meta-schema has few distinct targets: {ids:?}"
+        );
+    }
+
+    /// Every target id in the debug text of `parsed`.
+    fn target_ids_of(parsed: &ParsedSchema) -> Vec<usize> {
+        debug_of(parsed)
+            .split("Target(TargetId(")
+            .skip(1)
+            .filter_map(|rest| rest.split(')').next()?.parse().ok())
+            .collect()
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // References are parsed in full wherever they sit
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Neither the depth of the `$ref` nor the depth of its target cuts it.
+    #[rstest]
+    fn ref_target_is_parsed_in_full_whatever_the_site_and_target_depth(
+        #[values(false, true)] remote: bool,
+        #[values(0, 31, 33)] site_levels: usize,
+        #[values(0, 31, 33)] target_levels: usize,
+    ) {
+        let url = "https://example.com/target.json";
+        let target = nest("not", target_levels, json!({ "description": "LEAF" }));
+        let mut cache = cache_with(&[(url, target.clone())]);
+        let mut ctx = ParseContext::new(&mut cache, None);
+        let ref_str = if remote { url } else { "#/x-targets/T" };
+        let mut value = nest("not", site_levels, json!({ "$ref": ref_str }));
+        value["x-targets"] = json!({ "T": target });
+
+        let parsed = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+
+        assert!(debug_of(&parsed).contains("LEAF"));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Keywords next to and instead of `$ref`
+    // ══════════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn ref_wins_over_dynamic_ref_when_both_are_present() {
+        let value = json!({
+            "$ref": "#/x/A", "$dynamicRef": "#/x/B",
+            "x": { "A": { "type": "string" }, "B": { "type": "integer" } }
+        });
+
+        let parsed = parse_schema(&value).expect("parses");
+
+        assert_eq!(schema_type_str(parsed.resolved_root()), Some("string"));
+    }
+
+    #[test]
+    fn unresolved_ref_does_not_fall_back_to_dynamic_ref() {
+        let value = json!({
+            "$ref": "#/x/Missing", "$dynamicRef": "#/x/B", "x": { "B": { "type": "integer" } }
+        });
+
+        let parsed = parse_schema(&value).expect("parses");
+
+        assert_eq!(unresolved_ref(&parsed.root), Some("#/x/Missing"));
+    }
+
+    #[test]
+    fn non_string_ref_value_is_ignored() {
+        let parsed = parse_schema(&json!({ "$ref": 5, "type": "string" })).expect("parses");
+
+        assert_eq!(schema_type_str(parsed.resolved_root()), Some("string"));
+        assert!(parsed.root.reference.is_none());
+    }
+
+    #[test]
+    fn property_named_dollar_ref_is_a_property_not_a_reference() {
+        let value = json!({ "properties": { "$ref": { "type": "string" } } });
+
+        let parsed = parse_schema(&value).expect("parses");
+
+        let property = property(parsed.resolved_root(), "$ref");
+        assert_eq!(schema_type_str(property), Some("string"));
+        assert!(property.reference.is_none());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // JSON pointers and anchors name places
+    // ══════════════════════════════════════════════════════════════════════════
+
+    #[rstest]
+    #[case::escaped_slash("#/definitions/a~1b", Some("string"))]
+    #[case::escaped_tilde("#/definitions/a~0b", Some("integer"))]
+    #[case::array_index("#/allOf/0", Some("boolean"))]
+    #[case::leading_zero_index("#/allOf/01", None)]
+    #[case::index_beyond_the_array("#/allOf/9", None)]
+    #[case::below_a_missing_key("#/definitions/Missing/x", None)]
+    #[case::percent_encoding_is_not_decoded("#/definitions/a%20b", None)]
+    fn pointer_tokens_are_read_as_rfc_6901_says(#[case] pointer: &str, #[case] ty: Option<&str>) {
+        let value = json!({
+            "properties": { "p": { "$ref": pointer } },
+            "allOf": [{ "type": "boolean" }],
+            "definitions": {
+                "a/b": { "type": "string" }, "a~b": { "type": "integer" },
+                "a b": { "type": "number" }
+            }
+        });
+
+        let parsed = parse_schema(&value).expect("parses");
+
+        let p = property(parsed.resolved_root(), "p");
+        match ty {
+            Some(ty) => assert_eq!(schema_type_str(parsed.resolve(p)), Some(ty)),
+            None => assert_eq!(unresolved_ref(p), Some(pointer)),
+        }
+    }
+
+    #[test]
+    fn hash_and_hash_slash_name_different_places() {
+        let value = json!({
+            "": { "type": "string" },
+            "type": "object",
+            "properties": { "a": { "$ref": "#/" }, "b": { "$ref": "#" } }
+        });
+
+        let parsed = parse_schema(&value).expect("parses");
+
+        let root = parsed.resolved_root();
+        assert_eq!(
+            schema_type_str(parsed.resolve(property(root, "a"))),
+            Some("string")
+        );
+        assert_eq!(
+            schema_type_str(parsed.resolve(property(root, "b"))),
+            Some("object")
+        );
+    }
+
+    #[rstest]
+    #[case::two_anchors(
+        json!({ "x-a": { "$anchor": "dup", "type": "string" },
+                "x-b": { "$anchor": "dup", "type": "integer" } })
+    )]
+    #[case::anchor_and_dynamic_anchor(
+        json!({ "x-a": { "$dynamicAnchor": "dup", "type": "string" },
+                "x-b": { "$anchor": "dup", "type": "integer" } })
+    )]
+    fn duplicate_anchor_names_resolve_to_the_first_in_document_order(#[case] mut value: Value) {
+        value["properties"] = json!({ "p": { "$ref": "#dup" } });
+
+        let parsed = parse_schema(&value).expect("parses");
+
+        let p = property(parsed.resolved_root(), "p");
+        assert_eq!(schema_type_str(parsed.resolve(p)), Some("string"));
+    }
+
+    #[test]
+    fn id_of_a_nested_schema_is_not_an_alias_of_its_location() {
+        let value = json!({
+            "properties": { "p": { "$ref": "https://example.com/inner.json" } },
+            "definitions": { "I": { "$id": "https://example.com/inner.json", "type": "string" } }
+        });
+
+        let parsed = parse_schema(&value).expect("parses");
+
+        assert_eq!(
+            unresolved_ref(property(parsed.resolved_root(), "p")),
+            Some("https://example.com/inner.json")
+        );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Documents and the location of a reference
+    // ══════════════════════════════════════════════════════════════════════════
+
+    const ROOT_URL: &str = "https://example.com/schemas/root.json";
+
+    #[test]
+    fn relative_remote_ref_in_a_local_target_uses_the_nearest_enclosing_id() {
+        let mut cache = cache_with(&[
+            (
+                "https://example.com/schemas/child.json",
+                json!({ "description": "WRONG" }),
+            ),
+            (
+                "https://example.com/schemas/sub/child.json",
+                json!({ "description": "RIGHT" }),
+            ),
+        ]);
+        let mut ctx = ParseContext::new(&mut cache, None);
+        let value = json!({
+            "$id": ROOT_URL,
+            "properties": { "q": { "$ref": "#/definitions/T" } },
+            "definitions": { "T": {
+                "$id": "sub/t.json", "properties": { "p": { "$ref": "child.json" } } } }
+        });
+
+        let parsed = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+
+        let t = parsed.resolve(property(parsed.resolved_root(), "q"));
+        assert_eq!(
+            parsed.resolve(property(t, "p")).description.as_deref(),
+            Some("RIGHT")
+        );
+    }
+
+    #[test]
+    fn relative_ref_in_a_target_resolves_against_the_target_not_the_referencing_site() {
+        let mut cache = cache_with(&[
+            (
+                "https://example.com/schemas/rel.json",
+                json!({ "description": "RIGHT" }),
+            ),
+            (
+                "https://other.example/rel.json",
+                json!({ "description": "WRONG" }),
+            ),
+        ]);
+        let mut ctx = ParseContext::new(&mut cache, None);
+        let value = json!({
+            "$id": ROOT_URL,
+            "properties": {
+                "x": { "$id": "https://other.example/x.json",
+                       "properties": { "u": { "$ref": "#/definitions/T" } } },
+                "y": { "$ref": "#/definitions/T" }
+            },
+            "definitions": { "T": { "properties": { "r": { "$ref": "rel.json" } } } }
+        });
+
+        let parsed = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+
+        let root = parsed.resolved_root();
+        let u = property(property(root, "x"), "u");
+        assert_eq!(target_of(u), target_of(property(root, "y")));
+        let r = property(parsed.resolve(u), "r");
+        assert_eq!(parsed.resolve(r).description.as_deref(), Some("RIGHT"));
+    }
+
+    #[rstest]
+    #[case::without_a_root_id(json!({}), "https://example.com/schemas/rel.json")]
+    #[case::with_a_root_id(
+        json!({ "$id": "https://example.com/other/root.json" }),
+        "https://example.com/other/rel.json"
+    )]
+    fn local_target_uses_the_root_id_or_else_the_document_url_as_base(
+        #[case] header: Value,
+        #[case] expected_url: &str,
+    ) {
+        let mut cache = cache_with(&[(expected_url, json!({ "description": "RIGHT" }))]);
+        let mut ctx = ParseContext::new(&mut cache, None);
+        let mut value = json!({
+            "properties": { "q": { "$ref": "#/definitions/T" } },
+            "definitions": { "T": { "$ref": "rel.json" } }
+        });
+        if let (Value::Object(map), Value::Object(header)) = (&mut value, header) {
+            map.extend(header);
+        }
+
+        let parsed = parse_with(&value, Some(ROOT_URL), Some(&mut ctx)).expect("parses");
+
+        let q = property(parsed.resolved_root(), "q");
+        assert_eq!(parsed.resolve(q).description.as_deref(), Some("RIGHT"));
+    }
+
+    // The base of a target is found by walking the raw objects above it, so an
+    // `$id` that sits on a container that is no schema moves the base too. The
+    // SSRF guard checks every resulting URL, so this costs no safety.
+    #[test]
+    fn id_on_a_container_above_a_target_moves_its_base_like_any_other_id() {
+        let mut cache = cache_with(&[(
+            "https://data.example/rel.json",
+            json!({ "description": "RIGHT" }),
+        )]);
+        let mut ctx = ParseContext::new(&mut cache, None);
+        let value = json!({
+            "properties": { "q": { "$ref": "#/x-data/inner" } },
+            "x-data": { "$id": "https://data.example/", "inner": {
+                "properties": { "p": { "$ref": "rel.json" } } } }
+        });
+
+        let parsed = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+
+        let inner = parsed.resolve(property(parsed.resolved_root(), "q"));
+        assert_eq!(
+            parsed.resolve(property(inner, "p")).description.as_deref(),
+            Some("RIGHT")
+        );
+    }
+
+    #[test]
+    fn fragment_ref_below_an_id_still_names_the_document_root() {
+        let value = json!({
+            "$id": ROOT_URL,
+            "properties": { "x": { "$id": "https://other.example/x.json",
+                                   "properties": { "p": { "$ref": "#/definitions/D" } } } },
+            "definitions": { "D": { "type": "string" } }
+        });
+
+        let parsed = parse_schema(&value).expect("parses");
+
+        let p = property(property(parsed.resolved_root(), "x"), "p");
+        assert_eq!(schema_type_str(parsed.resolve(p)), Some("string"));
+    }
+
+    // Depth-1: a document fetched for a `$ref` resolves the references that stay
+    // inside it, and none that reach another document, cached or not.
+    #[rstest]
+    fn fetched_document_resolves_only_references_inside_itself(
+        #[values(false, true)] cached: bool,
+    ) {
+        let b = "https://example.com/b.json";
+        let c = "https://example.com/c.json";
+        let mut entries = vec![(
+            b,
+            json!({
+                "properties": { "p": { "$ref": c }, "q": { "$ref": "#/x" }, "s": { "$ref": b } },
+                "x": { "description": "X" }
+            }),
+        )];
+        if cached {
+            entries.push((c, json!({ "description": "C" })));
+        }
+        let mut cache = cache_with(&entries);
+        let mut ctx = ParseContext::new(&mut cache, None);
+
+        let parsed = parse_with(&json!({ "$ref": b }), None, Some(&mut ctx)).expect("parses");
+
+        let b_root = parsed.resolved_root();
+        assert_eq!(unresolved_ref(property(b_root, "p")), Some(c));
+        assert_eq!(
+            parsed.resolve(property(b_root, "q")).description.as_deref(),
+            Some("X")
+        );
+        assert_eq!(
+            target_of(property(b_root, "s")),
+            target_of(&parsed.root),
+            "a fetched document's own URL names the document"
+        );
+        assert!(ctx.visited.is_empty(), "nothing was fetched");
+    }
+
+    #[test]
+    fn chain_of_cached_documents_is_entered_once() {
+        let url = |i: usize| format!("https://example.com/d{i}.json");
+        let entries: Vec<(String, Value)> = (0..100)
+            .map(|i| {
+                (
+                    url(i),
+                    json!({ "properties": { "next": { "$ref": url(i + 1) } } }),
+                )
+            })
+            .collect();
+        let mut cache = SchemaCache::new();
+        for (u, doc) in &entries {
+            cache.insert_document(u.clone(), doc.clone());
+        }
+        let mut ctx = ParseContext::new(&mut cache, None);
+
+        let parsed = parse_with(&json!({ "$ref": url(0) }), None, Some(&mut ctx)).expect("parses");
+
+        assert_eq!(parsed.targets.len(), 1);
+        let next = property(parsed.resolved_root(), "next");
+        assert_eq!(unresolved_ref(next), Some(url(1).as_str()));
+    }
+
+    #[test]
+    fn same_pointer_in_two_documents_names_two_targets() {
+        let b = "https://example.com/b.json";
+        let mut cache = cache_with(&[(
+            b,
+            json!({ "definitions": { "D": { "description": "REMOTE" } } }),
+        )]);
+        let mut ctx = ParseContext::new(&mut cache, None);
+        let value = json!({
+            "properties": { "a": { "$ref": "#/definitions/D" },
+                            "b": { "$ref": format!("{b}#/definitions/D") } },
+            "definitions": { "D": { "description": "MAIN" } }
+        });
+
+        let parsed = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+
+        let root = parsed.resolved_root();
+        let (a, b) = (property(root, "a"), property(root, "b"));
+        assert_ne!(target_of(a), target_of(b));
+        assert_eq!(parsed.resolve(a).description.as_deref(), Some("MAIN"));
+        assert_eq!(parsed.resolve(b).description.as_deref(), Some("REMOTE"));
+    }
+
+    #[test]
+    fn same_anchor_name_in_two_documents_resolves_per_document() {
+        let b = "https://example.com/b.json";
+        let mut cache = cache_with(&[(
+            b,
+            json!({ "x": { "$anchor": "n", "description": "REMOTE" } }),
+        )]);
+        let mut ctx = ParseContext::new(&mut cache, None);
+        let value = json!({
+            "properties": { "a": { "$ref": "#n" }, "b": { "$ref": format!("{b}#n") } },
+            "x": { "$anchor": "n", "description": "MAIN" }
+        });
+
+        let parsed = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+
+        let root = parsed.resolved_root();
+        assert_eq!(
+            parsed.resolve(property(root, "a")).description.as_deref(),
+            Some("MAIN")
+        );
+        assert_eq!(
+            parsed.resolve(property(root, "b")).description.as_deref(),
+            Some("REMOTE")
+        );
+    }
+
+    #[test]
+    fn id_of_a_fetched_document_does_not_name_it() {
+        let (b, other) = (
+            "https://example.com/b.json",
+            "https://example.com/other.json",
+        );
+        let mut cache = cache_with(&[(b, json!({ "$id": other, "description": "B" }))]);
+        let mut ctx = ParseContext::new(&mut cache, None);
+        let value = json!({ "properties": { "x": { "$ref": b }, "y": { "$ref": other } } });
+
+        let parsed = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+
+        let root = parsed.resolved_root();
+        assert_eq!(
+            parsed.resolve(property(root, "x")).description.as_deref(),
+            Some("B")
+        );
+        assert_eq!(unresolved_ref(property(root, "y")), Some(other));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Remote references in local targets: fetch limit and SSRF guard
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // A proxy on a closed port fails every fetch at once, without network.
+    const CLOSED_PROXY: &str = "http://127.0.0.1:1";
+
+    #[test]
+    fn fetch_limit_covers_references_inside_local_targets() {
+        let mut cache = SchemaCache::new();
+        let mut ctx = ParseContext::new(&mut cache, Some(CLOSED_PROXY));
+        let count = MAX_REMOTE_FETCH_COUNT + 5;
+        let mut properties = serde_json::Map::new();
+        let mut definitions = serde_json::Map::new();
+        for i in 0..count {
+            properties.insert(
+                format!("p{i}"),
+                json!({ "$ref": format!("#/definitions/D{i}") }),
+            );
+            definitions.insert(
+                format!("D{i}"),
+                json!({ "properties": { "r": { "$ref": format!("https://r{i}.invalid/x.json") } } }),
+            );
+        }
+        let value = json!({ "properties": properties, "definitions": definitions });
+
+        let parsed = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+
+        assert_eq!(ctx.visited.len(), MAX_REMOTE_FETCH_COUNT);
+        let unresolved = debug_of(&parsed).matches("Unresolved(").count();
+        assert_eq!(
+            unresolved, count,
+            "no fetch succeeds, so every reference is unresolved"
+        );
+    }
+
+    #[test]
+    fn failed_fetch_is_attempted_once_per_parse() {
+        let url = "https://r.invalid/x.json";
+        let mut cache = SchemaCache::new();
+        let mut ctx = ParseContext::new(&mut cache, Some(CLOSED_PROXY));
+        let value = json!({
+            "properties": { "a": { "$ref": url }, "b": { "$ref": "#/definitions/D" } },
+            "definitions": { "D": { "properties": { "r": { "$ref": url } } } }
+        });
+
+        let parsed = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+
+        assert_eq!(ctx.visited.len(), 1);
+        assert_eq!(debug_of(&parsed).matches("Unresolved(").count(), 2);
+    }
+
+    #[rstest]
+    #[case::loopback("http://127.0.0.1/evil.json", None)]
+    #[case::link_local("http://169.254.169.254/latest", None)]
+    #[case::private("http://10.0.0.1/x.json", None)]
+    #[case::ipv6_loopback("http://[::1]/x.json", None)]
+    #[case::ipv4_mapped_ipv6("http://[::ffff:127.0.0.1]/x.json", None)]
+    #[case::decimal_ipv4("http://2130706433/x.json", None)]
+    #[case::file_scheme("file:///etc/passwd", None)]
+    #[case::ftp_scheme("ftp://example.com/x.json", None)]
+    #[case::relative_against_a_loopback_id("meta.json", Some("http://127.0.0.1/"))]
+    #[case::relative_against_a_link_local_id("meta.json", Some("http://169.254.169.254/"))]
+    fn blocked_ref_inside_a_local_target_stays_unresolved(
+        #[case] ref_str: &str,
+        #[case] id: Option<&str>,
+    ) {
+        let mut cache = SchemaCache::new();
+        let mut ctx = ParseContext::new(&mut cache, Some(CLOSED_PROXY));
+        let mut value = json!({
+            "properties": { "p": { "$ref": "#/definitions/T" } },
+            "definitions": { "T": { "properties": { "r": { "$ref": ref_str } } } }
+        });
+        if let Some(id) = id {
+            value["$id"] = json!(id);
+        }
+
+        let parsed = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+
+        let t = parsed.resolve(property(parsed.resolved_root(), "p"));
+        assert_eq!(unresolved_ref(property(t, "r")), Some(ref_str));
+        assert!(ctx.visited.is_empty(), "nothing is fetched");
+        assert!(!ctx.cache.contains_document(ref_str));
+    }
+
+    #[test]
+    fn cached_document_for_a_blocked_url_is_not_served_to_a_local_target() {
+        let url = "http://127.0.0.1/evil.json";
+        let mut cache = cache_with(&[(url, json!({ "description": "EVIL" }))]);
+        let mut ctx = ParseContext::new(&mut cache, None);
+        let value = json!({
+            "properties": { "p": { "$ref": "#/definitions/T" } },
+            "definitions": { "T": { "$ref": url } }
+        });
+
+        let parsed = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+
+        assert_eq!(
+            unresolved_ref(property(parsed.resolved_root(), "p")),
+            Some(url)
+        );
+    }
+
+    #[test]
+    fn root_id_naming_a_blocked_url_is_no_way_around_the_guard() {
+        let url = "http://127.0.0.1/s.json";
+        let mut cache = SchemaCache::new();
+        let mut ctx = ParseContext::new(&mut cache, Some(CLOSED_PROXY));
+        let value = json!({ "$id": url, "properties": { "p": { "$ref": format!("{url}#/definitions/D") } },
+                            "definitions": { "D": { "type": "string" } } });
+
+        let parsed = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+
+        assert!(unresolved_ref(property(parsed.resolved_root(), "p")).is_some());
+        assert!(ctx.visited.is_empty());
+    }
+
+    // The root document's `$id` names the root document, and nothing is read
+    // from or written to the cache under it.
+    #[test]
+    fn root_id_names_the_root_document_and_never_touches_the_cache() {
+        let id = "https://trusted.example/s.json";
+        let mut cache = cache_with(&[(
+            id,
+            json!({ "definitions": { "y": { "description": "CACHED" } } }),
+        )]);
+        let before = cache.get_document(id).cloned();
+        let value = json!({
+            "$id": id,
+            "properties": { "p": { "$ref": format!("{id}#/definitions/y") } },
+            "definitions": { "y": { "description": "OWN" } }
+        });
+
+        let mut ctx = ParseContext::new(&mut cache, None);
+        let parsed = parse_with(
+            &value,
+            Some("https://other.example/doc.json"),
+            Some(&mut ctx),
+        )
+        .expect("parses");
+
+        assert_eq!(
+            parsed
+                .resolve(property(parsed.resolved_root(), "p"))
+                .description
+                .as_deref(),
+            Some("OWN")
+        );
+        assert!(ctx.visited.is_empty());
+        assert_eq!(cache.get_document(id).cloned(), before);
+        assert!(!cache.contains_document("https://other.example/doc.json"));
+    }
+
+    #[test]
+    fn document_deeper_than_the_limit_in_the_cache_is_not_entered() {
+        test_support::on_a_small_stack(|| {
+            let url = "https://example.com/deep.json";
+            // Building, copying, or dropping the document recursively would
+            // overflow a small stack on its own, so only move it.
+            let mut deep = json!({ "description": "DEEP" });
+            for _ in 0..5_000 {
+                deep = Value::Array(vec![deep]);
+            }
+            let mut cache = SchemaCache::new();
+            cache.insert_document(url.to_string(), deep);
+            let mut ctx = ParseContext::new(&mut cache, None);
+
+            let parsed = parse_with(&json!({ "$ref": url }), None, Some(&mut ctx)).expect("parses");
+
+            assert_eq!(unresolved_ref(&parsed.root), Some(url));
+            std::mem::forget(cache);
+        });
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Work stays bounded for hostile identifiers and keys
+    // ══════════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn huge_id_and_many_relative_refs_resolve_nothing_and_fetch_nothing() {
+        let mut cache = SchemaCache::new();
+        let mut ctx = ParseContext::new(&mut cache, Some(CLOSED_PROXY));
+        let mut properties = serde_json::Map::new();
+        for i in 0..5_000 {
+            properties.insert(format!("p{i}"), json!({ "$ref": format!("rel{i}.json") }));
+        }
+        let id = format!("https://example.com/{}/", "a".repeat(1 << 20));
+        let value = json!({ "$id": id, "properties": properties });
+
+        let parsed = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+
+        assert!(ctx.visited.is_empty());
+        assert_eq!(debug_of(&parsed).matches("Unresolved(").count(), 5_000);
+    }
+
+    #[test]
+    fn ref_with_a_huge_uri_part_is_unresolved_and_not_fetched() {
+        let mut cache = SchemaCache::new();
+        let mut ctx = ParseContext::new(&mut cache, Some(CLOSED_PROXY));
+        let ref_str = format!("https://example.com/{}.json", "a".repeat(1 << 20));
+
+        let parsed = parse_with(&json!({ "$ref": ref_str }), None, Some(&mut ctx)).expect("parses");
+
+        assert!(unresolved_ref(&parsed.root).is_some());
+        assert!(ctx.visited.is_empty());
+    }
+
+    #[test]
+    fn anchors_below_a_huge_key_do_not_copy_the_key() {
+        let key = "k".repeat(256 * 1024);
+        let mut anchors = serde_json::Map::new();
+        let mut properties = serde_json::Map::new();
+        for i in 0..4_000 {
+            anchors.insert(
+                format!("a{i}"),
+                json!({ "$anchor": format!("n{i}"), "type": "string" }),
+            );
+            properties.insert(format!("p{i}"), json!({ "$ref": format!("#n{i}") }));
+        }
+        let value = json!({ key: anchors, "properties": properties });
+
+        let parsed = parse_schema(&value).expect("parses");
+
+        assert_eq!(parsed.targets.len(), 4_000);
+        assert_well_formed(&parsed);
+    }
+
+    #[test]
+    fn parsing_twice_gives_the_same_table() {
+        let value = json!({
+            "properties": { "a": { "$ref": "#/definitions/A" }, "b": { "$ref": "#/definitions/B" } },
+            "definitions": { "A": { "properties": { "x": { "$ref": "#/definitions/B" } } },
+                             "B": { "type": "string" } }
+        });
+
+        let first = parse_schema(&value).expect("parses");
+        let second = parse_schema(&value).expect("parses");
+
+        assert_eq!(first.targets.len(), second.targets.len());
+        let mut ids = (target_ids_of(&first), target_ids_of(&second));
+        ids.0.sort_unstable();
+        ids.1.sort_unstable();
+        assert_eq!(ids.0, ids.1);
+        assert_eq!(node_count(&first), node_count(&second));
     }
 }

@@ -64,7 +64,7 @@ schema-failure Warning instead of applying part of it.
 - [x] Task 4: consumers follow reference nodes
 - [x] Task 5: remote documents are cached raw and parsed only as
       targets
-- [ ] Task 6: each `$ref` target is parsed once and shared
+- [x] Task 6: each `$ref` target is parsed once and shared
 - [ ] Task 7: a schema over the size budget is rejected with a
       Warning
 - [ ] Push to `main` and confirm the full CI matrix is green
@@ -205,46 +205,46 @@ https://raw.githubusercontent.com/json-schema-org/json-schema-spec/20a3fee852db8
 licensed AFL or BSD by its repository; it is used under
 BSD-3-Clause.
 
-- [ ] For the vendored draft-07 meta-schema and each vendored
+- [x] For the vendored draft-07 meta-schema and each vendored
       fixture, the parsed schema has no more nodes than its
       source documents have JSON values
-- [ ] A schema with a chain of 10 000 distinct definitions, each
+- [x] A schema with a chain of 10 000 distinct definitions, each
       referencing the next, parses without a stack overflow
-- [ ] An integration test in `rlsp-yaml/tests/lsp_lifecycle/`
+- [x] An integration test in `rlsp-yaml/tests/lsp_lifecycle/`
       opens a document whose schema is the draft-07 meta-schema
       and receives its schema diagnostics, including one for a
       value nested deeper than 32 schema levels
-- [ ] Remote `$ref`s inside local targets resolve, against the
+- [x] Remote `$ref`s inside local targets resolve, against the
       nearest enclosing `$id` or the document's URL, within the
       fetch limit and the SSRF guard; references inside a fetched
       document that point to further remote documents stay
       unresolved
-- [ ] A pure reference cycle such as a target whose only keyword
+- [x] A pure reference cycle such as a target whose only keyword
       is `$ref` to itself is permissive, `$dynamicRef` keeps its
       static resolution, and keywords next to `$ref` stay
       ignored
-- [ ] `MAX_REF_DEPTH` no longer exists, and no comment describes
+- [x] `MAX_REF_DEPTH` no longer exists, and no comment describes
       `$ref` targets as copied or recursion as cut at a depth
-- [ ] `parse_schema` returns `Result<ParsedSchema, SchemaError>`:
+- [x] `parse_schema` returns `Result<ParsedSchema, SchemaError>`:
       `ParseFailed` for a root that is boolean `false` or not an
       object, `TooDeep` for JSON nested deeper than
       `MAX_JSON_DEPTH`; `fetch_schema_raw` reports the same errors
       for the documents it parses
-- [ ] The step-budget fixture tests pass with their assertions
+- [x] The step-budget fixture tests pass with their assertions
       unchanged
-- [ ] `tests/fixtures/schemas/README.md` lists the draft-07
+- [x] `tests/fixtures/schemas/README.md` lists the draft-07
       meta-schema with its pinned source, its licence, and the
       copyright notice of the json-schema-spec repository, and
       describes what the directory's schemas are used for
-- [ ] `rlsp-yaml/docs/configuration.md` no longer names a `$ref`
+- [x] `rlsp-yaml/docs/configuration.md` no longer names a `$ref`
       resolution depth and tells the reader that recursive
       schemas are followed without a fixed `$ref` depth, within
       the limits its Schema Validation Limits section describes
-- [ ] `rlsp-yaml/docs/feature-log.md` records that `$ref` targets
+- [x] `rlsp-yaml/docs/feature-log.md` records that `$ref` targets
       are shared, so self-referencing schemas such as the JSON
       Schema meta-schemas load and are no longer cut at a fixed
       `$ref` depth
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ### Task 7: Reject a schema over the size budget
 

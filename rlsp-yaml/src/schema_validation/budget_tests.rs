@@ -46,8 +46,15 @@ fn fixture_schema(raw: &str) -> ParsedSchema {
     parse_schema(&value).expect("fixture is a schema")
 }
 
+/// The root schema of `raw`, for schemas without `$ref`: the target table is
+/// not carried along, so a schema with references would read as permissive.
 fn schema_of(raw: &serde_json::Value) -> JsonSchema {
-    parse_schema(raw).expect("valid schema").root
+    let parsed = parse_schema(raw).expect("valid schema");
+    assert!(
+        !format!("{parsed:?}").contains("Target("),
+        "schema_of drops the target table; use parse_schema for schemas with $ref"
+    );
+    parsed.root
 }
 
 /// Validate `text` against `raw_schema` within a budget of `steps`.

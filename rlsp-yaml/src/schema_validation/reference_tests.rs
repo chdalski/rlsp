@@ -266,9 +266,7 @@ fn a_target_shared_by_two_positions_validates_each_use() {
 #[test]
 fn an_unresolved_reference_validates_permissively() {
     let node = JsonSchema {
-        reference: Some(crate::schema::SchemaRef::Unresolved(
-            "#/missing".to_string(),
-        )),
+        reference: Some(crate::schema::SchemaRef::Unresolved("#/missing".into())),
         ..JsonSchema::default()
     };
     let schema = ParsedSchema::new(JsonSchema {
@@ -785,4 +783,50 @@ fn embedded_documents_nest_up_to_the_content_limit(
         result.diagnostics
     );
     assert_eq!(result.completeness, completeness);
+}
+
+// ── Schemas the parser builds: recursion is followed at any depth ───────────
+
+/// A document that nests `next` mappings `depth` levels and ends in `leaf`.
+fn nested_next_document(depth: usize, leaf_value: &str) -> String {
+    let parents = (0..depth).map(|level| "  ".repeat(level) + "next:");
+    let leaf = "  ".repeat(depth) + "leaf: " + leaf_value;
+    parents.chain([leaf]).collect::<Vec<_>>().join("\n") + "\n"
+}
+
+fn recursive_schema() -> ParsedSchema {
+    crate::schema::parse_schema(&serde_json::json!({
+        "properties": { "next": { "$ref": "#" }, "leaf": { "type": "integer" } }
+    }))
+    .expect("recursive schema parses")
+}
+
+// The schema used to be cut at 32 levels, so a leaf nested deeper was not
+// checked at all.
+#[rstest]
+#[case::shallow(5)]
+#[case::just_inside_the_old_cut(31)]
+#[case::beyond_the_old_cut(33)]
+#[case::well_beyond_the_old_cut(40)]
+fn recursive_schema_flags_a_leaf_at_any_nesting_depth(#[case] depth: usize) {
+    let diagnostics = diagnostics_of(&recursive_schema(), &nested_next_document(depth, "x"));
+
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].range.start.line as usize, depth);
+}
+
+#[test]
+fn recursive_schema_accepts_a_valid_deep_document() {
+    let diagnostics = diagnostics_of(&recursive_schema(), &nested_next_document(40, "1"));
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+}
+
+#[test]
+fn recursive_schema_ends_on_a_document_past_the_validation_depth_limit() {
+    on_a_small_stack(|| {
+        let text = nested_next_document(100, "x");
+
+        let _ = diagnostics_of(&recursive_schema(), &text);
+    });
 }

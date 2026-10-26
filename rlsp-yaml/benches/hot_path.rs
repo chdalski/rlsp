@@ -115,7 +115,7 @@ fn bench_composition_validation(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("composition_validation");
     for (name, raw) in &cases {
-        let Some(schema) = rlsp_yaml::schema::parse_schema(raw) else {
+        let Ok(schema) = rlsp_yaml::schema::parse_schema(raw) else {
             continue;
         };
         group.bench_with_input(BenchmarkId::from_parameter(name), &schema, |b, schema| {

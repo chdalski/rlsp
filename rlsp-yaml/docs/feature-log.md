@@ -31,6 +31,15 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### Shared `$ref` Targets [completed]
+
+**Date:** 2026-10-26
+**Description:** Each `$ref` target is parsed once and shared, so self-referencing schemas such as the JSON Schema meta-schemas load and are no longer cut at a fixed `$ref` depth. Documents nested deeper than 32 schema levels are validated against the full recursive schema and report the diagnostics it implies. A `$ref` that points to a remote document now also resolves inside definitions and other targets that the schema reaches through a local `$ref`, subject to the same fetch limit and URL restrictions as before.
+**Complexity:** High
+**Tier:** 1
+
+---
+
 ### Complete Schema Composition Support [completed]
 
 **Date:** 2026-10-24
@@ -145,7 +154,7 @@ corresponding plan file under `.ai/plans/`.
 
 **Description:** Parse `$id` (Draft-06+) and `id` (Draft-04) to establish base URIs for relative `$ref` resolution. Thread base URI through schema parsing.
 **Complexity:** Medium-High
-**Comment:** Foundational for remote `$ref` support. Nested schemas can override the parent's base URI. Requires threading base URI through `parse_schema_with_root`.
+**Comment:** Foundational for remote `$ref` support. Nested schemas can override the parent's base URI.
 **Tier:** 1
 
 ### Remote `$ref` Resolution [completed]
