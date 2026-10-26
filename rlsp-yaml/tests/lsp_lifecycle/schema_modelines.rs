@@ -240,7 +240,7 @@ async fn should_exercise_schema_lookup_in_completion() {
 const MANY_BRANCHES_SCHEMA_URL: &str = "https://example.com/many-branches.json";
 
 /// A schema whose `keyword` holds 25 branches, branch `i` requiring `field_i`.
-fn many_branches_schema(keyword: &str) -> rlsp_yaml::schema::JsonSchema {
+fn many_branches_schema(keyword: &str) -> rlsp_yaml::schema::ParsedSchema {
     let branches: Vec<_> = (0..25)
         .map(|i| json!({ "required": [format!("field_{i}")] }))
         .collect();

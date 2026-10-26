@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
@@ -394,9 +394,13 @@ impl Backend {
     /// `schema_url` must be a valid `https://` URL (the same value used in the
     /// modeline), since `validate_and_normalize_url` only permits http/https.
     #[doc(hidden)]
-    pub fn seed_schema_cache(&self, schema_url: &str, schema: crate::schema::JsonSchema) {
+    pub fn seed_schema_cache(&self, schema_url: &str, schema: crate::schema::ParsedSchema) {
         if let Ok(mut cache) = self.schema_cache.lock() {
-            cache.insert(schema_url.to_string(), serde_json::Value::Null, schema);
+            cache.insert(
+                schema_url.to_string(),
+                serde_json::Value::Null,
+                Arc::new(schema),
+            );
         }
     }
 
@@ -514,7 +518,7 @@ impl Backend {
                 }
 
                 let fetched = match fetch_result {
-                    Ok(fetched) => Some(fetched),
+                    Ok((value, schema)) => Some((value, Arc::new(schema))),
                     Err(e) => {
                         self.log_schema_failure(source, &url, &e).await;
                         None
@@ -524,7 +528,7 @@ impl Backend {
                 if let Some((ref v, ref s)) = fetched
                     && let Ok(mut cache) = self.schema_cache.lock()
                 {
-                    cache.insert(url, v.clone(), s.clone());
+                    cache.insert(url, v.clone(), Arc::clone(s));
                 }
                 fetched.map(|(_, s)| s)
             };
@@ -994,7 +998,7 @@ impl LanguageServer for Backend {
                 .and_then(|cache| cache.get(&url).cloned())
         });
 
-        Ok(crate::hover::hover_at(&docs, position, schema.as_ref()))
+        Ok(crate::hover::hover_at(&docs, position, schema.as_deref()))
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
@@ -1034,7 +1038,7 @@ impl LanguageServer for Backend {
         let items = crate::completion::complete_at(
             docs.as_deref().unwrap_or(&[]),
             position,
-            schema.as_ref(),
+            schema.as_deref(),
         );
         if items.is_empty() {
             return Ok(None);
@@ -1278,7 +1282,7 @@ impl LanguageServer for Backend {
             .ok()
             .and_then(|cache| cache.get(&url).cloned());
 
-        let lenses = crate::decorators::code_lens::code_lenses(&url, schema.as_ref());
+        let lenses = crate::decorators::code_lens::code_lenses(&url, schema.as_deref());
         if lenses.is_empty() {
             return Ok(None);
         }

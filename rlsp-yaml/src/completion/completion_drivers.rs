@@ -139,7 +139,7 @@ mod tests {
         integer_schema, labels, object_schema, pos, string_schema,
     };
     use crate::completion::complete_at;
-    use crate::schema::{JsonSchema, SchemaType};
+    use crate::schema::{JsonSchema, ParsedSchema, SchemaType};
     use crate::test_utils::parse_docs;
     use serde_json::json;
 
@@ -163,7 +163,7 @@ mod tests {
     fn complete_on_key_excludes_cursor_key_from_schema_results() {
         let docs = parse_docs("name: Alice\n");
         let schema = object_schema(vec![("name", string_schema()), ("city", string_schema())]);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
         let ls = labels(&result);
         assert!(!ls.contains(&"name"), "cursor key should be excluded");
         assert!(ls.contains(&"city"), "schema property 'city' should appear");
@@ -177,7 +177,7 @@ mod tests {
             ("age", integer_schema()),
             ("city", string_schema()),
         ]);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
         let ls = labels(&result);
         assert!(ls.contains(&"city"), "should suggest 'city'");
         assert!(!ls.contains(&"name"), "cursor key excluded");
@@ -188,7 +188,7 @@ mod tests {
     fn complete_on_key_falls_back_to_structural_when_schema_has_no_properties() {
         let docs = parse_docs("name: Alice\nage: 30\n");
         let schema = string_schema();
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
         let ls = labels(&result);
         assert!(ls.contains(&"age"), "structural fallback: sibling 'age'");
         assert!(
@@ -210,7 +210,7 @@ mod tests {
                 ..JsonSchema::default()
             },
         )]);
-        let result = complete_at(&docs, pos(0, 5), Some(&schema));
+        let result = complete_at(&docs, pos(0, 5), Some(&ParsedSchema::new(schema)));
         let ls = labels(&result);
         assert!(ls.contains(&"prod"));
         assert!(ls.contains(&"staging"));
@@ -238,7 +238,7 @@ mod tests {
     fn complete_on_value_falls_back_to_structural_when_no_enum_in_schema() {
         let docs = parse_docs("kind: app\nkind: \n");
         let schema = object_schema(vec![("kind", string_schema())]);
-        let result = complete_at(&docs, pos(1, 6), Some(&schema));
+        let result = complete_at(&docs, pos(1, 6), Some(&ParsedSchema::new(schema)));
         let ls = labels(&result);
         assert!(
             ls.contains(&"app"),
@@ -284,7 +284,7 @@ mod tests {
                 ..JsonSchema::default()
             },
         )]);
-        let result = complete_at(&docs, pos(2, 4), Some(&schema));
+        let result = complete_at(&docs, pos(2, 4), Some(&ParsedSchema::new(schema)));
         let ls = labels(&result);
         assert!(ls.contains(&"id"), "schema-sourced 'id' should appear");
         assert!(!ls.contains(&"name"), "present key excluded");

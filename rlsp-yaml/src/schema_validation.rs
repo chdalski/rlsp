@@ -5,7 +5,7 @@ use rlsp_yaml_parser::node::{Document, Node};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
 
 use crate::lsp_util::span_to_lsp;
-use crate::schema::JsonSchema;
+use crate::schema::{JsonSchema, ParsedSchema};
 use crate::server::YamlVersion;
 
 mod array_constraints;
@@ -62,12 +62,12 @@ pub struct Validation {
 #[must_use]
 pub fn validate_schema(
     docs: &[Document<Span>],
-    schema: &JsonSchema,
+    schema: &ParsedSchema,
     format_validation: bool,
     yaml_version: YamlVersion,
 ) -> Validation {
     let budget = Budget::new(step_budget(docs));
-    validate_documents(docs, schema, format_validation, yaml_version, &budget)
+    validate_documents(docs, &schema.root, format_validation, yaml_version, &budget)
 }
 
 /// [`validate_schema`] with an explicit `budget`, so tests can pick its size and
@@ -294,7 +294,7 @@ mod tests {
     use tower_lsp::lsp_types::{DiagnosticSeverity, NumberOrString};
 
     use super::*;
-    use crate::schema::{AdditionalProperties, JsonSchema, SchemaType};
+    use crate::schema::{AdditionalProperties, JsonSchema, ParsedSchema, SchemaType};
     use crate::test_utils::parse_docs;
     use serde_json::json;
 
@@ -316,7 +316,8 @@ mod tests {
         let schema = object_schema_with_props(vec![("server", server_schema)]);
         let text = "server:\n  port: not-an-int";
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaType");
     }
@@ -347,7 +348,8 @@ mod tests {
         };
         let text = "a:\n  b:\n    c:\n      d: hello";
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &l1, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(l1), true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -369,7 +371,7 @@ mod tests {
         let text = "x:\n".repeat(25) + "  value: leaf";
         let docs = parse_docs(&text);
         // Must complete without panic
-        let _ = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let _ = validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2);
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -383,7 +385,8 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("age: 30");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(!result.is_empty());
         assert!(
             result
@@ -421,7 +424,8 @@ mod tests {
         #[case] expected_code: &str,
     ) {
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(!result.is_empty());
         assert_eq!(
             result[0].code,
@@ -437,7 +441,8 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("name: Alice\nextra: value");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         let ap_diags: Vec<_> = result
             .iter()
             .filter(|d| code_of(d) == "schemaAdditionalProperty")
@@ -473,7 +478,8 @@ mod tests {
     )]
     fn violation_produces_error_severity(#[case] schema: JsonSchema, #[case] text: &str) {
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(!result.is_empty());
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
     }
@@ -486,7 +492,8 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("name: Alice\nextra: value");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         let ap = result
             .iter()
             .find(|d| code_of(d) == "schemaAdditionalProperty")
@@ -504,7 +511,8 @@ mod tests {
         let schema = object_schema_with_props(vec![("spec", spec_schema)]);
         let text = "spec:\n  other: value";
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(!result.is_empty());
         let msg = &result[0].message;
         assert!(
@@ -523,7 +531,8 @@ mod tests {
             },
         )]);
         let docs = parse_docs("env: testing");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(!result.is_empty());
         let msg = &result[0].message;
         assert!(msg.contains("prod"), "message should contain 'prod'");
@@ -541,7 +550,8 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -551,7 +561,8 @@ mod tests {
             required: Some(vec!["name".to_string()]),
             ..JsonSchema::default()
         };
-        let result = validate_schema(&[], &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&[], &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -559,7 +570,8 @@ mod tests {
     fn should_return_empty_for_schema_with_no_constraints() {
         let schema = JsonSchema::default();
         let docs = parse_docs("anything: value\nnested:\n  key: 123");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -570,7 +582,8 @@ mod tests {
             ..JsonSchema::default()
         };
         // Simulate parse failure by passing empty docs slice
-        let result = validate_schema(&[], &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&[], &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -582,7 +595,8 @@ mod tests {
         };
         let text = "name: Alice\n---\nage: 30";
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         // Second document is missing "name"
         assert_eq!(
             result
@@ -600,7 +614,8 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("anything: value");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -631,7 +646,7 @@ mod tests {
         text.push_str(&"  ".repeat(levels));
         text.push_str("42\n");
         let docs = parse_docs(&text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2);
         assert_eq!(result.completeness, Completeness::Complete);
     }
 
@@ -656,7 +671,7 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("other: value");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2);
         assert_eq!(result.completeness, Completeness::Complete);
         assert_eq!(result.diagnostics.len(), 1);
         assert!(
@@ -674,7 +689,7 @@ mod tests {
         };
         // Only field_0 is present — the other 24 branches are unsatisfied
         let docs = parse_docs("field_0: value");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+        let result = validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2);
         assert_eq!(result.completeness, Completeness::Complete);
         let missing: Vec<&str> = result
             .diagnostics
@@ -714,7 +729,8 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("age: 30");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(!result.is_empty());
         // Message must not contain the full 1000-char description
         for d in &result {
@@ -739,7 +755,8 @@ mod tests {
             },
         )]);
         let docs = parse_docs("env: invalid");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(!result.is_empty());
         assert_eq!(code_of(&result[0]), "schemaEnum");
         // Message must be bounded — 50 values * ~6 chars each would be ~300+
@@ -762,7 +779,8 @@ mod tests {
         };
         let schema = object_schema_with_props(vec![("env", env_schema)]);
         let docs = parse_docs("env: testing");
-        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2).diagnostics;
+        let result = validate_schema(&docs, &ParsedSchema::new(schema), false, YamlVersion::V1_2)
+            .diagnostics;
         let diag = result
             .iter()
             .find(|d| code_of(d) == "schemaEnum")
@@ -791,7 +809,7 @@ mod tests {
             &budget,
         )
         .with_mode(mode);
-        validate_node(&docs[0].root, &schema, &[], &mut ctx, 0);
+        validate_node(&docs[0].root, &schema.root, &[], &mut ctx, 0);
         diagnostics.len()
     }
 

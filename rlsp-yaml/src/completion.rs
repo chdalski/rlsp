@@ -6,7 +6,7 @@ use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::Document;
 use tower_lsp::lsp_types::{CompletionItem, Position};
 
-use crate::schema::JsonSchema;
+use crate::schema::ParsedSchema;
 
 mod completion_drivers;
 mod completion_items;
@@ -35,8 +35,9 @@ use support::MAX_COMPLETION_ITEMS;
 pub fn complete_at(
     docs: &[Document<Span>],
     position: Position,
-    schema: Option<&JsonSchema>,
+    schema: Option<&ParsedSchema>,
 ) -> Vec<CompletionItem> {
+    let schema = schema.map(|s| &s.root);
     let cursor_line = position.line as usize;
     let mut items = match locate_cursor(docs, position) {
         CursorLocation::OutsideAny => Vec::new(),
@@ -301,7 +302,7 @@ mod tests {
     fn cross_document_label_not_contaminated(
         #[case] text: &str,
         #[case] cursor: tower_lsp::lsp_types::Position,
-        #[case] schema: Option<&JsonSchema>,
+        #[case] schema: Option<&ParsedSchema>,
         #[case] absent_label: &str,
     ) {
         let docs = parse_docs(text);
@@ -318,7 +319,7 @@ mod tests {
         let schema = object_schema(vec![("name", string_schema()), ("age", integer_schema())]);
         let text = "name: Alice\n---\nage: 30\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(2, 0), Some(&schema));
+        let result = complete_at(&docs, pos(2, 0), Some(&ParsedSchema::new(schema)));
 
         let ls = labels(&result);
         assert!(
@@ -400,6 +401,7 @@ mod tests {
         #[case] schema: Option<JsonSchema>,
     ) {
         let docs = parse_docs(text);
+        let schema = schema.map(ParsedSchema::new);
         let result = complete_at(&docs, cursor, schema.as_ref());
         assert!(
             result.is_empty(),
@@ -440,7 +442,7 @@ mod tests {
             ("age", integer_schema()),
             ("city", string_schema()),
         ]);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
         let ls = labels(&result);
         assert!(ls.contains(&"city"), "should suggest 'city', got: {ls:?}");
         assert!(
@@ -464,7 +466,7 @@ mod tests {
                 ..JsonSchema::default()
             },
         )]);
-        let result = complete_at(&docs, pos(0, 5), Some(&schema));
+        let result = complete_at(&docs, pos(0, 5), Some(&ParsedSchema::new(schema)));
         let ls = labels(&result);
         assert!(ls.contains(&"prod"), "should suggest 'prod', got: {ls:?}");
         assert!(
@@ -521,7 +523,7 @@ mod tests {
             "server",
             object_schema(vec![("host", string_schema()), ("port", integer_schema())]),
         )]);
-        let result = complete_at(&docs, pos(2, 2), Some(&schema));
+        let result = complete_at(&docs, pos(2, 2), Some(&ParsedSchema::new(schema)));
         let ls = labels(&result);
         assert!(
             ls.contains(&"port"),
@@ -559,7 +561,7 @@ mod tests {
                 ..JsonSchema::default()
             },
         )]);
-        let result = complete_at(&docs, pos(2, 2), Some(&schema));
+        let result = complete_at(&docs, pos(2, 2), Some(&ParsedSchema::new(schema)));
         let ls = labels(&result);
         assert!(
             ls.contains(&"port"),

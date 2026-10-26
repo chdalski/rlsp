@@ -425,7 +425,7 @@ mod tests {
     use rstest::rstest;
     use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString};
 
-    use crate::schema::{JsonSchema, SchemaType};
+    use crate::schema::{JsonSchema, ParsedSchema, SchemaType};
     use crate::schema_validation::validate_schema;
     use crate::server::YamlVersion;
     use crate::test_utils::parse_docs;
@@ -448,7 +448,7 @@ mod tests {
     fn run_format(text: &str, fmt: &str) -> Vec<Diagnostic> {
         let schema = format_schema(fmt);
         let docs = parse_docs(text);
-        validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics
+        validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -679,7 +679,8 @@ mod tests {
     fn format_validation_disabled_produces_no_format_diagnostics() {
         let schema = format_schema("date");
         let docs = parse_docs("not-a-date");
-        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2).diagnostics;
+        let result = validate_schema(&docs, &ParsedSchema::new(schema), false, YamlVersion::V1_2)
+            .diagnostics;
         assert!(result.is_empty());
     }
 }

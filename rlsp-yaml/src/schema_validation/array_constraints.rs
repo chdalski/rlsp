@@ -247,7 +247,7 @@ mod tests {
     use tower_lsp::lsp_types::{DiagnosticSeverity, Position};
 
     use crate::schema::parse_schema;
-    use crate::schema::{AdditionalProperties, JsonSchema, SchemaType};
+    use crate::schema::{AdditionalProperties, JsonSchema, ParsedSchema, SchemaType};
     use crate::server::YamlVersion;
     use crate::test_utils::parse_docs;
     use rlsp_yaml_parser::node::Node;
@@ -270,7 +270,8 @@ mod tests {
         )]);
         let text = "ports:\n  - 8080\n  - not-an-int";
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaType");
     }
@@ -287,7 +288,8 @@ mod tests {
         )]);
         let text = "ports:\n  - 8080\n  - 9090";
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -328,7 +330,8 @@ mod tests {
         #[case] expected_code: &str,
     ) {
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), expected_code);
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::ERROR));
@@ -357,7 +360,8 @@ mod tests {
         #[case] text: &str,
     ) {
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -379,7 +383,8 @@ mod tests {
     fn should_produce_no_diagnostics_when_array_has_one_matching_item_no_min_max() {
         let schema = object_schema_with_props(vec![("items", contains_schema(None, None))]);
         let docs = parse_docs("items:\n  - 1\n  - hello");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -387,7 +392,8 @@ mod tests {
     fn should_produce_diagnostic_when_no_items_match_contains_schema() {
         let schema = object_schema_with_props(vec![("items", contains_schema(None, None))]);
         let docs = parse_docs("items:\n  - hello\n  - world");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("at least 1"));
     }
@@ -396,7 +402,8 @@ mod tests {
     fn should_produce_diagnostic_when_min_contains_not_met() {
         let schema = object_schema_with_props(vec![("items", contains_schema(Some(2), None))]);
         let docs = parse_docs("items:\n  - 1\n  - hello");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("at least 2"));
     }
@@ -405,7 +412,8 @@ mod tests {
     fn should_produce_no_diagnostics_when_min_contains_met() {
         let schema = object_schema_with_props(vec![("items", contains_schema(Some(2), None))]);
         let docs = parse_docs("items:\n  - 1\n  - 2");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -413,7 +421,8 @@ mod tests {
     fn should_produce_diagnostic_when_max_contains_exceeded() {
         let schema = object_schema_with_props(vec![("items", contains_schema(None, Some(1)))]);
         let docs = parse_docs("items:\n  - 1\n  - 2");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("at most 1"));
     }
@@ -422,7 +431,8 @@ mod tests {
     fn should_produce_no_diagnostics_when_max_contains_not_exceeded() {
         let schema = object_schema_with_props(vec![("items", contains_schema(None, Some(1)))]);
         let docs = parse_docs("items:\n  - 1\n  - hello");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -431,7 +441,8 @@ mod tests {
         // minContains: 0 disables the "at least one" requirement
         let schema = object_schema_with_props(vec![("items", contains_schema(Some(0), None))]);
         let docs = parse_docs("items:\n  - hello\n  - world");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -447,7 +458,8 @@ mod tests {
             },
         )]);
         let docs = parse_docs("items:\n  - hello\n  - world");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -469,7 +481,8 @@ mod tests {
         )]);
         // [0] is a string (ok), [1] is a string but expected integer (fail)
         let docs = parse_docs("arr:\n  - hello\n  - world");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("integer"));
     }
@@ -481,7 +494,8 @@ mod tests {
             tuple_schema(vec![string_schema(), integer_schema()], None),
         )]);
         let docs = parse_docs("arr:\n  - hello\n  - 42");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -493,7 +507,8 @@ mod tests {
         )]);
         // [0] string ok, [1] integer ok (matches items schema)
         let docs = parse_docs("arr:\n  - hello\n  - 42");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -505,7 +520,8 @@ mod tests {
         )]);
         // [0] string ok, [1] string fails items schema (expected integer)
         let docs = parse_docs("arr:\n  - hello\n  - world");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("integer"));
     }
@@ -521,7 +537,8 @@ mod tests {
         )]);
         // Only one item — only [0] is validated, [1] and [2] positions absent
         let docs = parse_docs("arr:\n  - hello");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -542,6 +559,7 @@ mod tests {
         });
         let schema = parse_schema(&raw).expect("valid schema");
         let arr_schema = schema
+            .root
             .properties
             .as_ref()
             .and_then(|p| p.get("arr"))
@@ -560,8 +578,8 @@ mod tests {
         });
         let schema = parse_schema(&raw).expect("valid schema");
         // prefixItems was set first — array-form items is ignored
-        assert!(schema.prefix_items.is_some());
-        assert_eq!(schema.prefix_items.as_ref().unwrap().len(), 1);
+        assert!(schema.root.prefix_items.is_some());
+        assert_eq!(schema.root.prefix_items.as_ref().unwrap().len(), 1);
     }
 
     // ── unevaluatedItems ─────────────────────────────────────────────────────
@@ -578,7 +596,8 @@ mod tests {
             ..JsonSchema::default()
         };
         let docs = parse_docs("- hello\n- 42");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -592,7 +611,8 @@ mod tests {
         };
         // [0] is string (evaluated by prefix), [1] is string (unevaluated, fails integer)
         let docs = parse_docs("- hello\n- world");
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("integer"));
     }
@@ -620,7 +640,8 @@ mod tests {
         );
         let text = "- hello\n- extra";
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaAdditionalProperties");
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
@@ -640,7 +661,8 @@ mod tests {
         );
         let text = "- hello\n- 42";
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -652,7 +674,8 @@ mod tests {
         );
         let text = "- hello";
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -664,7 +687,8 @@ mod tests {
         );
         let text = "- hello\n- extra1\n- extra2";
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 2);
         assert!(
             result
@@ -681,7 +705,8 @@ mod tests {
         );
         let text = "- hello\n- 42";
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -693,7 +718,8 @@ mod tests {
         );
         let text = "- hello\n- world";
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert_eq!(result.len(), 1);
         assert_eq!(code_of(&result[0]), "schemaType");
     }
@@ -710,7 +736,8 @@ mod tests {
         };
         let text = "- hello\n- extra";
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -719,7 +746,8 @@ mod tests {
         let schema = tuple_schema_with_additional_items(vec![string_schema()], None);
         let text = "- hello\n- 42\n- extra";
         let docs = parse_docs(text);
-        let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2).diagnostics;
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
         assert!(result.is_empty());
     }
 
@@ -737,7 +765,8 @@ mod tests {
         let text = "tags:\n  - a";
         let docs = parse_docs(text);
         let idx = docs[0].line_index();
-        let result = validate_schema(&docs, &schema, false, YamlVersion::V1_2).diagnostics;
+        let result = validate_schema(&docs, &ParsedSchema::new(schema), false, YamlVersion::V1_2)
+            .diagnostics;
         let diag = result
             .iter()
             .find(|d| code_of(d) == "schemaMinItems")

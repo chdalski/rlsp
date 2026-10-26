@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-10-26
 
 # Share `$ref` Targets and Bound Schema Size at Parse Time
@@ -56,7 +56,7 @@ schema-failure Warning instead of applying part of it.
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: parse results are shared, not copied, by the cache
+- [x] Task 1: parse results are shared, not copied, by the cache
       and every consumer
 - [ ] Task 2: one parser struct carries per-parse state
 - [ ] Task 3: `definitions`/`$defs` are no longer parsed into the
@@ -79,17 +79,17 @@ cache and every consumer entry point use it. Behavior is
 unchanged; this separates the mechanical churn at several hundred
 call sites from the design change.
 
-- [ ] Parsing returns a `ParsedSchema`, and the cache and the
+- [x] Parsing returns a `ParsedSchema`, and the cache and the
       consumer entry points take it; the cache hands it out
       shared, and no request copies a cached schema
-- [ ] `SchemaCache::get_or_fetch`, which nothing calls, is
+- [x] `SchemaCache::get_or_fetch`, which nothing calls, is
       removed
-- [ ] The unit tests of validation, completion, hover, code lens,
+- [x] The unit tests of validation, completion, hover, code lens,
       and `src/schema.rs`, the `tests/lsp_lifecycle/` suites, and
       the benches pass with their assertions unchanged — only
       mechanical edits that wrap a `JsonSchema` into a
       `ParsedSchema` or adjust cache access
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ### Task 2: Carry per-parse state in one parser struct
 

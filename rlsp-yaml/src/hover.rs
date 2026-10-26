@@ -6,7 +6,7 @@ use rlsp_yaml_parser::node::{Document, Node};
 use rlsp_yaml_parser::{LineIndex, Pos, Span};
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
 
-use crate::schema::JsonSchema;
+use crate::schema::{JsonSchema, ParsedSchema};
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -33,8 +33,9 @@ const MAX_EXAMPLE_LEN: usize = 100;
 pub fn hover_at(
     docs: &[Document<Span>],
     position: Position,
-    schema: Option<&JsonSchema>,
+    schema: Option<&ParsedSchema>,
 ) -> Option<Hover> {
+    let schema = schema.map(|s| &s.root);
     if docs.is_empty() {
         return None;
     }
@@ -614,7 +615,7 @@ mod tests {
             properties: Some(props),
             ..Default::default()
         };
-        let result = hover_at(&docs, pos(0, 0), Some(&schema));
+        let result = hover_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -642,7 +643,7 @@ mod tests {
             properties: Some(props),
             ..Default::default()
         };
-        let result = hover_at(&docs, pos(0, 0), Some(&schema));
+        let result = hover_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -669,7 +670,7 @@ mod tests {
             properties: Some(props),
             ..Default::default()
         };
-        let result = hover_at(&docs, pos(0, 0), Some(&schema));
+        let result = hover_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -700,7 +701,7 @@ mod tests {
             properties: Some(props),
             ..Default::default()
         };
-        let result = hover_at(&docs, pos(0, 0), Some(&schema));
+        let result = hover_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -726,7 +727,7 @@ mod tests {
             properties: Some(props),
             ..Default::default()
         };
-        let result = hover_at(&docs, pos(0, 0), Some(&schema));
+        let result = hover_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         // Structural hover still works
         let hover = result.expect("should return hover");
@@ -768,7 +769,7 @@ mod tests {
             properties: Some(root_props),
             ..Default::default()
         };
-        let result = hover_at(&docs, pos(1, 2), Some(&schema));
+        let result = hover_at(&docs, pos(1, 2), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -800,7 +801,7 @@ mod tests {
             properties: Some(props),
             ..Default::default()
         };
-        let result = hover_at(&docs, pos(0, 6), Some(&schema));
+        let result = hover_at(&docs, pos(0, 6), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -827,7 +828,7 @@ mod tests {
             properties: Some(props),
             ..Default::default()
         };
-        let result = hover_at(&docs, pos(0, 6), Some(&schema));
+        let result = hover_at(&docs, pos(0, 6), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -855,7 +856,7 @@ mod tests {
             properties: Some(props),
             ..Default::default()
         };
-        let result = hover_at(&docs, pos(0, 0), Some(&schema));
+        let result = hover_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -881,7 +882,7 @@ mod tests {
             properties: Some(props),
             ..Default::default()
         };
-        let result = hover_at(&docs, pos(0, 0), Some(&schema));
+        let result = hover_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -926,7 +927,7 @@ mod tests {
             properties: Some(props),
             ..Default::default()
         };
-        let result = hover_at(&docs, pos(0, 0), Some(&schema));
+        let result = hover_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -973,7 +974,7 @@ mod tests {
             properties: Some(props),
             ..Default::default()
         };
-        let result = hover_at(&docs, pos(0, 0), Some(&schema));
+        let result = hover_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -1027,7 +1028,7 @@ mod tests {
             properties: Some(root_props),
             ..Default::default()
         };
-        let result = hover_at(&docs, pos(1, 2), Some(&schema));
+        let result = hover_at(&docs, pos(1, 2), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -1053,7 +1054,7 @@ mod tests {
             properties: Some(root_props),
             ..Default::default()
         };
-        let result = hover_at(&docs, pos(2, 4), Some(&schema));
+        let result = hover_at(&docs, pos(2, 4), Some(&ParsedSchema::new(schema)));
 
         // Structural hover for a.b.c should still work
         let hover = result.expect("structural hover should work");
@@ -1087,7 +1088,7 @@ mod tests {
             }]),
             ..Default::default()
         };
-        let result = hover_at(&docs, pos(0, 0), Some(&schema));
+        let result = hover_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -1114,7 +1115,7 @@ mod tests {
             }]),
             ..Default::default()
         };
-        let result = hover_at(&docs, pos(0, 0), Some(&schema));
+        let result = hover_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -1154,7 +1155,7 @@ mod tests {
         let docs = parse_docs(text);
         // Schema has description at root but no properties
         let schema = schema_with_description("Root schema description");
-        let result = hover_at(&docs, pos(0, 0), Some(&schema));
+        let result = hover_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -1169,7 +1170,7 @@ mod tests {
     #[test]
     fn schema_present_but_parse_fails_returns_none() {
         let schema = schema_with_description("some desc");
-        let result = hover_at(&[], pos(0, 0), Some(&schema));
+        let result = hover_at(&[], pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         assert!(result.is_none(), "should return None when no parsed docs");
     }
@@ -1195,7 +1196,7 @@ mod tests {
             properties: Some(props),
             ..Default::default()
         };
-        let result = hover_at(&docs, pos(0, 0), Some(&schema));
+        let result = hover_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -1226,7 +1227,7 @@ mod tests {
             properties: Some(props),
             ..Default::default()
         };
-        let result = hover_at(&docs, pos(0, 0), Some(&schema));
+        let result = hover_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -1253,7 +1254,7 @@ mod tests {
             properties: Some(props),
             ..Default::default()
         };
-        let result = hover_at(&docs, pos(0, 0), Some(&schema));
+        let result = hover_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -1285,7 +1286,7 @@ mod tests {
             properties: Some(props),
             ..Default::default()
         };
-        let result = hover_at(&docs, pos(0, 0), Some(&schema));
+        let result = hover_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -1320,7 +1321,7 @@ mod tests {
             properties: Some(props),
             ..Default::default()
         };
-        let result = hover_at(&docs, pos(0, 0), Some(&schema));
+        let result = hover_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -1361,7 +1362,7 @@ mod tests {
             properties: Some(props),
             ..Default::default()
         };
-        let result = hover_at(&docs, pos(0, 0), Some(&schema));
+        let result = hover_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -1399,7 +1400,7 @@ mod tests {
             properties: Some(props),
             ..Default::default()
         };
-        let result = hover_at(&docs, pos(0, 0), Some(&schema));
+        let result = hover_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -1446,7 +1447,7 @@ mod tests {
             properties: Some(props),
             ..Default::default()
         };
-        let result = hover_at(&docs, pos(0, 0), Some(&schema));
+        let result = hover_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         assert!(result.is_some(), "should return hover");
         let hover = result.unwrap();
@@ -1583,7 +1584,7 @@ mod tests {
         let schema = schema_with_examples(vec![json!({"name": "Alice", "age": 30})]);
         let text = "key: v\n";
         let docs = parse_docs(text);
-        let result = hover_at(&docs, pos(0, 0), Some(&schema));
+        let result = hover_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -1604,7 +1605,7 @@ mod tests {
         let schema = schema_with_examples(vec![json!(["a", "b", "c"])]);
         let text = "key: v\n";
         let docs = parse_docs(text);
-        let result = hover_at(&docs, pos(0, 0), Some(&schema));
+        let result = hover_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -1620,7 +1621,7 @@ mod tests {
         let schema = schema_with_examples(vec![json!("hello"), json!(42), json!(true)]);
         let text = "key: v\n";
         let docs = parse_docs(text);
-        let result = hover_at(&docs, pos(0, 0), Some(&schema));
+        let result = hover_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -1648,7 +1649,7 @@ mod tests {
         let schema = schema_with_examples(vec![json!({"host": "localhost"}), json!("simple")]);
         let text = "key: v\n";
         let docs = parse_docs(text);
-        let result = hover_at(&docs, pos(0, 0), Some(&schema));
+        let result = hover_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);
@@ -1673,7 +1674,7 @@ mod tests {
         })]);
         let text = "key: v\n";
         let docs = parse_docs(text);
-        let result = hover_at(&docs, pos(0, 0), Some(&schema));
+        let result = hover_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let hover = result.expect("should return hover");
         let content = hover_content(&hover);

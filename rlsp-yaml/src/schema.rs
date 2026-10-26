@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Read as _;
 use std::net::IpAddr;
+use std::sync::Arc;
 
 use serde_json::Value;
 use tower_lsp::lsp_types::Url;
@@ -87,6 +88,24 @@ pub enum AdditionalProperties {
     Denied,
     /// `additionalProperties` is a sub-schema that additional properties must match.
     Schema(Box<JsonSchema>),
+}
+
+/// The result of parsing a schema document.
+///
+/// A parsed schema is shared (`Arc<ParsedSchema>`) between the cache and every
+/// request that reads it, so it deliberately has no `Clone`.
+#[derive(Debug)]
+pub struct ParsedSchema {
+    /// The root schema.
+    pub root: JsonSchema,
+}
+
+impl ParsedSchema {
+    /// Wrap `root` as a parsed schema.
+    #[must_use]
+    pub const fn new(root: JsonSchema) -> Self {
+        Self { root }
+    }
 }
 
 /// A subset of JSON Schema (Draft-04 and Draft-07) sufficient for validation,
@@ -230,7 +249,7 @@ pub struct SchemaStoreCatalog {
 
 /// In-memory cache of parsed JSON Schemas, keyed by normalized URL.
 ///
-/// Each entry stores the raw `Value` alongside the parsed `JsonSchema` so that
+/// Each entry stores the raw `Value` alongside the shared `ParsedSchema` so that
 /// fragment-bearing `$ref` values (`other.json#/definitions/Foo`) can navigate
 /// the raw document with a JSON Pointer after the initial fetch.
 ///
@@ -238,7 +257,7 @@ pub struct SchemaStoreCatalog {
 /// `$id`, to prevent `$id`-spoofing cache poisoning.
 #[derive(Debug, Default)]
 pub struct SchemaCache {
-    inner: HashMap<String, (Value, JsonSchema)>,
+    inner: HashMap<String, (Value, Arc<ParsedSchema>)>,
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -254,45 +273,20 @@ impl SchemaCache {
 
     /// Return a cached schema by URL, or `None` on a cache miss.
     #[must_use]
-    pub fn get(&self, url: &str) -> Option<&JsonSchema> {
+    pub fn get(&self, url: &str) -> Option<&Arc<ParsedSchema>> {
         self.inner.get(url).map(|(_, s)| s)
     }
 
     /// Insert a schema into the cache.  The first insertion for a given URL
     /// wins; subsequent calls for the same key are silently ignored.
-    pub fn insert(&mut self, url: String, value: Value, schema: JsonSchema) {
+    pub fn insert(&mut self, url: String, value: Value, schema: Arc<ParsedSchema>) {
         self.inner.entry(url).or_insert((value, schema));
     }
 
     /// Return a cached (raw value, parsed schema) pair by URL, or `None`.
     #[must_use]
-    fn get_raw(&self, url: &str) -> Option<&(Value, JsonSchema)> {
+    fn get_raw(&self, url: &str) -> Option<&(Value, Arc<ParsedSchema>)> {
         self.inner.get(url)
-    }
-
-    /// Return a cached schema, fetching and caching it on the first call.
-    ///
-    /// `url` must already be normalised (use [`validate_and_normalize_url`]).
-    /// `proxy` is forwarded to [`fetch_schema_raw`] on a cache miss.
-    ///
-    /// # Errors
-    ///
-    /// Propagates errors from [`fetch_schema_raw`].
-    pub fn get_or_fetch(
-        &mut self,
-        url: &str,
-        proxy: Option<&str>,
-    ) -> Result<&JsonSchema, SchemaError> {
-        if !self.inner.contains_key(url) {
-            let (value, schema) = fetch_schema_raw(url, proxy, None)?;
-            self.inner.insert(url.to_string(), (value, schema));
-        }
-        let Some((_, schema)) = self.inner.get(url) else {
-            return Err(SchemaError::FetchFailed(
-                "cache miss after insert".to_string(),
-            ));
-        };
-        Ok(schema)
     }
 
     /// Return whether the URL is already in the cache (avoids a fetch).
@@ -303,7 +297,7 @@ impl SchemaCache {
 
     /// Consume `self` and return the underlying map, for use when merging a
     /// returned cache back into the live cache after a `spawn_blocking` pass.
-    pub(crate) fn into_inner(self) -> HashMap<String, (Value, JsonSchema)> {
+    pub(crate) fn into_inner(self) -> HashMap<String, (Value, Arc<ParsedSchema>)> {
         self.inner
     }
 }
@@ -511,7 +505,7 @@ pub fn fetch_schema_raw(
     url: &str,
     proxy: Option<&str>,
     ctx: Option<&mut ParseContext<'_>>,
-) -> Result<(Value, JsonSchema), SchemaError> {
+) -> Result<(Value, ParsedSchema), SchemaError> {
     // Validate and normalise the URL before issuing any network request.
     validate_and_normalize_url(url)?;
 
@@ -522,7 +516,10 @@ pub fn fetch_schema_raw(
     let schema = ctx
         .map_or_else(
             || parse_schema(&value),
-            |ctx| parse_schema_with_root(&value, &value, Some(url), Some(ctx), 0),
+            |ctx| {
+                parse_schema_with_root(&value, &value, Some(url), Some(ctx), 0)
+                    .map(ParsedSchema::new)
+            },
         )
         .ok_or_else(|| SchemaError::ParseFailed("not a JSON Schema".to_string()))?;
     Ok((value, schema))
@@ -670,7 +667,7 @@ impl<'a> ParseContext<'a> {
     }
 }
 
-/// Parse a `serde_json::Value` into a [`JsonSchema`].
+/// Parse a `serde_json::Value` into a [`ParsedSchema`].
 ///
 /// Returns `None` if the value is not a JSON object (or boolean — see below).
 ///
@@ -678,8 +675,8 @@ impl<'a> ParseContext<'a> {
 /// - `true`  → empty (permissive) schema
 /// - `false` → `None` (no schema representation for "reject everything")
 #[must_use]
-pub fn parse_schema(value: &Value) -> Option<JsonSchema> {
-    parse_schema_with_root(value, value, None, None, 0)
+pub fn parse_schema(value: &Value) -> Option<ParsedSchema> {
+    parse_schema_with_root(value, value, None, None, 0).map(ParsedSchema::new)
 }
 
 /// Populate scalar/string/numeric constraint fields on `schema` from `obj`.
@@ -1295,7 +1292,8 @@ fn resolve_ref(
     // themselves resolved remotely — intentional depth-1 remote resolution limit.
     if !ctx.cache.contains(&normalized) {
         let (value, schema) = fetch_schema_raw(&normalized, ctx.proxy, None).ok()?;
-        ctx.cache.insert(normalized.clone(), value, schema);
+        ctx.cache
+            .insert(normalized.clone(), value, Arc::new(schema));
     }
 
     let (remote_value, _) = ctx.cache.get_raw(&normalized)?;
@@ -1388,14 +1386,14 @@ mod tests {
     #[test]
     fn should_parse_minimal_object_schema() {
         let v = json!({"type": "object"});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         assert_eq!(schema_type_str(&s), Some("object"));
     }
 
     #[test]
     fn should_parse_schema_with_properties() {
         let v = json!({"type": "object", "properties": {"name": {"type": "string"}, "age": {"type": "integer"}}});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         let props = s.properties.as_ref().expect("should have properties");
         assert_eq!(
             schema_type_str(props.get("name").expect("name")),
@@ -1410,7 +1408,7 @@ mod tests {
     #[test]
     fn should_parse_required_fields() {
         let v = json!({"type": "object", "required": ["name", "age"]});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         let req = s.required.as_ref().expect("should have required");
         assert!(req.contains(&"name".to_string()));
         assert!(req.contains(&"age".to_string()));
@@ -1419,7 +1417,7 @@ mod tests {
     #[test]
     fn should_parse_enum_values() {
         let v = json!({"type": "string", "enum": ["alpha", "beta", "gamma"]});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         let enums = s.enum_values.as_ref().expect("should have enum");
         assert_eq!(enums.len(), 3);
         assert!(enums.contains(&json!("alpha")));
@@ -1430,21 +1428,21 @@ mod tests {
     #[test]
     fn should_parse_description() {
         let v = json!({"type": "string", "description": "A human-readable name"});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         assert_eq!(s.description.as_deref(), Some("A human-readable name"));
     }
 
     #[test]
     fn should_parse_default_value() {
         let v = json!({"type": "integer", "default": 42});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         assert_eq!(s.default, Some(json!(42)));
     }
 
     #[test]
     fn should_parse_array_schema_with_items() {
         let v = json!({"type": "array", "items": {"type": "string"}});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         let items = s.items.as_ref().expect("should have items");
         assert_eq!(schema_type_str(items), Some("string"));
     }
@@ -1452,7 +1450,7 @@ mod tests {
     #[test]
     fn should_parse_additional_properties_false() {
         let v = json!({"type": "object", "additionalProperties": false});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         assert!(matches!(
             s.additional_properties,
             Some(AdditionalProperties::Denied)
@@ -1462,7 +1460,7 @@ mod tests {
     #[test]
     fn should_parse_additional_properties_as_schema() {
         let v = json!({"type": "object", "additionalProperties": {"type": "string"}});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         assert!(matches!(
             s.additional_properties,
             Some(AdditionalProperties::Schema(_))
@@ -1472,7 +1470,7 @@ mod tests {
     #[test]
     fn should_parse_min_properties_and_max_properties() {
         let v = json!({"type": "object", "minProperties": 1, "maxProperties": 5});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         assert_eq!(s.min_properties, Some(1));
         assert_eq!(s.max_properties, Some(5));
     }
@@ -1481,7 +1479,7 @@ mod tests {
     #[test]
     fn should_parse_additional_items_false() {
         let v = json!({"items": [{"type": "string"}], "additionalItems": false});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         assert!(s.prefix_items.is_some());
         assert!(matches!(
             s.additional_items,
@@ -1493,7 +1491,7 @@ mod tests {
     #[test]
     fn should_parse_additional_items_schema() {
         let v = json!({"items": [{"type": "string"}], "additionalItems": {"type": "integer"}});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         assert!(matches!(
             s.additional_items,
             Some(AdditionalProperties::Schema(_))
@@ -1504,7 +1502,7 @@ mod tests {
     #[test]
     fn should_not_parse_additional_items_when_prefix_items_set_from_prefix_items_key() {
         let v = json!({"prefixItems": [{"type": "string"}], "additionalItems": false});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         assert!(s.additional_items.is_none());
     }
 
@@ -1512,28 +1510,28 @@ mod tests {
     #[test]
     fn should_not_parse_additional_items_when_no_array_items() {
         let v = json!({"type": "array", "additionalItems": false});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         assert!(s.additional_items.is_none());
     }
 
     #[test]
     fn should_parse_all_of() {
         let v = json!({"allOf": [{"type": "object"}, {"required": ["name"]}]});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         assert_eq!(s.all_of.as_ref().map(Vec::len), Some(2));
     }
 
     #[test]
     fn should_parse_any_of() {
         let v = json!({"anyOf": [{"type": "string"}, {"type": "integer"}]});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         assert_eq!(s.any_of.as_ref().map(Vec::len), Some(2));
     }
 
     #[test]
     fn should_parse_one_of() {
         let v = json!({"oneOf": [{"type": "string"}, {"type": "null"}]});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         assert_eq!(s.one_of.as_ref().map(Vec::len), Some(2));
     }
 
@@ -1550,7 +1548,7 @@ mod tests {
     #[test]
     fn should_parse_empty_object_as_permissive_schema() {
         let v = json!({});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         assert!(s.schema_type.is_none());
         assert!(s.properties.is_none());
         assert!(s.required.is_none());
@@ -1559,7 +1557,9 @@ mod tests {
     // boolean true → permissive schema
     #[test]
     fn should_parse_boolean_true_schema() {
-        let s = parse_schema(&Value::Bool(true)).expect("should return Some for true");
+        let s = parse_schema(&Value::Bool(true))
+            .expect("should return Some for true")
+            .root;
         assert!(s.schema_type.is_none());
     }
 
@@ -1572,7 +1572,7 @@ mod tests {
     #[test]
     fn should_parse_draft04_definitions() {
         let v = json!({"definitions": {"addr": {"type": "string"}}});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         let defs = s.definitions.as_ref().expect("should have definitions");
         assert!(defs.contains_key("addr"));
     }
@@ -1580,7 +1580,7 @@ mod tests {
     #[test]
     fn should_parse_draft07_defs() {
         let v = json!({"$defs": {"addr": {"type": "string"}}});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         let defs = s.definitions.as_ref().expect("should have $defs");
         assert!(defs.contains_key("addr"));
     }
@@ -1589,7 +1589,7 @@ mod tests {
     #[test]
     fn should_parse_deprecated_true() {
         let v = json!({"type": "string", "deprecated": true});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         assert_eq!(s.deprecated, Some(true));
     }
 
@@ -1603,7 +1603,7 @@ mod tests {
             "$ref": "#/definitions/MyType",
             "definitions": {"MyType": {"type": "string"}}
         });
-        let s = parse_schema(&v).expect("should resolve");
+        let s = parse_schema(&v).expect("should resolve").root;
         assert_eq!(schema_type_str(&s), Some("string"));
     }
 
@@ -1623,7 +1623,7 @@ mod tests {
             },
             "definitions": {"Bar": {"type": "integer"}}
         });
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         let props = s.properties.as_ref().expect("should have properties");
         let foo = props.get("foo").expect("should have foo");
         assert_eq!(schema_type_str(foo), Some("integer"));
@@ -1653,52 +1653,77 @@ mod tests {
     }
 
     #[test]
+    fn parsed_schema_new_wraps_the_root_schema() {
+        let parsed = ParsedSchema::new(JsonSchema {
+            description: Some("x".to_string()),
+            ..JsonSchema::default()
+        });
+
+        assert_eq!(parsed.root.description.as_deref(), Some("x"));
+    }
+
+    #[test]
+    fn cache_get_returns_the_inserted_arc_without_copying() {
+        let url = "https://example.com/schema.json";
+        let mut cache = SchemaCache::new();
+        let schema = Arc::new(ParsedSchema::new(JsonSchema::default()));
+        cache.insert(url.to_string(), Value::Null, Arc::clone(&schema));
+
+        let first = cache.get(url).expect("should be cached");
+        let second = cache.get(url).expect("should be cached");
+
+        assert!(Arc::ptr_eq(first, second));
+        assert!(Arc::ptr_eq(first, &schema));
+        assert_eq!(Arc::strong_count(&schema), 2, "local handle plus the cache");
+    }
+
+    #[test]
     fn should_return_cached_schema_on_cache_hit() {
         let mut cache = SchemaCache::new();
-        let schema = JsonSchema {
+        let schema = ParsedSchema::new(JsonSchema {
             description: Some("test".to_string()),
             ..JsonSchema::default()
-        };
+        });
         cache.insert(
             "https://example.com/schema.json".to_string(),
             Value::Null,
-            schema,
+            Arc::new(schema),
         );
 
         let result = cache
             .get("https://example.com/schema.json")
             .expect("should be cached");
-        assert_eq!(result.description.as_deref(), Some("test"));
+        assert_eq!(result.root.description.as_deref(), Some("test"));
     }
 
     // first write wins
     #[test]
     fn should_not_overwrite_existing_cache_entry() {
         let mut cache = SchemaCache::new();
-        let schema_a = JsonSchema {
+        let schema_a = ParsedSchema::new(JsonSchema {
             description: Some("first".to_string()),
             ..JsonSchema::default()
-        };
-        let schema_b = JsonSchema {
+        });
+        let schema_b = ParsedSchema::new(JsonSchema {
             description: Some("second".to_string()),
             ..JsonSchema::default()
-        };
+        });
 
         cache.insert(
             "https://example.com/schema.json".to_string(),
             Value::Null,
-            schema_a,
+            Arc::new(schema_a),
         );
         cache.insert(
             "https://example.com/schema.json".to_string(),
             Value::Null,
-            schema_b,
+            Arc::new(schema_b),
         );
 
         let result = cache
             .get("https://example.com/schema.json")
             .expect("should be cached");
-        assert_eq!(result.description.as_deref(), Some("first"));
+        assert_eq!(result.root.description.as_deref(), Some("first"));
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -1907,7 +1932,9 @@ mod tests {
     fn parse_type_returns_none_for_non_string_non_array() {
         // type: 42 (number) — should be ignored
         let v = json!({"type": 42});
-        let s = parse_schema(&v).expect("should parse as object schema");
+        let s = parse_schema(&v)
+            .expect("should parse as object schema")
+            .root;
         assert!(
             s.schema_type.is_none(),
             "non-string/non-array type should yield None"
@@ -1918,7 +1945,7 @@ mod tests {
     fn parse_type_returns_none_for_empty_type_array() {
         // type: [] — empty array has no types, should yield None
         let v = json!({"type": []});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         assert!(
             s.schema_type.is_none(),
             "empty type array should yield None schema_type"
@@ -1929,7 +1956,7 @@ mod tests {
     fn parse_type_filters_non_string_items_from_array() {
         // type: [42, "string"] — non-string items filtered out; "string" survives
         let v = json!({"type": [42, "string"]});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         // "string" remains after filtering
         assert!(
             s.schema_type.is_some(),
@@ -1949,7 +1976,7 @@ mod tests {
             "type": "object"
         });
         // Parsing the root succeeds — it has type "object"
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         assert_eq!(schema_type_str(&s), Some("object"));
     }
 
@@ -1962,7 +1989,7 @@ mod tests {
         // with only ref_path set
         if let Some(s) = result {
             assert_eq!(
-                s.ref_path.as_deref(),
+                s.root.ref_path.as_deref(),
                 Some("http://example.com/other-schema.json")
             );
         }
@@ -1975,7 +2002,7 @@ mod tests {
     fn empty_all_of_array_yields_none() {
         // allOf: [] — empty array produces no schemas; field should be None
         let v = json!({"allOf": []});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         assert!(s.all_of.is_none(), "empty allOf should yield None");
     }
 
@@ -1983,7 +2010,7 @@ mod tests {
     fn all_of_with_non_object_entries_filtered_out_yields_none() {
         // allOf: ["string"] — non-object entries filtered by parse_schema_with_root
         let v = json!({"allOf": ["not a schema"]});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         assert!(
             s.all_of.is_none(),
             "allOf with only invalid entries should yield None"
@@ -1996,7 +2023,7 @@ mod tests {
     fn empty_definitions_object_yields_none() {
         // definitions: {} — empty map produces no entries; field should be None
         let v = json!({"definitions": {}});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         assert!(
             s.definitions.is_none(),
             "empty definitions should yield None"
@@ -2010,7 +2037,7 @@ mod tests {
             "definitions": {"TypeA": {"type": "string"}},
             "$defs": {"TypeB": {"type": "integer"}}
         });
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         let defs = s
             .definitions
             .as_ref()
@@ -2031,7 +2058,7 @@ mod tests {
     fn additional_properties_true_parsed_as_permissive_schema() {
         // additionalProperties: true — boolean true is a permissive schema
         let v = json!({"type": "object", "additionalProperties": true});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         // true is a permissive boolean schema → AdditionalProperties::Schema(empty)
         assert!(
             matches!(
@@ -2070,7 +2097,7 @@ mod tests {
     fn required_with_non_string_values_filtered() {
         // required: [42, "name"] — non-string values (42) are filtered by filter_map
         let v = json!({"required": [42, "name", true]});
-        let s = parse_schema(&v).expect("should parse");
+        let s = parse_schema(&v).expect("should parse").root;
         let req = s.required.as_ref().expect("should have required");
         assert_eq!(req.len(), 1, "only string 'name' should survive filtering");
         assert!(req.contains(&"name".to_string()));
@@ -2266,7 +2293,7 @@ mod tests {
                 "credit_card": ["billing_address", "billing_zip"]
             }
         });
-        let schema = parse_schema(&value).unwrap();
+        let schema = parse_schema(&value).unwrap().root;
         let dep_req = schema.dependent_required.unwrap();
         let reqs = dep_req.get("credit_card").unwrap();
         assert!(reqs.contains(&"billing_address".to_string()));
@@ -2283,7 +2310,7 @@ mod tests {
                 "name": { "required": ["age"] }
             }
         });
-        let schema = parse_schema(&value).unwrap();
+        let schema = parse_schema(&value).unwrap().root;
         let dep_sch = schema.dependent_schemas.unwrap();
         let dep = dep_sch.get("name").unwrap();
         assert_eq!(dep.required, Some(vec!["age".to_string()]));
@@ -2301,7 +2328,7 @@ mod tests {
                 "a": ["c"]  // overrides Draft-04 entry for "a"
             }
         });
-        let schema = parse_schema(&value).unwrap();
+        let schema = parse_schema(&value).unwrap().root;
         let dep_req = schema.dependent_required.unwrap();
         // 2019-09 wins: only "c", not "b"
         assert_eq!(dep_req.get("a").unwrap(), &vec!["c".to_string()]);
@@ -2324,7 +2351,7 @@ mod tests {
                 }
             }
         });
-        let schema = parse_schema(&value).unwrap();
+        let schema = parse_schema(&value).unwrap().root;
         let foo = schema.properties.unwrap();
         let foo_schema = foo.get("foo").unwrap();
         assert_eq!(
@@ -2348,7 +2375,7 @@ mod tests {
                 }
             }
         });
-        let schema = parse_schema(&value).unwrap();
+        let schema = parse_schema(&value).unwrap().root;
         let bar_schema = schema.properties.unwrap();
         let bar = bar_schema.get("bar").unwrap();
         assert_eq!(
@@ -2372,7 +2399,7 @@ mod tests {
                 }
             }
         });
-        let schema = parse_schema(&value).unwrap();
+        let schema = parse_schema(&value).unwrap().root;
         let val_schema = schema.properties.unwrap();
         let val = val_schema.get("val").unwrap();
         assert_eq!(
@@ -2385,7 +2412,7 @@ mod tests {
     #[test]
     fn ref_returns_schema_with_ref_path_when_anchor_not_found() {
         let value = json!({ "$ref": "#nonexistent" });
-        let schema = parse_schema(&value).unwrap();
+        let schema = parse_schema(&value).unwrap().root;
         assert_eq!(schema.ref_path, Some("#nonexistent".to_string()));
         assert!(schema.schema_type.is_none());
     }
@@ -2409,7 +2436,7 @@ mod tests {
                 "x": { "$ref": "#nested" }
             }
         });
-        let schema = parse_schema(&value).unwrap();
+        let schema = parse_schema(&value).unwrap().root;
         let x = schema.properties.unwrap();
         let x_schema = x.get("x").unwrap();
         assert_eq!(
@@ -2429,7 +2456,7 @@ mod tests {
                 "Name": { "type": "string" }
             }
         });
-        let schema = parse_schema(&value).unwrap();
+        let schema = parse_schema(&value).unwrap().root;
         let name = schema.properties.unwrap();
         let name_schema = name.get("name").unwrap();
         assert_eq!(
@@ -2442,7 +2469,7 @@ mod tests {
     #[test]
     fn anchor_field_stored_on_schema() {
         let value = json!({ "$anchor": "myanchor", "type": "string" });
-        let schema = parse_schema(&value).unwrap();
+        let schema = parse_schema(&value).unwrap().root;
         assert_eq!(schema.anchor, Some("myanchor".to_string()));
     }
 
@@ -2450,7 +2477,7 @@ mod tests {
     #[test]
     fn dynamic_anchor_field_stored_on_schema() {
         let value = json!({ "$dynamicAnchor": "myloop", "type": "array" });
-        let schema = parse_schema(&value).unwrap();
+        let schema = parse_schema(&value).unwrap().root;
         assert_eq!(schema.dynamic_anchor, Some("myloop".to_string()));
     }
 
@@ -2465,7 +2492,7 @@ mod tests {
             "$id": "https://example.com/schema.json",
             "type": "object"
         });
-        let schema = parse_schema(&value).unwrap();
+        let schema = parse_schema(&value).unwrap().root;
         assert_eq!(
             schema.id,
             Some("https://example.com/schema.json".to_string())
@@ -2500,7 +2527,7 @@ mod tests {
                 }
             }
         });
-        let schema = parse_schema(&value).unwrap();
+        let schema = parse_schema(&value).unwrap().root;
         let child = schema.properties.as_ref().unwrap().get("child").unwrap();
         assert_eq!(child.id, Some("https://example.com/child.json".to_string()));
     }
@@ -2512,7 +2539,7 @@ mod tests {
             "id": "https://example.com/schema.json",
             "type": "object"
         });
-        let schema = parse_schema(&value).unwrap();
+        let schema = parse_schema(&value).unwrap().root;
         assert_eq!(
             schema.id,
             Some("https://example.com/schema.json".to_string())
@@ -2527,7 +2554,7 @@ mod tests {
             "id": "https://example.com/ignored.json",
             "type": "object"
         });
-        let schema = parse_schema(&value).unwrap();
+        let schema = parse_schema(&value).unwrap().root;
         assert_eq!(
             schema.id,
             Some("https://example.com/preferred.json".to_string())
@@ -2552,7 +2579,7 @@ mod tests {
                 }
             }
         });
-        let schema = parse_schema(&value).unwrap();
+        let schema = parse_schema(&value).unwrap().root;
         let middle = schema.properties.as_ref().unwrap().get("middle").unwrap();
         assert!(middle.id.is_none(), "middle has no $id");
         let leaf = middle.properties.as_ref().unwrap().get("leaf").unwrap();
@@ -2617,9 +2644,13 @@ mod tests {
         cache.insert(
             "https://example.com/a.json".to_string(),
             json_a.clone(),
-            schema_a,
+            Arc::new(schema_a),
         );
-        cache.insert("https://example.com/b.json".to_string(), json_b, schema_b);
+        cache.insert(
+            "https://example.com/b.json".to_string(),
+            json_b,
+            Arc::new(schema_b),
+        );
 
         // Resolving A should terminate — the cycle is broken when B tries to
         // re-visit A (already in visited set).
@@ -2665,27 +2696,27 @@ mod tests {
         cache.insert(
             "https://json-schema.org/draft/2020-12/schema".to_string(),
             Value::Null,
-            JsonSchema {
+            Arc::new(ParsedSchema::new(JsonSchema {
                 description: Some("legitimate".to_string()),
                 ..JsonSchema::default()
-            },
+            })),
         );
 
         // A malicious schema tries to claim the same URL via $id.
         cache.insert(
             "https://json-schema.org/draft/2020-12/schema".to_string(),
             Value::Null,
-            JsonSchema {
+            Arc::new(ParsedSchema::new(JsonSchema {
                 description: Some("malicious".to_string()),
                 ..JsonSchema::default()
-            },
+            })),
         );
 
         let cached = cache
             .get("https://json-schema.org/draft/2020-12/schema")
             .unwrap();
         assert_eq!(
-            cached.description.as_deref(),
+            cached.root.description.as_deref(),
             Some("legitimate"),
             "first-write-wins must prevent $id spoofing overwrite"
         );
@@ -2720,7 +2751,7 @@ mod tests {
         let remote_schema = parse_schema(&remote_value).unwrap();
 
         let mut cache = SchemaCache::new();
-        cache.insert(ref_url.to_string(), remote_value, remote_schema);
+        cache.insert(ref_url.to_string(), remote_value, Arc::new(remote_schema));
 
         let root = json!({});
         let mut ctx = ParseContext::new(&mut cache, None);
@@ -2746,7 +2777,7 @@ mod tests {
 
         let mut cache = SchemaCache::new();
         let url = "https://example.com/types.json".to_string();
-        cache.insert(url.clone(), remote_value, remote_schema);
+        cache.insert(url.clone(), remote_value, Arc::new(remote_schema));
 
         let root = json!({});
         let ref_str = format!("{url}#/definitions/Address");
@@ -2770,7 +2801,7 @@ mod tests {
         let remote_schema = parse_schema(&remote_value).unwrap();
 
         let mut cache = SchemaCache::new();
-        cache.insert(ref_url.to_string(), remote_value, remote_schema);
+        cache.insert(ref_url.to_string(), remote_value, Arc::new(remote_schema));
 
         let root = json!({
             "type": "object",
@@ -2837,7 +2868,7 @@ mod tests {
         let remote_value: Value = json!({ "type": "object", "description": "an address" });
         let remote_schema = parse_schema(&remote_value).unwrap();
         let mut cache = SchemaCache::new();
-        cache.insert(ref_url.to_string(), remote_value, remote_schema);
+        cache.insert(ref_url.to_string(), remote_value, Arc::new(remote_schema));
 
         // Call exactly the code path that fetch_schema_raw uses when ctx=Some.
         let mut ctx = ParseContext::new(&mut cache, None);
@@ -2872,7 +2903,7 @@ mod tests {
         });
 
         // ctx=None — parse_schema is called, which cannot resolve remote refs.
-        let schema = parse_schema(&body).expect("should parse");
+        let schema = parse_schema(&body).expect("should parse").root;
         let props = schema.properties.as_ref().expect("should have properties");
         let home = props.get("home").expect("should have home property");
         // Without ctx, the $ref is stored as ref_path but not resolved.

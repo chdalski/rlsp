@@ -11,7 +11,7 @@
 
 use std::fmt::Write as _;
 
-use rlsp_yaml::schema::{AdditionalProperties, JsonSchema, SchemaType};
+use rlsp_yaml::schema::{AdditionalProperties, JsonSchema, ParsedSchema, SchemaType};
 use serde_json::Value;
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -111,7 +111,7 @@ pub fn generate_anchor_yaml(anchor_count: usize) -> String {
 // Schema generator
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// Build a `JsonSchema` with Kubernetes-like complexity.
+/// Build a `ParsedSchema` with Kubernetes-like complexity.
 ///
 /// - `properties` top-level properties
 /// - `depth` levels of nested object schemas
@@ -120,8 +120,8 @@ pub fn generate_anchor_yaml(anchor_count: usize) -> String {
 /// enum values, pattern constraint, and allOf branches — matching real-world
 /// complexity found in Kubernetes CRD schemas.
 #[must_use]
-pub fn generate_schema(properties: usize, depth: usize) -> JsonSchema {
-    build_object_schema(properties, depth, 0)
+pub fn generate_schema(properties: usize, depth: usize) -> ParsedSchema {
+    ParsedSchema::new(build_object_schema(properties, depth, 0))
 }
 
 fn build_object_schema(properties: usize, depth: usize, current_depth: usize) -> JsonSchema {

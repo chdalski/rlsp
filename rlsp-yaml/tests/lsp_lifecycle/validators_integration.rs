@@ -194,7 +194,7 @@ async fn should_publish_key_ordering_diagnostic_when_enabled() {
 
 /// K8s ConfigMap-style schema: `data` is an object with string values;
 /// `enabled` is a boolean field.
-fn configmap_schema() -> rlsp_yaml::schema::JsonSchema {
+fn configmap_schema() -> rlsp_yaml::schema::ParsedSchema {
     let schema_json = serde_json::json!({
         "type": "object",
         "properties": {

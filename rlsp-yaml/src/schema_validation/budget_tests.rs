@@ -42,11 +42,11 @@ const KUBERNETES_DEPLOYMENT: &str =
 
 fn fixture_schema(raw: &str) -> JsonSchema {
     let value: serde_json::Value = serde_json::from_str(raw).expect("fixture is JSON");
-    parse_schema(&value).expect("fixture is a schema")
+    parse_schema(&value).expect("fixture is a schema").root
 }
 
 fn schema_of(raw: &serde_json::Value) -> JsonSchema {
-    parse_schema(raw).expect("valid schema")
+    parse_schema(raw).expect("valid schema").root
 }
 
 /// Validate `text` against `raw_schema` within a budget of `steps`.
@@ -307,7 +307,7 @@ fn evaluated_item_count_is_unknown_when_the_budget_cuts_the_scan() {
 fn run_with_no_documents_is_complete() {
     let schema = schema_of(&json!({"type": "object"}));
 
-    let result = validate_schema(&[], &schema, true, YamlVersion::V1_2);
+    let result = validate_schema(&[], &ParsedSchema::new(schema), true, YamlVersion::V1_2);
 
     assert_eq!(result.completeness, Completeness::Complete);
     assert!(result.diagnostics.is_empty());
@@ -732,7 +732,12 @@ fn wide_any_of_with_a_hundred_failing_branches_completes_at_the_default_budget()
         .collect();
     let schema = schema_of(&json!({"anyOf": branches}));
 
-    let result = validate_schema(&parse_docs("a: 1"), &schema, true, YamlVersion::V1_2);
+    let result = validate_schema(
+        &parse_docs("a: 1"),
+        &ParsedSchema::new(schema),
+        true,
+        YamlVersion::V1_2,
+    );
 
     assert_eq!(result.completeness, Completeness::Complete);
     assert_eq!(result.diagnostics.len(), 1);
@@ -754,7 +759,12 @@ fn wide_unevaluated_properties_document_completes_at_the_default_budget() {
         .flat_map(|branch| (0..5).map(move |i| format!("key_{branch}_{i}: 1\n")))
         .collect();
 
-    let result = validate_schema(&parse_docs(&text), &schema, true, YamlVersion::V1_2);
+    let result = validate_schema(
+        &parse_docs(&text),
+        &ParsedSchema::new(schema),
+        true,
+        YamlVersion::V1_2,
+    );
 
     assert_eq!(result.completeness, Completeness::Complete);
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
@@ -805,7 +815,7 @@ fn embedded_content_larger_than_the_budget_exhausts_it() {
     }));
     let docs = parse_docs(&text);
 
-    let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+    let result = validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2);
 
     assert_eq!(result.completeness, Completeness::StoppedEarly);
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
@@ -995,7 +1005,7 @@ fn cloud_config_with_a_wrongly_typed_package_update_is_flagged() {
 
     let result = validate_schema(
         &parse_docs("#cloud-config\npackage_update: 5\npackages:\n  - git\n"),
-        &schema,
+        &ParsedSchema::new(schema),
         true,
         YamlVersion::V1_2,
     );
@@ -1042,7 +1052,12 @@ fn unique_items_check_the_budget_cannot_pay_for_reports_nothing() {
     let text = format!("{}- 0\n", items.concat());
     let schema = schema_of(&json!({"uniqueItems": true}));
 
-    let result = validate_schema(&parse_docs(&text), &schema, true, YamlVersion::V1_2);
+    let result = validate_schema(
+        &parse_docs(&text),
+        &ParsedSchema::new(schema),
+        true,
+        YamlVersion::V1_2,
+    );
 
     assert_eq!(result.completeness, Completeness::StoppedEarly);
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
@@ -1331,7 +1346,7 @@ fn unknown_keys_run(count: usize) -> Validation {
     let schema = schema_of(&json!({"additionalProperties": false}));
     validate_schema(
         &parse_docs(&numbered_keys(count)),
-        &schema,
+        &ParsedSchema::new(schema),
         true,
         YamlVersion::V1_2,
     )
@@ -1357,7 +1372,12 @@ fn reaching_the_diagnostic_limit_stops_the_remaining_documents() {
     let schema = schema_of(&json!({"additionalProperties": false}));
     let text = format!("{}---\nextra: 1\n", numbered_keys(MAX_DIAGNOSTICS));
 
-    let result = validate_schema(&parse_docs(&text), &schema, true, YamlVersion::V1_2);
+    let result = validate_schema(
+        &parse_docs(&text),
+        &ParsedSchema::new(schema),
+        true,
+        YamlVersion::V1_2,
+    );
 
     assert_eq!(result.diagnostics.len(), MAX_DIAGNOSTICS);
     assert_eq!(result.completeness, Completeness::StoppedEarly);
@@ -1438,7 +1458,7 @@ fn one_large_string_is_validated_in_full_at_the_production_budget() {
     let schema = schema_of(&json!({"type": "string", "minLength": 1, "pattern": "^x+$"}));
     let docs = parse_docs(&format!("\"{}\"", "x".repeat(100 * 1024)));
 
-    let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+    let result = validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2);
 
     assert_eq!(result.completeness, Completeness::Complete);
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);

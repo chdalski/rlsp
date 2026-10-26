@@ -12,7 +12,7 @@ use rlsp_yaml::validation::validators::{
 };
 use tower_lsp::lsp_types::DiagnosticSeverity;
 
-pub fn i11_build_schema() -> rlsp_yaml::schema::JsonSchema {
+pub fn i11_build_schema() -> rlsp_yaml::schema::ParsedSchema {
     parse_schema(&serde_json::json!({
         "type": "object",
         "additionalProperties": { "type": "string" }
@@ -22,7 +22,7 @@ pub fn i11_build_schema() -> rlsp_yaml::schema::JsonSchema {
 
 pub fn i11_collect_diagnostics(
     docs: &[rlsp_yaml_parser::node::Document<rlsp_yaml_parser::Span>],
-    schema: &rlsp_yaml::schema::JsonSchema,
+    schema: &rlsp_yaml::schema::ParsedSchema,
 ) -> Vec<tower_lsp::lsp_types::Diagnostic> {
     let mut all = Vec::new();
     all.extend(validate_unused_anchors(docs));

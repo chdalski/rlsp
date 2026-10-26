@@ -2,13 +2,13 @@
 
 use tower_lsp::lsp_types::{CodeLens, Command, Position, Range};
 
-use crate::schema::JsonSchema;
+use crate::schema::ParsedSchema;
 
 /// Produce code lenses for a document associated with `schema_url`.
 #[must_use]
-pub fn code_lenses(schema_url: &str, schema: Option<&JsonSchema>) -> Vec<CodeLens> {
+pub fn code_lenses(schema_url: &str, schema: Option<&ParsedSchema>) -> Vec<CodeLens> {
     let title = schema
-        .and_then(|s| s.title.clone())
+        .and_then(|s| s.root.title.clone())
         .unwrap_or_else(|| schema_url.to_string());
 
     let range = Range {
@@ -50,7 +50,10 @@ mod tests {
     #[test]
     fn uses_schema_title_when_present() {
         let schema = schema_with_title("My Schema");
-        let lenses = code_lenses("https://example.com/schema.json", Some(&schema));
+        let lenses = code_lenses(
+            "https://example.com/schema.json",
+            Some(&ParsedSchema::new(schema)),
+        );
         assert_eq!(lenses.len(), 1);
         assert_eq!(lenses[0].command.as_ref().unwrap().title, "My Schema");
     }
@@ -58,7 +61,10 @@ mod tests {
     #[test]
     fn uses_url_when_schema_has_no_title() {
         let schema = JsonSchema::default();
-        let lenses = code_lenses("https://example.com/schema.json", Some(&schema));
+        let lenses = code_lenses(
+            "https://example.com/schema.json",
+            Some(&ParsedSchema::new(schema)),
+        );
         assert_eq!(lenses.len(), 1);
         assert_eq!(
             lenses[0].command.as_ref().unwrap().title,

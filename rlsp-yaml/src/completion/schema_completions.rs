@@ -245,7 +245,7 @@ mod tests {
     };
     use super::*;
     use crate::completion::complete_at;
-    use crate::schema::{JsonSchema, SchemaType};
+    use crate::schema::{JsonSchema, ParsedSchema, SchemaType};
     use crate::test_utils::parse_docs;
 
     // ── test helper ──────────────────────────────────────────────────────────
@@ -756,7 +756,7 @@ mod tests {
         let schema = object_schema(vec![("name", string_schema()), ("age", integer_schema())]);
         let text = "name: Alice\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let ls = labels(&result);
         assert!(
@@ -787,7 +787,7 @@ mod tests {
         )]);
         let text = "age: 30\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let item = result.iter().find(|i| i.label == "name");
         assert!(
@@ -821,7 +821,7 @@ mod tests {
         ]);
         let text = "host: localhost\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let ls = labels(&result);
         assert!(ls.contains(&"port"), "should suggest 'port'");
@@ -841,7 +841,7 @@ mod tests {
         ]);
         let text = "a: 1\nb: 2\nc: \n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(2, 0), Some(&schema));
+        let result = complete_at(&docs, pos(2, 0), Some(&ParsedSchema::new(schema)));
 
         let ls = labels(&result);
         assert!(
@@ -863,7 +863,7 @@ mod tests {
         )]);
         let text = "server:\n  host: localhost\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(1, 2), Some(&schema));
+        let result = complete_at(&docs, pos(1, 2), Some(&ParsedSchema::new(schema)));
 
         let ls = labels(&result);
         assert!(ls.contains(&"port"), "should suggest nested 'port'");
@@ -882,7 +882,7 @@ mod tests {
         let schema = object_schema(vec![("kind", string_schema())]);
         let text = "name: Alice\nkind: \n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let ls = labels(&result);
         assert!(ls.contains(&"kind"), "schema property 'kind' should appear");
@@ -897,7 +897,7 @@ mod tests {
         let schema = object_schema(vec![("env", string_schema())]);
         let text = "env: production\nregion: us-east\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(1, 0), Some(&schema));
+        let result = complete_at(&docs, pos(1, 0), Some(&ParsedSchema::new(schema)));
 
         let ls = labels(&result);
         let env_count = ls.iter().filter(|&&l| l == "env").count();
@@ -926,7 +926,7 @@ mod tests {
         )]);
         let text = "env: \n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 5), Some(&schema));
+        let result = complete_at(&docs, pos(0, 5), Some(&ParsedSchema::new(schema)));
 
         let ls = labels(&result);
         assert!(ls.contains(&"production"), "should suggest 'production'");
@@ -953,7 +953,7 @@ mod tests {
         )]);
         let text = "env: \n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 5), Some(&schema));
+        let result = complete_at(&docs, pos(0, 5), Some(&ParsedSchema::new(schema)));
 
         assert!(!result.is_empty(), "should have enum suggestions");
         assert!(
@@ -975,7 +975,7 @@ mod tests {
         )]);
         let text = "env: production\nenv: \n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(1, 5), Some(&schema));
+        let result = complete_at(&docs, pos(1, 5), Some(&ParsedSchema::new(schema)));
 
         let ls = labels(&result);
         let prod_count = ls.iter().filter(|&&l| l == "production").count();
@@ -987,7 +987,7 @@ mod tests {
         let schema = object_schema(vec![("env", string_schema())]);
         let text = "env: production\nenv: \n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(1, 5), Some(&schema));
+        let result = complete_at(&docs, pos(1, 5), Some(&ParsedSchema::new(schema)));
 
         let ls = labels(&result);
         assert!(
@@ -1001,7 +1001,7 @@ mod tests {
         let schema = object_schema(vec![("enabled", boolean_schema())]);
         let text = "enabled: \n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 9), Some(&schema));
+        let result = complete_at(&docs, pos(0, 9), Some(&ParsedSchema::new(schema)));
 
         let ls = labels(&result);
         assert!(ls.contains(&"true"), "should suggest 'true'");
@@ -1052,7 +1052,7 @@ mod tests {
         #[case] absent: &str,
     ) {
         let docs = parse_docs(text);
-        let result = complete_at(&docs, cursor, Some(&schema));
+        let result = complete_at(&docs, cursor, Some(&ParsedSchema::new(schema)));
         let ls = labels(&result);
         assert!(
             ls.contains(&expected),
@@ -1094,7 +1094,7 @@ mod tests {
         #[case] expected: &str,
     ) {
         let docs = parse_docs(text);
-        let result = complete_at(&docs, cursor, Some(&schema));
+        let result = complete_at(&docs, cursor, Some(&ParsedSchema::new(schema)));
         let ls = labels(&result);
         assert!(
             ls.contains(&expected),
@@ -1111,7 +1111,7 @@ mod tests {
         let schema = JsonSchema::default();
         let text = "name: Alice\nage: 30\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let ls = labels(&result);
         assert!(
@@ -1125,7 +1125,7 @@ mod tests {
         let schema = object_schema(vec![("unrelated", JsonSchema::default())]);
         let text = "name: Alice\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let ls = labels(&result);
         assert!(
@@ -1141,7 +1141,7 @@ mod tests {
     #[test]
     fn should_return_empty_for_schema_completion_on_empty_document() {
         let schema = object_schema(vec![("name", string_schema())]);
-        let result = complete_at(&[], pos(0, 0), Some(&schema));
+        let result = complete_at(&[], pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         assert!(result.is_empty(), "should return empty for empty document");
     }
@@ -1151,7 +1151,7 @@ mod tests {
         let schema = object_schema(vec![("name", string_schema())]);
         let text = "# comment\nkey: value\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         assert!(result.is_empty(), "should return empty for comment line");
     }
@@ -1161,7 +1161,7 @@ mod tests {
         let schema = object_schema(vec![("name", string_schema())]);
         let text = "key1: v1\n---\nkey2: v2\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(1, 0), Some(&schema));
+        let result = complete_at(&docs, pos(1, 0), Some(&ParsedSchema::new(schema)));
 
         assert!(
             result.is_empty(),
@@ -1174,7 +1174,7 @@ mod tests {
         let schema = object_schema(vec![("data", JsonSchema::default())]);
         let text = "name: Alice\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let item = result.iter().find(|i| i.label == "data");
         assert!(item.is_some(), "should suggest 'data' without panicking");
@@ -1198,7 +1198,7 @@ mod tests {
         )]);
         let text = "env: pro\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 7), Some(&schema));
+        let result = complete_at(&docs, pos(0, 7), Some(&ParsedSchema::new(schema)));
 
         let ls = labels(&result);
         assert!(
@@ -1223,7 +1223,7 @@ mod tests {
         )]);
         let text = "age: 30\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let item = result.iter().find(|i| i.label == "name");
         assert!(item.is_some(), "should suggest 'name'");
@@ -1252,7 +1252,7 @@ mod tests {
         };
         let text = "prop_000: x\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         assert!(
             result.len() <= 100,
@@ -1266,7 +1266,7 @@ mod tests {
         let schema = all_of(field_branches(30));
         let text = "irrelevant: x\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let labels = item_labels(&result);
         assert_eq!(
@@ -1289,7 +1289,7 @@ mod tests {
         )]);
         let text = "key: \n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 5), Some(&schema));
+        let result = complete_at(&docs, pos(0, 5), Some(&ParsedSchema::new(schema)));
 
         assert!(!result.is_empty(), "should have enum suggestion");
         for item in &result {
@@ -1313,7 +1313,7 @@ mod tests {
         )]);
         let text = "enabled: \n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 9), Some(&schema));
+        let result = complete_at(&docs, pos(0, 9), Some(&ParsedSchema::new(schema)));
 
         let ls = labels(&result);
         assert!(
@@ -1339,7 +1339,7 @@ mod tests {
         let schema = object_schema(vec![("a", object_schema(vec![("b", string_schema())]))]);
         let text = "a:\n  b:\n    c:\n      d:\n        e: v\n";
         let docs = parse_docs(text);
-        let _result = complete_at(&docs, pos(4, 8), Some(&schema));
+        let _result = complete_at(&docs, pos(4, 8), Some(&ParsedSchema::new(schema)));
     }
 
     #[test]
@@ -1351,7 +1351,7 @@ mod tests {
         ]);
         let text = "a: 1\nb: 2\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(1, 0), Some(&schema));
+        let result = complete_at(&docs, pos(1, 0), Some(&ParsedSchema::new(schema)));
 
         let ls = labels(&result);
         assert!(
@@ -1380,7 +1380,7 @@ mod tests {
         )]);
         let text = "placeholder: null\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let item = result
             .iter()
@@ -1411,7 +1411,7 @@ mod tests {
         )]);
         let text = "placeholder: null\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let item = result
             .iter()
@@ -1447,7 +1447,7 @@ mod tests {
         ]);
         let text = "placeholder: null\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let new_item = result
             .iter()
@@ -1485,7 +1485,7 @@ mod tests {
         );
         let text = "placeholder: null\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let snippet = result
             .iter()
@@ -1543,7 +1543,7 @@ mod tests {
         #[case] cursor: tower_lsp::lsp_types::Position,
     ) {
         let docs = parse_docs(text);
-        let result = complete_at(&docs, cursor, Some(&schema));
+        let result = complete_at(&docs, cursor, Some(&ParsedSchema::new(schema)));
         let has_snippet = result.iter().any(|i| i.label == "(all required)");
         assert!(!has_snippet, "should not offer '(all required)' snippet");
     }
@@ -1564,7 +1564,7 @@ mod tests {
         );
         let text = "placeholder: null\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let snippet = result
             .iter()
@@ -1602,7 +1602,7 @@ mod tests {
         );
         let text = "placeholder: null\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let snippet = result
             .iter()
@@ -1624,7 +1624,7 @@ mod tests {
         );
         let text = "placeholder: null\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let snippet = result
             .iter()
@@ -1670,7 +1670,7 @@ mod tests {
         let text = "placeholder: null\n";
         let docs = parse_docs(text);
 
-        let result1 = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result1 = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
         let snippet1 = result1.iter().find(|i| i.label == "(all required)");
         assert!(
             snippet1.is_some(),
@@ -1682,7 +1682,7 @@ mod tests {
             "object type default should be '{{}}', got: {insert1}"
         );
 
-        let result2 = complete_at(&docs, pos(0, 0), Some(&schema2));
+        let result2 = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema2)));
         let snippet2 = result2.iter().find(|i| i.label == "(all required)");
         assert!(
             snippet2.is_some(),
@@ -1703,7 +1703,7 @@ mod tests {
         );
         let text = "placeholder: null\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let snippet = result.iter().find(|i| i.label == "(all required)");
         assert!(snippet.is_some(), "should offer snippet");
@@ -1728,7 +1728,7 @@ mod tests {
         let schema = deep_schema(25);
         let text = "placeholder: null\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         assert!(item_labels(&result).contains(&"leaf"));
     }
@@ -1752,7 +1752,7 @@ mod tests {
         )]);
         let text = "servers:\n  -\n    host: localhost\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(2, 4), Some(&schema));
+        let result = complete_at(&docs, pos(2, 4), Some(&ParsedSchema::new(schema)));
 
         let ls = labels(&result);
         assert!(
@@ -1780,7 +1780,7 @@ mod tests {
         )]);
         let text = "value: \n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 6), Some(&schema));
+        let result = complete_at(&docs, pos(0, 6), Some(&ParsedSchema::new(schema)));
 
         let ls = labels(&result);
         assert!(ls.contains(&"42"), "should render integer 42, got: {ls:?}");
@@ -1806,7 +1806,7 @@ mod tests {
         )]);
         let text = "value: \n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 6), Some(&schema));
+        let result = complete_at(&docs, pos(0, 6), Some(&ParsedSchema::new(schema)));
 
         let ls = labels(&result);
         assert!(
@@ -1834,7 +1834,7 @@ mod tests {
         )]);
         let text = "name: x\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&schema));
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
         let item = result.iter().find(|i| i.label == "value");
         assert!(item.is_some(), "should suggest 'value'");
@@ -1850,7 +1850,7 @@ mod tests {
         let schema = object_schema(vec![("host", string_schema()), ("port", integer_schema())]);
         let text = "host: localhost\n\n";
         let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(1, 0), Some(&schema));
+        let result = complete_at(&docs, pos(1, 0), Some(&ParsedSchema::new(schema)));
 
         let ls = labels(&result);
         assert!(
