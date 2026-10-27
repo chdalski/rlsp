@@ -53,7 +53,7 @@ fetch.
 - [x] Design review of the approach
 - [x] Task 1: settings are stored through one method
 - [x] Task 2: only Kubernetes names reach the schema URL
-- [ ] Task 3: file names match the schema repository; custom
+- [x] Task 3: file names match the schema repository; custom
       resources are not fetched
 - [ ] Task 4: an invalid `kubernetesVersion` falls back to `master`
       with a Warning
@@ -142,24 +142,24 @@ commit include
 `flowschema-flowcontrol-v1.json`, and
 `storageversion-apiserverinternal-v1alpha1.json`.
 
-- [ ] URL tests pin each verified file name above plus the core
+- [x] URL tests pin each verified file name above plus the core
       (`pod-v1.json`) and dotless-group (`deployment-apps-v1.json`)
       cases
-- [ ] Manifests of the custom-resource groups `cert-manager.io/v1`
+- [x] Manifests of the custom-resource groups `cert-manager.io/v1`
       and `kustomize.config.k8s.io/v1beta1` trigger no Kubernetes
       fetch and go on to SchemaStore matching, pinned by an
       integration test; each listed dotted group maps to its segment
       in a unit test
-- [ ] `should_not_warn_when_kubernetes_schema_fetch_fails` keeps
+- [x] `should_not_warn_when_kubernetes_schema_fetch_fails` keeps
       asserting that a failed Kubernetes fetch stays silent, now
       with a built-in group whose file does not exist
-- [ ] `rlsp-yaml/docs/configuration.md` tells the reader that
+- [x] `rlsp-yaml/docs/configuration.md` tells the reader that
       auto-detection covers built-in Kubernetes API groups and that
       custom resources go on to SchemaStore
-- [ ] `rlsp-yaml/docs/feature-log.md` has an entry that tells the
+- [x] `rlsp-yaml/docs/feature-log.md` has an entry that tells the
       reader how Kubernetes auto-detection now treats document
       names, Kubernetes's own API groups, and custom resources
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ### Task 4: Fall back to `master` for an invalid `kubernetesVersion`
 

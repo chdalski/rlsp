@@ -597,9 +597,11 @@ impl Backend {
                 SchemaSource::Declared,
             )
             .await;
-        } else if let Some(resource) = crate::schema::detect_kubernetes_resource(documents) {
-            // Third fallback: Kubernetes auto-detection.
-            let schema_url = crate::schema::kubernetes_schema_url(&resource, &k8s_version);
+        } else if let Some(resource) = crate::schema::detect_kubernetes_resource(documents)
+            && let Some(schema_url) = crate::schema::kubernetes_schema_url(&resource, &k8s_version)
+        {
+            // Third fallback: Kubernetes auto-detection.  A custom resource
+            // has no URL and goes on to SchemaStore.
             self.process_schema(
                 uri,
                 &schema_url,

@@ -80,7 +80,7 @@ When enabled, the server warns if mapping keys are not in alphabetical order.
 - **Type:** `string`
 - **Default:** `"master"` (tracks the latest available schemas)
 
-The Kubernetes cluster version used for automatic schema resolution. When a document contains root-level `apiVersion` and `kind` fields and no schema is configured via modeline or glob, the server fetches the corresponding schema from [yannh/kubernetes-json-schema](https://github.com/yannh/kubernetes-json-schema) using this version string.
+The Kubernetes cluster version used for automatic schema resolution. When a document contains root-level `apiVersion` and `kind` fields and no schema is configured via modeline or glob, the server fetches the corresponding schema from [yannh/kubernetes-json-schema](https://github.com/yannh/kubernetes-json-schema) using this version string. Only built-in Kubernetes API groups are auto-detected; custom resources go on to SchemaStore (see [Schema Resolution Priority](#schema-resolution-priority)).
 
 Set this to match your cluster version to get accurate validation:
 
@@ -653,6 +653,8 @@ When a YAML file is opened or changed, the server resolves a schema using the fo
 4. **SchemaStore** — if enabled (`schemaStore: true`, the default), the server fetches the [SchemaStore](https://www.schemastore.org/) catalog and matches the file's path against catalog `fileMatch` patterns. The catalog is fetched lazily on first need and cached for the session.
 
 A document is a Kubernetes manifest for auto-detection only if its `apiVersion` and `kind` are valid. A `kind` starts with an ASCII letter, continues with ASCII letters and digits, and has at most 63 characters. An `apiVersion` is a version such as `v1`, `v1beta1`, or `v2alpha3`, optionally preceded by a group and `/`; a group is a DNS subdomain (lowercase letters, digits, `-`, and `.`, at most 253 characters). Any other document goes on to SchemaStore (step 4) without a Kubernetes schema fetch.
+
+The schema repository holds schemas only for Kubernetes's own API groups, so auto-detection covers those: the core group, every group without a dot (`apps`, `batch`, `autoscaling`, ...), and the built-in dotted groups such as `networking.k8s.io`, `rbac.authorization.k8s.io`, and `storage.k8s.io`. A custom resource, such as `cert-manager.io/v1` or `kustomize.config.k8s.io/v1beta1`, has no schema in the repository; it triggers no Kubernetes schema fetch and goes on to SchemaStore (step 4), the same as a document with invalid names.
 
 If none of the above produce a match, no schema is applied and only syntax/structural validators run.
 

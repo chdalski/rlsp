@@ -215,22 +215,74 @@ pub fn detect_kubernetes_resource(docs: &[Document<Span>]) -> Option<KubernetesR
     KubernetesResource::new(api_version?, kind?)
 }
 
+/// Kubernetes's own API groups that contain a dot, each with the segment the
+/// schema repository uses in file names.
+///
+/// The repository holds no custom-resource schemas, and neither a first-label
+/// rule nor a `.k8s.io` suffix rule tells them apart: `apps.kruise.io` would
+/// hit a built-in schema and `kustomize.config.k8s.io` would fail a fetch
+/// instead of reaching `SchemaStore`.  A new Kubernetes API group therefore
+/// needs an entry here before it is auto-detected.
+///
+/// The segment is the group's first label, except for `internal.apiserver.k8s.io`:
+/// the repository names that group's files after the API's Go package.
+const BUILTIN_DOTTED_GROUPS: &[(&str, &str)] = &[
+    ("admissionregistration.k8s.io", "admissionregistration"),
+    ("apiextensions.k8s.io", "apiextensions"),
+    ("apiregistration.k8s.io", "apiregistration"),
+    ("authentication.k8s.io", "authentication"),
+    ("authorization.k8s.io", "authorization"),
+    ("certificates.k8s.io", "certificates"),
+    ("coordination.k8s.io", "coordination"),
+    ("discovery.k8s.io", "discovery"),
+    ("events.k8s.io", "events"),
+    ("flowcontrol.apiserver.k8s.io", "flowcontrol"),
+    ("internal.apiserver.k8s.io", "apiserverinternal"),
+    ("lifecycle.k8s.io", "lifecycle"),
+    ("networking.k8s.io", "networking"),
+    ("node.k8s.io", "node"),
+    ("rbac.authorization.k8s.io", "rbac"),
+    ("resource.k8s.io", "resource"),
+    ("scheduling.k8s.io", "scheduling"),
+    ("storage.k8s.io", "storage"),
+    ("storagemigration.k8s.io", "storagemigration"),
+];
+
+/// The file-name segment of `group`, or `None` for a custom-resource group.
+///
+/// A group without a dot is one of Kubernetes's own (`apps`, `batch`, ...) and
+/// is its own segment; a custom-resource group always contains a dot.
+fn schema_file_segment(group: &str) -> Option<&str> {
+    if !group.contains('.') {
+        return Some(group);
+    }
+    BUILTIN_DOTTED_GROUPS
+        .iter()
+        .find(|(builtin, _)| *builtin == group)
+        .map(|&(_, segment)| segment)
+}
+
 /// Construct a Kubernetes JSON Schema URL for the given resource.
 ///
 /// Uses the schema repository at
-/// `https://raw.githubusercontent.com/yannh/kubernetes-json-schema`.
+/// `https://raw.githubusercontent.com/yannh/kubernetes-json-schema`, which
+/// holds schemas only for Kubernetes's own API groups.  Returns `None` for a
+/// custom resource, so the caller can go on to another schema source instead
+/// of fetching a file that does not exist.
 ///
 /// Filename rules:
 /// - `kind` is lowercased.
 /// - For grouped API versions (e.g. `apps/v1`) the filename is
-///   `{kind}-{group}-{version}.json`.
+///   `{kind}-{segment}-{version}.json`, where the segment comes from the
+///   group (e.g. `networking` for `networking.k8s.io`).
 /// - For core API versions (e.g. `v1`) the filename is
 ///   `{kind}-{api_version}.json`.
 #[must_use]
-pub fn kubernetes_schema_url(resource: &KubernetesResource, k8s_version: &str) -> String {
+pub fn kubernetes_schema_url(resource: &KubernetesResource, k8s_version: &str) -> Option<String> {
     let kind_lower = resource.kind().to_ascii_lowercase();
     let filename = if let Some((group, version)) = resource.api_version().split_once('/') {
-        format!("{kind_lower}-{group}-{version}.json")
+        let segment = schema_file_segment(group)?;
+        format!("{kind_lower}-{segment}-{version}.json")
     } else {
         format!("{kind_lower}-{}.json", resource.api_version())
     };
@@ -239,9 +291,9 @@ pub fn kubernetes_schema_url(resource: &KubernetesResource, k8s_version: &str) -
     } else {
         format!("v{k8s_version}-standalone-strict")
     };
-    format!(
+    Some(format!(
         "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/{dir_prefix}/{filename}"
-    )
+    ))
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -602,6 +654,66 @@ mod tests {
         "master",
         "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/deployment-apps-v1.json"
     )]
+    #[case::ingress_networking(
+        "networking.k8s.io/v1",
+        "Ingress",
+        "1.29.0",
+        "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v1.29.0-standalone-strict/ingress-networking-v1.json"
+    )]
+    #[case::networkpolicy_networking(
+        "networking.k8s.io/v1",
+        "NetworkPolicy",
+        "1.29.0",
+        "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v1.29.0-standalone-strict/networkpolicy-networking-v1.json"
+    )]
+    #[case::clusterrole_rbac(
+        "rbac.authorization.k8s.io/v1",
+        "ClusterRole",
+        "1.29.0",
+        "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v1.29.0-standalone-strict/clusterrole-rbac-v1.json"
+    )]
+    #[case::csr_certificates(
+        "certificates.k8s.io/v1",
+        "CertificateSigningRequest",
+        "1.29.0",
+        "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v1.29.0-standalone-strict/certificatesigningrequest-certificates-v1.json"
+    )]
+    #[case::vwc_admissionregistration(
+        "admissionregistration.k8s.io/v1",
+        "ValidatingWebhookConfiguration",
+        "1.29.0",
+        "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v1.29.0-standalone-strict/validatingwebhookconfiguration-admissionregistration-v1.json"
+    )]
+    #[case::apiservice_apiregistration(
+        "apiregistration.k8s.io/v1",
+        "APIService",
+        "1.29.0",
+        "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v1.29.0-standalone-strict/apiservice-apiregistration-v1.json"
+    )]
+    #[case::flowschema_flowcontrol(
+        "flowcontrol.apiserver.k8s.io/v1",
+        "FlowSchema",
+        "1.29.0",
+        "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v1.29.0-standalone-strict/flowschema-flowcontrol-v1.json"
+    )]
+    #[case::storageversion_apiserverinternal(
+        "internal.apiserver.k8s.io/v1alpha1",
+        "StorageVersion",
+        "1.29.0",
+        "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v1.29.0-standalone-strict/storageversion-apiserverinternal-v1alpha1.json"
+    )]
+    #[case::dotless_group_with_beta(
+        "autoscaling/v2beta1",
+        "HorizontalPodAutoscaler",
+        "1.29.0",
+        "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v1.29.0-standalone-strict/horizontalpodautoscaler-autoscaling-v2beta1.json"
+    )]
+    #[case::dotted_builtin_master(
+        "networking.k8s.io/v1",
+        "Ingress",
+        "master",
+        "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/ingress-networking-v1.json"
+    )]
     fn kubernetes_schema_url_returns_url(
         #[case] api_version: &str,
         #[case] kind: &str,
@@ -609,7 +721,10 @@ mod tests {
         #[case] expected: &str,
     ) {
         let resource = KubernetesResource::new(api_version, kind).expect("valid resource");
-        assert_eq!(kubernetes_schema_url(&resource, k8s_version), expected);
+        assert_eq!(
+            kubernetes_schema_url(&resource, k8s_version).as_deref(),
+            Some(expected)
+        );
     }
 
     #[rstest]
@@ -779,6 +894,106 @@ mod tests {
         );
     }
 
+    /// Every dotted built-in group with the segment the schema repository uses
+    /// in its file names, written out independently of the production list.
+    const BUILTIN_DOTTED_GROUPS: [(&str, &str); 19] = [
+        ("admissionregistration.k8s.io", "admissionregistration"),
+        ("apiextensions.k8s.io", "apiextensions"),
+        ("apiregistration.k8s.io", "apiregistration"),
+        ("authentication.k8s.io", "authentication"),
+        ("authorization.k8s.io", "authorization"),
+        ("certificates.k8s.io", "certificates"),
+        ("coordination.k8s.io", "coordination"),
+        ("discovery.k8s.io", "discovery"),
+        ("events.k8s.io", "events"),
+        ("flowcontrol.apiserver.k8s.io", "flowcontrol"),
+        ("internal.apiserver.k8s.io", "apiserverinternal"),
+        ("lifecycle.k8s.io", "lifecycle"),
+        ("networking.k8s.io", "networking"),
+        ("node.k8s.io", "node"),
+        ("rbac.authorization.k8s.io", "rbac"),
+        ("resource.k8s.io", "resource"),
+        ("scheduling.k8s.io", "scheduling"),
+        ("storage.k8s.io", "storage"),
+        ("storagemigration.k8s.io", "storagemigration"),
+    ];
+
+    #[rstest]
+    #[case::apps("apps")]
+    #[case::autoscaling("autoscaling")]
+    #[case::batch("batch")]
+    #[case::policy("policy")]
+    #[case::extensions("extensions")]
+    #[case::any_name_without_a_dot("whatever")]
+    fn kubernetes_schema_url_uses_a_dotless_group_as_its_own_segment(#[case] group: &str) {
+        let resource =
+            KubernetesResource::new(&format!("{group}/v1"), "Widget").expect("valid resource");
+        assert_eq!(
+            kubernetes_schema_url(&resource, "master"),
+            Some(format!(
+                "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/widget-{group}-v1.json"
+            ))
+        );
+    }
+
+    #[test]
+    fn kubernetes_schema_url_maps_every_builtin_dotted_group_to_its_segment() {
+        for (group, segment) in BUILTIN_DOTTED_GROUPS {
+            let resource =
+                KubernetesResource::new(&format!("{group}/v1"), "Thing").expect("valid resource");
+            assert_eq!(
+                kubernetes_schema_url(&resource, "master"),
+                Some(format!(
+                    "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/thing-{segment}-v1.json"
+                )),
+                "group {group}"
+            );
+        }
+        let mut segments: Vec<&str> = BUILTIN_DOTTED_GROUPS.iter().map(|&(_, s)| s).collect();
+        segments.sort_unstable();
+        segments.dedup();
+        assert_eq!(segments.len(), BUILTIN_DOTTED_GROUPS.len());
+    }
+
+    #[test]
+    fn kubernetes_schema_url_returns_none_for_near_misses_of_builtin_groups() {
+        for (group, _) in BUILTIN_DOTTED_GROUPS {
+            for near_miss in [format!("x.{group}"), format!("{group}.x")] {
+                let resource = KubernetesResource::new(&format!("{near_miss}/v1"), "Widget")
+                    .expect("valid resource");
+                assert_eq!(
+                    kubernetes_schema_url(&resource, "master"),
+                    None,
+                    "group {near_miss}"
+                );
+            }
+        }
+    }
+
+    #[rstest]
+    #[case::cert_manager("cert-manager.io")]
+    #[case::kustomize_config("kustomize.config.k8s.io")]
+    #[case::gateway_api("gateway.networking.k8s.io")]
+    #[case::volume_snapshots("snapshot.storage.k8s.io")]
+    #[case::bare_suffix("k8s.io")]
+    #[case::dash_suffix("x-k8s.io")]
+    #[case::builtin_as_suffix("foo.networking.k8s.io")]
+    #[case::builtin_as_prefix("networking.k8s.io.evil.com")]
+    #[case::partial_builtin("apiserver.k8s.io")]
+    #[case::first_label_of_dotless_builtin_vpa("autoscaling.k8s.io")]
+    #[case::first_label_of_dotless_builtin_kruise("apps.kruise.io")]
+    #[case::first_label_of_dotless_builtin_volcano("batch.volcano.sh")]
+    #[case::first_label_of_dotted_builtin("networking.example.com")]
+    #[case::wrong_suffix_internal("internal.k8s.io")]
+    #[case::wrong_suffix_rbac("rbac.k8s.io")]
+    #[case::example("example.com")]
+    #[case::hyphenated("my-group.example.com")]
+    fn kubernetes_schema_url_returns_none_for_custom_resource_groups(#[case] group: &str) {
+        let resource =
+            KubernetesResource::new(&format!("{group}/v1"), "Widget").expect("valid resource");
+        assert_eq!(kubernetes_schema_url(&resource, "master"), None);
+    }
+
     mod url_properties {
         use proptest::prelude::*;
 
@@ -800,16 +1015,47 @@ mod tests {
             ]
         }
 
+        /// An accepted resource whose group has schemas names a file in the
+        /// schema repository: the URL passes the SSRF guard, starts with the
+        /// repository prefix, and adds one directory and one file that the
+        /// document cannot widen.
+        fn assert_url_inside_the_schema_repository(url: &str) -> Result<(), TestCaseError> {
+            let normalized = crate::schema::validate_and_normalize_url(url)
+                .expect("accepted resource must pass the SSRF guard");
+
+            prop_assert_eq!(&normalized, url);
+            prop_assert!(normalized.starts_with(REPOSITORY_PREFIX), "{normalized}");
+            let parsed =
+                tower_lsp::lsp_types::Url::parse(&normalized).expect("normalized URL parses");
+            prop_assert_eq!(parsed.query(), None);
+            prop_assert_eq!(parsed.fragment(), None);
+            let segments: Vec<&str> = parsed.path_segments().expect("hierarchical URL").collect();
+            prop_assert_eq!(segments.len(), 5, "{}", normalized);
+            prop_assert!(
+                segments
+                    .iter()
+                    .all(|s| !s.is_empty() && !s.starts_with('.'))
+            );
+            prop_assert_eq!(
+                segments[4].rsplit('.').next(),
+                Some("json"),
+                "{}",
+                normalized
+            );
+            prop_assert!(
+                !normalized[REPOSITORY_PREFIX.len()..].contains(['%', '\\']),
+                "{}",
+                normalized
+            );
+            Ok(())
+        }
+
         proptest! {
             #![proptest_config(ProptestConfig {
                 cases: 2048,
                 ..ProptestConfig::default()
             })]
 
-            /// Whatever the document says, an accepted resource names a file in
-            /// the schema repository: the URL passes the SSRF guard, starts
-            /// with the repository prefix, and adds one directory and one file
-            /// that the document cannot widen.
             #[test]
             fn accepted_resource_yields_url_inside_the_schema_repository(
                 api_version in name_text(),
@@ -820,28 +1066,56 @@ mod tests {
                 };
 
                 for k8s_version in ["1.29.0", "master"] {
-                    let url = kubernetes_schema_url(&resource, k8s_version);
-                    let normalized = crate::schema::validate_and_normalize_url(&url)
-                        .expect("accepted resource must pass the SSRF guard");
-
-                    prop_assert!(normalized.starts_with(REPOSITORY_PREFIX), "{normalized}");
-                    let parsed = tower_lsp::lsp_types::Url::parse(&normalized).expect("normalized URL parses");
-                    prop_assert_eq!(parsed.query(), None);
-                    prop_assert_eq!(parsed.fragment(), None);
-                    let segments: Vec<&str> =
-                        parsed.path_segments().expect("hierarchical URL").collect();
-                    prop_assert_eq!(segments.len(), 5, "{}", normalized);
-                    prop_assert!(segments.iter().all(|s| !s.is_empty() && !s.starts_with('.')));
-                    prop_assert_eq!(segments[4].rsplit('.').next(), Some("json"), "{}", normalized);
-                    prop_assert!(
-                        !normalized[REPOSITORY_PREFIX.len()..].contains(['%', '\\']),
-                        "{}",
-                        normalized
-                    );
+                    if let Some(url) = kubernetes_schema_url(&resource, k8s_version) {
+                        assert_url_inside_the_schema_repository(&url)?;
+                    }
                 }
             }
 
-            /// Guards the property above against passing vacuously: the
+            /// Guards the property above against passing vacuously: core and
+            /// dotless-group resources always have a URL.
+            #[test]
+            fn core_and_dotless_resources_yield_a_url(
+                api_version in "(v[0-9]{1,3}((alpha|beta)[0-9])?)|([a-z0-9]{1,10}/v[0-9]{1,3})",
+                kind in "[A-Z][A-Za-z0-9]{0,62}",
+            ) {
+                let resource = KubernetesResource::new(&api_version, &kind).expect("valid resource");
+                for k8s_version in ["1.29.0", "master"] {
+                    let url = kubernetes_schema_url(&resource, k8s_version);
+                    prop_assert!(url.is_some(), "{api_version} {kind}");
+                    assert_url_inside_the_schema_repository(&url.expect("checked above"))?;
+                }
+            }
+
+            #[test]
+            fn builtin_dotted_resource_yields_url_inside_the_schema_repository(
+                group in prop::sample::select(BUILTIN_DOTTED_GROUPS.map(|(group, _)| group).to_vec()),
+                version in "v[0-9]{1,3}((alpha|beta)[0-9])?",
+                kind in "[A-Z][A-Za-z0-9]{0,62}",
+            ) {
+                let resource = KubernetesResource::new(&format!("{group}/{version}"), &kind)
+                    .expect("valid resource");
+                for k8s_version in ["1.29.0", "master"] {
+                    let url = kubernetes_schema_url(&resource, k8s_version);
+                    prop_assert!(url.is_some(), "{group}");
+                    assert_url_inside_the_schema_repository(&url.expect("checked above"))?;
+                }
+            }
+
+            #[test]
+            fn dotted_group_outside_the_builtin_list_yields_no_url(
+                group in "[a-z0-9]{1,8}(\\.[a-z0-9]{1,8}){1,3}",
+                kind in "[A-Z][A-Za-z0-9]{0,62}",
+            ) {
+                prop_assume!(BUILTIN_DOTTED_GROUPS.iter().all(|&(builtin, _)| builtin != group));
+                let resource = KubernetesResource::new(&format!("{group}/v1"), &kind)
+                    .expect("valid resource");
+                for k8s_version in ["1.29.0", "master"] {
+                    prop_assert_eq!(kubernetes_schema_url(&resource, k8s_version), None);
+                }
+            }
+
+            /// Guards the first property against passing vacuously: the
             /// structured strategies must produce resources the validator
             /// accepts.
             #[test]
@@ -861,7 +1135,7 @@ mod tests {
     #[test]
     fn should_treat_capitalised_master_as_versioned_prefix() {
         let pod = KubernetesResource::new("v1", "Pod").expect("valid resource");
-        let url = kubernetes_schema_url(&pod, "Master");
+        let url = kubernetes_schema_url(&pod, "Master").expect("core resource has a URL");
         assert!(
             url.contains("vMaster-standalone-strict/"),
             "expected vMaster-standalone-strict/ in URL, got: {url}"

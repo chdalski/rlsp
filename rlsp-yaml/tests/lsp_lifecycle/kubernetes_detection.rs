@@ -122,11 +122,34 @@ async fn open_manifest_through_proxy(text: &str) -> (Vec<String>, Vec<String>) {
 
 #[tokio::test]
 async fn should_fetch_kubernetes_schema_for_valid_manifest() {
-    let (seen, _) = open_manifest_through_proxy("apiVersion: example.com/v1\nkind: Widget\n").await;
+    let (seen, _) = open_manifest_through_proxy("apiVersion: apps/v1\nkind: Deployment\n").await;
 
     assert!(
         seen.iter().any(|line| line == KUBERNETES_CONNECT),
         "a valid manifest must reach the Kubernetes schema repository: {seen:?}"
+    );
+}
+
+/// Open `text` through the fake proxy and assert that it triggers no
+/// Kubernetes fetch, no matching warning, and goes on to `SchemaStore` matching.
+async fn assert_falls_through_to_schemastore(text: &str) {
+    let (seen, warnings) = open_manifest_through_proxy(text).await;
+
+    assert!(
+        !seen
+            .iter()
+            .any(|line| line.contains("raw.githubusercontent.com")),
+        "this manifest must not trigger a Kubernetes fetch: {seen:?}"
+    );
+    assert!(
+        seen.iter().any(|line| line == SCHEMASTORE_CONNECT),
+        "the document must go on to SchemaStore matching: {seen:?}"
+    );
+    assert!(
+        !warnings
+            .iter()
+            .any(|w| w.contains("raw.githubusercontent.com")),
+        "{warnings:?}"
     );
 }
 
@@ -139,22 +162,71 @@ async fn should_fetch_kubernetes_schema_for_valid_manifest() {
 async fn should_not_fetch_kubernetes_schema_for_invalid_names_and_fall_through_to_schemastore(
     #[case] text: &str,
 ) {
-    let (seen, warnings) = open_manifest_through_proxy(text).await;
+    assert_falls_through_to_schemastore(text).await;
+}
 
+#[rstest]
+#[case::cert_manager("apiVersion: cert-manager.io/v1\nkind: Certificate\n")]
+#[case::kustomize("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n")]
+#[tokio::test]
+async fn should_not_fetch_kubernetes_schema_for_custom_resources_and_fall_through_to_schemastore(
+    #[case] text: &str,
+) {
+    assert_falls_through_to_schemastore(text).await;
+}
+
+#[tokio::test]
+async fn should_not_touch_the_network_for_a_custom_resource_when_schemastore_is_disabled() {
+    let proxy = FakeProxy::start(Reply::not_found());
+    let (mut service, mut log) = start_server(json!({
+        "httpProxy": proxy.url(),
+        "schemaStore": false
+    }))
+    .await;
+
+    send(
+        &mut service,
+        did_open_notification(
+            "file:///test/manifest.yaml",
+            "apiVersion: cert-manager.io/v1\nkind: Certificate\n",
+        ),
+    )
+    .await;
+    let warnings = warnings_before_sentinel(&mut service, &mut log).await;
+
+    assert!(proxy.seen().is_empty(), "{:?}", proxy.seen());
+    assert!(warnings.is_empty(), "{warnings:?}");
+}
+
+#[tokio::test]
+async fn should_record_kubernetes_schema_association_for_builtin_dotted_group() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/ingress.yaml";
+    send(
+        &mut service,
+        did_open_notification(
+            uri,
+            "apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: test\n",
+        ),
+    )
+    .await;
+
+    let resp = send(&mut service, code_lens_request(2, uri)).await;
+    let resp = resp.expect("codeLens should return a response");
+    let result = resp.result().expect("codeLens should have result");
+    let arr = result.as_array().expect("codeLens result should be array");
     assert!(
-        !seen
-            .iter()
-            .any(|line| line.contains("raw.githubusercontent.com")),
-        "an invalid name must not trigger a Kubernetes fetch: {seen:?}"
+        !arr.is_empty(),
+        "codeLens should return a lens for the K8s schema"
     );
+    let lens_str = serde_json::to_string(&arr[0]).expect("serialize lens");
     assert!(
-        seen.iter().any(|line| line == SCHEMASTORE_CONNECT),
-        "the document must go on to SchemaStore matching: {seen:?}"
-    );
-    assert!(
-        !warnings
-            .iter()
-            .any(|w| w.contains("raw.githubusercontent.com")),
-        "{warnings:?}"
+        lens_str.contains("ingress-networking-v1.json"),
+        "lens should reference ingress-networking-v1.json: {lens_str}"
     );
 }

@@ -170,10 +170,11 @@ async fn should_not_warn_when_kubernetes_schema_fetch_fails() {
     let proxy = FakeProxy::start(Reply::not_found());
     let (mut service, mut log) = start_server(proxy_options(&proxy.url())).await;
 
-    let custom_resource = "apiVersion: example.com/v1\nkind: Widget\nmetadata:\n  name: w\n";
+    let unknown_builtin_kind =
+        "apiVersion: networking.k8s.io/v1\nkind: Widget\nmetadata:\n  name: w\n";
     send(
         &mut service,
-        did_open_notification("file:///test/widget.yaml", custom_resource),
+        did_open_notification("file:///test/widget.yaml", unknown_builtin_kind),
     )
     .await;
     let warnings = warnings_before_sentinel(&mut service, &mut log).await;
