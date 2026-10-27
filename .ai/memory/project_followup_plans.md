@@ -17,9 +17,10 @@ metadata:
 ## Open: rlsp-yaml
 
 - **Schema plan queue (one plan at a time, in this order).** Each needs its own clarification + plan:
-  3a. Follow `patternProperties`, `additionalProperties`, and `prefixItems` in the shared schema path resolver (`src/schema/path.rs`, `SchemaPathSegment::{Key, Item}`) — next in the queue, the user chose 2026-10-27 to plan it right after the hover-docs plan. Today neither hover nor completion offers anything under GitHub Actions `jobs.<id>` or docker-compose `services.<name>`. `prefixItems` needs the item index in the path segment.
+  3a. Follow `patternProperties`, `additionalProperties`, and `prefixItems` in the shared schema path resolver — in progress as `.ai/plans/2026-10-27-resolver-pattern-and-positional-schemas.md`.
+  3b. Completion bug: structural sibling keys of a sequence item come from the first document of a multi-document file (`find_node_at_path` in `completion/navigation.rs` walks `docs.first()`); the cursor locator already knows the right sequence — user chose 2026-10-27 to plan it right after item 3a.
   4. Bound the thread-local `REGEX_CACHE` and run `validate_schema` off the async executor (`spawn_blocking`).
-  5. Bug: `unevaluatedItems: false` is dropped (boolean `false` sub-schema loss in the parser); check every keyword parsed through the generic sub-schema path.
+  5. Bug: `unevaluatedItems: false` is dropped (boolean `false` sub-schema loss in the parser); check every keyword parsed through the generic sub-schema path. Known instances besides `unevaluatedItems`: `prefixItems: [A, false, C]` parses as `[A, C]` (index shift in validation and the path resolver), a `false` `patternProperties` schema is dropped, `items: false` reads as absent; the resolver's positional and pattern reads must follow the fix.
   6. `httpProxy` hardening — VS Code setting has no `scope`/`restrictedConfigurations`; `configuration.md` wrongly says "requests are made directly" when unset (ureq reads proxy env vars).
   7. SSRF guard via DNS resolution — hostname-string check only (`foo.localhost`, `localtest.me`, `127.0.0.1.nip.io` pass; DNS rebinding).
   8. Relative/local schemas (`$schema=./schema.json`, `file://`).
