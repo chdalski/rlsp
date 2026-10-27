@@ -649,8 +649,10 @@ When a YAML file is opened or changed, the server resolves a schema using the fo
 
 1. **Modeline** — `# yaml-language-server: $schema=<url>` in the first 10 lines of the file. Highest priority; overrides everything else. Use `$schema=none` to disable schema processing for a specific file.
 2. **Workspace glob** — the `schemas` setting maps schema URLs to glob patterns. The first pattern that matches the file's URI path wins.
-3. **Kubernetes auto-detection** — if the document's root mapping contains both `apiVersion` and `kind`, the server fetches the corresponding schema from [yannh/kubernetes-json-schema](https://github.com/yannh/kubernetes-json-schema) using the configured `kubernetesVersion`.
+3. **Kubernetes auto-detection** — if the document's root mapping contains both `apiVersion` and `kind`, and both follow Kubernetes naming rules, the server fetches the corresponding schema from [yannh/kubernetes-json-schema](https://github.com/yannh/kubernetes-json-schema) using the configured `kubernetesVersion`.
 4. **SchemaStore** — if enabled (`schemaStore: true`, the default), the server fetches the [SchemaStore](https://www.schemastore.org/) catalog and matches the file's path against catalog `fileMatch` patterns. The catalog is fetched lazily on first need and cached for the session.
+
+A document is a Kubernetes manifest for auto-detection only if its `apiVersion` and `kind` are valid. A `kind` starts with an ASCII letter, continues with ASCII letters and digits, and has at most 63 characters. An `apiVersion` is a version such as `v1`, `v1beta1`, or `v2alpha3`, optionally preceded by a group and `/`; a group is a DNS subdomain (lowercase letters, digits, `-`, and `.`, at most 253 characters). Any other document goes on to SchemaStore (step 4) without a Kubernetes schema fetch.
 
 If none of the above produce a match, no schema is applied and only syntax/structural validators run.
 

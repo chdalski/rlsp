@@ -52,7 +52,7 @@ fetch.
 - [x] Clarify scope with the user
 - [x] Design review of the approach
 - [x] Task 1: settings are stored through one method
-- [ ] Task 2: only Kubernetes names reach the schema URL
+- [x] Task 2: only Kubernetes names reach the schema URL
 - [ ] Task 3: file names match the schema repository; custom
       resources are not fetched
 - [ ] Task 4: an invalid `kubernetesVersion` falls back to `master`
@@ -88,26 +88,26 @@ alphanumeric labels of 1–63 characters, inner `-`, joined by `.`,
 at most 253 characters); a version is `v` followed by digits,
 optionally followed by `alpha` or `beta` and digits.
 
-- [ ] Detection returns a resource only for values that follow
+- [x] Detection returns a resource only for values that follow
       these rules; `kubernetes_schema_url` accepts only that
       validated resource
-- [ ] A manifest whose `kind` or `apiVersion` breaks the rules —
+- [x] A manifest whose `kind` or `apiVersion` breaks the rules —
       `../` sequences, a `/` in the version, an uppercase group, an
       empty or over-long value among them — triggers no Kubernetes
       fetch, and the document goes on to SchemaStore matching; an
       integration test in `rlsp-yaml/tests/lsp_lifecycle/` pins the
       absent fetch for the traversal manifest
-- [ ] A property test shows that, for a fixed valid
+- [x] A property test shows that, for a fixed valid
       `kubernetesVersion`, every accepted resource yields a URL that,
       after `validate_and_normalize_url`, starts with
       `https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/`
-- [ ] The existing detection and URL tests pass with their
+- [x] The existing detection and URL tests pass with their
       assertions unchanged — only edits for the validated type
-- [ ] The "Schema Resolution Priority" section of
+- [x] The "Schema Resolution Priority" section of
       `rlsp-yaml/docs/configuration.md` tells the reader that
       auto-detection needs a valid Kubernetes `apiVersion` and
       `kind` and that other documents go on to SchemaStore
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ### Task 3: Build the repository's file names and skip custom resources
 
@@ -217,6 +217,9 @@ LSP specification allows `window/logMessage` during the
   the whole settings object fail to deserialize, resetting every
   setting at initialization and dropping a whole configuration
   change.
+- **Version numbers are capped at 9 digits:** each digit run in an
+  API version may have at most 9 digits, so a hostile value cannot
+  grow the URL; real versions use one or two digits.
 - **Invalid names go on to SchemaStore:** a document with an
   invalid `kind` is not a Kubernetes manifest, and the source chain
   stays "first source that yields a URL wins".

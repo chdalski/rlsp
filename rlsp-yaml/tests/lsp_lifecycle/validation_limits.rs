@@ -118,7 +118,8 @@ async fn should_cap_published_diagnostics_at_the_limit_when_the_diagnostic_limit
 
 #[tokio::test]
 async fn should_warn_for_auto_detected_kubernetes_schema_when_validation_stops_early() {
-    let url = rlsp_yaml::schema::kubernetes_schema_url("v1", "Pod", "master");
+    let pod = rlsp_yaml::schema::KubernetesResource::new("v1", "Pod").expect("valid resource");
+    let url = rlsp_yaml::schema::kubernetes_schema_url(&pod, "master");
 
     let outcome = open_with_seeded_schema(
         &url,

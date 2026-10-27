@@ -89,20 +89,112 @@ pub fn extract_yaml_version(text: &str) -> Option<String> {
 // Schema association — Kubernetes auto-detection
 // ──────────────────────────────────────────────────────────────────────────────
 
+/// The `apiVersion` and `kind` of a Kubernetes manifest, checked against
+/// Kubernetes naming rules.
+///
+/// The only way to obtain a value is [`KubernetesResource::new`], so
+/// [`kubernetes_schema_url`] never receives raw document text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KubernetesResource {
+    api_version: String,
+    kind: String,
+}
+
+impl KubernetesResource {
+    /// Validate `api_version` and `kind`; `None` if either breaks the rules.
+    ///
+    /// - `kind` starts with an ASCII letter, continues with ASCII letters and
+    ///   digits, and has at most 63 characters.
+    /// - `api_version` is a version (`v1`, `v1beta2`, `v2alpha1`), optionally
+    ///   preceded by `group/`, where the group is a DNS-1123 subdomain.
+    #[must_use]
+    pub fn new(api_version: &str, kind: &str) -> Option<Self> {
+        let valid_api_version = match api_version.split_once('/') {
+            Some((group, version)) => is_dns_subdomain(group) && is_api_version(version),
+            None => is_api_version(api_version),
+        };
+        (valid_api_version && is_kind(kind)).then(|| Self {
+            api_version: api_version.to_string(),
+            kind: kind.to_string(),
+        })
+    }
+
+    /// The validated `apiVersion`, e.g. `v1` or `apps/v1`.
+    #[must_use]
+    pub fn api_version(&self) -> &str {
+        &self.api_version
+    }
+
+    /// The validated `kind`, e.g. `Pod`.
+    #[must_use]
+    pub fn kind(&self) -> &str {
+        &self.kind
+    }
+}
+
+const MAX_VERSION_DIGITS: usize = 9;
+
+fn is_kind(kind: &str) -> bool {
+    let mut chars = kind.chars();
+    kind.len() <= 63
+        && chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric())
+}
+
+/// A DNS-1123 subdomain: dot-separated labels of 1–63 lowercase alphanumerics
+/// and inner `-`, at most 253 characters in total.
+fn is_dns_subdomain(group: &str) -> bool {
+    group.len() <= 253
+        && group.split('.').all(|label| {
+            let bytes = label.as_bytes();
+            let alphanumeric = |b: &u8| b.is_ascii_lowercase() || b.is_ascii_digit();
+            (1..=63).contains(&bytes.len())
+                && bytes.first().is_some_and(alphanumeric)
+                && bytes.last().is_some_and(alphanumeric)
+                && bytes.iter().all(|b| alphanumeric(b) || *b == b'-')
+        })
+}
+
+/// `v` followed by digits, optionally followed by `alpha` or `beta` and digits.
+///
+/// Each digit run is capped at [`MAX_VERSION_DIGITS`]: real versions use one or
+/// two digits, and the cap keeps a hostile value from lengthening the URL.
+fn is_api_version(version: &str) -> bool {
+    let is_number = |digits: &str| {
+        (1..=MAX_VERSION_DIGITS).contains(&digits.len())
+            && digits.bytes().all(|b| b.is_ascii_digit())
+    };
+    let Some(rest) = version.strip_prefix('v') else {
+        return false;
+    };
+    let digits_end = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
+    let (major, stability) = rest.split_at(digits_end);
+    is_number(major)
+        && (stability.is_empty()
+            || stability
+                .strip_prefix("alpha")
+                .or_else(|| stability.strip_prefix("beta"))
+                .is_some_and(is_number))
+}
+
 /// Inspect the first YAML document's root mapping for `apiVersion` and `kind`.
 ///
-/// Returns `Some((api_version, kind))` if both keys are present and both values
-/// are plain string scalars.  Returns `None` if the document slice is empty,
-/// the root node is not a mapping, or either key is absent / non-string.
+/// Returns `Some(resource)` if both keys are present, both values are plain
+/// string scalars, and both follow Kubernetes naming rules (see
+/// [`KubernetesResource::new`]).  Returns `None` if the document slice is
+/// empty, the root node is not a mapping, either key is absent / non-string,
+/// or either value breaks the rules.
 #[must_use]
-pub fn detect_kubernetes_resource(docs: &[Document<Span>]) -> Option<(String, String)> {
+pub fn detect_kubernetes_resource(docs: &[Document<Span>]) -> Option<KubernetesResource> {
     let root = &docs.first()?.root;
     let Node::Mapping { entries, .. } = root else {
         return None;
     };
 
-    let mut api_version: Option<String> = None;
-    let mut kind: Option<String> = None;
+    let mut api_version: Option<&str> = None;
+    let mut kind: Option<&str> = None;
 
     for (k, v) in entries {
         let key = match k {
@@ -110,7 +202,7 @@ pub fn detect_kubernetes_resource(docs: &[Document<Span>]) -> Option<(String, St
             Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => continue,
         };
         let val = match v {
-            Node::Scalar { value, .. } => value.clone(),
+            Node::Scalar { value, .. } => value.as_str(),
             Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => continue,
         };
         match key {
@@ -120,7 +212,7 @@ pub fn detect_kubernetes_resource(docs: &[Document<Span>]) -> Option<(String, St
         }
     }
 
-    Some((api_version?, kind?))
+    KubernetesResource::new(api_version?, kind?)
 }
 
 /// Construct a Kubernetes JSON Schema URL for the given resource.
@@ -135,12 +227,12 @@ pub fn detect_kubernetes_resource(docs: &[Document<Span>]) -> Option<(String, St
 /// - For core API versions (e.g. `v1`) the filename is
 ///   `{kind}-{api_version}.json`.
 #[must_use]
-pub fn kubernetes_schema_url(api_version: &str, kind: &str, k8s_version: &str) -> String {
-    let kind_lower = kind.to_lowercase();
-    let filename = if let Some((group, version)) = api_version.split_once('/') {
+pub fn kubernetes_schema_url(resource: &KubernetesResource, k8s_version: &str) -> String {
+    let kind_lower = resource.kind().to_ascii_lowercase();
+    let filename = if let Some((group, version)) = resource.api_version().split_once('/') {
         format!("{kind_lower}-{group}-{version}.json")
     } else {
-        format!("{kind_lower}-{api_version}.json")
+        format!("{kind_lower}-{}.json", resource.api_version())
     };
     let dir_prefix = if k8s_version == "master" {
         "master-standalone-strict".to_string()
@@ -460,7 +552,7 @@ mod tests {
         let docs = parse_docs(text);
         assert_eq!(
             detect_kubernetes_resource(&docs),
-            Some((expected.0.to_string(), expected.1.to_string()))
+            Some(KubernetesResource::new(expected.0, expected.1).expect("valid resource"))
         );
     }
 
@@ -516,17 +608,260 @@ mod tests {
         #[case] k8s_version: &str,
         #[case] expected: &str,
     ) {
+        let resource = KubernetesResource::new(api_version, kind).expect("valid resource");
+        assert_eq!(kubernetes_schema_url(&resource, k8s_version), expected);
+    }
+
+    #[rstest]
+    #[case::core("v1", "Pod")]
+    #[case::grouped("apps/v1", "Deployment")]
+    #[case::dotted_group("rbac.authorization.k8s.io/v1", "ClusterRole")]
+    #[case::beta("networking.k8s.io/v1beta1", "Ingress")]
+    #[case::alpha("example.com/v2alpha3", "Widget")]
+    #[case::hyphenated_group("my-group.example.com/v1", "Widget")]
+    #[case::kind_with_digits("v1", "K8s2Thing")]
+    #[case::crd("apiextensions.k8s.io/v1", "CustomResourceDefinition")]
+    #[case::hpa_beta("autoscaling/v2beta1", "HorizontalPodAutoscaler")]
+    #[case::cert_manager("cert-manager.io/v1", "Certificate")]
+    #[case::argo("argoproj.io/v1alpha1", "Application")]
+    #[case::vpa("autoscaling.k8s.io/v1", "VerticalPodAutoscaler")]
+    #[case::gateway("gateway.networking.k8s.io/v1", "HTTPRoute")]
+    #[case::digit_leading_group_label("1a.example.com/v1", "Widget")]
+    #[case::lowercase_kind("v1", "pod")]
+    #[case::version_zero("v0", "Pod")]
+    #[case::multi_digit_alpha("example.com/v1alpha12", "Widget")]
+    #[case::version_9_digits("v123456789", "Pod")]
+    #[case::kind_digit_inside("v1", "Ec2NodeClass")]
+    #[case::group_x_k8s_io("x-k8s.io/v1", "Widget")]
+    #[case::version_two_digits("v10", "Pod")]
+    #[case::version_beta_three("v2beta3", "Pod")]
+    #[case::kind_single_letter("v1", "P")]
+    #[case::kind_63_chars("v1", &"K".repeat(63))]
+    #[case::group_label_63_chars(&format!("{}.io/v1", "a".repeat(63)), "Pod")]
+    #[case::group_253_chars(&format!("{}/v1", ["a".repeat(63), "b".repeat(63), "c".repeat(63), "d".repeat(61)].join(".")), "Pod")]
+    fn kubernetes_resource_accepts(#[case] api_version: &str, #[case] kind: &str) {
+        let resource = KubernetesResource::new(api_version, kind).expect("must accept");
+        assert_eq!(resource.api_version(), api_version);
+        assert_eq!(resource.kind(), kind);
+    }
+
+    #[rstest]
+    #[case::traversal_kind("v1", "../../../../attacker/repo/main/evil")]
+    #[case::slash_in_kind("v1", "Pod/x")]
+    #[case::dot_in_kind("v1", "Po.d")]
+    #[case::dash_in_kind("v1", "Po-d")]
+    #[case::kind_starts_with_digit("v1", "1Pod")]
+    #[case::kind_empty("v1", "")]
+    #[case::kind_64_chars("v1", &"K".repeat(64))]
+    #[case::kind_non_ascii_letter("v1", "Pöd")]
+    #[case::kind_turkish_dotted_i("v1", "İngress")]
+    #[case::kind_trailing_newline("v1", "Pod\n")]
+    #[case::kind_with_space("v1", "Pod x")]
+    #[case::kind_percent("v1", "Po%64")]
+    #[case::kind_query("v1", "Pod?x=1")]
+    #[case::kind_fragment("v1", "Pod#x")]
+    #[case::traversal_group("../../x/v1", "Pod")]
+    #[case::traversal_version("apps/../v1", "Pod")]
+    #[case::slash_in_version("apps/v1/extra", "Pod")]
+    #[case::leading_slash("/v1", "Pod")]
+    #[case::trailing_slash("apps/", "Pod")]
+    #[case::double_slash("apps//v1", "Pod")]
+    #[case::uppercase_group("Apps/v1", "Pod")]
+    #[case::underscore_group("my_group/v1", "Pod")]
+    #[case::group_leading_dot(".apps/v1", "Pod")]
+    #[case::group_trailing_dot("apps./v1", "Pod")]
+    #[case::group_double_dot("a..b/v1", "Pod")]
+    #[case::group_leading_hyphen("-apps/v1", "Pod")]
+    #[case::group_trailing_hyphen("apps-/v1", "Pod")]
+    #[case::group_label_64_chars(&format!("{}.io/v1", "a".repeat(64)), "Pod")]
+    #[case::group_254_chars(&format!("{}/v1", ["a".repeat(63), "b".repeat(63), "c".repeat(63), "d".repeat(62)].join(".")), "Pod")]
+    #[case::group_non_ascii("äpps/v1", "Pod")]
+    #[case::group_percent("ap%2Fps/v1", "Pod")]
+    #[case::api_version_empty("", "Pod")]
+    #[case::version_without_v("1", "Pod")]
+    #[case::version_v_only("v", "Pod")]
+    #[case::version_uppercase_v("V1", "Pod")]
+    #[case::version_unknown_suffix("v1gamma1", "Pod")]
+    #[case::version_beta_without_number("v1beta", "Pod")]
+    #[case::version_alpha_non_digit("v1alphax", "Pod")]
+    #[case::version_trailing_dot("v1.", "Pod")]
+    #[case::version_dotted("v1.2", "Pod")]
+    #[case::version_without_major_before_beta("vbeta1", "Pod")]
+    #[case::version_trailing_newline("v1\n", "Pod")]
+    #[case::version_with_space("v1 ", "Pod")]
+    #[case::version_non_ascii_digit("v١", "Pod")]
+    #[case::version_fullwidth_digit("v\u{ff11}", "Pod")]
+    #[case::version_plus_sign("v+1", "Pod")]
+    #[case::version_hyphenated_beta("v1beta-1", "Pod")]
+    #[case::version_beta_trailing_letter("v1beta1x", "Pod")]
+    #[case::version_double_v("vv1", "Pod")]
+    #[case::version_10_digits("v1234567890", "Pod")]
+    #[case::version_10_digit_beta_number("v1beta1234567890", "Pod")]
+    #[case::version_5000_digits(&format!("v{}", "1".repeat(5000)), "Pod")]
+    #[case::version_alpha_without_number("v1alpha", "Pod")]
+    #[case::multiple_slashes("a/b/v1", "Pod")]
+    #[case::trailing_slash_after_version("apps/v1/", "Pod")]
+    #[case::traversal_after_version("apps/v1/../../x", "Pod")]
+    #[case::version_with_slash("v1/x", "Pod")]
+    #[case::version_with_query("v1?x", "Pod")]
+    #[case::version_hyphen("v-1", "Pod")]
+    #[case::version_letter_after_v("va1", "Pod")]
+    #[case::mixed_case_group("Example.COM/v1", "Pod")]
+    #[case::group_label_leading_hyphen("-a.io/v1", "Pod")]
+    #[case::group_label_trailing_hyphen("a-.io/v1", "Pod")]
+    #[case::group_leading_dot_label(".a.io/v1", "Pod")]
+    #[case::group_trailing_dot_label("a.io./v1", "Pod")]
+    #[case::group_percent_encoded_dots("%2e%2e/v1", "Pod")]
+    #[case::group_without_version("apps", "Pod")]
+    #[case::group_dot_dot_version("apps/..", "Pod")]
+    #[case::core_version_with_traversal("v1/..", "Pod")]
+    #[case::group_with_at("a@b/v1", "Pod")]
+    #[case::group_with_port("a:80/v1", "Pod")]
+    #[case::group_with_space("a b/v1", "Pod")]
+    #[case::group_with_backslash("a\\b/v1", "Pod")]
+    #[case::group_cyrillic_a("\u{430}pps/v1", "Pod")]
+    #[case::group_trailing_newline("apps\n/v1", "Pod")]
+    #[case::kind_backslash("v1", "Pod\\x")]
+    #[case::kind_at("v1", "Pod@host")]
+    #[case::kind_colon("v1", "Pod:80")]
+    #[case::kind_underscore("v1", "Pod_x")]
+    #[case::kind_leading_hyphen("v1", "-Pod")]
+    #[case::kind_double_dot("v1", "..")]
+    #[case::kind_single_dot("v1", ".")]
+    #[case::kind_tab("v1", "Po\td")]
+    #[case::kind_crlf("v1", "Pod\r\n")]
+    #[case::kind_leading_space("v1", " Pod")]
+    #[case::kind_only_spaces("v1", "   ")]
+    #[case::kind_nul("v1", "Pod\0")]
+    #[case::kind_escape("v1", "Pod\u{1b}[31m")]
+    #[case::kind_kelvin_sign("v1", "\u{212a}ind")]
+    #[case::kind_fullwidth_letter("v1", "\u{ff30}od")]
+    #[case::kind_cyrillic_er("v1", "\u{420}od")]
+    #[case::kind_sharp_s("v1", "Stra\u{df}e")]
+    #[case::kind_combining_accent("v1", "Pod\u{301}")]
+    #[case::kind_rtl_override("v1", "Pod\u{202e}")]
+    #[case::kind_emoji("v1", "Pod\u{1f600}")]
+    #[case::kind_1_mib("v1", &"K".repeat(1 << 20))]
+    #[case::group_1_mib(&format!("{}/v1", "a".repeat(1 << 20)), "Pod")]
+    fn kubernetes_resource_rejects(#[case] api_version: &str, #[case] kind: &str) {
+        assert_eq!(KubernetesResource::new(api_version, kind), None);
+    }
+
+    #[rstest]
+    #[case::traversal_kind("apiVersion: v1\nkind: ../../../../attacker/repo/main/evil\n")]
+    #[case::traversal_api_version("apiVersion: ../../x/v1\nkind: Pod\n")]
+    #[case::slash_in_version("apiVersion: apps/v1/extra\nkind: Pod\n")]
+    #[case::uppercase_group("apiVersion: Apps/v1\nkind: Pod\n")]
+    #[case::empty_kind("apiVersion: v1\nkind: ''\n")]
+    #[case::empty_api_version("apiVersion: ''\nkind: Pod\n")]
+    #[case::escaped_slashes_in_kind("apiVersion: v1\nkind: \"\\x2e\\x2e\\x2f\\x2e\\x2e\"\n")]
+    #[case::escaped_newline_in_kind("apiVersion: v1\nkind: \"Pod\\n\"\n")]
+    #[case::escaped_tab_in_kind("apiVersion: v1\nkind: \"Po\\td\"\n")]
+    #[case::trailing_space_in_kind("apiVersion: v1\nkind: \"Pod \"\n")]
+    #[case::escaped_slash_in_api_version("apiVersion: \"apps\\x2f..\\x2fv1\"\nkind: Pod\n")]
+    #[case::later_invalid_kind_wins("apiVersion: v1\nkind: Pod\nkind: ../x\n")]
+    #[case::later_invalid_api_version_wins("apiVersion: v1\nkind: Pod\napiVersion: ../x\n")]
+    #[case::integer_kind("apiVersion: v1\nkind: 123\n")]
+    #[case::alias_kind("a: &a Pod\napiVersion: v1\nkind: *a\n")]
+    #[case::sequence_root("- apiVersion: v1\n  kind: Pod\n")]
+    #[case::scalar_root("Pod\n")]
+    fn detect_kubernetes_resource_returns_none_for_invalid_names(#[case] text: &str) {
+        let docs = parse_docs(text);
+        assert_eq!(detect_kubernetes_resource(&docs), None);
+    }
+
+    #[test]
+    fn detect_kubernetes_resource_uses_the_last_of_duplicate_keys() {
+        let docs = parse_docs("apiVersion: v1\nkind: ../x\nkind: Pod\n");
         assert_eq!(
-            kubernetes_schema_url(api_version, kind, k8s_version),
-            expected
+            detect_kubernetes_resource(&docs),
+            Some(KubernetesResource::new("v1", "Pod").expect("valid resource"))
         );
+    }
+
+    mod url_properties {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        const REPOSITORY_PREFIX: &str =
+            "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/";
+
+        /// Free-form text over the characters that matter for URL syntax, mixed
+        /// with well-formed values so that both accepted and rejected inputs
+        /// are generated.
+        fn name_text() -> impl Strategy<Value = String> {
+            prop_oneof![
+                "[a-zA-Z0-9./%?#:@\\ _\\-\\\\\\n]{0,40}",
+                any::<String>(),
+                "[a-z0-9]{1,8}(\\.[a-z0-9-]{1,8}){0,3}/v[0-9]{1,2}((alpha|beta)[0-9])?",
+                "v[0-9]{1,2}((alpha|beta)[0-9])?",
+                "[A-Za-z][A-Za-z0-9]{0,70}",
+            ]
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig {
+                cases: 2048,
+                ..ProptestConfig::default()
+            })]
+
+            /// Whatever the document says, an accepted resource names a file in
+            /// the schema repository: the URL passes the SSRF guard, starts
+            /// with the repository prefix, and adds one directory and one file
+            /// that the document cannot widen.
+            #[test]
+            fn accepted_resource_yields_url_inside_the_schema_repository(
+                api_version in name_text(),
+                kind in name_text(),
+            ) {
+                let Some(resource) = KubernetesResource::new(&api_version, &kind) else {
+                    return Ok(());
+                };
+
+                for k8s_version in ["1.29.0", "master"] {
+                    let url = kubernetes_schema_url(&resource, k8s_version);
+                    let normalized = crate::schema::validate_and_normalize_url(&url)
+                        .expect("accepted resource must pass the SSRF guard");
+
+                    prop_assert!(normalized.starts_with(REPOSITORY_PREFIX), "{normalized}");
+                    let parsed = tower_lsp::lsp_types::Url::parse(&normalized).expect("normalized URL parses");
+                    prop_assert_eq!(parsed.query(), None);
+                    prop_assert_eq!(parsed.fragment(), None);
+                    let segments: Vec<&str> =
+                        parsed.path_segments().expect("hierarchical URL").collect();
+                    prop_assert_eq!(segments.len(), 5, "{}", normalized);
+                    prop_assert!(segments.iter().all(|s| !s.is_empty() && !s.starts_with('.')));
+                    prop_assert_eq!(segments[4].rsplit('.').next(), Some("json"), "{}", normalized);
+                    prop_assert!(
+                        !normalized[REPOSITORY_PREFIX.len()..].contains(['%', '\\']),
+                        "{}",
+                        normalized
+                    );
+                }
+            }
+
+            /// Guards the property above against passing vacuously: the
+            /// structured strategies must produce resources the validator
+            /// accepts.
+            #[test]
+            fn structured_values_are_accepted(
+                api_version in "(([a-z0-9][a-z0-9.-]{0,30}[a-z0-9]|[a-z0-9])/)?v[0-9]{1,3}((alpha|beta)[0-9])?",
+                kind in "[A-Z][A-Za-z0-9]{0,62}",
+            ) {
+                prop_assume!(!api_version.contains("..") && !api_version.contains(".-")
+                    && !api_version.contains("-.") && !api_version.contains("/."));
+                prop_assert!(KubernetesResource::new(&api_version, &kind).is_some());
+            }
+        }
     }
 
     // K8s-11: "Master" (capital M) falls through to versioned branch (case-sensitive match)
     // Different assertion shape (contains check) — left standalone.
     #[test]
     fn should_treat_capitalised_master_as_versioned_prefix() {
-        let url = kubernetes_schema_url("v1", "Pod", "Master");
+        let pod = KubernetesResource::new("v1", "Pod").expect("valid resource");
+        let url = kubernetes_schema_url(&pod, "Master");
         assert!(
             url.contains("vMaster-standalone-strict/"),
             "expected vMaster-standalone-strict/ in URL, got: {url}"
