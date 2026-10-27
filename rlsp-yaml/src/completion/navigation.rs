@@ -6,18 +6,24 @@ use rlsp_yaml_parser::LineIndex;
 use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::{Document, Node};
 
+use crate::schema::path::SchemaPathSegment;
+
 use super::cursor_location::node_span;
 use super::cursor_location::scalar_key;
 
-/// Walk `docs` following `path` (a sequence of mapping key strings) and return
-/// the node at that path, or `None` if any step fails.
+/// Walk `docs` following `path` and return the node at that path, or `None` if
+/// any step fails. An item segment always fails: the path does not say which
+/// item it means.
 pub(super) fn find_node_at_path<'a>(
     docs: &'a [Document<Span>],
-    path: &[String],
+    path: &[SchemaPathSegment],
 ) -> Option<&'a Node<Span>> {
     let root = docs.first().map(|d| &d.root)?;
     let mut current = root;
-    for key in path {
+    for segment in path {
+        let SchemaPathSegment::Key(key) = segment else {
+            return None;
+        };
         match current {
             Node::Mapping { entries, .. } => {
                 let entry = entries
@@ -103,23 +109,28 @@ mod tests {
     use super::{
         collect_sequence_sibling_keys, collect_sibling_keys_ast, find_node_at_path, present_keys,
     };
+    use crate::schema::path::SchemaPathSegment;
+    use crate::schema::test_support::key;
     use crate::test_utils::parse_docs;
     use rlsp_yaml_parser::node::Node;
 
     // ── find_node_at_path: None cases ─────────────────────────────────────────
 
     #[rstest]
-    #[case::empty_docs(&[], &["any"], "empty docs slice")]
-    #[case::missing_key(&["name: Alice\n"], &["missing"], "key not in mapping")]
-    #[case::scalar_mid_path(&["name: Alice\n"], &["name", "deeper"], "scalar terminates traversal")]
-    #[case::sequence_mid_path(&["items:\n  - foo\n"], &["items", "deeper"], "sequence terminates traversal")]
+    #[case::empty_docs(&[], vec![key("any")], "empty docs slice")]
+    #[case::missing_key(&["name: Alice\n"], vec![key("missing")], "key not in mapping")]
+    #[case::scalar_mid_path(&["name: Alice\n"], vec![key("name"), key("deeper")], "scalar terminates traversal")]
+    #[case::sequence_mid_path(&["items:\n  - foo\n"], vec![key("items"), key("deeper")], "sequence terminates traversal")]
+    #[case::item_on_sequence(&["items:\n  - foo\n"], vec![key("items"), SchemaPathSegment::Item], "an item segment does not say which item")]
+    #[case::item_on_root_sequence(&["- foo\n"], vec![SchemaPathSegment::Item], "an item segment does not say which item")]
+    #[case::item_on_scalar(&["name: Alice\n"], vec![key("name"), SchemaPathSegment::Item], "scalar terminates traversal")]
+    #[case::item_is_not_a_brackets_key(&["\"[]\": x\n"], vec![SchemaPathSegment::Item], "an item segment never names a key")]
     fn find_node_at_path_returns_none(
         #[case] yamls: &[&str],
-        #[case] path: &[&str],
+        #[case] path: Vec<SchemaPathSegment>,
         #[case] desc: &str,
     ) {
         let docs = yamls.first().map_or_else(Vec::new, |y| parse_docs(y));
-        let path: Vec<String> = path.iter().map(|s| (*s).to_string()).collect();
         assert!(
             find_node_at_path(&docs, &path).is_none(),
             "expected None for {desc}"
@@ -132,16 +143,17 @@ mod tests {
     }
 
     #[rstest]
-    #[case::empty_path_returns_root("key: val\n", &[], NodeKind::Mapping)]
-    #[case::single_key_found("name: Alice\n", &["name"], NodeKind::Scalar)]
-    #[case::nested_path("outer:\n  inner: value\n", &["outer", "inner"], NodeKind::Scalar)]
+    #[case::empty_path_returns_root("key: val\n", vec![], NodeKind::Mapping)]
+    #[case::single_key_found("name: Alice\n", vec![key("name")], NodeKind::Scalar)]
+    #[case::nested_path("outer:\n  inner: value\n", vec![key("outer"), key("inner")], NodeKind::Scalar)]
+    #[case::brackets_key_found("\"[]\": x\n", vec![key("[]")], NodeKind::Scalar)]
+    #[case::brackets_key_nested("a:\n  \"[]\":\n    b: 1\n", vec![key("a"), key("[]")], NodeKind::Mapping)]
     fn find_node_at_path_returns_node(
         #[case] yaml: &str,
-        #[case] path: &[&str],
+        #[case] path: Vec<SchemaPathSegment>,
         #[case] expected_kind: NodeKind,
     ) {
         let docs = parse_docs(yaml);
-        let path: Vec<String> = path.iter().map(|s| (*s).to_string()).collect();
         let node = find_node_at_path(&docs, &path).expect("expected Some node, got None");
         match expected_kind {
             NodeKind::Mapping => assert!(

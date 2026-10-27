@@ -7,6 +7,18 @@ use std::ptr;
 
 use super::{JsonSchema, ParsedSchema};
 
+/// One step of a path through a schema: a mapping key or an array item.
+///
+/// An array item is a segment of its own, so a mapping key spelled `[]` is
+/// never taken for one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SchemaPathSegment {
+    /// The value of the mapping key with this name.
+    Key(String),
+    /// An element of an array.
+    Item,
+}
+
 /// The `allOf`, `anyOf` and `oneOf` branches of `schema`, in that order.
 pub fn composition_branches(schema: &JsonSchema) -> impl DoubleEndedIterator<Item = &JsonSchema> {
     [&schema.all_of, &schema.any_of, &schema.one_of]
@@ -19,7 +31,7 @@ pub fn composition_branches(schema: &JsonSchema) -> impl DoubleEndedIterator<Ite
 /// sub-schema at that path if it exists, resolved. Returns `None` when the path
 /// exceeds the schema depth.
 ///
-/// A segment that no `properties` entry names is tried against every
+/// A key segment that no `properties` entry names is tried against every
 /// composition branch with the same path, so a schema that references itself
 /// can come back to the same schema with the same rest of the path. The walk
 /// goes through each shared target once per rest of the path: a target
@@ -29,7 +41,7 @@ pub fn composition_branches(schema: &JsonSchema) -> impl DoubleEndedIterator<Ite
 pub fn resolve_schema_path<'a>(
     parsed: &'a ParsedSchema,
     schema: &'a JsonSchema,
-    path: &[String],
+    path: &[SchemaPathSegment],
 ) -> Option<&'a JsonSchema> {
     let mut tried: HashSet<(*const JsonSchema, usize)> = HashSet::new();
     let mut stack = vec![(schema, path)];
@@ -38,15 +50,18 @@ pub fn resolve_schema_path<'a>(
         if node.reference.is_some() && !tried.insert((ptr::from_ref(schema), path.len())) {
             continue;
         }
-        let [key, rest @ ..] = path else {
+        let [segment, rest @ ..] = path else {
             return Some(schema);
         };
 
-        // Array item descent.
-        if key == "[]" {
-            stack.extend(schema.items.as_deref().map(|items| (items, rest)));
-            continue;
-        }
+        let key = match segment {
+            // Array item descent.
+            SchemaPathSegment::Item => {
+                stack.extend(schema.items.as_deref().map(|items| (items, rest)));
+                continue;
+            }
+            SchemaPathSegment::Key(key) => key,
+        };
 
         // Direct property lookup.
         if let Some(prop_schema) = schema.properties.as_ref().and_then(|p| p.get(key.as_str())) {
@@ -67,9 +82,9 @@ mod tests {
     use super::*;
     use crate::schema::SchemaType;
     use crate::schema::test_support::{
-        CHAIN_LENGTH, all_of, any_of, boolean_schema, chain, composes_itself, cyclic, declaring,
-        field_branches, integer_schema, ladder, nest_in_all_of, no_targets, object_schema, one_of,
-        reference_to, string_schema, with_targets,
+        CHAIN_LENGTH, all_of, any_of, array_of, boolean_schema, chain, composes_itself, cyclic,
+        declaring, field_branches, integer_schema, key, ladder, nest_in_all_of, no_targets,
+        object_schema, one_of, reference_to, string_schema, with_targets,
     };
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -89,7 +104,7 @@ mod tests {
     fn resolve_schema_path_single_key_found() {
         let name_schema = string_schema();
         let schema = object_schema(vec![("name", name_schema)]);
-        let path = vec!["name".to_string()];
+        let path = vec![key("name")];
         let parsed = no_targets();
         let result = resolve_schema_path(&parsed, &schema, &path);
         assert!(result.is_some(), "should find 'name' in schema");
@@ -98,7 +113,7 @@ mod tests {
     #[test]
     fn resolve_schema_path_single_key_not_found() {
         let schema = object_schema(vec![("name", string_schema())]);
-        let path = vec!["missing".to_string()];
+        let path = vec![key("missing")];
         let parsed = no_targets();
         let result = resolve_schema_path(&parsed, &schema, &path);
         assert!(result.is_none(), "missing key should return None");
@@ -112,10 +127,13 @@ mod tests {
             items: Some(Box::new(items_schema)),
             ..JsonSchema::default()
         };
-        let path = vec!["[]".to_string()];
+        let path = vec![SchemaPathSegment::Item];
         let parsed = no_targets();
         let result = resolve_schema_path(&parsed, &schema, &path);
-        assert!(result.is_some(), "[] sentinel should descend into items");
+        assert!(
+            result.is_some(),
+            "an item segment should descend into items"
+        );
     }
 
     #[test]
@@ -124,12 +142,76 @@ mod tests {
             schema_type: Some(SchemaType::Single("array".to_string())),
             ..JsonSchema::default()
         };
-        let path = vec!["[]".to_string()];
+        let path = vec![SchemaPathSegment::Item];
         let parsed = no_targets();
         let result = resolve_schema_path(&parsed, &schema, &path);
         assert!(
             result.is_none(),
-            "[] on schema without items should return None"
+            "an item segment on a schema without items should return None"
+        );
+    }
+
+    #[rstest]
+    #[case::key(vec![key("[]")], Some("integer"))]
+    #[case::item(vec![SchemaPathSegment::Item], Some("boolean"))]
+    fn resolve_schema_path_tells_a_brackets_key_from_an_array_item(
+        #[case] path: Vec<SchemaPathSegment>,
+        #[case] expected: Option<&str>,
+    ) {
+        let schema = JsonSchema {
+            items: Some(Box::new(boolean_schema())),
+            ..object_schema(vec![("[]", integer_schema())])
+        };
+
+        assert_eq!(resolved_type_at(&schema, &path).as_deref(), expected);
+    }
+
+    #[test]
+    fn resolve_schema_path_brackets_key_without_property_is_none() {
+        let schema = array_of(string_schema());
+
+        assert!(resolve_schema_path(&no_targets(), &schema, &[key("[]")]).is_none());
+    }
+
+    #[test]
+    fn resolve_schema_path_item_without_items_is_none_beside_a_brackets_property() {
+        let schema = object_schema(vec![("[]", string_schema())]);
+
+        assert!(resolve_schema_path(&no_targets(), &schema, &[SchemaPathSegment::Item]).is_none());
+    }
+
+    #[test]
+    fn resolve_schema_path_finds_brackets_key_in_composition_branch() {
+        let schema = all_of(vec![object_schema(vec![("[]", integer_schema())])]);
+
+        assert_eq!(
+            resolved_type_at(&schema, &[key("[]")]).as_deref(),
+            Some("integer")
+        );
+    }
+
+    #[rstest]
+    #[case::object_in_array_in_array(vec![SchemaPathSegment::Item, SchemaPathSegment::Item, key("b")], true)]
+    #[case::one_item_too_many(vec![SchemaPathSegment::Item, SchemaPathSegment::Item, SchemaPathSegment::Item], false)]
+    fn resolve_schema_path_descends_through_nested_arrays(
+        #[case] path: Vec<SchemaPathSegment>,
+        #[case] found: bool,
+    ) {
+        let schema = array_of(array_of(object_schema(vec![("b", string_schema())])));
+
+        assert_eq!(
+            resolve_schema_path(&no_targets(), &schema, &path).is_some(),
+            found
+        );
+    }
+
+    #[test]
+    fn resolve_schema_path_descends_into_items_of_a_property() {
+        let schema = object_schema(vec![("tags", array_of(string_schema()))]);
+
+        assert_eq!(
+            resolved_type_at(&schema, &[key("tags"), SchemaPathSegment::Item]).as_deref(),
+            Some("string")
         );
     }
 
@@ -140,7 +222,7 @@ mod tests {
             any_of: Some(vec![object_schema(vec![("host", host_schema)])]),
             ..JsonSchema::default()
         };
-        let path = vec!["host".to_string()];
+        let path = vec![key("host")];
         let parsed = no_targets();
         let result = resolve_schema_path(&parsed, &schema, &path);
         assert!(result.is_some(), "should find 'host' in anyOf branch");
@@ -149,7 +231,7 @@ mod tests {
     #[test]
     fn resolve_schema_path_deep_path_found() {
         let schema = object_schema(vec![("a", object_schema(vec![("b", string_schema())]))]);
-        let path = vec!["a".to_string(), "b".to_string()];
+        let path = vec![key("a"), key("b")];
         let parsed = no_targets();
         let result = resolve_schema_path(&parsed, &schema, &path);
         assert!(result.is_some(), "deep path a.b should be found");
@@ -158,22 +240,27 @@ mod tests {
     #[test]
     fn resolve_schema_path_deep_path_not_found() {
         let schema = object_schema(vec![("a", object_schema(vec![("b", string_schema())]))]);
-        let path = vec!["a".to_string(), "c".to_string()];
+        let path = vec![key("a"), key("c")];
         let parsed = no_targets();
         let result = resolve_schema_path(&parsed, &schema, &path);
         assert!(result.is_none(), "deep path a.c should not be found");
     }
 
     /// The `type` of the schema `path` resolves to, to tell resolved schemas apart.
-    fn resolved_type(schema: &JsonSchema, path: &[&str]) -> Option<String> {
-        let path: Vec<String> = path.iter().map(ToString::to_string).collect();
-        match resolve_schema_path(&no_targets(), schema, &path)?
+    fn resolved_type_at(schema: &JsonSchema, path: &[SchemaPathSegment]) -> Option<String> {
+        match resolve_schema_path(&no_targets(), schema, path)?
             .schema_type
             .as_ref()?
         {
             SchemaType::Single(t) => Some(t.clone()),
             SchemaType::Multiple(_) => None,
         }
+    }
+
+    /// [`resolved_type_at`] for a path of keys.
+    fn resolved_type(schema: &JsonSchema, path: &[&str]) -> Option<String> {
+        let path: Vec<_> = path.iter().map(|name| key(name)).collect();
+        resolved_type_at(schema, &path)
     }
 
     #[rstest]
@@ -242,7 +329,7 @@ mod tests {
     fn resolve_schema_path_is_none_for_a_missing_key_among_many_branches() {
         let schema = all_of(field_branches(30));
 
-        assert!(resolve_schema_path(&no_targets(), &schema, &["missing".to_string()]).is_none());
+        assert!(resolve_schema_path(&no_targets(), &schema, &[key("missing")]).is_none());
     }
 
     #[test]
@@ -262,14 +349,17 @@ mod tests {
     // ══════════════════════════════════════════════════════════════════════════
 
     #[rstest]
-    #[case::a_key_further_down(&["next", "next", "a"][..], true)]
-    #[case::the_schema_itself(&["next", "next"][..], true)]
-    #[case::a_missing_key(&["missing"][..], false)]
-    #[case::a_missing_key_further_down(&["next", "next", "missing"][..], false)]
-    #[case::items_where_there_are_none(&["next", "[]"][..], false)]
-    fn path_resolution_ends_on_a_cyclic_schema(#[case] path: &[&str], #[case] found: bool) {
+    #[case::a_key_further_down(vec![key("next"), key("next"), key("a")], true)]
+    #[case::the_schema_itself(vec![key("next"), key("next")], true)]
+    #[case::a_missing_key(vec![key("missing")], false)]
+    #[case::a_missing_key_further_down(vec![key("next"), key("next"), key("missing")], false)]
+    #[case::items_where_there_are_none(vec![key("next"), SchemaPathSegment::Item], false)]
+    #[case::a_brackets_key_where_there_are_none(vec![key("next"), key("[]")], false)]
+    fn path_resolution_ends_on_a_cyclic_schema(
+        #[case] path: Vec<SchemaPathSegment>,
+        #[case] found: bool,
+    ) {
         let schema = cyclic();
-        let path: Vec<String> = path.iter().map(ToString::to_string).collect();
 
         let resolved = resolve_schema_path(&schema, &schema.root, &path);
 
@@ -280,8 +370,8 @@ mod tests {
     fn path_resolution_ends_on_a_chain_of_ten_thousand_targets() {
         let schema = chain(CHAIN_LENGTH);
 
-        let found = resolve_schema_path(&schema, &schema.root, &["leaf".to_string()]);
-        let missing = resolve_schema_path(&schema, &schema.root, &["missing".to_string()]);
+        let found = resolve_schema_path(&schema, &schema.root, &[key("leaf")]);
+        let missing = resolve_schema_path(&schema, &schema.root, &[key("missing")]);
 
         assert!(found.is_some());
         assert!(missing.is_none());
@@ -291,8 +381,8 @@ mod tests {
     fn path_resolution_visits_each_target_of_a_branching_graph_once() {
         let schema = ladder(64);
 
-        assert!(resolve_schema_path(&schema, &schema.root, &["missing".to_string()]).is_none());
-        assert!(resolve_schema_path(&schema, &schema.root, &["leaf".to_string()]).is_some());
+        assert!(resolve_schema_path(&schema, &schema.root, &[key("missing")]).is_none());
+        assert!(resolve_schema_path(&schema, &schema.root, &[key("leaf")]).is_some());
     }
 
     #[test]
@@ -302,7 +392,7 @@ mod tests {
             vec![declaring("a")],
         );
 
-        assert!(resolve_schema_path(&schema, &schema.root, &["missing".to_string()]).is_none());
+        assert!(resolve_schema_path(&schema, &schema.root, &[key("missing")]).is_none());
     }
 
     #[test]
@@ -316,7 +406,7 @@ mod tests {
             vec![described],
         );
 
-        let resolved = resolve_schema_path(&schema, &schema.root, &["port".to_string()]);
+        let resolved = resolve_schema_path(&schema, &schema.root, &[key("port")]);
 
         assert_eq!(
             resolved.and_then(|s| s.description.as_deref()),
@@ -332,16 +422,8 @@ mod tests {
         #[case] composing: fn(Vec<JsonSchema>) -> JsonSchema,
     ) {
         let schema = composes_itself(composing);
-        let found = resolve_schema_path(
-            &schema,
-            &schema.root,
-            &["here".to_string(), "a".to_string()],
-        );
-        let missing = resolve_schema_path(
-            &schema,
-            &schema.root,
-            &["here".to_string(), "b".to_string()],
-        );
+        let found = resolve_schema_path(&schema, &schema.root, &[key("here"), key("a")]);
+        let missing = resolve_schema_path(&schema, &schema.root, &[key("here"), key("b")]);
 
         assert!(found.is_some());
         assert!(missing.is_none());

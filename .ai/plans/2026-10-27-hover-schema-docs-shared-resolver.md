@@ -36,7 +36,7 @@ and schema completion.
 - [x] Clarify scope with the user
 - [x] Design review of the approach
 - [x] Task 1: the path resolver lives in the schema layer
-- [ ] Task 2: array items are a typed path segment
+- [x] Task 2: array items are a typed path segment
 - [ ] Task 3: hover resolves schema docs through the shared
       resolver
 - [ ] Task 4: array items are found through composition branches
@@ -71,16 +71,16 @@ The resolver takes a path of `Key(String)` and `Item` segments
 instead of strings with the `"[]"` sentinel, so a YAML key named
 `[]` is no longer taken for an array item.
 
-- [ ] The resolver and every completion path builder and path
+- [x] The resolver and every completion path builder and path
       reader use the typed segment; no `"[]"` sentinel string
       remains in production code
-- [ ] With a schema that declares a property `"[]"` whose
+- [x] With a schema that declares a property `"[]"` whose
       sub-schema has properties, `complete_at` under the document
       key `"[]"` offers those properties and not the parent's
       `items` properties, pinned by a test
-- [ ] Every other completion test passes with its assertions
+- [x] Every other completion test passes with its assertions
       unchanged; only path literals change to the typed segment
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ### Task 3: Hover resolves schema docs through the shared resolver
 

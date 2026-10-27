@@ -1552,7 +1552,7 @@ mod tests {
         let ls = labels(&result);
         assert!(
             ls.contains(&"port"),
-            "should suggest 'port' via sequence [] path, got: {ls:?}"
+            "should suggest 'port' via the item path segment, got: {ls:?}"
         );
     }
 

@@ -6,12 +6,14 @@ use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::{Document, Node};
 use tower_lsp::lsp_types::Position;
 
+use crate::schema::path::SchemaPathSegment;
+
 /// Where the cursor sits in the YAML AST.
 ///
 /// Used by `locate_cursor` and consumed by `complete_at`.
-/// Every variant carries the `enclosing_path` — ancestor mapping keys from the
-/// document root down to the immediately enclosing structure, with `"[]"`
-/// sentinels for sequence descents.
+/// Every variant carries the `enclosing_path` — the segments from the document
+/// root down to the immediately enclosing structure: a key segment for each
+/// ancestor mapping key and an item segment for each sequence descent.
 #[derive(Debug)]
 pub(super) enum CursorLocation<'a> {
     /// Cursor is inside a mapping key token.
@@ -20,7 +22,7 @@ pub(super) enum CursorLocation<'a> {
     /// containing mapping; `mapping` is the containing `Node::Mapping`.
     OnKey {
         key: String,
-        enclosing_path: Vec<String>,
+        enclosing_path: Vec<SchemaPathSegment>,
         mapping: &'a Node<Span>,
     },
     /// Cursor is in the value position of a `key: <value>` pair.
@@ -29,7 +31,7 @@ pub(super) enum CursorLocation<'a> {
     /// is the path to the containing mapping (does **not** include `key`).
     OnValue {
         key: String,
-        enclosing_path: Vec<String>,
+        enclosing_path: Vec<SchemaPathSegment>,
     },
     /// Cursor is on a blank/whitespace-only line inside a mapping.
     ///
@@ -37,7 +39,7 @@ pub(super) enum CursorLocation<'a> {
     /// `cursor.line` and its entries sit at a column ≤ the cursor column.
     /// `mapping` is the deepest such `Node::Mapping`.
     InBlankMapping {
-        enclosing_path: Vec<String>,
+        enclosing_path: Vec<SchemaPathSegment>,
         mapping: &'a Node<Span>,
     },
     /// Cursor is inside a specific sequence item.
@@ -45,7 +47,7 @@ pub(super) enum CursorLocation<'a> {
     /// `sequence` is the containing `Node::Sequence`; `current_item` is the
     /// item node the cursor sits in.
     InSequenceItem {
-        enclosing_path: Vec<String>,
+        enclosing_path: Vec<SchemaPathSegment>,
         sequence: &'a Node<Span>,
         current_item: &'a Node<Span>,
     },
@@ -54,7 +56,7 @@ pub(super) enum CursorLocation<'a> {
     /// No item's span contains the cursor, but the sequence's own span covers
     /// the cursor line.
     InBlankSequence {
-        enclosing_path: Vec<String>,
+        enclosing_path: Vec<SchemaPathSegment>,
         sequence: &'a Node<Span>,
     },
     /// Cursor cannot be located in any AST structure.
@@ -121,7 +123,7 @@ pub(super) const fn lsp_position_to_pos(position: Position) -> Pos {
 pub(super) fn deepest_mapping_at_column<'a>(
     node: &'a Node<Span>,
     cursor: Pos,
-    path: &mut Vec<String>,
+    path: &mut Vec<SchemaPathSegment>,
     idx: &LineIndex,
 ) -> Option<&'a Node<Span>> {
     let Node::Mapping { entries, loc, .. } = node else {
@@ -152,7 +154,7 @@ pub(super) fn deepest_mapping_at_column<'a>(
         // value if it is also a Mapping whose keys satisfy the condition.
         if let Node::Mapping { .. } = value_node {
             let saved_len = path.len();
-            path.push(key_str.to_string());
+            path.push(SchemaPathSegment::Key(key_str.to_string()));
             if let Some(deeper) = deepest_mapping_at_column(value_node, cursor, path, idx) {
                 return Some(deeper);
             }
@@ -256,12 +258,12 @@ pub(super) fn locate_cursor(docs: &[Document<Span>], position: Position) -> Curs
     if !cursor_line_has_mapping_content(docs, cursor.line) {
         for doc in docs {
             let idx = doc.line_index();
-            let path: Vec<String> = Vec::new();
+            let path: Vec<SchemaPathSegment> = Vec::new();
             if let Node::Mapping { loc, .. } = &doc.root {
                 if idx.line_column(loc.start).0 as usize <= cursor.line
                     && cursor.line <= idx.line_column(loc.end).0 as usize
                 {
-                    let mut descent_path: Vec<String> = Vec::new();
+                    let mut descent_path: Vec<SchemaPathSegment> = Vec::new();
                     if let Some(mapping) =
                         deepest_mapping_at_column(&doc.root, cursor, &mut descent_path, idx)
                     {
@@ -292,7 +294,7 @@ pub(super) fn locate_cursor(docs: &[Document<Span>], position: Position) -> Curs
 pub(super) fn locate_in_node<'a>(
     node: &'a Node<Span>,
     cursor: Pos,
-    enclosing_path: &mut Vec<String>,
+    enclosing_path: &mut Vec<SchemaPathSegment>,
     idx: &LineIndex,
 ) -> CursorLocation<'a> {
     match node {
@@ -312,7 +314,7 @@ pub(super) fn locate_in_node<'a>(
 
                 if span_contains_cursor(value_span, cursor, idx) {
                     let key = scalar_key(key_node).unwrap_or("").to_string();
-                    enclosing_path.push(key.clone());
+                    enclosing_path.push(SchemaPathSegment::Key(key.clone()));
 
                     // Recurse into the value.
                     let inner = locate_in_node(value_node, cursor, enclosing_path, idx);
@@ -367,9 +369,9 @@ pub(super) fn locate_in_node<'a>(
             for item in items {
                 let item_span = node_span(item);
                 if span_contains_cursor(item_span, cursor, idx) {
-                    // Push "[]" so that inner mapping keys carry the sequence
-                    // sentinel in their enclosing_path.
-                    enclosing_path.push("[]".to_string());
+                    // Push an item segment so that inner mapping keys carry the
+                    // sequence descent in their enclosing_path.
+                    enclosing_path.push(SchemaPathSegment::Item);
                     let inner = locate_in_node(item, cursor, enclosing_path, idx);
                     if matches!(inner, CursorLocation::OutsideAny) {
                         enclosing_path.pop();
@@ -379,7 +381,7 @@ pub(super) fn locate_in_node<'a>(
                             current_item: item,
                         };
                     }
-                    // inner already has the "[]" in path via enclosing_path
+                    // inner already has the item segment in path via enclosing_path
                     return inner;
                 }
             }
@@ -409,6 +411,8 @@ mod tests {
         CursorLocation, cursor_line_has_mapping_content, locate_cursor, locate_in_node, node_span,
         scalar_key, span_contains_cursor,
     };
+    use crate::schema::path::SchemaPathSegment;
+    use crate::schema::test_support::key;
     use crate::test_utils::parse_docs;
     use rlsp_yaml_parser::node::Node;
 
@@ -416,25 +420,49 @@ mod tests {
 
     #[rstest]
     #[case::on_key_top_level("name: Alice\nage: 30\n", pos(0, 0), "name", vec![])]
-    #[case::on_key_nested("server:\n  host: localhost\n", pos(1, 2), "host", vec!["server".to_string()])]
+    #[case::on_key_nested("server:\n  host: localhost\n", pos(1, 2), "host", vec![key("server")])]
     #[case::on_key_in_sequence_item(
         "items:\n  - name: foo\n    age: 1\n",
         pos(1, 4),
         "name",
-        vec!["items".to_string(), "[]".to_string()]
+        vec![key("items"), SchemaPathSegment::Item]
+    )]
+    #[case::on_key_in_root_sequence_item(
+        "- name: foo\n  age: 1\n",
+        pos(1, 2),
+        "age",
+        vec![SchemaPathSegment::Item]
+    )]
+    #[case::on_key_in_nested_sequence_item(
+        "- - a: 1\n    b: 2\n",
+        pos(1, 4),
+        "b",
+        vec![SchemaPathSegment::Item, SchemaPathSegment::Item]
+    )]
+    #[case::on_key_under_brackets_key(
+        "\"[]\":\n  a: 1\n  b: 2\n",
+        pos(1, 2),
+        "a",
+        vec![key("[]")]
+    )]
+    #[case::on_key_in_sequence_under_brackets_key(
+        "\"[]\":\n  - a: 1\n    b: 2\n",
+        pos(2, 4),
+        "b",
+        vec![key("[]"), SchemaPathSegment::Item]
     )]
     #[case::on_key_utf8("café: latte\n", pos(0, 0), "café", vec![])]
     #[case::on_key_three_levels(
         "a:\n  b:\n    c: v\n",
         pos(2, 4),
         "c",
-        vec!["a".to_string(), "b".to_string()]
+        vec![key("a"), key("b")]
     )]
     fn locate_cursor_on_key(
         #[case] yaml: &str,
         #[case] position: Position,
         #[case] expected_key: &str,
-        #[case] expected_path: Vec<String>,
+        #[case] expected_path: Vec<SchemaPathSegment>,
     ) {
         let docs = parse_docs(yaml);
         let loc = locate_cursor(&docs, position);
@@ -459,12 +487,12 @@ mod tests {
 
     #[rstest]
     #[case::on_value_scalar("name: Alice\n", pos(0, 6), "name", vec![])]
-    #[case::on_value_nested("server:\n  host: localhost\n", pos(1, 8), "host", vec!["server".to_string()])]
+    #[case::on_value_nested("server:\n  host: localhost\n", pos(1, 8), "host", vec![key("server")])]
     fn locate_cursor_on_value(
         #[case] yaml: &str,
         #[case] position: Position,
         #[case] expected_key: &str,
-        #[case] expected_path: Vec<String>,
+        #[case] expected_path: Vec<SchemaPathSegment>,
     ) {
         let docs = parse_docs(yaml);
         let loc = locate_cursor(&docs, position);
@@ -484,22 +512,27 @@ mod tests {
 
     #[rstest]
     #[case::blank_mapping_root("name: Alice\n\nage: 30\n", pos(1, 0), vec![])]
-    #[case::blank_mapping_nested("server:\n  host: localhost\n  \nport: 80\n", pos(2, 2), vec!["server".to_string()])]
-    #[case::blank_mapping_eof("server:\n  host: localhost\n", pos(2, 2), vec!["server".to_string()])]
+    #[case::blank_mapping_nested("server:\n  host: localhost\n  \nport: 80\n", pos(2, 2), vec![key("server")])]
+    #[case::blank_mapping_eof("server:\n  host: localhost\n", pos(2, 2), vec![key("server")])]
     #[case::blank_mapping_column_boundary(
         "outer:\n  inner:\n    key: val\n",
         pos(3, 2),
-        vec!["outer".to_string()]
+        vec![key("outer")]
+    )]
+    #[case::blank_mapping_under_brackets_key(
+        "\"[]\":\n  a: 1\n  \n",
+        pos(2, 2),
+        vec![key("[]")]
     )]
     #[case::blank_mapping_column_descent_deeper(
         "outer:\n  inner:\n    key: val\n",
         pos(3, 4),
-        vec!["outer".to_string(), "inner".to_string()]
+        vec![key("outer"), key("inner")]
     )]
     fn locate_cursor_in_blank_mapping(
         #[case] yaml: &str,
         #[case] position: Position,
-        #[case] expected_path: Vec<String>,
+        #[case] expected_path: Vec<SchemaPathSegment>,
     ) {
         let docs = parse_docs(yaml);
         let loc = locate_cursor(&docs, position);
@@ -526,11 +559,13 @@ mod tests {
     // ── locate_cursor: InBlankSequence ───────────────────────────────────────
 
     #[rstest]
-    #[case::blank_sequence_after_scalar("items:\n  - foo\n  \n", pos(2, 2), vec!["items".to_string()])]
+    #[case::blank_sequence_after_scalar("items:\n  - foo\n  \n", pos(2, 2), vec![key("items")])]
+    #[case::blank_sequence_under_brackets_key("\"[]\":\n  - foo\n  \n", pos(2, 2), vec![key("[]")])]
+    #[case::blank_sequence_at_root("- foo\n\n", pos(1, 0), vec![])]
     fn locate_cursor_in_blank_sequence(
         #[case] yaml: &str,
         #[case] position: Position,
-        #[case] expected_path: Vec<String>,
+        #[case] expected_path: Vec<SchemaPathSegment>,
     ) {
         let docs = parse_docs(yaml);
         let loc = locate_cursor(&docs, position);
@@ -560,12 +595,13 @@ mod tests {
     #[case::in_sequence_item_mapping_second_key(
         "items:\n  - name: foo\n    age: 1\n",
         pos(2, 4),
-        vec!["items".to_string(), "[]".to_string()]
+        vec![key("items"), SchemaPathSegment::Item]
     )]
+    #[case::scalar_in_nested_sequence("- - foo\n", pos(0, 4), vec![SchemaPathSegment::Item])]
     fn locate_cursor_in_sequence_item(
         #[case] yaml: &str,
         #[case] position: Position,
-        #[case] expected_path: Vec<String>,
+        #[case] expected_path: Vec<SchemaPathSegment>,
     ) {
         let docs = parse_docs(yaml);
         let loc = locate_cursor(&docs, position);
@@ -615,7 +651,7 @@ mod tests {
                 sequence,
                 current_item,
             } => {
-                assert_eq!(enclosing_path, vec!["tags".to_string()]);
+                assert_eq!(enclosing_path, vec![key("tags")]);
                 assert!(
                     matches!(sequence, Node::Sequence { .. }),
                     "sequence should be a Sequence node"

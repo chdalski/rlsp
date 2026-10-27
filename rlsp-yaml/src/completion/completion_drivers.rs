@@ -7,7 +7,7 @@ use rlsp_yaml_parser::node::{Document, Node};
 use tower_lsp::lsp_types::CompletionItem;
 
 use crate::schema::ParsedSchema;
-use crate::schema::path::resolve_schema_path;
+use crate::schema::path::{SchemaPathSegment, resolve_schema_path};
 
 use super::completion_items::{collect_values_for_key_ast, keys_to_items, merge_completions};
 use super::cursor_location::{node_span, scalar_key};
@@ -23,7 +23,7 @@ pub(super) fn complete_on_key<'a>(
     docs: &'a [Document<Span>],
     cursor_line: usize,
     key: String,
-    enclosing_path: &[String],
+    enclosing_path: &[SchemaPathSegment],
     mapping: &'a Node<Span>,
     schema: Option<&ParsedSchema>,
 ) -> Vec<CompletionItem> {
@@ -31,15 +31,16 @@ pub(super) fn complete_on_key<'a>(
         present_keys(mapping, cursor_line, d.line_index())
     });
     let seq_len = enclosing_path.len().saturating_sub(1);
-    let structural_keys: HashSet<String> = if enclosing_path.last().is_some_and(|s| s == "[]") {
-        let seq_path = enclosing_path.get(..seq_len).unwrap_or(&[]);
-        match find_node_at_path(docs, seq_path) {
-            Some(seq @ Node::Sequence { .. }) => collect_sequence_sibling_keys(seq),
-            _ => collect_sibling_keys_ast(mapping).into_iter().collect(),
-        }
-    } else {
-        collect_sibling_keys_ast(mapping).into_iter().collect()
-    };
+    let structural_keys: HashSet<String> =
+        if enclosing_path.last() == Some(&SchemaPathSegment::Item) {
+            let seq_path = enclosing_path.get(..seq_len).unwrap_or(&[]);
+            match find_node_at_path(docs, seq_path) {
+                Some(seq @ Node::Sequence { .. }) => collect_sequence_sibling_keys(seq),
+                _ => collect_sibling_keys_ast(mapping).into_iter().collect(),
+            }
+        } else {
+            collect_sibling_keys_ast(mapping).into_iter().collect()
+        };
     let structural = keys_to_items(structural_keys.into_iter().filter(|k| k != &key).collect());
     if let Some(s) = schema
         && let Some(resolved_schema) = resolve_schema_path(s, &s.root, enclosing_path)
@@ -67,12 +68,12 @@ pub(super) fn complete_on_value(
     docs: &[Document<Span>],
     cursor_line: usize,
     key: &str,
-    enclosing_path: Vec<String>,
+    enclosing_path: Vec<SchemaPathSegment>,
     schema: Option<&ParsedSchema>,
 ) -> Vec<CompletionItem> {
     if let Some(s) = schema {
         let mut value_path = enclosing_path;
-        value_path.push(key.to_string());
+        value_path.push(SchemaPathSegment::Key(key.to_string()));
         if let Some(prop_schema) = resolve_schema_path(s, &s.root, &value_path) {
             let schema_items = schema_value_completions(prop_schema);
             if !schema_items.is_empty() {
@@ -96,7 +97,7 @@ pub(super) fn complete_on_value(
 }
 
 pub(super) fn complete_in_sequence_item<'a>(
-    enclosing_path: Vec<String>,
+    enclosing_path: Vec<SchemaPathSegment>,
     sequence: &'a Node<Span>,
     current_item: &'a Node<Span>,
     schema: Option<&ParsedSchema>,
@@ -117,7 +118,7 @@ pub(super) fn complete_in_sequence_item<'a>(
     );
     if let Some(s) = schema {
         let mut items_path = enclosing_path;
-        items_path.push("[]".to_string());
+        items_path.push(SchemaPathSegment::Item);
         if let Some(items_schema) = resolve_schema_path(s, &s.root, &items_path)
             && schema_has_properties(s, items_schema)
         {

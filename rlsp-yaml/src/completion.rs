@@ -7,7 +7,7 @@ use rlsp_yaml_parser::node::Document;
 use tower_lsp::lsp_types::{CompletionItem, Position};
 
 use crate::schema::ParsedSchema;
-use crate::schema::path::resolve_schema_path;
+use crate::schema::path::{SchemaPathSegment, resolve_schema_path};
 
 mod completion_drivers;
 mod completion_items;
@@ -64,7 +64,7 @@ pub fn complete_at(
         } => {
             if let Some(s) = schema {
                 let mut items_path = enclosing_path;
-                items_path.push("[]".to_string());
+                items_path.push(SchemaPathSegment::Item);
                 if let Some(items_schema) = resolve_schema_path(s, &s.root, &items_path)
                     && schema_has_properties(s, items_schema)
                 {
@@ -112,6 +112,7 @@ mod tests {
         integer_schema, labels, object_schema, pos, string_schema,
     };
     use super::*;
+    use crate::schema::test_support::array_of;
     use crate::schema::{JsonSchema, SchemaType};
     use crate::test_utils::parse_docs;
 
@@ -548,7 +549,7 @@ mod tests {
         );
     }
 
-    // C-9: InBlankSequence with schema descends via [] sentinel
+    // C-9: InBlankSequence with schema descends via an item path segment
     #[test]
     fn complete_at_in_blank_sequence_with_schema_descends_items() {
         let docs = parse_docs("servers:\n  - host: localhost\n  \n");
@@ -589,5 +590,126 @@ mod tests {
                 .all(|i| i.kind == Some(CompletionItemKind::FIELD)),
             "structural key suggestions should have FIELD kind"
         );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // A mapping key spelled `[]` is a key, not an array item
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /// A schema with both a property named `[]` (that declares `viaProperty`)
+    /// and `items` (that declare `viaItems`), so the labels tell which one a
+    /// path followed.
+    fn brackets_property_and_items_schema() -> ParsedSchema {
+        ParsedSchema::new(JsonSchema {
+            items: Some(Box::new(object_schema(vec![("viaItems", string_schema())]))),
+            ..object_schema(vec![(
+                "[]",
+                object_schema(vec![("viaProperty", string_schema())]),
+            )])
+        })
+    }
+
+    #[rstest]
+    #[case::on_key("\"[]\":\n  a: 1\n", pos(1, 2))]
+    #[case::in_blank_mapping("\"[]\":\n  a: 1\n  \n", pos(2, 2))]
+    fn under_a_brackets_key_the_schema_of_that_property_applies(
+        #[case] text: &str,
+        #[case] position: Position,
+    ) {
+        let docs = parse_docs(text);
+        let schema = brackets_property_and_items_schema();
+
+        let result = complete_at(&docs, position, Some(&schema));
+
+        let ls = labels(&result);
+        assert!(ls.contains(&"viaProperty"), "got: {ls:?}");
+        assert!(!ls.contains(&"viaItems"), "got: {ls:?}");
+    }
+
+    #[test]
+    fn under_a_brackets_key_without_a_property_the_items_schema_does_not_apply() {
+        let docs = parse_docs("\"[]\":\n  a: 1\n  b: 2\n");
+        let schema =
+            ParsedSchema::new(array_of(object_schema(vec![("viaItems", string_schema())])));
+
+        let result = complete_at(&docs, pos(1, 2), Some(&schema));
+
+        let ls = labels(&result);
+        assert!(ls.contains(&"b"), "got: {ls:?}");
+        assert!(!ls.contains(&"viaItems"), "got: {ls:?}");
+    }
+
+    #[test]
+    fn under_a_brackets_key_structural_keys_come_from_its_own_mapping() {
+        let docs = parse_docs("- p: 1\n---\n\"[]\":\n  a: 1\n  b: 2\n");
+
+        let result = complete_at(&docs, pos(3, 2), None);
+
+        let ls = labels(&result);
+        assert!(ls.contains(&"b"), "got: {ls:?}");
+        assert!(!ls.contains(&"p"), "got: {ls:?}");
+    }
+
+    #[test]
+    fn on_the_value_of_a_brackets_key_the_enum_of_that_property_applies() {
+        let docs = parse_docs("\"[]\": x\n");
+        let schema = ParsedSchema::new(JsonSchema {
+            items: Some(Box::new(string_schema())),
+            ..object_schema(vec![(
+                "[]",
+                JsonSchema {
+                    enum_values: Some(vec![json!("x"), json!("y")]),
+                    ..JsonSchema::default()
+                },
+            )])
+        });
+
+        let result = complete_at(&docs, pos(0, 6), Some(&schema));
+
+        let ls = labels(&result);
+        assert!(ls.contains(&"x") && ls.contains(&"y"), "got: {ls:?}");
+    }
+
+    #[rstest]
+    #[case::in_blank_sequence("\"[]\":\n  - host: a\n  \n", pos(2, 2))]
+    #[case::in_sequence_item("\"[]\":\n  - x\n", pos(1, 4))]
+    fn a_sequence_under_a_brackets_key_descends_into_the_items_of_that_property(
+        #[case] text: &str,
+        #[case] position: Position,
+    ) {
+        let docs = parse_docs(text);
+        let schema = ParsedSchema::new(object_schema(vec![(
+            "[]",
+            array_of(object_schema(vec![
+                ("host", string_schema()),
+                ("port", integer_schema()),
+            ])),
+        )]));
+
+        let result = complete_at(&docs, position, Some(&schema));
+
+        let ls = labels(&result);
+        assert!(ls.contains(&"port"), "got: {ls:?}");
+    }
+
+    #[rstest]
+    #[case::without_schema(None, &["b"][..])]
+    #[case::with_schema(
+        Some(ParsedSchema::new(array_of(array_of(object_schema(vec![
+            ("a", string_schema()),
+            ("b", string_schema()),
+            ("c", string_schema()),
+        ]))))),
+        &["c"][..]
+    )]
+    fn on_a_key_in_a_nested_sequence_item_the_mapping_siblings_apply(
+        #[case] schema: Option<ParsedSchema>,
+        #[case] expected: &[&str],
+    ) {
+        let docs = parse_docs("- - a: 1\n    b: 2\n");
+
+        let result = complete_at(&docs, pos(0, 4), schema.as_ref());
+
+        assert_eq!(labels(&result), expected);
     }
 }

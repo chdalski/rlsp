@@ -327,7 +327,14 @@ pub(crate) mod test_support {
     use std::cell::RefCell;
     use std::fmt::Debug;
 
+    use super::path::SchemaPathSegment;
     use super::{JsonSchema, ParsedSchema, SchemaRef, SchemaType, TargetId};
+
+    /// The path segment for the mapping key `name`. An array item is always
+    /// written as [`SchemaPathSegment::Item`], so a key spelled `[]` stays a key.
+    pub fn key(name: &str) -> SchemaPathSegment {
+        SchemaPathSegment::Key(name.to_string())
+    }
 
     /// A reference node to the target at `index`.
     pub fn reference_to(index: usize) -> JsonSchema {
@@ -459,6 +466,15 @@ pub(crate) mod test_support {
         JsonSchema {
             schema_type: Some(SchemaType::Single("object".to_string())),
             properties: Some(props.into_iter().map(|(k, v)| (k.to_string(), v)).collect()),
+            ..JsonSchema::default()
+        }
+    }
+
+    /// An array schema whose elements are `items`.
+    pub fn array_of(items: JsonSchema) -> JsonSchema {
+        JsonSchema {
+            schema_type: Some(SchemaType::Single("array".to_string())),
+            items: Some(Box::new(items)),
             ..JsonSchema::default()
         }
     }
