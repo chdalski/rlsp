@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-10-27)
 **Created:** 2026-10-27
 
 # Hover Schema Docs Through the Shared Path Resolver
@@ -40,7 +40,7 @@ and schema completion.
 - [x] Task 3: hover resolves schema docs through the shared
       resolver
 - [x] Task 4: array items are found through composition branches
-- [ ] Push to `main` and confirm the full CI matrix is green
+- [x] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
