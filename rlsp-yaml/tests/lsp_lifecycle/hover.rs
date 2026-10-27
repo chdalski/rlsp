@@ -86,7 +86,8 @@ const HOVER_SCHEMA_URL: &str = "https://example.com/test-hover-docs.json";
 
 /// Hover at (`line`, `character`) in `document` against a schema that documents
 /// an array item's key, a key behind nested composition, a key reached only
-/// through a later branch, and a key with dots.
+/// through a later branch, a key with dots, and arrays declared in an `anyOf`
+/// branch.
 /// Returns the serialized hover result.
 async fn hover_with_docs_schema(document: &str, line: u32, character: u32) -> String {
     let schema = parse_schema(&json!({
@@ -118,6 +119,24 @@ async fn hover_with_docs_schema(document: &str, line: u32, character: u32) -> St
                 "properties": {
                     "app.kubernetes.io/name": { "description": "App name label docs" }
                 }
+            },
+            "sidecars": {
+                "anyOf": [
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": { "name": { "description": "Sidecar name docs" } }
+                        }
+                    },
+                    { "type": "null" }
+                ]
+            },
+            "ports": {
+                "anyOf": [
+                    { "type": "array", "items": { "description": "Port item docs" } },
+                    { "type": "null" }
+                ]
             }
         }
     }))
@@ -178,5 +197,26 @@ async fn should_show_schema_docs_when_the_first_matching_branch_dead_ends() {
     assert!(
         result_str.contains("Port docs"),
         "hover should show the docs of 'port' from the later branch, got: {result_str}"
+    );
+}
+
+#[tokio::test]
+async fn should_show_schema_docs_for_a_key_below_an_item_of_an_array_declared_in_an_any_of_branch()
+{
+    let result_str = hover_with_docs_schema("sidecars:\n  - name: x\n", 1, 4).await;
+
+    assert!(
+        result_str.contains("Sidecar name docs"),
+        "hover should show the docs of 'name', got: {result_str}"
+    );
+}
+
+#[tokio::test]
+async fn should_show_schema_docs_for_an_item_of_an_array_declared_in_an_any_of_branch() {
+    let result_str = hover_with_docs_schema("ports:\n  - 8080\n", 1, 4).await;
+
+    assert!(
+        result_str.contains("Port item docs"),
+        "hover should show the docs of the item, got: {result_str}"
     );
 }

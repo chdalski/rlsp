@@ -112,7 +112,7 @@ mod tests {
         integer_schema, labels, object_schema, pos, string_schema,
     };
     use super::*;
-    use crate::schema::test_support::array_of;
+    use crate::schema::test_support::{any_of, array_of, null_schema};
     use crate::schema::{JsonSchema, SchemaType};
     use crate::test_utils::parse_docs;
 
@@ -711,5 +711,157 @@ mod tests {
         let result = complete_at(&docs, pos(0, 4), schema.as_ref());
 
         assert_eq!(labels(&result), expected);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Items of an array schema declared in a composition branch
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /// A schema for the `servers` key that reaches its `items` only through a
+    /// composition branch, either an `anyOf` next to a null branch or an `allOf`
+    /// of a `$ref` target.
+    fn servers_items_reached_through_a_branch(through_reference: bool) -> ParsedSchema {
+        let items = json!({
+            "type": "object",
+            "properties": {
+                "host": { "type": "string" },
+                "port": { "type": "integer" },
+                "env": { "enum": ["prod", "staging"] },
+                "app": { "type": "object", "properties": {
+                    "name": { "type": "string" },
+                    "version": { "type": "string" }
+                } }
+            }
+        });
+        let schema = if through_reference {
+            json!({
+                "properties": { "servers": { "$ref": "#/definitions/List" } },
+                "definitions": { "List": { "allOf": [{ "type": "array", "items": items }] } }
+            })
+        } else {
+            json!({ "properties": { "servers": {
+                "anyOf": [{ "type": "array", "items": items }, { "type": "null" }]
+            } } })
+        };
+        crate::schema::parse_schema(&schema).expect("parses")
+    }
+
+    #[rstest]
+    #[case::in_an_any_of_branch(false)]
+    #[case::in_an_all_of_branch_of_a_reference(true)]
+    fn a_key_in_an_item_of_a_sequence_declared_in_a_branch_gets_the_other_item_keys(
+        #[case] through_reference: bool,
+    ) {
+        let docs = parse_docs("servers:\n  - host: a\n");
+        let schema = servers_items_reached_through_a_branch(through_reference);
+
+        let result = complete_at(&docs, pos(1, 4), Some(&schema));
+
+        let ls = labels(&result);
+        assert!(ls.contains(&"port") && ls.contains(&"env"), "got: {ls:?}");
+        assert!(!ls.contains(&"host"), "got: {ls:?}");
+    }
+
+    #[rstest]
+    #[case::in_an_any_of_branch(false)]
+    #[case::in_an_all_of_branch_of_a_reference(true)]
+    fn a_blank_line_in_a_sequence_declared_in_a_branch_gets_the_item_keys(
+        #[case] through_reference: bool,
+    ) {
+        let docs = parse_docs("servers:\n  - host: a\n  \n");
+        let schema = servers_items_reached_through_a_branch(through_reference);
+
+        let result = complete_at(&docs, pos(2, 2), Some(&schema));
+
+        let ls = labels(&result);
+        assert!(
+            ls.contains(&"port") && ls.contains(&"env") && ls.contains(&"app"),
+            "got: {ls:?}"
+        );
+    }
+
+    #[rstest]
+    #[case::on_a_key("servers:\n  - app:\n      name: x\n", pos(2, 6))]
+    #[case::on_a_blank_line("servers:\n  - app:\n      name: x\n      \n", pos(3, 6))]
+    fn a_key_below_an_item_of_a_sequence_declared_in_a_branch_gets_the_keys_of_its_schema(
+        #[case] text: &str,
+        #[case] position: Position,
+    ) {
+        let docs = parse_docs(text);
+
+        for through_reference in [false, true] {
+            let schema = servers_items_reached_through_a_branch(through_reference);
+
+            let result = complete_at(&docs, position, Some(&schema));
+
+            assert_eq!(labels(&result), ["version"]);
+        }
+    }
+
+    #[test]
+    fn a_value_below_an_item_of_a_sequence_declared_in_a_branch_gets_the_enum_of_the_item_schema() {
+        let docs = parse_docs("servers:\n  - env: \n");
+
+        for through_reference in [false, true] {
+            let schema = servers_items_reached_through_a_branch(through_reference);
+
+            let result = complete_at(&docs, pos(1, 9), Some(&schema));
+
+            let ls = labels(&result);
+            assert!(
+                ls.contains(&"prod") && ls.contains(&"staging"),
+                "got: {ls:?}"
+            );
+            assert!(
+                result
+                    .iter()
+                    .all(|i| i.kind == Some(CompletionItemKind::VALUE)),
+                "enum suggestions should have VALUE kind"
+            );
+        }
+    }
+
+    #[test]
+    fn a_sequence_without_items_in_any_branch_leaves_only_structural_keys() {
+        let docs =
+            parse_docs("servers:\n  - host: a\n    port: 1\n  \n  - host: b\n    city: NY\n");
+        let schema = ParsedSchema::new(object_schema(vec![(
+            "servers",
+            any_of(vec![null_schema(), string_schema()]),
+        )]));
+
+        let result = complete_at(&docs, pos(3, 2), Some(&schema));
+
+        assert_eq!(
+            labels(&result),
+            labels(&complete_at(&docs, pos(3, 2), None))
+        );
+        assert!(
+            labels(&result).contains(&"city"),
+            "got: {:?}",
+            labels(&result)
+        );
+    }
+
+    #[test]
+    fn own_items_win_over_items_in_a_branch_in_completion() {
+        let docs = parse_docs("servers:\n  - host: a\n  \n");
+        let schema = ParsedSchema::new(object_schema(vec![(
+            "servers",
+            JsonSchema {
+                items: Some(Box::new(object_schema(vec![("own_key", string_schema())]))),
+                any_of: Some(vec![array_of(object_schema(vec![(
+                    "branch_key",
+                    string_schema(),
+                )]))]),
+                ..JsonSchema::default()
+            },
+        )]));
+
+        let result = complete_at(&docs, pos(2, 2), Some(&schema));
+
+        let ls = labels(&result);
+        assert!(ls.contains(&"own_key"), "got: {ls:?}");
+        assert!(!ls.contains(&"branch_key"), "got: {ls:?}");
     }
 }

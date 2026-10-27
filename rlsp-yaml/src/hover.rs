@@ -363,7 +363,9 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::schema::test_support::{all_of, any_of, array_of, object_schema, one_of};
+    use crate::schema::test_support::{
+        all_of, any_of, array_of, null_schema, object_schema, one_of,
+    };
     use crate::schema::{JsonSchema, SchemaType};
     use crate::test_utils::parse_docs;
 
@@ -1937,6 +1939,50 @@ mod tests {
         "k",
         "Direct doc"
     )]
+    #[case::item_of_an_any_of_array(
+        "tags:\n  - x\n",
+        pos(1, 4),
+        object_schema(vec![("tags", any_of(vec![array_of(schema_with_description("Tag doc")), null_schema()]))]),
+        "tags[0]",
+        "Tag doc"
+    )]
+    #[case::key_below_item_of_an_any_of_array(
+        "containers:\n  - image: x\n",
+        pos(1, 4),
+        object_schema(vec![(
+            "containers",
+            any_of(vec![
+                array_of(object_schema(vec![("image", schema_with_description("Image doc"))])),
+                null_schema(),
+            ]),
+        )]),
+        "containers[0].image",
+        "Image doc"
+    )]
+    #[case::item_of_a_root_sequence_in_a_branch(
+        "- name: x\n",
+        pos(0, 2),
+        any_of(vec![
+            array_of(object_schema(vec![("name", schema_with_description("Root item name"))])),
+            null_schema(),
+        ]),
+        "[0].name",
+        "Root item name"
+    )]
+    #[case::own_items_win_over_items_in_a_branch(
+        "tags:\n  - x\n",
+        pos(1, 4),
+        object_schema(vec![(
+            "tags",
+            JsonSchema {
+                items: Some(Box::new(schema_with_description("Own item doc"))),
+                any_of: Some(vec![array_of(schema_with_description("Branch item doc"))]),
+                ..JsonSchema::default()
+            },
+        )]),
+        "tags[0]",
+        "Own item doc"
+    )]
     fn hover_shows_the_schema_docs_of_the_hovered_path(
         #[case] text: &str,
         #[case] cursor: Position,
@@ -2022,6 +2068,23 @@ mod tests {
             with_root_description("Obj doc", object_schema(vec![("x", schema_with_description("X doc"))])),
         )])
     )]
+    #[case::item_where_no_branch_has_items(
+        "tags:\n  - x\n",
+        pos(1, 4),
+        object_schema(vec![("tags", any_of(vec![null_schema(), schema_with_description("Branch doc")]))])
+    )]
+    #[case::own_items_shadow_branch_items_for_a_key_below_the_item(
+        "tags:\n  - name: x\n",
+        pos(1, 4),
+        object_schema(vec![(
+            "tags",
+            JsonSchema {
+                items: Some(Box::new(object_schema(vec![("other", schema_with_description("Other doc"))]))),
+                any_of: Some(vec![array_of(object_schema(vec![("name", schema_with_description("Branch name"))]))]),
+                ..JsonSchema::default()
+            },
+        )])
+    )]
     fn hover_shows_no_schema_docs_when_the_path_does_not_resolve(
         #[case] text: &str,
         #[case] cursor: Position,
@@ -2045,14 +2108,6 @@ mod tests {
             Sharing, assert_references_followed, reference_to, with_targets,
         };
 
-        fn object(props: Vec<(&str, JsonSchema)>) -> JsonSchema {
-            JsonSchema {
-                schema_type: Some(SchemaType::Single("object".to_string())),
-                properties: Some(props.into_iter().map(|(k, v)| (k.to_string(), v)).collect()),
-                ..JsonSchema::default()
-            }
-        }
-
         /// A schema with everything hover prints from a property schema.
         fn described() -> JsonSchema {
             JsonSchema {
@@ -2065,25 +2120,25 @@ mod tests {
         }
 
         #[rstest]
-        #[case::root(|t: &Sharing| t.put(object(vec![("name", described())])), "name: x\n", pos(0, 0))]
+        #[case::root(|t: &Sharing| t.put(object_schema(vec![("name", described())])), "name: x\n", pos(0, 0))]
         #[case::property(
-            |t: &Sharing| object(vec![("name", t.put(described()))]),
+            |t: &Sharing| object_schema(vec![("name", t.put(described()))]),
             "name: x\n",
             pos(0, 0)
         )]
         #[case::property_value(
-            |t: &Sharing| object(vec![("name", t.put(described()))]),
+            |t: &Sharing| object_schema(vec![("name", t.put(described()))]),
             "name: x\n",
             pos(0, 6)
         )]
         #[case::property_on_the_path(
-            |t: &Sharing| object(vec![("a", t.put(object(vec![("name", t.put(described()))])))]),
+            |t: &Sharing| object_schema(vec![("a", t.put(object_schema(vec![("name", t.put(described()))])))]),
             "a:\n  name: x\n",
             pos(1, 2)
         )]
         #[case::all_of_branch(
             |t: &Sharing| JsonSchema {
-                all_of: Some(vec![t.put(object(vec![("name", t.put(described()))]))]),
+                all_of: Some(vec![t.put(object_schema(vec![("name", t.put(described()))]))]),
                 ..JsonSchema::default()
             },
             "name: x\n",
@@ -2091,7 +2146,7 @@ mod tests {
         )]
         #[case::any_of_branch(
             |t: &Sharing| JsonSchema {
-                any_of: Some(vec![t.put(object(vec![("name", t.put(described()))]))]),
+                any_of: Some(vec![t.put(object_schema(vec![("name", t.put(described()))]))]),
                 ..JsonSchema::default()
             },
             "name: x\n",
@@ -2099,17 +2154,17 @@ mod tests {
         )]
         #[case::one_of_branch(
             |t: &Sharing| JsonSchema {
-                one_of: Some(vec![t.put(object(vec![("name", t.put(described()))]))]),
+                one_of: Some(vec![t.put(object_schema(vec![("name", t.put(described()))]))]),
                 ..JsonSchema::default()
             },
             "name: x\n",
             pos(0, 0)
         )]
         #[case::branch_on_the_path(
-            |t: &Sharing| object(vec![(
+            |t: &Sharing| object_schema(vec![(
                 "a",
                 JsonSchema {
-                    all_of: Some(vec![t.put(object(vec![("name", t.put(described()))]))]),
+                    all_of: Some(vec![t.put(object_schema(vec![("name", t.put(described()))]))]),
                     ..JsonSchema::default()
                 },
             )]),
@@ -2122,14 +2177,30 @@ mod tests {
             pos(0, 0)
         )]
         #[case::array_item(
-            |t: &Sharing| object(vec![("list", t.put(array_of(t.put(described()))))]),
+            |t: &Sharing| object_schema(vec![("list", t.put(array_of(t.put(described()))))]),
             "list:\n  - x\n",
             pos(1, 4)
         )]
         #[case::key_below_array_item(
-            |t: &Sharing| object(vec![(
+            |t: &Sharing| object_schema(vec![(
                 "list",
-                array_of(t.put(object(vec![("name", t.put(described()))]))),
+                array_of(t.put(object_schema(vec![("name", t.put(described()))]))),
+            )]),
+            "list:\n  - name: x\n",
+            pos(1, 4)
+        )]
+        #[case::array_item_behind_a_branch(
+            |t: &Sharing| object_schema(vec![(
+                "list",
+                any_of(vec![t.put(array_of(t.put(described()))), null_schema()]),
+            )]),
+            "list:\n  - x\n",
+            pos(1, 4)
+        )]
+        #[case::key_below_item_behind_a_branch_of_a_reference(
+            |t: &Sharing| object_schema(vec![(
+                "list",
+                t.put(all_of(vec![t.put(array_of(t.put(object_schema(vec![("name", t.put(described()))]))))])),
             )]),
             "list:\n  - name: x\n",
             pos(1, 4)
@@ -2148,7 +2219,7 @@ mod tests {
         fn hover_ends_on_a_schema_that_references_itself() {
             let target = JsonSchema {
                 all_of: Some(vec![reference_to(0)]),
-                ..object(vec![("next", reference_to(0)), ("name", described())])
+                ..object_schema(vec![("next", reference_to(0)), ("name", described())])
             };
             let schema = with_targets(reference_to(0), vec![target]);
             let docs = parse_docs("next:\n  next:\n    next:\n      name: x\n");
@@ -2166,11 +2237,11 @@ mod tests {
         fn hover_follows_two_schemas_that_reference_each_other() {
             let first = JsonSchema {
                 description: Some("first".to_string()),
-                ..object(vec![("down", reference_to(1))])
+                ..object_schema(vec![("down", reference_to(1))])
             };
             let second = JsonSchema {
                 description: Some("second".to_string()),
-                ..object(vec![("down", reference_to(0))])
+                ..object_schema(vec![("down", reference_to(0))])
             };
             let schema = with_targets(reference_to(0), vec![first, second]);
             let docs = parse_docs("down:\n  down:\n    down: x\n");
@@ -2204,13 +2275,43 @@ mod tests {
         }
 
         #[rstest]
+        #[case::item("containers:\n  - x\n", "Container item doc")]
+        #[case::key_below_item("containers:\n  - image: x\n", "Image doc")]
+        fn hover_on_an_array_declared_in_an_all_of_branch_of_a_reference_target_shows_the_item_docs(
+            #[case] text: &str,
+            #[case] expected: &str,
+        ) {
+            let schema = crate::schema::parse_schema(&json!({
+                "properties": { "containers": { "$ref": "#/definitions/List" } },
+                "definitions": { "List": { "allOf": [{
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "description": "Container item doc",
+                        "properties": { "image": { "description": "Image doc" } }
+                    }
+                }] } }
+            }))
+            .expect("parses");
+            let docs = parse_docs(text);
+
+            let hover = hover_at(&docs, pos(1, 4), Some(&schema)).expect("hover");
+
+            assert!(
+                hover_content(&hover).contains(&format!("**Description:** {expected}")),
+                "{}",
+                hover_content(&hover)
+            );
+        }
+
+        #[rstest]
         #[case::unresolved(JsonSchema {
             reference: Some(crate::schema::SchemaRef::Unresolved("#/missing".into())),
             ..JsonSchema::default()
         })]
         #[case::target_outside_the_table(reference_to(7))]
         fn hover_on_a_reference_without_a_target_has_no_schema_section(#[case] node: JsonSchema) {
-            let schema = with_targets(object(vec![("name", node)]), vec![described()]);
+            let schema = with_targets(object_schema(vec![("name", node)]), vec![described()]);
             let docs = parse_docs("name: x\n");
 
             let hover = hover_at(&docs, pos(0, 0), Some(&schema)).expect("hover");
@@ -2228,7 +2329,7 @@ mod tests {
                 description: Some("own".to_string()),
                 ..reference_to(0)
             };
-            let schema = with_targets(object(vec![("name", node)]), vec![described()]);
+            let schema = with_targets(object_schema(vec![("name", node)]), vec![described()]);
             let docs = parse_docs("name: x\n");
 
             let hover = hover_at(&docs, pos(0, 0), Some(&schema)).expect("hover");
@@ -2241,7 +2342,7 @@ mod tests {
         fn hover_on_a_key_the_cyclic_schema_does_not_declare_has_no_schema_section() {
             let target = JsonSchema {
                 all_of: Some(vec![reference_to(0)]),
-                ..object(vec![("next", reference_to(0))])
+                ..object_schema(vec![("next", reference_to(0))])
             };
             let schema = with_targets(reference_to(0), vec![target]);
             let docs = parse_docs("next:\n  missing: x\n");

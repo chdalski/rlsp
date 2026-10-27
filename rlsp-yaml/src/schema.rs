@@ -462,6 +462,13 @@ pub(crate) mod test_support {
         }
     }
 
+    pub fn null_schema() -> JsonSchema {
+        JsonSchema {
+            schema_type: Some(SchemaType::Single("null".to_string())),
+            ..JsonSchema::default()
+        }
+    }
+
     pub fn object_schema(props: Vec<(&str, JsonSchema)>) -> JsonSchema {
         JsonSchema {
             schema_type: Some(SchemaType::Single("object".to_string())),

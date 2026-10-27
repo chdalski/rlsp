@@ -423,3 +423,76 @@ async fn should_complete_nested_key_when_parent_schema_is_only_reachable_through
         "should exclude present key 'host', got: {result_str}"
     );
 }
+
+const ANY_OF_ITEMS_SCHEMA_URL: &str = "https://example.com/test-any-of-items-completion.json";
+
+/// Complete at (`line`, `character`) in `document` against a schema whose
+/// `servers` key is an array declared in an `anyOf` branch next to a null
+/// branch, returning the serialized completion result.
+async fn completion_with_servers_in_any_of(document: &str, line: u32, character: u32) -> String {
+    let schema = parse_schema(&json!({
+        "type": "object",
+        "properties": { "servers": { "anyOf": [
+            {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "host": { "type": "string" },
+                        "port": { "type": "integer" }
+                    }
+                }
+            },
+            { "type": "null" }
+        ] } }
+    }))
+    .expect("any-of items schema parse failed");
+
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    service
+        .inner()
+        .seed_schema_cache(ANY_OF_ITEMS_SCHEMA_URL, schema);
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/any-of-items-completion.yaml";
+    let text = format!("# yaml-language-server: $schema={ANY_OF_ITEMS_SCHEMA_URL}\n{document}");
+    send(&mut service, did_open_notification(uri, &text)).await;
+
+    // The modeline occupies line 0, so the document's lines start at 1.
+    let resp = send(
+        &mut service,
+        completion_request(2, uri, line + 1, character),
+    )
+    .await;
+    let resp = resp.expect("completion should return a response");
+    let result = resp.result().expect("completion should have a result");
+    serde_json::to_string(result).expect("serialize")
+}
+
+#[tokio::test]
+async fn should_complete_item_keys_on_a_blank_line_in_a_sequence_declared_in_an_any_of_branch() {
+    let result_str = completion_with_servers_in_any_of("servers:\n  - host: a\n  \n", 2, 2).await;
+
+    assert!(
+        result_str.contains("port"),
+        "should offer 'port' from the item schema, got: {result_str}"
+    );
+}
+
+#[tokio::test]
+async fn should_complete_the_other_item_keys_on_a_key_in_an_item_of_a_sequence_declared_in_an_any_of_branch()
+ {
+    let result_str = completion_with_servers_in_any_of("servers:\n  - host: a\n", 1, 4).await;
+
+    assert!(
+        result_str.contains("port"),
+        "should offer 'port' from the item schema, got: {result_str}"
+    );
+    assert!(
+        !result_str.contains("\"host\""),
+        "should exclude present key 'host', got: {result_str}"
+    );
+}

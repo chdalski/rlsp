@@ -39,7 +39,7 @@ and schema completion.
 - [x] Task 2: array items are a typed path segment
 - [x] Task 3: hover resolves schema docs through the shared
       resolver
-- [ ] Task 4: array items are found through composition branches
+- [x] Task 4: array items are found through composition branches
 - [ ] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
@@ -123,28 +123,28 @@ When a schema node has no own `items`, the resolver looks for
 order and with the same fallback as for a key; an own `items`
 takes precedence over the branches.
 
-- [ ] Hover shows the schema docs of an item, and of a key below
+- [x] Hover shows the schema docs of an item, and of a key below
       an item, of a sequence whose schema is
       `anyOf: [{type: array, items: …}, {type: "null"}]`, and of a
       sequence whose `items` is reached only through an `allOf`
       branch of a `$ref` target, pinned by unit tests
-- [ ] For a sequence whose `items` is reached only through a
+- [x] For a sequence whose `items` is reached only through a
       branch, completion offers the item schema's keys in an
       existing item, on a blank line in the sequence, and on a key
       below an item, and the item schema's enum values for a value
       below an item, pinned by unit tests through `complete_at`
-- [ ] A schema node with an own `items` resolves to it even when a
+- [x] A schema node with an own `items` resolves to it even when a
       branch also declares `items`, and a self-referencing schema
       without any `items` still resolves an item path to nothing,
       pinned by tests
-- [ ] Integration tests in `tests/lsp_lifecycle/hover.rs` and
+- [x] Integration tests in `tests/lsp_lifecycle/hover.rs` and
       `tests/lsp_lifecycle/completion.rs` pin hover docs and key
       completion for an item of a sequence whose `items` is
       reached only through an `anyOf` branch
-- [ ] The feature-log entry for this change also tells the reader
+- [x] The feature-log entry for this change also tells the reader
       that hover and completion find the items of an array schema
       declared in a composition branch
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ## Non-Goals
 

@@ -12,8 +12,9 @@ use super::schema_completions::schema_key_completions;
 use super::support::test_fixtures::{integer_schema, labels, object_schema, pos, string_schema};
 use super::*;
 use crate::schema::test_support::{
-    CHAIN_LENGTH, Sharing, all_of, any_of, assert_references_followed, chain, composes_itself,
-    cyclic, declaring, ladder, on_a_small_stack, one_of, reference_to, with_targets,
+    CHAIN_LENGTH, Sharing, all_of, any_of, array_of, assert_references_followed, chain,
+    composes_itself, cyclic, declaring, ladder, null_schema, on_a_small_stack, one_of,
+    reference_to, with_targets,
 };
 use crate::schema::{JsonSchema, SchemaType};
 use crate::test_utils::parse_docs;
@@ -42,14 +43,6 @@ fn enum_schema() -> JsonSchema {
     JsonSchema {
         schema_type: Some(SchemaType::Single("string".to_string())),
         enum_values: Some(vec![serde_json::json!("a"), serde_json::json!("b")]),
-        ..JsonSchema::default()
-    }
-}
-
-fn array_of(items: JsonSchema) -> JsonSchema {
-    JsonSchema {
-        schema_type: Some(SchemaType::Single("array".to_string())),
-        items: Some(Box::new(items)),
         ..JsonSchema::default()
     }
 }
@@ -95,6 +88,22 @@ fn array_of(items: JsonSchema) -> JsonSchema {
 )]
 #[case::items_behind_a_property_reference(
     |t: &Sharing| object_schema(vec![("servers", t.put(array_of(t.put(server(t)))))]),
+    "servers:\n  - host: x\n  \n",
+    pos(2, 2)
+)]
+#[case::items_behind_a_branch(
+    |t: &Sharing| object_schema(vec![(
+        "servers",
+        any_of(vec![t.put(array_of(t.put(server(t)))), null_schema()]),
+    )]),
+    "servers:\n  - host: x\n  \n",
+    pos(2, 2)
+)]
+#[case::items_behind_an_all_of_reference(
+    |t: &Sharing| object_schema(vec![(
+        "servers",
+        t.put(all_of(vec![t.put(array_of(t.put(server(t))))])),
+    )]),
     "servers:\n  - host: x\n  \n",
     pos(2, 2)
 )]
