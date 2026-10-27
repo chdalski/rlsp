@@ -488,6 +488,32 @@ pub(crate) mod test_support {
         }
     }
 
+    /// An array schema whose items are described by position (`prefixItems`),
+    /// with no `items`.
+    pub fn tuple_of(prefix: Vec<JsonSchema>) -> JsonSchema {
+        JsonSchema {
+            schema_type: Some(SchemaType::Single("array".to_string())),
+            prefix_items: Some(prefix),
+            ..JsonSchema::default()
+        }
+    }
+
+    /// `schema` with the `additionalItems` schema `additional`.
+    pub fn with_additional_items(schema: JsonSchema, additional: JsonSchema) -> JsonSchema {
+        JsonSchema {
+            additional_items: Some(AdditionalProperties::Schema(Box::new(additional))),
+            ..schema
+        }
+    }
+
+    /// `schema` with `additionalItems: false`.
+    pub fn denying_additional_items(schema: JsonSchema) -> JsonSchema {
+        JsonSchema {
+            additional_items: Some(AdditionalProperties::Denied),
+            ..schema
+        }
+    }
+
     /// `schema` with `patternProperties`, in the order given.
     pub fn with_patterns(schema: JsonSchema, patterns: Vec<(&str, JsonSchema)>) -> JsonSchema {
         JsonSchema {

@@ -344,7 +344,8 @@ mod tests {
 
     use super::*;
     use crate::schema::test_support::{
-        all_of, any_of, array_of, null_schema, object_schema, one_of,
+        all_of, any_of, array_of, denying_additional_items, null_schema, object_schema, one_of,
+        tuple_of, with_additional_items,
     };
     use crate::schema::{JsonSchema, SchemaType};
     use crate::test_utils::parse_docs;
@@ -1987,6 +1988,100 @@ mod tests {
         "items[1].name",
         "Name doc"
     )]
+    #[case::first_item_of_a_tuple(
+        "pair:\n  - a\n  - b\n",
+        pos(1, 4),
+        object_schema(vec![("pair", tuple_of(vec![schema_with_description("First doc"), schema_with_description("Second doc")]))]),
+        "pair[0]",
+        "First doc"
+    )]
+    #[case::second_item_of_a_tuple(
+        "pair:\n  - a\n  - b\n",
+        pos(2, 4),
+        object_schema(vec![("pair", tuple_of(vec![schema_with_description("First doc"), schema_with_description("Second doc")]))]),
+        "pair[1]",
+        "Second doc"
+    )]
+    #[case::second_item_of_a_root_tuple(
+        "- a\n- b\n",
+        pos(1, 2),
+        tuple_of(vec![schema_with_description("First doc"), schema_with_description("Second doc")]),
+        "[1]",
+        "Second doc"
+    )]
+    #[case::key_in_the_first_item_of_a_tuple(
+        "t:\n  - n: 1\n  - m: 2\n",
+        pos(1, 4),
+        object_schema(vec![("t", tuple_of(vec![
+            object_schema(vec![("n", schema_with_description("N doc"))]),
+            object_schema(vec![("m", schema_with_description("M doc"))]),
+        ]))]),
+        "t[0].n",
+        "N doc"
+    )]
+    #[case::key_in_the_second_item_of_a_tuple(
+        "t:\n  - n: 1\n  - m: 2\n",
+        pos(2, 4),
+        object_schema(vec![("t", tuple_of(vec![
+            object_schema(vec![("n", schema_with_description("N doc"))]),
+            object_schema(vec![("m", schema_with_description("M doc"))]),
+        ]))]),
+        "t[1].m",
+        "M doc"
+    )]
+    #[case::item_beyond_the_prefix_takes_items(
+        "t:\n  - a\n  - b\n  - c\n",
+        pos(3, 4),
+        object_schema(vec![("t", JsonSchema {
+            items: Some(Box::new(schema_with_description("Rest doc"))),
+            ..tuple_of(vec![schema_with_description("First doc"), schema_with_description("Second doc")])
+        })]),
+        "t[2]",
+        "Rest doc"
+    )]
+    #[case::item_beyond_the_tuple_takes_additional_items(
+        "t:\n  - a\n  - b\n  - c\n",
+        pos(3, 4),
+        object_schema(vec![("t", with_additional_items(
+            tuple_of(vec![schema_with_description("First doc"), schema_with_description("Second doc")]),
+            schema_with_description("Additional doc"),
+        ))]),
+        "t[2]",
+        "Additional doc"
+    )]
+    #[case::nested_tuples_use_both_indices_inner(
+        "a:\n  - - p\n    - q\n  - - r\n",
+        pos(2, 6),
+        object_schema(vec![("a", tuple_of(vec![
+            tuple_of(vec![schema_with_description("Doc 00"), schema_with_description("Doc 01")]),
+            tuple_of(vec![schema_with_description("Doc 10"), schema_with_description("Doc 11")]),
+        ]))]),
+        "a[0][1]",
+        "Doc 01"
+    )]
+    #[case::nested_tuples_use_both_indices_outer(
+        "a:\n  - - p\n    - q\n  - - r\n",
+        pos(3, 6),
+        object_schema(vec![("a", tuple_of(vec![
+            tuple_of(vec![schema_with_description("Doc 00"), schema_with_description("Doc 01")]),
+            tuple_of(vec![schema_with_description("Doc 10"), schema_with_description("Doc 11")]),
+        ]))]),
+        "a[1][0]",
+        "Doc 10"
+    )]
+    #[case::own_tuple_wins_over_items_in_a_branch(
+        "tags:\n  - x\n",
+        pos(1, 4),
+        object_schema(vec![(
+            "tags",
+            JsonSchema {
+                any_of: Some(vec![array_of(schema_with_description("Branch item doc"))]),
+                ..tuple_of(vec![schema_with_description("Own position doc")])
+            },
+        )]),
+        "tags[0]",
+        "Own position doc"
+    )]
     fn hover_shows_the_schema_docs_of_the_hovered_path(
         #[case] text: &str,
         #[case] cursor: Position,
@@ -2055,6 +2150,25 @@ mod tests {
         "a:\n  - - x\n",
         pos(1, 6),
         object_schema(vec![("a", array_of(schema_with_description("Single level doc")))])
+    )]
+    #[case::item_beyond_a_tuple_that_denies_additional_items(
+        "t:\n  - a\n  - b\n  - c\n",
+        pos(3, 4),
+        object_schema(vec![("t", JsonSchema {
+            any_of: Some(vec![array_of(schema_with_description("Branch item doc"))]),
+            ..denying_additional_items(tuple_of(vec![
+                schema_with_description("First doc"),
+                schema_with_description("Second doc"),
+            ]))
+        })])
+    )]
+    #[case::item_beyond_a_tuple_without_a_schema_for_it(
+        "t:\n  - a\n  - b\n  - c\n",
+        pos(3, 4),
+        object_schema(vec![("t", tuple_of(vec![
+            schema_with_description("First doc"),
+            schema_with_description("Second doc"),
+        ]))])
     )]
     #[case::key_where_schema_is_an_array(
         "list:\n  name: x\n",

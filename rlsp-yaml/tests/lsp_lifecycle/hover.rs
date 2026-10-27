@@ -348,3 +348,58 @@ async fn should_show_no_docs_below_a_service_name_the_pattern_does_not_match() {
 
     assert!(!image.contains("Image docs"), "got: {image}");
 }
+
+// ── Hover schema docs of array items described by their position ──
+
+const TUPLE_SCHEMA_URL: &str = "https://example.com/test-hover-tuple.json";
+
+#[tokio::test]
+async fn should_show_the_docs_of_the_second_item_of_a_prefix_items_sequence() {
+    let schema = serde_json::json!({
+        "properties": {
+            "pair": {
+                "type": "array",
+                "prefixItems": [
+                    { "description": "First item docs" },
+                    { "description": "Second item docs" }
+                ]
+            }
+        }
+    });
+
+    let result_str =
+        hover_with_schema(TUPLE_SCHEMA_URL, &schema, "pair:\n  - a\n  - b\n", 2, 4).await;
+
+    assert!(result_str.contains("Second item docs"), "got: {result_str}");
+    assert!(!result_str.contains("First item docs"), "got: {result_str}");
+}
+
+#[tokio::test]
+async fn should_show_the_docs_of_an_item_beyond_a_draft_07_tuple() {
+    let schema = serde_json::json!({
+        "properties": {
+            "row": {
+                "type": "array",
+                "items": [
+                    { "description": "First item docs" },
+                    { "description": "Second item docs" }
+                ],
+                "additionalItems": { "description": "Further item docs" }
+            }
+        }
+    });
+
+    let result_str = hover_with_schema(
+        TUPLE_SCHEMA_URL,
+        &schema,
+        "row:\n  - a\n  - b\n  - c\n",
+        3,
+        4,
+    )
+    .await;
+
+    assert!(
+        result_str.contains("Further item docs"),
+        "got: {result_str}"
+    );
+}

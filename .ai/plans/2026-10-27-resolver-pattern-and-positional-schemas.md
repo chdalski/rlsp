@@ -58,7 +58,7 @@ except the positional corrections named in Decisions.
       completion share one path type
 - [x] Task 3: keys resolve through `patternProperties` and
       `additionalProperties`
-- [ ] Task 4: items resolve by position
+- [x] Task 4: items resolve by position
 - [ ] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
@@ -188,28 +188,28 @@ yields nothing; a node with none of these falls back to the
 composition branches as today. This belongs to the first pass of the
 walk.
 
-- [ ] Resolver unit tests pin: `prefixItems` inside and beyond the
+- [x] Resolver unit tests pin: `prefixItems` inside and beyond the
       prefix, with and without `items`; the tuple form with an
       `additionalItems` schema and with `additionalItems: false`; a
       plain `items` at every index; an own positional schema
       shadowing a branch's `items`; a tuple inside a composition
       branch; and a positional schema behind a `$ref` target
-- [ ] Each result listed in the Decisions entry "Positional schemas
+- [x] Each result listed in the Decisions entry "Positional schemas
       change these results" is pinned by a test; every other
       existing test passes with its assertions unchanged
-- [ ] Hover shows the docs of a tuple item by its position, and
+- [x] Hover shows the docs of a tuple item by its position, and
       completion offers item `i`'s keys in an existing item and on a
       blank line at position `i`, pinned by unit tests through
       `hover_at` and `complete_at`
-- [ ] Integration tests in `tests/lsp_lifecycle/hover.rs` and
+- [x] Integration tests in `tests/lsp_lifecycle/hover.rs` and
       `tests/lsp_lifecycle/completion.rs` pin hover docs and key
       completion for the second item of a `prefixItems` sequence
-- [ ] The doc comment of `resolve_schema_path` describes how an
+- [x] The doc comment of `resolve_schema_path` describes how an
       item's schema is picked by its position
-- [ ] The feature-log entry for this change also tells the reader
+- [x] The feature-log entry for this change also tells the reader
       that hover and completion pick an array item's schema by its
       position
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ## Non-Goals
 

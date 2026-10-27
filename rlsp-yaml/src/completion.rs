@@ -116,7 +116,9 @@ mod tests {
         integer_schema, labels, object_schema, pos, string_schema,
     };
     use super::*;
-    use crate::schema::test_support::{any_of, array_of, null_schema};
+    use crate::schema::test_support::{
+        any_of, array_of, denying_additional_items, null_schema, tuple_of,
+    };
     use crate::schema::{JsonSchema, SchemaType};
     use crate::test_utils::parse_docs;
 
@@ -601,6 +603,132 @@ mod tests {
         assert!(
             ls.contains(&"port"),
             "should suggest schema item key 'port', got: {ls:?}"
+        );
+    }
+
+    // ── Item keys by position ────────────────────────────────────────────────
+
+    /// A sequence under `servers` whose first item declares `alpha` and `beta`
+    /// and whose second declares `gamma` and `delta`.
+    fn positional_servers_schema(rest: impl FnOnce(JsonSchema) -> JsonSchema) -> ParsedSchema {
+        let tuple = tuple_of(vec![
+            object_schema(vec![("alpha", string_schema()), ("beta", string_schema())]),
+            object_schema(vec![("gamma", string_schema()), ("delta", string_schema())]),
+        ]);
+        ParsedSchema::new(object_schema(vec![("servers", rest(tuple))]))
+    }
+
+    #[rstest]
+    #[case::left_of_the_second_mapping_item("servers:\n  - alpha: 1\n  - gamma: 2\n", pos(2, 0))]
+    #[case::blank_line_between_scalar_items("servers:\n  - a\n  \n  - b\n", pos(2, 2))]
+    #[case::blank_line_after_the_first_scalar_item("servers:\n  - a\n  \n", pos(2, 2))]
+    fn complete_at_in_a_blank_sequence_offers_the_keys_of_the_tuple_item_at_that_position(
+        #[case] yaml: &str,
+        #[case] cursor: Position,
+    ) {
+        let docs = parse_docs(yaml);
+        let schema = positional_servers_schema(|tuple| tuple);
+
+        let result = complete_at(&docs, cursor, Some(&schema));
+
+        let ls = labels(&result);
+        assert!(
+            ls.contains(&"gamma") && ls.contains(&"delta"),
+            "should suggest the keys of item 1, got: {ls:?}"
+        );
+        assert!(
+            !ls.contains(&"alpha") && !ls.contains(&"beta"),
+            "should not suggest the keys of item 0, got: {ls:?}"
+        );
+    }
+
+    #[test]
+    fn complete_at_on_a_blank_line_after_the_first_tuple_item_offers_the_keys_of_that_item() {
+        let docs = parse_docs("servers:\n  - alpha: 1\n  \n");
+        let schema = positional_servers_schema(|tuple| tuple);
+
+        let result = complete_at(&docs, pos(2, 2), Some(&schema));
+
+        let ls = labels(&result);
+        assert!(
+            ls.contains(&"beta"),
+            "should suggest the missing key of item 0, got: {ls:?}"
+        );
+        assert!(
+            !ls.contains(&"delta"),
+            "should not suggest the keys of item 1, got: {ls:?}"
+        );
+    }
+
+    #[test]
+    fn complete_at_on_a_key_of_the_second_tuple_item_offers_the_keys_of_that_position() {
+        let docs = parse_docs("servers:\n  - alpha: 1\n  - gamma: 2\n");
+        let schema = positional_servers_schema(|tuple| tuple);
+
+        let result = complete_at(&docs, pos(2, 4), Some(&schema));
+
+        let ls = labels(&result);
+        assert!(
+            ls.contains(&"delta"),
+            "should suggest the missing key of item 1, got: {ls:?}"
+        );
+        assert!(
+            !ls.contains(&"beta"),
+            "should not suggest a key only item 0 declares, got: {ls:?}"
+        );
+    }
+
+    #[test]
+    fn complete_at_in_the_second_tuple_item_offers_the_keys_of_that_position() {
+        let docs = parse_docs("servers:\n  - alpha: 1\n  - gamma: 2\n    \n");
+        let schema = positional_servers_schema(|tuple| tuple);
+
+        let result = complete_at(&docs, pos(3, 4), Some(&schema));
+
+        let ls = labels(&result);
+        assert!(
+            ls.contains(&"delta"),
+            "should suggest the missing key of item 1, got: {ls:?}"
+        );
+        assert!(
+            !ls.contains(&"beta"),
+            "should not suggest a key only item 0 declares, got: {ls:?}"
+        );
+    }
+
+    #[test]
+    fn complete_at_in_a_blank_sequence_beyond_the_prefix_offers_the_keys_of_items() {
+        let docs = parse_docs("servers:\n  - alpha: 1\n  - gamma: 2\n  - zeta: 3\n");
+        let schema = positional_servers_schema(|tuple| JsonSchema {
+            items: Some(Box::new(object_schema(vec![("omega", string_schema())]))),
+            ..tuple
+        });
+
+        let result = complete_at(&docs, pos(3, 0), Some(&schema));
+
+        let ls = labels(&result);
+        assert!(
+            ls.contains(&"omega"),
+            "should suggest the keys of items, got: {ls:?}"
+        );
+        assert!(
+            !ls.contains(&"beta") && !ls.contains(&"delta"),
+            "should not suggest the keys of the prefix, got: {ls:?}"
+        );
+    }
+
+    #[test]
+    fn complete_at_in_a_blank_sequence_beyond_a_tuple_that_denies_additional_items_offers_no_schema_keys()
+     {
+        let docs = parse_docs("servers:\n  - alpha: 1\n  - gamma: 2\n  - zeta: 3\n");
+        let schema = positional_servers_schema(denying_additional_items);
+
+        let result = complete_at(&docs, pos(3, 0), Some(&schema));
+
+        let ls = labels(&result);
+        assert!(
+            !ls.contains(&"beta") && !ls.contains(&"delta"),
+            "should suggest no schema keys, got: {ls:?}"
         );
     }
 

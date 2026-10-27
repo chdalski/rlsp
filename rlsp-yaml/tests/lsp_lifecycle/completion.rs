@@ -650,3 +650,82 @@ async fn should_complete_the_keys_and_values_of_a_service_named_by_a_pattern() {
         "should offer the restart values, got: {values}"
     );
 }
+
+// ── Key completion in array items described by their position ──
+
+const TUPLE_SCHEMA_URL: &str = "https://example.com/test-completion-tuple.json";
+
+fn tuple_schema() -> serde_json::Value {
+    serde_json::json!({
+        "properties": {
+            "pair": {
+                "type": "array",
+                "prefixItems": [
+                    {
+                        "type": "object",
+                        "properties": { "alpha": { "type": "string" }, "beta": { "type": "string" } }
+                    },
+                    {
+                        "type": "object",
+                        "properties": { "gamma": { "type": "string" }, "delta": { "type": "string" } }
+                    }
+                ]
+            }
+        }
+    })
+}
+
+#[tokio::test]
+async fn should_complete_the_keys_of_the_second_prefix_item_on_a_blank_line() {
+    let result_str = completion_with_schema(
+        TUPLE_SCHEMA_URL,
+        &tuple_schema(),
+        "pair:\n  - a\n  \n  - b\n",
+        2,
+        2,
+    )
+    .await;
+
+    for expected in ["gamma", "delta"] {
+        assert!(
+            result_str.contains(expected),
+            "should offer '{expected}', got: {result_str}"
+        );
+    }
+    assert!(!result_str.contains("beta"), "got: {result_str}");
+}
+
+#[tokio::test]
+async fn should_complete_the_keys_of_the_second_prefix_item_left_of_its_dash() {
+    let result_str = completion_with_schema(
+        TUPLE_SCHEMA_URL,
+        &tuple_schema(),
+        "pair:\n  - alpha: 1\n  - gamma: 2\n",
+        2,
+        0,
+    )
+    .await;
+
+    for expected in ["gamma", "delta"] {
+        assert!(
+            result_str.contains(expected),
+            "should offer '{expected}', got: {result_str}"
+        );
+    }
+    assert!(!result_str.contains("beta"), "got: {result_str}");
+}
+
+#[tokio::test]
+async fn should_complete_the_missing_key_of_the_second_prefix_item() {
+    let result_str = completion_with_schema(
+        TUPLE_SCHEMA_URL,
+        &tuple_schema(),
+        "pair:\n  - alpha: 1\n  - gamma: 2\n    \n",
+        3,
+        4,
+    )
+    .await;
+
+    assert!(result_str.contains("delta"), "got: {result_str}");
+    assert!(!result_str.contains("beta"), "got: {result_str}");
+}

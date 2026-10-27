@@ -42,7 +42,7 @@ pub enum SchemaPathSegment {
     /// The value of the mapping key with this name.
     Key(String),
     /// The element of an array at this zero-based index. The schema walk
-    /// ignores the index: it is there for picking the schema by position.
+    /// picks the item's schema by it.
     Item(usize),
 }
 
@@ -60,14 +60,20 @@ pub fn composition_branches(schema: &JsonSchema) -> impl DoubleEndedIterator<Ite
 ///
 /// The walk has two passes. The first follows the schemas that declare the
 /// path: a key segment goes to the `properties` entry of that name, an item
-/// segment to `items`. A schema without that entry tries every composition
-/// branch with the same path, so a schema that references itself can come back
-/// to the same schema with the same rest of the path. The walk goes through each
-/// shared target once per rest of the path: a target already tried at that
-/// point cannot succeed, or the walk would have ended. It keeps an explicit
-/// stack, so the depth of a chain of references does not grow the call stack.
-/// The first pass does no pattern work and its results do not change with the
-/// second pass.
+/// segment to the schema the node has for that position: the `prefixItems`
+/// entry (or entry of the Draft-04/07 tuple form of `items`) at the index when
+/// it is within the prefix, otherwise `items`, otherwise the `additionalItems`
+/// schema, as validation applies them. A node that has one of these does not
+/// try its branches; `additionalItems: false` beyond the prefix offers nothing,
+/// and only dead-ends that node, so a later sibling branch may still answer. A
+/// schema that has no `properties` entry for the key, or no schema for the
+/// position, tries every composition branch with the same path, so a schema that
+/// references itself can come back to the same schema with the same rest of the
+/// path. The walk goes through each shared target once per rest of the path: a
+/// target already tried at that point cannot succeed, or the walk would have
+/// ended. It keeps an explicit stack, so the depth of a chain of references does
+/// not grow the call stack. The first pass does no pattern work and its results
+/// do not change with the second pass.
 ///
 /// Only when the first pass finds nothing, and it met a schema with
 /// `patternProperties` or `additionalProperties` that no `properties` entry
@@ -204,6 +210,33 @@ fn charge(allowance: &mut Option<&mut Allowance<'_>>, steps: usize) -> bool {
         .is_none_or(|allowance| spend(&mut allowance.left, steps))
 }
 
+/// What a schema itself says about the item at an index.
+enum ItemSchema<'a> {
+    /// The item is described by this schema.
+    Found(&'a JsonSchema),
+    /// `additionalItems: false` rules the item out.
+    Nothing,
+    /// The schema says nothing about the item, so its branches may.
+    Unspecified,
+}
+
+/// The schema `schema` has for the item at `index`, as validation applies them:
+/// the `prefixItems` entry at `index` when it is within the prefix, otherwise
+/// `items`, otherwise the `additionalItems` schema.
+fn schema_at_index(schema: &JsonSchema, index: usize) -> ItemSchema<'_> {
+    if let Some(entry) = schema.prefix_items.as_deref().and_then(|p| p.get(index)) {
+        return ItemSchema::Found(entry);
+    }
+    if let Some(items) = schema.items.as_deref() {
+        return ItemSchema::Found(items);
+    }
+    match &schema.additional_items {
+        Some(AdditionalProperties::Schema(additional)) => ItemSchema::Found(additional),
+        Some(AdditionalProperties::Denied) => ItemSchema::Nothing,
+        None => ItemSchema::Unspecified,
+    }
+}
+
 /// What the walk has left to do.
 enum Step<'a, 'p> {
     /// Resolve `path` from the schema.
@@ -250,24 +283,29 @@ fn walk<'a>(
         };
 
         let key = match segment {
-            // Array item descent: own `items` first, then the composition branches.
-            SchemaPathSegment::Item(_) => {
-                if let Some(items) = schema.items.as_deref() {
-                    if !charge(&mut allowance, 1) {
-                        return Err(GIVEN_UP);
+            // Array item descent: the schema the node itself has for the index,
+            // else the composition branches.
+            SchemaPathSegment::Item(index) => {
+                match schema_at_index(schema, *index) {
+                    ItemSchema::Found(item) => {
+                        if !charge(&mut allowance, 1) {
+                            return Err(GIVEN_UP);
+                        }
+                        stack.push(Step::Visit(item, rest));
                     }
-                    stack.push(Step::Visit(items, rest));
-                } else {
-                    if let Some(allowance) = allowance.as_deref_mut()
-                        && !spend(&mut allowance.left, composition_branches(schema).count())
-                    {
-                        return Err(GIVEN_UP);
+                    ItemSchema::Nothing => {}
+                    ItemSchema::Unspecified => {
+                        if let Some(allowance) = allowance.as_deref_mut()
+                            && !spend(&mut allowance.left, composition_branches(schema).count())
+                        {
+                            return Err(GIVEN_UP);
+                        }
+                        stack.extend(
+                            composition_branches(schema)
+                                .rev()
+                                .map(|b| Step::Visit(b, path)),
+                        );
                     }
-                    stack.extend(
-                        composition_branches(schema)
-                            .rev()
-                            .map(|b| Step::Visit(b, path)),
-                    );
                 }
                 continue;
             }
@@ -318,11 +356,13 @@ mod tests {
     };
     use crate::schema::test_support::{
         CHAIN_LENGTH, all_of, any_of, array_of, boolean_schema, chain, composes_itself, cyclic,
-        declaring, denying_additional, described, field_branches, integer_schema, key, ladder,
-        nest_in_all_of, no_targets, null_schema, object_schema, on_a_small_stack, one_of,
-        reference_to, string_schema, with_additional, with_patterns, with_targets,
+        declaring, denying_additional, denying_additional_items, described, field_branches,
+        integer_schema, key, ladder, nest_in_all_of, no_targets, null_schema, object_schema,
+        on_a_small_stack, one_of, reference_to, string_schema, tuple_of, with_additional,
+        with_additional_items, with_patterns, with_targets,
     };
     use regex::RegexBuilder;
+    use serde_json::{Value, json};
 
     // ══════════════════════════════════════════════════════════════════════════
     // Direct unit tests: resolve_schema_path
@@ -921,7 +961,7 @@ mod tests {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // The index of an item segment
+    // Plain items at every index
     // ══════════════════════════════════════════════════════════════════════════
 
     #[rstest]
@@ -929,7 +969,7 @@ mod tests {
     #[case::second(1)]
     #[case::far_out(7)]
     #[case::largest(usize::MAX)]
-    fn resolve_schema_path_ignores_the_item_index(#[case] index: usize) {
+    fn resolve_schema_path_resolves_plain_items_the_same_at_every_index(#[case] index: usize) {
         let schema = array_of(object_schema(vec![("b", string_schema())]));
         let parsed = no_targets();
         let at_first = resolve_schema_path(&parsed, &schema, &[ITEM, key("b")]);
@@ -944,7 +984,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_schema_path_ignores_the_indices_of_nested_items() {
+    fn resolve_schema_path_resolves_nested_plain_items_the_same_at_every_index() {
         let schema = array_of(array_of(object_schema(vec![("b", string_schema())])));
         let found = [
             SchemaPathSegment::Item(3),
@@ -962,7 +1002,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_schema_path_ignores_the_item_index_in_a_composition_branch() {
+    fn resolve_schema_path_resolves_plain_items_in_a_composition_branch_the_same_at_every_index() {
         let schema = any_of(vec![null_schema(), array_of(string_schema())]);
         let parsed = no_targets();
         let at_first = resolve_schema_path(&parsed, &schema, &[ITEM]);
@@ -990,6 +1030,593 @@ mod tests {
         let schema = all_of(vec![object_schema(vec![("[]", string_schema())])]);
 
         assert!(resolved_type_at(&schema, &[SchemaPathSegment::Item(2)]).is_none());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Positional schemas of an item segment
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /// A path to the item at `index`.
+    fn item(index: usize) -> SchemaPathSegment {
+        SchemaPathSegment::Item(index)
+    }
+
+    /// A tuple whose items at 0 and 1 are a string and an integer.
+    fn string_integer_tuple() -> JsonSchema {
+        tuple_of(vec![string_schema(), integer_schema()])
+    }
+
+    /// A branch that is an array of objects declaring `x`, to tell its `items`
+    /// from the schemas a tuple offers.
+    fn branch_items() -> JsonSchema {
+        array_of(object_schema(vec![("x", string_schema())]))
+    }
+
+    #[rstest]
+    #[case::first(0, "string")]
+    #[case::second(1, "integer")]
+    fn resolve_schema_path_resolves_an_item_inside_the_prefix_to_its_positional_schema(
+        #[case] index: usize,
+        #[case] expected: &str,
+    ) {
+        assert_eq!(
+            resolved_type_at(&string_integer_tuple(), &[item(index)]).as_deref(),
+            Some(expected)
+        );
+    }
+
+    #[rstest]
+    #[case::at_the_end(2)]
+    #[case::far_out(7)]
+    #[case::largest(usize::MAX)]
+    fn resolve_schema_path_resolves_nothing_beyond_a_prefix_without_items(#[case] index: usize) {
+        assert!(resolved_type_at(&string_integer_tuple(), &[item(index)]).is_none());
+    }
+
+    #[rstest]
+    #[case::first(0, "string")]
+    #[case::second(1, "integer")]
+    #[case::at_the_end(2, "boolean")]
+    #[case::far_out(7, "boolean")]
+    #[case::largest(usize::MAX, "boolean")]
+    fn resolve_schema_path_takes_the_prefix_inside_it_and_items_beyond_it(
+        #[case] index: usize,
+        #[case] expected: &str,
+    ) {
+        let schema = JsonSchema {
+            items: Some(Box::new(boolean_schema())),
+            ..string_integer_tuple()
+        };
+
+        assert_eq!(
+            resolved_type_at(&schema, &[item(index)]).as_deref(),
+            Some(expected)
+        );
+    }
+
+    #[rstest]
+    #[case::first(0, "string")]
+    #[case::second(1, "integer")]
+    #[case::at_the_end(2, "null")]
+    #[case::largest(usize::MAX, "null")]
+    fn resolve_schema_path_takes_additional_items_beyond_the_tuple(
+        #[case] index: usize,
+        #[case] expected: &str,
+    ) {
+        let schema = with_additional_items(string_integer_tuple(), null_schema());
+
+        assert_eq!(
+            resolved_type_at(&schema, &[item(index)]).as_deref(),
+            Some(expected)
+        );
+    }
+
+    #[test]
+    fn resolve_schema_path_resolves_additional_items_true_to_an_empty_schema() {
+        let schema = with_additional_items(string_integer_tuple(), JsonSchema::default());
+        let Some(AdditionalProperties::Schema(empty)) = &schema.additional_items else {
+            panic!("the tuple has an additionalItems schema");
+        };
+        let parsed = no_targets();
+
+        let resolved = resolve_schema_path(&parsed, &schema, &[item(2)]);
+
+        assert!(resolved.is_some_and(|got| ptr::eq(got, &raw const **empty)));
+        assert!(resolve_schema_path(&parsed, &schema, &[item(2), key("x")]).is_none());
+    }
+
+    #[rstest]
+    #[case::first(0, Some("string"))]
+    #[case::second(1, Some("integer"))]
+    #[case::at_the_end(2, None)]
+    #[case::largest(usize::MAX, None)]
+    fn resolve_schema_path_resolves_nothing_beyond_a_tuple_that_denies_additional_items(
+        #[case] index: usize,
+        #[case] expected: Option<&str>,
+    ) {
+        let schema = denying_additional_items(string_integer_tuple());
+
+        assert_eq!(
+            resolved_type_at(&schema, &[item(index)]).as_deref(),
+            expected
+        );
+    }
+
+    #[test]
+    fn resolve_schema_path_prefers_items_to_additional_items_beyond_the_prefix() {
+        let schema = JsonSchema {
+            items: Some(Box::new(boolean_schema())),
+            ..with_additional_items(string_integer_tuple(), null_schema())
+        };
+
+        assert_eq!(
+            resolved_type_at(&schema, &[item(2)]).as_deref(),
+            Some("boolean")
+        );
+    }
+
+    #[test]
+    fn resolve_schema_path_resolves_a_very_long_prefix_by_index() {
+        let prefix = (0..10_000)
+            .map(|n| {
+                if n == 9_999 {
+                    integer_schema()
+                } else {
+                    string_schema()
+                }
+            })
+            .collect();
+        let schema = tuple_of(prefix);
+
+        assert_eq!(
+            resolved_type_at(&schema, &[item(9_999)]).as_deref(),
+            Some("integer")
+        );
+        assert!(resolved_type_at(&schema, &[item(10_000)]).is_none());
+    }
+
+    #[rstest]
+    #[case::second_item_second_key(vec![item(1), key("b")], Some("integer"))]
+    #[case::first_item_key_of_the_second(vec![item(0), key("b")], None)]
+    #[case::first_item_first_key(vec![item(0), key("a")], Some("string"))]
+    fn resolve_schema_path_continues_below_a_positional_schema(
+        #[case] path: Vec<SchemaPathSegment>,
+        #[case] expected: Option<&str>,
+    ) {
+        let schema = tuple_of(vec![
+            object_schema(vec![("a", string_schema())]),
+            object_schema(vec![("b", integer_schema())]),
+        ]);
+
+        assert_eq!(resolved_type_at(&schema, &path).as_deref(), expected);
+    }
+
+    #[rstest]
+    #[case::first_first(0, 0, "string")]
+    #[case::first_second(0, 1, "integer")]
+    #[case::second_first(1, 0, "boolean")]
+    #[case::second_second(1, 1, "null")]
+    fn resolve_schema_path_uses_the_index_of_every_nested_item_segment(
+        #[case] outer: usize,
+        #[case] inner: usize,
+        #[case] expected: &str,
+    ) {
+        let schema = tuple_of(vec![
+            string_integer_tuple(),
+            tuple_of(vec![boolean_schema(), null_schema()]),
+        ]);
+
+        assert_eq!(
+            resolved_type_at(&schema, &[item(outer), item(inner)]).as_deref(),
+            Some(expected)
+        );
+    }
+
+    #[rstest]
+    #[case::own_position_declares_it("x", Some("string"))]
+    #[case::own_items_do_not_answer_inside_the_prefix("y", None)]
+    #[case::branch_items_do_not_answer_inside_the_prefix("z", None)]
+    fn resolve_schema_path_does_not_fall_back_when_the_path_dead_ends_below_a_positional_schema(
+        #[case] name: &str,
+        #[case] expected: Option<&str>,
+    ) {
+        let schema = JsonSchema {
+            items: Some(Box::new(object_schema(vec![("y", boolean_schema())]))),
+            all_of: Some(vec![array_of(object_schema(vec![("z", boolean_schema())]))]),
+            ..tuple_of(vec![object_schema(vec![("x", string_schema())])])
+        };
+
+        assert_eq!(
+            resolved_type_at(&schema, &[item(0), key(name)]).as_deref(),
+            expected
+        );
+    }
+
+    #[rstest]
+    #[case::additional_items_declare_it("x", Some("string"))]
+    #[case::branch_items_do_not_answer_beyond_the_prefix("z", None)]
+    fn resolve_schema_path_does_not_fall_back_when_the_path_dead_ends_below_additional_items(
+        #[case] name: &str,
+        #[case] expected: Option<&str>,
+    ) {
+        let schema = JsonSchema {
+            all_of: Some(vec![array_of(object_schema(vec![("z", boolean_schema())]))]),
+            ..with_additional_items(
+                tuple_of(vec![string_schema()]),
+                object_schema(vec![("x", string_schema())]),
+            )
+        };
+
+        assert_eq!(
+            resolved_type_at(&schema, &[item(1), key(name)]).as_deref(),
+            expected
+        );
+    }
+
+    // ── The positional schemas that change what a path resolves to ───────────
+
+    #[test]
+    fn resolve_schema_path_prefers_a_positional_schema_to_own_items_inside_the_prefix() {
+        let schema = JsonSchema {
+            items: Some(Box::new(boolean_schema())),
+            ..tuple_of(vec![string_schema()])
+        };
+
+        assert_eq!(
+            resolved_type_at(&schema, &[item(0)]).as_deref(),
+            Some("string")
+        );
+    }
+
+    #[test]
+    fn resolve_schema_path_prefers_a_positional_schema_to_branch_items_inside_the_prefix() {
+        let schema = JsonSchema {
+            all_of: Some(vec![branch_items()]),
+            ..tuple_of(vec![string_schema()])
+        };
+
+        assert_eq!(
+            resolved_type_at(&schema, &[item(0)]).as_deref(),
+            Some("string")
+        );
+    }
+
+    #[test]
+    fn resolve_schema_path_falls_back_to_branch_items_beyond_a_prefix_without_items_or_additional_items()
+     {
+        let schema = JsonSchema {
+            all_of: Some(vec![branch_items()]),
+            ..tuple_of(vec![string_schema()])
+        };
+
+        assert_eq!(
+            resolved_type_at(&schema, &[item(1)]).as_deref(),
+            Some("object")
+        );
+    }
+
+    #[rstest]
+    #[case::schema(null_schema(), Some("null"))]
+    #[case::true_as_an_empty_schema(JsonSchema::default(), None)]
+    fn resolve_schema_path_prefers_additional_items_to_branch_items_beyond_the_prefix(
+        #[case] additional_items: JsonSchema,
+        #[case] expected: Option<&str>,
+    ) {
+        let schema = JsonSchema {
+            all_of: Some(vec![branch_items()]),
+            ..with_additional_items(tuple_of(vec![string_schema()]), additional_items)
+        };
+        let parsed = no_targets();
+
+        let resolved = resolve_schema_path(&parsed, &schema, &[item(1)]);
+
+        assert!(resolved.is_some_and(|got| got.properties.is_none()));
+        assert_eq!(resolved_type_at(&schema, &[item(1)]).as_deref(), expected);
+    }
+
+    #[rstest]
+    #[case::beyond_the_prefix(1, None)]
+    #[case::inside_the_prefix(0, Some("string"))]
+    fn resolve_schema_path_resolves_nothing_beyond_a_denying_tuple_even_with_branch_items(
+        #[case] index: usize,
+        #[case] expected: Option<&str>,
+    ) {
+        let schema = JsonSchema {
+            all_of: Some(vec![branch_items()]),
+            ..denying_additional_items(tuple_of(vec![string_schema()]))
+        };
+
+        assert_eq!(
+            resolved_type_at(&schema, &[item(index)]).as_deref(),
+            expected
+        );
+    }
+
+    #[rstest]
+    #[case::all_of(all_of)]
+    #[case::any_of(any_of)]
+    #[case::one_of(one_of)]
+    fn resolve_schema_path_prefers_the_tuple_of_an_earlier_branch_to_items_of_a_later_one(
+        #[case] compose: fn(Vec<JsonSchema>) -> JsonSchema,
+    ) {
+        let schema = compose(vec![string_integer_tuple(), array_of(boolean_schema())]);
+
+        assert_eq!(
+            resolved_type_at(&schema, &[item(1)]).as_deref(),
+            Some("integer")
+        );
+        assert_eq!(
+            resolved_type_at(&schema, &[item(2)]).as_deref(),
+            Some("boolean")
+        );
+    }
+
+    #[rstest]
+    #[case::all_of(all_of)]
+    #[case::any_of(any_of)]
+    #[case::one_of(one_of)]
+    fn resolve_schema_path_prefers_additional_items_of_an_earlier_branch_to_items_of_a_later_one(
+        #[case] compose: fn(Vec<JsonSchema>) -> JsonSchema,
+    ) {
+        let schema = compose(vec![
+            with_additional_items(tuple_of(vec![string_schema()]), null_schema()),
+            array_of(boolean_schema()),
+        ]);
+
+        assert_eq!(
+            resolved_type_at(&schema, &[item(1)]).as_deref(),
+            Some("null")
+        );
+    }
+
+    #[rstest]
+    #[case::inside_the_prefix(0, "string")]
+    #[case::beyond_the_prefix(1, "boolean")]
+    fn resolve_schema_path_lets_a_later_branch_answer_after_a_denying_tuple_of_an_earlier_one(
+        #[case] index: usize,
+        #[case] expected: &str,
+    ) {
+        let schema = all_of(vec![
+            denying_additional_items(tuple_of(vec![string_schema()])),
+            array_of(boolean_schema()),
+        ]);
+
+        assert_eq!(
+            resolved_type_at(&schema, &[item(index)]).as_deref(),
+            Some(expected)
+        );
+    }
+
+    #[test]
+    fn resolve_schema_path_falls_to_the_next_branch_when_the_positional_schema_of_the_first_dead_ends()
+     {
+        let schema = all_of(vec![
+            tuple_of(vec![object_schema(vec![("x", string_schema())])]),
+            array_of(object_schema(vec![("b", boolean_schema())])),
+        ]);
+
+        assert_eq!(
+            resolved_type_at(&schema, &[item(0), key("b")]).as_deref(),
+            Some("boolean")
+        );
+    }
+
+    // ── Where a tuple can be ─────────────────────────────────────────────────
+
+    #[rstest]
+    #[case::in_a_branch(any_of(vec![null_schema(), string_integer_tuple()]), vec![item(1)])]
+    #[case::in_nested_branches(
+        all_of(vec![any_of(vec![string_integer_tuple()]), array_of(boolean_schema())]),
+        vec![item(1)],
+    )]
+    #[case::below_a_property(
+        object_schema(vec![("t", any_of(vec![string_integer_tuple(), null_schema()]))]),
+        vec![key("t"), item(1)],
+    )]
+    fn resolve_schema_path_finds_a_tuple_inside_a_composition_branch(
+        #[case] schema: JsonSchema,
+        #[case] path: Vec<SchemaPathSegment>,
+    ) {
+        assert_eq!(resolved_type_at(&schema, &path).as_deref(), Some("integer"));
+    }
+
+    #[test]
+    fn resolve_schema_path_resolves_positional_schemas_behind_a_reference() {
+        let in_prefix = with_targets(
+            tuple_of(vec![string_schema(), reference_to(0)]),
+            vec![described("the target")],
+        );
+        let as_additional = with_targets(
+            with_additional_items(tuple_of(vec![string_schema()]), reference_to(0)),
+            vec![described("the target")],
+        );
+        let tuple_in_branch = with_targets(
+            all_of(vec![reference_to(0)]),
+            vec![tuple_of(vec![described("first"), described("second")])],
+        );
+        let tuple_at_root = with_targets(
+            reference_to(0),
+            vec![tuple_of(vec![described("first"), described("second")])],
+        );
+
+        assert_eq!(
+            description_at(&in_prefix, &[item(1)]).as_deref(),
+            Some("the target")
+        );
+        assert_eq!(
+            description_at(&as_additional, &[item(1)]).as_deref(),
+            Some("the target")
+        );
+        assert_eq!(
+            description_at(&tuple_in_branch, &[item(1)]).as_deref(),
+            Some("second")
+        );
+        assert_eq!(
+            description_at(&tuple_at_root, &[item(0)]).as_deref(),
+            Some("first")
+        );
+    }
+
+    #[test]
+    fn path_resolution_ends_on_a_tuple_that_refers_to_itself() {
+        on_a_small_stack(|| {
+            let tuple = with_additional_items(tuple_of(vec![reference_to(0)]), reference_to(0));
+            let schema = with_targets(reference_to(0), vec![tuple]);
+            let deep = |index: usize| vec![item(index); 1_000];
+
+            for index in [0, 1, 5] {
+                assert!(resolve_schema_path(&schema, &schema.root, &deep(index)).is_some());
+            }
+            let mut dead_end = deep(0);
+            dead_end.push(key("x"));
+            assert!(resolve_schema_path(&schema, &schema.root, &dead_end).is_none());
+        });
+    }
+
+    #[test]
+    fn path_resolution_visits_a_tuple_two_branches_share_once() {
+        let schema = with_targets(
+            all_of(vec![reference_to(0), reference_to(0)]),
+            vec![tuple_of(vec![string_schema()])],
+        );
+
+        assert!(resolve_schema_path(&schema, &schema.root, &[item(5), key("x")]).is_none());
+    }
+
+    // ── Positional schemas and the second pass ───────────────────────────────
+
+    #[rstest]
+    #[case::second_item_has_the_pattern(1, Some("string"))]
+    #[case::first_item_has_none(0, None)]
+    fn resolve_schema_path_continues_into_the_second_pass_below_a_positional_schema(
+        #[case] index: usize,
+        #[case] expected: Option<&str>,
+    ) {
+        let schema = tuple_of(vec![
+            object_schema(vec![]),
+            patterned(vec![("^svc", string_schema())]),
+        ]);
+
+        assert_eq!(
+            resolved_type_at(&schema, &[item(index), key("svc1")]).as_deref(),
+            expected
+        );
+    }
+
+    #[test]
+    fn resolve_schema_path_charges_a_positional_hit_like_an_items_hit() {
+        let pattern = || patterned(vec![("k", string_schema())]);
+        let path = [item(1), key("k")];
+        let by_items = cheapest_allowance(&array_of(pattern()), &path);
+
+        assert!(by_items.is_some());
+        assert_eq!(
+            cheapest_allowance(&tuple_of(vec![string_schema(), pattern()]), &path),
+            by_items
+        );
+        assert_eq!(
+            cheapest_allowance(
+                &with_additional_items(tuple_of(vec![string_schema()]), pattern()),
+                &path,
+            ),
+            by_items
+        );
+    }
+
+    #[test]
+    fn resolve_schema_path_charges_the_branches_only_for_an_item_the_node_does_not_describe() {
+        let pattern = || patterned(vec![("k", string_schema())]);
+        let schema = JsonSchema {
+            all_of: Some(vec![array_of(pattern()); 5_000]),
+            ..tuple_of(vec![pattern()])
+        };
+
+        assert_eq!(
+            type_within(&schema, &[item(0), key("k")], 1_000).as_deref(),
+            Some("string")
+        );
+        assert!(type_within(&schema, &[item(1), key("k")], 1_000).is_none());
+        assert_eq!(
+            type_within(&schema, &[item(1), key("k")], 100_000).as_deref(),
+            Some("string")
+        );
+    }
+
+    #[test]
+    fn resolve_schema_path_spends_nothing_in_the_first_pass_for_positional_items() {
+        let tuple = with_additional_items(string_integer_tuple(), null_schema());
+
+        assert_eq!(
+            type_within(&tuple, &[item(1)], 0).as_deref(),
+            Some("integer")
+        );
+        assert_eq!(type_within(&tuple, &[item(2)], 0).as_deref(), Some("null"));
+    }
+
+    // ── The tuple forms the parser reads ─────────────────────────────────────
+
+    #[rstest]
+    #[case::prefix_items_inside(
+        json!({"prefixItems": [{"type": "string"}, {"type": "integer"}], "items": {"type": "boolean"}}),
+        1,
+        Some("integer"),
+    )]
+    #[case::prefix_items_beyond(
+        json!({"prefixItems": [{"type": "string"}, {"type": "integer"}], "items": {"type": "boolean"}}),
+        2,
+        Some("boolean"),
+    )]
+    #[case::draft_07_inside(
+        json!({"items": [{"type": "string"}, {"type": "integer"}], "additionalItems": {"type": "boolean"}}),
+        1,
+        Some("integer"),
+    )]
+    #[case::draft_07_additional_items_schema(
+        json!({"items": [{"type": "string"}, {"type": "integer"}], "additionalItems": {"type": "boolean"}}),
+        2,
+        Some("boolean"),
+    )]
+    #[case::draft_07_additional_items_false(
+        json!({"items": [{"type": "string"}, {"type": "integer"}], "additionalItems": false}),
+        2,
+        None,
+    )]
+    #[case::draft_07_without_additional_items(
+        json!({"items": [{"type": "string"}, {"type": "integer"}]}),
+        2,
+        None,
+    )]
+    #[case::additional_items_next_to_prefix_items_is_not_read(
+        json!({"prefixItems": [{"type": "string"}], "additionalItems": {"type": "boolean"}}),
+        1,
+        None,
+    )]
+    fn resolve_schema_path_follows_the_tuple_forms_the_parser_reads(
+        #[case] schema: Value,
+        #[case] index: usize,
+        #[case] expected: Option<&str>,
+    ) {
+        let parsed = crate::schema::parse_schema(&schema).expect("the schema parses");
+
+        let resolved = resolve_schema_path(&parsed, &parsed.root, &[item(index)]);
+
+        let found = resolved.and_then(|got| match got.schema_type.as_ref()? {
+            SchemaType::Single(t) => Some(t.as_str()),
+            SchemaType::Multiple(_) => None,
+        });
+        assert_eq!(found, expected);
+    }
+
+    #[test]
+    fn resolve_schema_path_follows_draft_07_additional_items_true() {
+        let parsed = crate::schema::parse_schema(
+            &json!({"items": [{"type": "string"}], "additionalItems": true}),
+        )
+        .expect("the schema parses");
+
+        let resolved = resolve_schema_path(&parsed, &parsed.root, &[item(1)]);
+
+        assert!(resolved.is_some_and(|got| got.schema_type.is_none()));
     }
 
     // ══════════════════════════════════════════════════════════════════════════
