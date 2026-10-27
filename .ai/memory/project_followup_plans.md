@@ -17,7 +17,8 @@ metadata:
 ## Open: rlsp-yaml
 
 - **Schema plan queue (one plan at a time, in this order).** Each needs its own clarification + plan:
-  3. Hover docs for array items and nested composition — includes unifying hover's and completion's path resolvers (they duplicate "which sub-schema describes this path").
+  3. Hover docs for array items and nested composition — in progress as `.ai/plans/2026-10-27-hover-schema-docs-shared-resolver.md` (shared resolver in `src/schema/path.rs`, typed path segment, items through composition branches).
+  3a. Follow `patternProperties`, `additionalProperties`, and `prefixItems` in the shared schema path resolver — user chose 2026-10-27 to plan it right after item 3. Today neither hover nor completion offers anything under GitHub Actions `jobs.<id>` or docker-compose `services.<name>`. `prefixItems` needs the item index in the path segment.
   4. Bound the thread-local `REGEX_CACHE` and run `validate_schema` off the async executor (`spawn_blocking`).
   5. Bug: `unevaluatedItems: false` is dropped (boolean `false` sub-schema loss in the parser); check every keyword parsed through the generic sub-schema path.
   6. `httpProxy` hardening — VS Code setting has no `scope`/`restrictedConfigurations`; `configuration.md` wrongly says "requests are made directly" when unset (ureq reads proxy env vars).
