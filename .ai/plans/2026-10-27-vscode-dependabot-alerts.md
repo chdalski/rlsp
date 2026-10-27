@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-10-27
 
 # Fix the Open Dependabot Alerts in the VS Code Extension
@@ -37,7 +37,7 @@ dependency tree so the audit and the workflow pass again.
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: the extension's dependency tree is free of both
+- [x] Task 1: the extension's dependency tree is free of both
       advisories
 - [ ] Push to `main` and confirm the full CI matrix, the VS Code
       Extension workflow included, is green
@@ -51,25 +51,25 @@ script through `pnpx @vscode/vsce` like CI, raise the
 `serialize-javascript` override to the patched release, and update
 the override guard test with it.
 
-- [ ] `package.json` has no `@vscode/vsce` devDependency, its
+- [x] `package.json` has no `@vscode/vsce` devDependency, its
       `package` script runs `pnpx @vscode/vsce package
       --no-dependencies`, and the `serialize-javascript` override
       is `^7.1.3`
-- [ ] `pnpm-lock.yaml` contains no `@vscode/vsce`, `@azure/identity`,
+- [x] `pnpm-lock.yaml` contains no `@vscode/vsce`, `@azure/identity`,
       or `@azure/msal-node` entry, and every `serialize-javascript`
       it resolves is 7.1.3 or higher
-- [ ] `pnpm run audit` exits 0, reporting no advisory at low or
+- [x] `pnpm run audit` exits 0, reporting no advisory at low or
       above apart from the allowlisted CVE-2026-24001
-- [ ] `overrides.test.ts` expects the `^7.1.3` override, records
+- [x] `overrides.test.ts` expects the `^7.1.3` override, records
       GHSA-m5mm-p8h7-m29v with floor 7.1.3 next to the earlier
       `serialize-javascript` advisory, and treats 7.1.2 as
       vulnerable and 7.1.3 as patched
-- [ ] Comments in `overrides.test.ts` match the new graph and floor:
+- [x] Comments in `overrides.test.ts` match the new graph and floor:
       none cites `@vscode/vsce` as an installed dependency, and the
       `serialize-javascript` floor comment names 7.1.3 and
       GHSA-m5mm-p8h7-m29v as the binding advisory
-- [ ] `pnpm run package` produces a `.vsix`
-- [ ] `pnpm run build`, `test`, `lint`, `format`, `typecheck`, and
+- [x] `pnpm run package` produces a `.vsix`
+- [x] `pnpm run build`, `test`, `lint`, `format`, `typecheck`, and
       `xvfb-run -a pnpm run test:integration` pass
 
 ## Non-Goals

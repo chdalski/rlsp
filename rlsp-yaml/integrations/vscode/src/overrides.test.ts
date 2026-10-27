@@ -15,8 +15,10 @@ import { describe, expect, it } from 'vitest';
 //   vulnerable and the fix is moving to major 5, so a missing major-4
 //   floor below means migrating off major 4 entirely, not that no floor
 //   has been found yet.
-// - serialize-javascript is covered by GHSA-gfhx-hw2g-v5hg (LOW,
-//   CVE-2026-97711): `>= 7.1.1, < 7.1.2`, patched 7.1.2. The override
+// - serialize-javascript is covered by GHSA-m5mm-p8h7-m29v (LOW,
+//   CVE-2026-115897): `< 7.1.3`, patched 7.1.3 -- the binding advisory for
+//   the floor. It also covers the range of the earlier GHSA-gfhx-hw2g-v5hg
+//   (LOW, CVE-2026-97711): `>= 7.1.1, < 7.1.2`, patched 7.1.2. The override
 //   also forces @vscode/test-cli's mocha off its declared ^6.0.2 onto
 //   major 7, because the 6.x line carries older advisories.
 // - source-map-js is covered by GHSA-68fv-2mgg-jv7q (HIGH,
@@ -136,7 +138,7 @@ describe('isAtLeast', () => {
     // Numeric comparison again: '5.0.9' > '5.0.12' as strings, but 9 < 12
     // as numbers.
     ['5.0.9', '5.0.12', false],
-    ['7.1.10', '7.1.2', true],
+    ['7.1.10', '7.1.3', true],
   ])('isAtLeast(%s, %s) === %s', (actual, floor, expected) => {
     expect(isAtLeast(actual, floor)).toBe(expected);
   });
@@ -170,7 +172,8 @@ type GuardedPackage = 'brace-expansion' | 'fast-uri' | 'serialize-javascript' | 
 // here). fast-uri majors 3 and 4 are its two verified patched floors
 // (GHSA-5jgf-p345-68v8 / GHSA-fph4-wmhf-6fwf / GHSA-f65p-4m7j-42xc /
 // GHSA-jqff-g426-hqxp). serialize-javascript major 7 is the only line the
-// override permits; its floor is set by GHSA-gfhx-hw2g-v5hg. source-map-js
+// override permits; its floor is set by GHSA-m5mm-p8h7-m29v, which supersedes
+// the earlier GHSA-gfhx-hw2g-v5hg floor of 7.1.2. source-map-js
 // major 1 is its only published line; its floor is set by
 // GHSA-68fv-2mgg-jv7q. Any major line absent from a package's row --
 // including majors the advisories cover with floors of their own, like
@@ -180,7 +183,7 @@ type GuardedPackage = 'brace-expansion' | 'fast-uri' | 'serialize-javascript' | 
 const patchedFloors: Record<GuardedPackage, Record<number, string>> = {
   'brace-expansion': { 2: '2.1.7', 5: '5.0.12' },
   'fast-uri': { 3: '3.1.6', 4: '4.1.3' },
-  'serialize-javascript': { 7: '7.1.2' },
+  'serialize-javascript': { 7: '7.1.3' },
   'source-map-js': { 1: '1.2.2' },
 };
 
@@ -246,13 +249,15 @@ describe('isPatchedVersion', () => {
     // Fail-closed default for a future major the advisories don't cover
     // at all.
     ['brace-expansion', '6.0.0', false],
-    // serialize-javascript: one patch below the floor (the exact
-    // vulnerable version GHSA-gfhx-hw2g-v5hg names), a lower minor, the
-    // floor, numeric-not-lexicographic, and majors with no floor (6.9.9 is
-    // the line mocha declares; 8.0.0 is a future major).
+    // serialize-javascript: one patch below the floor (7.1.2, the previous
+    // floor, vulnerable per GHSA-m5mm-p8h7-m29v), the version
+    // GHSA-gfhx-hw2g-v5hg names, a lower minor, the floor,
+    // numeric-not-lexicographic, and majors with no floor (6.9.9 is the line
+    // mocha declares; 8.0.0 is a future major).
+    ['serialize-javascript', '7.1.2', false],
     ['serialize-javascript', '7.1.1', false],
     ['serialize-javascript', '7.0.9', false],
-    ['serialize-javascript', '7.1.2', true],
+    ['serialize-javascript', '7.1.3', true],
     ['serialize-javascript', '7.1.10', true],
     ['serialize-javascript', '7.2.0', true],
     ['serialize-javascript', '6.9.9', false],
@@ -272,11 +277,11 @@ describe('isPatchedVersion', () => {
     ['brace-expansion', '3.1.6', false],
     ['brace-expansion', '4.1.3', false],
     ['brace-expansion', '1.2.2', false],
-    ['brace-expansion', '7.1.2', false],
+    ['brace-expansion', '7.1.3', false],
     ['fast-uri', '2.1.7', false],
     ['fast-uri', '5.0.12', false],
     ['fast-uri', '1.2.2', false],
-    ['fast-uri', '7.1.2', false],
+    ['fast-uri', '7.1.3', false],
     ['serialize-javascript', '1.2.2', false],
     ['serialize-javascript', '2.1.7', false],
     ['serialize-javascript', '3.1.6', false],
@@ -286,7 +291,7 @@ describe('isPatchedVersion', () => {
     ['source-map-js', '3.1.6', false],
     ['source-map-js', '4.1.3', false],
     ['source-map-js', '5.0.12', false],
-    ['source-map-js', '7.1.2', false],
+    ['source-map-js', '7.1.3', false],
   ])('isPatchedVersion(%s, %s) === %s', (packageName, version, expected) => {
     expect(isPatchedVersion(packageName, version)).toBe(expected);
   });
@@ -302,9 +307,8 @@ describe('isPatchedVersion', () => {
 // empty set means an override silently went dead, which must fail loudly
 // rather than pass vacuously on `[].every(...)`. The
 // fast-uri call site passes onEmpty: true, because fast-uri carries no
-// override and its absence from the graph (true as of the @vscode/vsce
-// 4.0.0 upgrade) is tolerated. See header comment for the full reasoning
-// behind each policy.
+// override and its absence from the current graph is tolerated. See
+// header comment for the full reasoning behind each policy.
 function allPatched(
   versions: string[],
   packageName: GuardedPackage,
@@ -351,12 +355,15 @@ describe('allPatched', () => {
     // itself a regression, not a pass.
     [[], 'brace-expansion', false, false],
     // serialize-javascript (onEmpty: false throughout).
-    [['7.1.2'], 'serialize-javascript', false, true],
+    [['7.1.3'], 'serialize-javascript', false, true],
+    // The previous floor, which the lockfile would keep if the override
+    // stayed at ^7.1.2.
+    [['7.1.2'], 'serialize-javascript', false, false],
     [['7.1.1'], 'serialize-javascript', false, false],
     // The major mocha declares, which resolves if the override dies.
     [['6.0.2'], 'serialize-javascript', false, false],
     // A patched sibling does not excuse an unchecked major.
-    [['7.1.2', '6.0.2'], 'serialize-javascript', false, false],
+    [['7.1.3', '6.0.2'], 'serialize-javascript', false, false],
     [[], 'serialize-javascript', false, false],
     // source-map-js (onEmpty: false throughout).
     [['1.2.2'], 'source-map-js', false, true],
@@ -404,8 +411,8 @@ function overridesBlockOf(text: string): string {
 }
 
 // The `overrides:` block as a key -> range map, so the pins can be asserted
-// by exact equality: a substring match would also accept `^7.1.20` for
-// `^7.1.2`, or a longer key that merely ends in the expected one.
+// by exact equality: a substring match would also accept `^7.1.30` for
+// `^7.1.3`, or a longer key that merely ends in the expected one.
 function overridesOf(text: string): Record<string, string> {
   const entries: Record<string, string> = {};
   for (const line of overridesBlockOf(text).split('\n').slice(1)) {
@@ -457,7 +464,7 @@ describe('allResolvedVersions', () => {
   const fragment = [
     'packages:',
     '',
-    '  serialize-javascript@7.1.2:',
+    '  serialize-javascript@7.1.3:',
     '    resolution: {}',
     '',
     '  serialize-javascript@7.2.0-beta.0:',
@@ -471,7 +478,7 @@ describe('allResolvedVersions', () => {
 
   it('captures a pre-release header so parseVersion can reject it', () => {
     const versions = allResolvedVersions(fragment, 'serialize-javascript');
-    expect(versions).toEqual(['7.1.2', '7.2.0-beta.0']);
+    expect(versions).toEqual(['7.1.3', '7.2.0-beta.0']);
     expect(() => allPatched(versions, 'serialize-javascript', { onEmpty: false })).toThrow(
       'unexpected version format',
     );
@@ -492,7 +499,7 @@ describe(
   () => {
     it('overrides block declares exactly the retained pins', () => {
       expect(overridesOf(lockfile)).toEqual({
-        'serialize-javascript': '^7.1.2',
+        'serialize-javascript': '^7.1.3',
         'source-map-js': '^1.2.2',
         'brace-expansion@2': '^2.1.7',
         'brace-expansion@5': '^5.0.12',
