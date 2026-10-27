@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-10-27)
 **Created:** 2026-10-27
 
 # Validate the Inputs of the Kubernetes Schema URL
@@ -57,7 +57,7 @@ fetch.
       resources are not fetched
 - [x] Task 4: an invalid `kubernetesVersion` falls back to `master`
       with a Warning
-- [ ] Push to `main` and confirm the full CI matrix is green
+- [x] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
