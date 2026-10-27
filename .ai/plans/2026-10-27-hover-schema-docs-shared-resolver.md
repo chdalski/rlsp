@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-10-27
 
 # Hover Schema Docs Through the Shared Path Resolver
@@ -35,7 +35,7 @@ and schema completion.
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: the path resolver lives in the schema layer
+- [x] Task 1: the path resolver lives in the schema layer
 - [ ] Task 2: array items are a typed path segment
 - [ ] Task 3: hover resolves schema docs through the shared
       resolver
@@ -52,18 +52,18 @@ walk into a new crate-internal module `src/schema/path.rs`, so that
 hover can use the resolver without depending on completion.
 Behavior is unchanged.
 
-- [ ] `resolve_schema_path` and `composition_branches` are defined
+- [x] `resolve_schema_path` and `composition_branches` are defined
       in `src/schema/path.rs` and visible only inside the crate;
       completion uses them from there and keeps no copy
-- [ ] Tests that exercise only the resolver live with it in
+- [x] Tests that exercise only the resolver live with it in
       `src/schema/path.rs`; no test is deleted or has its
       assertions weakened
-- [ ] The moved tests and every completion test — in
+- [x] The moved tests and every completion test — in
       `src/completion.rs`, `src/completion/`, and
       `tests/lsp_lifecycle/completion.rs` — pass with their
       assertions unchanged; only import paths and the location of
       shared test builders change
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ### Task 2: Mark array items with a typed path segment
 

@@ -7,6 +7,7 @@ use rlsp_yaml_parser::node::Document;
 use tower_lsp::lsp_types::{CompletionItem, Position};
 
 use crate::schema::ParsedSchema;
+use crate::schema::path::resolve_schema_path;
 
 mod completion_drivers;
 mod completion_items;
@@ -22,7 +23,7 @@ use completion_drivers::{complete_in_sequence_item, complete_on_key, complete_on
 use completion_items::keys_to_items;
 use cursor_location::{CursorLocation, locate_cursor};
 use navigation::{collect_sequence_sibling_keys, collect_sibling_keys_ast, present_keys};
-use schema_completions::{resolve_schema_path, schema_has_properties, schema_key_completions};
+use schema_completions::{schema_has_properties, schema_key_completions};
 use support::MAX_COMPLETION_ITEMS;
 
 /// Compute completion items for the given cursor position within the AST.

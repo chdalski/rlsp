@@ -18,6 +18,8 @@ pub use budget::SizeBudget;
 pub mod association;
 /// Memory budgets of one schema parse.
 mod budget;
+/// Lookup of the sub-schema at a path through a parsed schema.
+pub(crate) mod path;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -325,7 +327,7 @@ pub(crate) mod test_support {
     use std::cell::RefCell;
     use std::fmt::Debug;
 
-    use super::{JsonSchema, ParsedSchema, SchemaRef, TargetId};
+    use super::{JsonSchema, ParsedSchema, SchemaRef, SchemaType, TargetId};
 
     /// A reference node to the target at `index`.
     pub fn reference_to(index: usize) -> JsonSchema {
@@ -430,6 +432,128 @@ pub(crate) mod test_support {
             expected,
             "the case does not depend on its references"
         );
+    }
+
+    pub fn string_schema() -> JsonSchema {
+        JsonSchema {
+            schema_type: Some(SchemaType::Single("string".to_string())),
+            ..JsonSchema::default()
+        }
+    }
+
+    pub fn integer_schema() -> JsonSchema {
+        JsonSchema {
+            schema_type: Some(SchemaType::Single("integer".to_string())),
+            ..JsonSchema::default()
+        }
+    }
+
+    pub fn boolean_schema() -> JsonSchema {
+        JsonSchema {
+            schema_type: Some(SchemaType::Single("boolean".to_string())),
+            ..JsonSchema::default()
+        }
+    }
+
+    pub fn object_schema(props: Vec<(&str, JsonSchema)>) -> JsonSchema {
+        JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            properties: Some(props.into_iter().map(|(k, v)| (k.to_string(), v)).collect()),
+            ..JsonSchema::default()
+        }
+    }
+
+    /// An object schema that declares the single string property `key`.
+    pub fn declaring(key: &str) -> JsonSchema {
+        object_schema(vec![(key, string_schema())])
+    }
+
+    pub fn all_of(branches: Vec<JsonSchema>) -> JsonSchema {
+        JsonSchema {
+            all_of: Some(branches),
+            ..JsonSchema::default()
+        }
+    }
+
+    pub fn any_of(branches: Vec<JsonSchema>) -> JsonSchema {
+        JsonSchema {
+            any_of: Some(branches),
+            ..JsonSchema::default()
+        }
+    }
+
+    pub fn one_of(branches: Vec<JsonSchema>) -> JsonSchema {
+        JsonSchema {
+            one_of: Some(branches),
+            ..JsonSchema::default()
+        }
+    }
+
+    /// `count` branches; branch `i` defines the single property `field_{i}`.
+    pub fn field_branches(count: usize) -> Vec<JsonSchema> {
+        (0..count)
+            .map(|i| object_schema(vec![(&format!("field_{i}"), string_schema())]))
+            .collect()
+    }
+
+    /// Wrap `schema` in `depth` levels of single-branch `allOf`.
+    pub fn nest_in_all_of(schema: JsonSchema, depth: usize) -> JsonSchema {
+        (0..depth).fold(schema, |inner, _| all_of(vec![inner]))
+    }
+
+    /// A schema that offers `a` and `next`, where `next` is the schema again, and
+    /// that composes itself.
+    pub fn cyclic() -> ParsedSchema {
+        let target = JsonSchema {
+            all_of: Some(vec![reference_to(0)]),
+            one_of: Some(vec![reference_to(0)]),
+            ..object_schema(vec![("a", string_schema()), ("next", reference_to(0))])
+        };
+        with_targets(reference_to(0), vec![target])
+    }
+
+    /// Length of the chains that the tests of every consumer build.
+    pub const CHAIN_LENGTH: usize = 10_000;
+
+    /// `length` targets where each composes the next, and the last one declares `leaf`.
+    pub fn chain(length: usize) -> ParsedSchema {
+        let mut targets: Vec<JsonSchema> = (1..length)
+            .map(|next| all_of(vec![reference_to(next)]))
+            .collect();
+        targets.push(declaring("leaf"));
+        with_targets(reference_to(0), targets)
+    }
+
+    /// `layers` layers of two targets that compose both targets of the next layer,
+    /// ending in one target that declares `leaf`: `2^layers` paths, `2 * layers`
+    /// targets.
+    pub fn ladder(layers: usize) -> ParsedSchema {
+        let mut targets = Vec::new();
+        for layer in 0..layers {
+            let next = 2 * layer + 2;
+            let below = if layer + 1 == layers {
+                vec![reference_to(next)]
+            } else {
+                vec![reference_to(next), reference_to(next + 1)]
+            };
+            targets.push(all_of(below.clone()));
+            targets.push(all_of(below));
+        }
+        targets.push(declaring("leaf"));
+        with_targets(all_of(vec![reference_to(0), reference_to(1)]), targets)
+    }
+
+    /// A schema whose property `here` is a target that offers `a` and composes
+    /// itself twice through `composing`.
+    pub fn composes_itself(composing: fn(Vec<JsonSchema>) -> JsonSchema) -> ParsedSchema {
+        let target = JsonSchema {
+            properties: Some([("a".to_string(), string_schema())].into()),
+            ..composing(vec![reference_to(0), reference_to(0)])
+        };
+        with_targets(
+            object_schema(vec![("here", reference_to(0)), ("a", string_schema())]),
+            vec![target],
+        )
     }
 }
 

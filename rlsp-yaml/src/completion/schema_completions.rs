@@ -9,65 +9,13 @@ use tower_lsp::lsp_types::{
     MarkupContent, MarkupKind,
 };
 
+use crate::schema::path::composition_branches;
 use crate::schema::{JsonSchema, ParsedSchema, SchemaType};
 
 use super::formatting::{
     json_value_to_yaml_label, truncate_description, truncate_enum_label, type_label,
 };
 use super::support::MAX_COMPLETION_ITEMS;
-
-/// The `allOf`, `anyOf` and `oneOf` branches of `schema`, in that order.
-fn composition_branches(schema: &JsonSchema) -> impl DoubleEndedIterator<Item = &JsonSchema> {
-    [&schema.all_of, &schema.any_of, &schema.one_of]
-        .into_iter()
-        .flatten()
-        .flatten()
-}
-
-/// Walk the schema tree from `schema` following `path`, returning the
-/// sub-schema at that path if it exists, resolved. Returns `None` when the path
-/// exceeds the schema depth.
-///
-/// A segment that no `properties` entry names is tried against every
-/// composition branch with the same path, so a schema that references itself
-/// can come back to the same schema with the same rest of the path. The walk
-/// goes through each shared target once per rest of the path: a target
-/// already tried at that point cannot succeed, or the walk would have ended.
-/// It keeps an explicit stack, so the depth of a chain of references does not
-/// grow the call stack.
-pub(super) fn resolve_schema_path<'a>(
-    parsed: &'a ParsedSchema,
-    schema: &'a JsonSchema,
-    path: &[String],
-) -> Option<&'a JsonSchema> {
-    let mut tried: HashSet<(*const JsonSchema, usize)> = HashSet::new();
-    let mut stack = vec![(schema, path)];
-    while let Some((node, path)) = stack.pop() {
-        let schema = parsed.resolve(node);
-        if node.reference.is_some() && !tried.insert((ptr::from_ref(schema), path.len())) {
-            continue;
-        }
-        let [key, rest @ ..] = path else {
-            return Some(schema);
-        };
-
-        // Array item descent.
-        if key == "[]" {
-            stack.extend(schema.items.as_deref().map(|items| (items, rest)));
-            continue;
-        }
-
-        // Direct property lookup.
-        if let Some(prop_schema) = schema.properties.as_ref().and_then(|p| p.get(key.as_str())) {
-            stack.push((prop_schema, rest));
-            continue;
-        }
-
-        // Walk composition branches; the first branch is tried first.
-        stack.extend(composition_branches(schema).rev().map(|b| (b, path)));
-    }
-    None
-}
 
 /// Visit every property `schema` offers, directly and through `allOf`,
 /// `anyOf` and `oneOf` branches, until `visit` breaks. `visit` gets each
@@ -281,7 +229,9 @@ mod tests {
     };
     use super::*;
     use crate::completion::complete_at;
-    use crate::schema::test_support::no_targets;
+    use crate::schema::test_support::{
+        all_of, any_of, field_branches, nest_in_all_of, no_targets, one_of,
+    };
     use crate::schema::{JsonSchema, ParsedSchema, SchemaType};
     use crate::test_utils::parse_docs;
 
@@ -294,98 +244,6 @@ mod tests {
             required: Some(required.into_iter().map(str::to_string).collect()),
             ..JsonSchema::default()
         }
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // Direct unit tests: resolve_schema_path
-    // ══════════════════════════════════════════════════════════════════════════
-
-    #[test]
-    fn resolve_schema_path_empty_path_returns_schema() {
-        let parsed = no_targets();
-        let schema = string_schema();
-        let result = resolve_schema_path(&parsed, &schema, &[]);
-        assert!(result.is_some());
-        assert!(std::ptr::eq(result.unwrap(), &raw const schema));
-    }
-
-    #[test]
-    fn resolve_schema_path_single_key_found() {
-        let name_schema = string_schema();
-        let schema = object_schema(vec![("name", name_schema)]);
-        let path = vec!["name".to_string()];
-        let parsed = no_targets();
-        let result = resolve_schema_path(&parsed, &schema, &path);
-        assert!(result.is_some(), "should find 'name' in schema");
-    }
-
-    #[test]
-    fn resolve_schema_path_single_key_not_found() {
-        let schema = object_schema(vec![("name", string_schema())]);
-        let path = vec!["missing".to_string()];
-        let parsed = no_targets();
-        let result = resolve_schema_path(&parsed, &schema, &path);
-        assert!(result.is_none(), "missing key should return None");
-    }
-
-    #[test]
-    fn resolve_schema_path_array_sentinel_descends() {
-        let items_schema = object_schema(vec![("host", string_schema())]);
-        let schema = JsonSchema {
-            schema_type: Some(SchemaType::Single("array".to_string())),
-            items: Some(Box::new(items_schema)),
-            ..JsonSchema::default()
-        };
-        let path = vec!["[]".to_string()];
-        let parsed = no_targets();
-        let result = resolve_schema_path(&parsed, &schema, &path);
-        assert!(result.is_some(), "[] sentinel should descend into items");
-    }
-
-    #[test]
-    fn resolve_schema_path_array_sentinel_no_items_returns_none() {
-        let schema = JsonSchema {
-            schema_type: Some(SchemaType::Single("array".to_string())),
-            ..JsonSchema::default()
-        };
-        let path = vec!["[]".to_string()];
-        let parsed = no_targets();
-        let result = resolve_schema_path(&parsed, &schema, &path);
-        assert!(
-            result.is_none(),
-            "[] on schema without items should return None"
-        );
-    }
-
-    #[test]
-    fn resolve_schema_path_composition_branch_found() {
-        let host_schema = string_schema();
-        let schema = JsonSchema {
-            any_of: Some(vec![object_schema(vec![("host", host_schema)])]),
-            ..JsonSchema::default()
-        };
-        let path = vec!["host".to_string()];
-        let parsed = no_targets();
-        let result = resolve_schema_path(&parsed, &schema, &path);
-        assert!(result.is_some(), "should find 'host' in anyOf branch");
-    }
-
-    #[test]
-    fn resolve_schema_path_deep_path_found() {
-        let schema = object_schema(vec![("a", object_schema(vec![("b", string_schema())]))]);
-        let path = vec!["a".to_string(), "b".to_string()];
-        let parsed = no_targets();
-        let result = resolve_schema_path(&parsed, &schema, &path);
-        assert!(result.is_some(), "deep path a.b should be found");
-    }
-
-    #[test]
-    fn resolve_schema_path_deep_path_not_found() {
-        let schema = object_schema(vec![("a", object_schema(vec![("b", string_schema())]))]);
-        let path = vec!["a".to_string(), "c".to_string()];
-        let parsed = no_targets();
-        let result = resolve_schema_path(&parsed, &schema, &path);
-        assert!(result.is_none(), "deep path a.c should not be found");
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -460,54 +318,6 @@ mod tests {
     // ══════════════════════════════════════════════════════════════════════════
     // Property walk over composition branches without a branch or depth limit
     // ══════════════════════════════════════════════════════════════════════════
-
-    /// `count` branches; branch `i` defines the single property `field_{i}`.
-    fn field_branches(count: usize) -> Vec<JsonSchema> {
-        (0..count)
-            .map(|i| object_schema(vec![(&format!("field_{i}"), string_schema())]))
-            .collect()
-    }
-
-    /// Wrap `schema` in `depth` levels of single-branch `allOf`.
-    fn nest_in_all_of(schema: JsonSchema, depth: usize) -> JsonSchema {
-        (0..depth).fold(schema, |inner, _| JsonSchema {
-            all_of: Some(vec![inner]),
-            ..JsonSchema::default()
-        })
-    }
-
-    fn all_of(branches: Vec<JsonSchema>) -> JsonSchema {
-        JsonSchema {
-            all_of: Some(branches),
-            ..JsonSchema::default()
-        }
-    }
-
-    fn any_of(branches: Vec<JsonSchema>) -> JsonSchema {
-        JsonSchema {
-            any_of: Some(branches),
-            ..JsonSchema::default()
-        }
-    }
-
-    fn one_of(branches: Vec<JsonSchema>) -> JsonSchema {
-        JsonSchema {
-            one_of: Some(branches),
-            ..JsonSchema::default()
-        }
-    }
-
-    /// The `type` of the schema `path` resolves to, to tell resolved schemas apart.
-    fn resolved_type(schema: &JsonSchema, path: &[&str]) -> Option<String> {
-        let path: Vec<String> = path.iter().map(ToString::to_string).collect();
-        match resolve_schema_path(&no_targets(), schema, &path)?
-            .schema_type
-            .as_ref()?
-        {
-            SchemaType::Single(t) => Some(t.clone()),
-            SchemaType::Multiple(_) => None,
-        }
-    }
 
     fn item_labels(items: &[CompletionItem]) -> Vec<&str> {
         items
@@ -649,75 +459,6 @@ mod tests {
         assert!(schema_key_completions(&no_targets(), &schema, &HashSet::new()).is_empty());
     }
 
-    #[rstest]
-    #[case::all_of(all_of)]
-    #[case::any_of(any_of)]
-    #[case::one_of(one_of)]
-    fn resolve_schema_path_finds_key_in_branch_beyond_twenty(
-        #[case] compose: fn(Vec<JsonSchema>) -> JsonSchema,
-    ) {
-        let mut branches = vec![JsonSchema::default(); 25];
-        branches.push(object_schema(vec![("target", integer_schema())]));
-        let schema = compose(branches);
-
-        assert_eq!(
-            resolved_type(&schema, &["target"]).as_deref(),
-            Some("integer")
-        );
-    }
-
-    #[test]
-    fn resolve_schema_path_continues_into_a_late_branch_for_a_multi_segment_path() {
-        let late = object_schema(vec![("a", object_schema(vec![("b", boolean_schema())]))]);
-        let mut branches = vec![JsonSchema::default(); 25];
-        branches.push(nest_in_all_of(late, 1));
-        let schema = all_of(branches);
-
-        assert_eq!(
-            resolved_type(&schema, &["a", "b"]).as_deref(),
-            Some("boolean")
-        );
-    }
-
-    #[test]
-    fn resolve_schema_path_continues_to_next_branch_when_earlier_branch_dead_ends() {
-        let schema = all_of(vec![
-            object_schema(vec![("a", object_schema(vec![("x", string_schema())]))]),
-            object_schema(vec![("a", object_schema(vec![("b", boolean_schema())]))]),
-        ]);
-
-        assert_eq!(
-            resolved_type(&schema, &["a", "b"]).as_deref(),
-            Some("boolean")
-        );
-    }
-
-    #[test]
-    fn resolve_schema_path_prefers_direct_property_then_all_of_over_one_of() {
-        let schema = JsonSchema {
-            all_of: Some(vec![object_schema(vec![("k", integer_schema())])]),
-            one_of: Some(vec![object_schema(vec![("k", boolean_schema())])]),
-            ..object_schema(vec![("direct", string_schema()), ("k", string_schema())])
-        };
-        assert_eq!(resolved_type(&schema, &["k"]).as_deref(), Some("string"));
-
-        let without_direct = JsonSchema {
-            properties: None,
-            ..schema
-        };
-        assert_eq!(
-            resolved_type(&without_direct, &["k"]).as_deref(),
-            Some("integer")
-        );
-    }
-
-    #[test]
-    fn resolve_schema_path_is_none_for_a_missing_key_among_many_branches() {
-        let schema = all_of(field_branches(30));
-
-        assert!(resolve_schema_path(&no_targets(), &schema, &["missing".to_string()]).is_none());
-    }
-
     #[test]
     fn walks_find_properties_in_a_very_deep_and_a_very_wide_schema() {
         let deep = nest_in_all_of(object_schema(vec![("leaf", string_schema())]), 500);
@@ -736,7 +477,6 @@ mod tests {
                 )),
                 ["leaf"]
             );
-            assert_eq!(resolved_type(schema, &["leaf"]).as_deref(), Some("string"));
         }
     }
 

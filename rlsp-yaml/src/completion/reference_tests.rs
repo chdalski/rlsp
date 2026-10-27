@@ -8,11 +8,12 @@ use std::collections::HashSet;
 use rstest::rstest;
 use tower_lsp::lsp_types::{CompletionItemKind, Position};
 
-use super::schema_completions::{resolve_schema_path, schema_key_completions};
+use super::schema_completions::schema_key_completions;
 use super::support::test_fixtures::{integer_schema, labels, object_schema, pos, string_schema};
 use super::*;
 use crate::schema::test_support::{
-    Sharing, assert_references_followed, on_a_small_stack, reference_to, with_targets,
+    CHAIN_LENGTH, Sharing, all_of, any_of, assert_references_followed, chain, composes_itself,
+    cyclic, declaring, ladder, on_a_small_stack, one_of, reference_to, with_targets,
 };
 use crate::schema::{JsonSchema, SchemaType};
 use crate::test_utils::parse_docs;
@@ -41,13 +42,6 @@ fn enum_schema() -> JsonSchema {
     JsonSchema {
         schema_type: Some(SchemaType::Single("string".to_string())),
         enum_values: Some(vec![serde_json::json!("a"), serde_json::json!("b")]),
-        ..JsonSchema::default()
-    }
-}
-
-fn all_of(branches: Vec<JsonSchema>) -> JsonSchema {
-    JsonSchema {
-        all_of: Some(branches),
         ..JsonSchema::default()
     }
 }
@@ -144,10 +138,6 @@ fn key_labels(schema: &ParsedSchema) -> Vec<String> {
     labels
 }
 
-fn declaring(key: &str) -> JsonSchema {
-    object_schema(vec![(key, string_schema())])
-}
-
 // ══════════════════════════════════════════════════════════════════════════
 // A shared target contributes its keys once
 // ══════════════════════════════════════════════════════════════════════════
@@ -232,32 +222,6 @@ fn keys_from_two_distinct_branches_still_appear_twice() {
 // Termination on cyclic and deep reference graphs
 // ══════════════════════════════════════════════════════════════════════════
 
-/// A schema that offers `a` and `next`, where `next` is the schema again, and
-/// that composes itself.
-fn cyclic() -> ParsedSchema {
-    let target = JsonSchema {
-        all_of: Some(vec![reference_to(0)]),
-        one_of: Some(vec![reference_to(0)]),
-        ..object_schema(vec![("a", string_schema()), ("next", reference_to(0))])
-    };
-    with_targets(reference_to(0), vec![target])
-}
-
-#[rstest]
-#[case::a_key_further_down(&["next", "next", "a"][..], true)]
-#[case::the_schema_itself(&["next", "next"][..], true)]
-#[case::a_missing_key(&["missing"][..], false)]
-#[case::a_missing_key_further_down(&["next", "next", "missing"][..], false)]
-#[case::items_where_there_are_none(&["next", "[]"][..], false)]
-fn path_resolution_ends_on_a_cyclic_schema(#[case] path: &[&str], #[case] found: bool) {
-    let schema = cyclic();
-    let path: Vec<String> = path.iter().map(ToString::to_string).collect();
-
-    let resolved = resolve_schema_path(&schema, &schema.root, &path);
-
-    assert_eq!(resolved.is_some(), found);
-}
-
 #[test]
 fn key_completion_ends_on_a_cyclic_schema() {
     assert_eq!(key_labels(&cyclic()), ["a", "next"]);
@@ -272,50 +236,9 @@ fn key_completion_below_a_cyclic_property_ends() {
     assert_eq!(labels(&items), ["next"]);
 }
 
-/// `length` targets where each composes the next, and the last one declares `leaf`.
-fn chain(length: usize) -> ParsedSchema {
-    let mut targets: Vec<JsonSchema> = (1..length)
-        .map(|next| all_of(vec![reference_to(next)]))
-        .collect();
-    targets.push(declaring("leaf"));
-    with_targets(reference_to(0), targets)
-}
-
-const CHAIN_LENGTH: usize = 10_000;
-
 #[test]
 fn key_completion_ends_on_a_chain_of_ten_thousand_targets() {
     assert_eq!(key_labels(&chain(CHAIN_LENGTH)), ["leaf"]);
-}
-
-#[test]
-fn path_resolution_ends_on_a_chain_of_ten_thousand_targets() {
-    let schema = chain(CHAIN_LENGTH);
-
-    let found = resolve_schema_path(&schema, &schema.root, &["leaf".to_string()]);
-    let missing = resolve_schema_path(&schema, &schema.root, &["missing".to_string()]);
-
-    assert!(found.is_some());
-    assert!(missing.is_none());
-}
-
-/// `layers` layers of two targets that compose both targets of the next layer,
-/// ending in one target that declares `leaf`: `2^layers` paths, `2 * layers`
-/// targets.
-fn ladder(layers: usize) -> ParsedSchema {
-    let mut targets = Vec::new();
-    for layer in 0..layers {
-        let next = 2 * layer + 2;
-        let below = if layer + 1 == layers {
-            vec![reference_to(next)]
-        } else {
-            vec![reference_to(next), reference_to(next + 1)]
-        };
-        targets.push(all_of(below.clone()));
-        targets.push(all_of(below));
-    }
-    targets.push(declaring("leaf"));
-    with_targets(all_of(vec![reference_to(0), reference_to(1)]), targets)
 }
 
 #[test]
@@ -323,8 +246,6 @@ fn walks_visit_each_target_of_a_branching_graph_once() {
     let schema = ladder(64);
 
     assert_eq!(key_labels(&schema), ["leaf"]);
-    assert!(resolve_schema_path(&schema, &schema.root, &["missing".to_string()]).is_none());
-    assert!(resolve_schema_path(&schema, &schema.root, &["leaf".to_string()]).is_some());
 }
 
 #[test]
@@ -335,26 +256,6 @@ fn walks_end_when_a_reference_points_past_the_target_table() {
     );
 
     assert_eq!(key_labels(&schema), ["a"]);
-    assert!(resolve_schema_path(&schema, &schema.root, &["missing".to_string()]).is_none());
-}
-
-#[test]
-fn a_resolved_path_is_the_target_not_the_reference() {
-    let described = JsonSchema {
-        description: Some("the target".to_string()),
-        ..integer_schema()
-    };
-    let schema = with_targets(
-        object_schema(vec![("port", reference_to(0))]),
-        vec![described],
-    );
-
-    let resolved = resolve_schema_path(&schema, &schema.root, &["port".to_string()]);
-
-    assert_eq!(
-        resolved.and_then(|s| s.description.as_deref()),
-        Some("the target")
-    );
 }
 
 /// A chain of `length` targets that compose the next one; the last declares
@@ -405,34 +306,13 @@ fn top_level_completion_ends_on_a_chain_of_ten_thousand_targets() {
 }
 
 #[rstest]
-#[case::all_of(|b| JsonSchema { all_of: Some(b), ..JsonSchema::default() })]
-#[case::any_of(|b| JsonSchema { any_of: Some(b), ..JsonSchema::default() })]
-#[case::one_of(|b| JsonSchema { one_of: Some(b), ..JsonSchema::default() })]
+#[case::all_of(all_of)]
+#[case::any_of(any_of)]
+#[case::one_of(one_of)]
 fn a_schema_that_composes_itself_through_a_keyword_ends(
     #[case] composing: fn(Vec<JsonSchema>) -> JsonSchema,
 ) {
-    let target = JsonSchema {
-        properties: Some([("a".to_string(), string_schema())].into()),
-        ..composing(vec![reference_to(0), reference_to(0)])
-    };
-    let schema = with_targets(
-        object_schema(vec![("here", reference_to(0)), ("a", string_schema())]),
-        vec![target],
-    );
-    let found = resolve_schema_path(
-        &schema,
-        &schema.root,
-        &["here".to_string(), "a".to_string()],
-    );
-    let missing = resolve_schema_path(
-        &schema,
-        &schema.root,
-        &["here".to_string(), "b".to_string()],
-    );
-
-    assert!(found.is_some());
-    assert!(missing.is_none());
-    assert_eq!(key_labels(&schema), ["a", "here"]);
+    assert_eq!(key_labels(&composes_itself(composing)), ["a", "here"]);
 }
 
 #[test]
