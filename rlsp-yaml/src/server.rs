@@ -828,6 +828,14 @@ impl Backend {
             .unwrap_or(5000)
     }
 
+    /// Replace the stored settings; the single store path for `initialize`
+    /// and `did_change_configuration`.
+    fn store_settings(&self, settings: Settings) {
+        if let Ok(mut s) = self.settings.lock() {
+            *s = settings;
+        }
+    }
+
     fn resolve_editor_config(
         uri: &Url,
         respect: bool,
@@ -847,9 +855,7 @@ impl LanguageServer for Backend {
             .initialization_options
             .and_then(|v| serde_json::from_value::<Settings>(v).ok())
             .unwrap_or_default();
-        if let Ok(mut s) = self.settings.lock() {
-            *s = settings;
-        }
+        self.store_settings(settings);
         Ok(InitializeResult {
             capabilities: Self::capabilities(),
             ..InitializeResult::default()
@@ -857,10 +863,8 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
-        if let Ok(settings) = serde_json::from_value::<Settings>(params.settings)
-            && let Ok(mut s) = self.settings.lock()
-        {
-            *s = settings;
+        if let Ok(settings) = serde_json::from_value::<Settings>(params.settings) {
+            self.store_settings(settings);
         }
     }
 

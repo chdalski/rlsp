@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-10-27
 
 # Validate the Inputs of the Kubernetes Schema URL
@@ -51,7 +51,7 @@ fetch.
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: settings are stored through one method
+- [x] Task 1: settings are stored through one method
 - [ ] Task 2: only Kubernetes names reach the schema URL
 - [ ] Task 3: file names match the schema repository; custom
       resources are not fetched
@@ -68,14 +68,14 @@ deserialized settings themselves. One method stores them for both,
 so that Task 4 adds its Warning in one place. Behavior is
 unchanged.
 
-- [ ] Both handlers store settings through one shared method, and
+- [x] Both handlers store settings through one shared method, and
       no other production code path stores them
-- [ ] `tests/lsp_lifecycle/kubernetes_detection.rs`,
+- [x] `tests/lsp_lifecycle/kubernetes_detection.rs`,
       `tests/lsp_lifecycle/configuration.rs`, and the
       `did_change_configuration` tests in
       `tests/lsp_lifecycle/validators_integration.rs` pass with
       their assertions unchanged
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ### Task 2: Accept only Kubernetes names in the schema URL
 
