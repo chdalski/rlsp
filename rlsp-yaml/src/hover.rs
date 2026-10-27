@@ -2360,4 +2360,117 @@ mod tests {
             );
         }
     }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Keys described by patternProperties and additionalProperties
+    // ══════════════════════════════════════════════════════════════════════
+
+    mod key_patterns {
+        use super::*;
+        use crate::schema::ParsedSchema;
+        use crate::schema::test_support::{
+            denying_additional, described, reference_to, with_additional, with_patterns,
+            with_targets,
+        };
+
+        /// A schema whose `jobs` map is `jobs`, with the job behind a reference
+        /// and its steps behind a second one.
+        fn workflow(jobs: impl FnOnce(JsonSchema) -> JsonSchema) -> ParsedSchema {
+            let job = JsonSchema {
+                description: Some("Job docs".to_string()),
+                ..object_schema(vec![
+                    ("runs-on", schema_with_description("Runner docs")),
+                    ("steps", array_of(reference_to(1))),
+                ])
+            };
+            let step = object_schema(vec![("uses", schema_with_description("Uses docs"))]);
+            with_targets(
+                object_schema(vec![("jobs", jobs(reference_to(0)))]),
+                vec![job, step],
+            )
+        }
+
+        fn through_pattern(job: JsonSchema) -> JsonSchema {
+            with_patterns(JsonSchema::default(), vec![("^[a-z]+$", job)])
+        }
+
+        fn through_additional_properties(job: JsonSchema) -> JsonSchema {
+            with_additional(JsonSchema::default(), job)
+        }
+
+        fn description_at(schema: &ParsedSchema, text: &str, cursor: Position) -> Option<String> {
+            let docs = parse_docs(text);
+            let hover = hover_at(&docs, cursor, Some(schema)).expect("hover");
+            hover_content(&hover)
+                .lines()
+                .find_map(|line| line.strip_prefix("**Description:** "))
+                .map(ToString::to_string)
+        }
+
+        #[rstest]
+        #[case::the_key_of_a_job("jobs:\n  build:\n    runs-on: x\n", pos(1, 2), "Job docs")]
+        #[case::a_key_below_the_job("jobs:\n  build:\n    runs-on: x\n", pos(2, 4), "Runner docs")]
+        #[case::a_key_below_an_item_of_the_job(
+            "jobs:\n  build:\n    steps:\n      - uses: x\n",
+            pos(3, 8),
+            "Uses docs"
+        )]
+        fn hover_shows_the_docs_below_a_key_a_pattern_or_additional_properties_describes(
+            #[case] text: &str,
+            #[case] cursor: Position,
+            #[case] expected: &str,
+            #[values(through_pattern, through_additional_properties)] jobs: fn(
+                JsonSchema,
+            )
+                -> JsonSchema,
+        ) {
+            let schema = workflow(jobs);
+
+            assert_eq!(
+                description_at(&schema, text, cursor).as_deref(),
+                Some(expected)
+            );
+        }
+
+        #[rstest]
+        #[case::no_pattern_matches(
+            |job| denying_additional(through_pattern(job)),
+        )]
+        #[case::only_additional_properties_false(
+            |_| denying_additional(JsonSchema::default()),
+        )]
+        fn hover_shows_no_docs_below_a_key_that_nothing_describes(
+            #[case] jobs: fn(JsonSchema) -> JsonSchema,
+        ) {
+            let schema = workflow(jobs);
+
+            assert_eq!(
+                description_at(&schema, "jobs:\n  Bad1:\n    runs-on: x\n", pos(1, 2)),
+                None
+            );
+            assert_eq!(
+                description_at(&schema, "jobs:\n  Bad1:\n    runs-on: x\n", pos(2, 4)),
+                None
+            );
+        }
+
+        #[test]
+        fn hover_shows_the_docs_of_the_first_matching_pattern_in_pattern_text_order() {
+            let schema = ParsedSchema::new(object_schema(vec![(
+                "jobs",
+                with_patterns(
+                    JsonSchema::default(),
+                    vec![
+                        ("^a", described("First docs")),
+                        ("^ab", described("Second docs")),
+                    ],
+                ),
+            )]));
+
+            assert_eq!(
+                description_at(&schema, "jobs:\n  abc: x\n", pos(1, 2)).as_deref(),
+                Some("First docs")
+            );
+        }
+    }
 }

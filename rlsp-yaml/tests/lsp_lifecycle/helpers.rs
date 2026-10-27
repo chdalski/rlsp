@@ -150,3 +150,60 @@ pub async fn warnings_before_sentinel(
         warnings.push(message.message);
     }
 }
+
+/// A GitHub-workflow-like schema: `jobs` names its jobs by a pattern, a job is
+/// a `oneOf` of two objects behind a `$ref`, and `steps` is an array of a `$ref`.
+pub fn workflow_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": { "jobs": {
+            "type": "object",
+            "patternProperties": { "^[_a-zA-Z][a-zA-Z0-9_-]*$": { "$ref": "#/definitions/job" } },
+            "additionalProperties": false
+        } },
+        "definitions": {
+            "job": {
+                "description": "Job docs",
+                "oneOf": [
+                    { "properties": {
+                        "runs-on": {
+                            "description": "Runner docs",
+                            "enum": ["ubuntu-latest", "windows-latest"]
+                        },
+                        "steps": { "type": "array", "items": { "$ref": "#/definitions/step" } }
+                    } },
+                    { "properties": { "uses": { "description": "Reusable docs" }, "with": {} } }
+                ]
+            },
+            "step": { "properties": {
+                "uses": { "description": "Step uses docs" },
+                "run": { "description": "Step run docs" },
+                "name": { "description": "Step name docs" }
+            } }
+        }
+    })
+}
+
+/// A compose-like schema: `services` names its services by a pattern, and the
+/// root allows `x-` extensions beside `additionalProperties: false`.
+pub fn compose_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": { "services": {
+            "type": "object",
+            "patternProperties": { "^[a-zA-Z0-9._-]+$": { "$ref": "#/definitions/service" } },
+            "additionalProperties": false
+        } },
+        "patternProperties": { "^x-": { "description": "Extension docs" } },
+        "additionalProperties": false,
+        "definitions": {
+            "service": {
+                "description": "Service docs",
+                "properties": {
+                    "image": { "description": "Image docs" },
+                    "restart": { "enum": ["no", "always"] }
+                }
+            }
+        }
+    })
+}

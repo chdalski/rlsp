@@ -86,6 +86,21 @@ pub struct Compiled {
     pub matching_work_per_byte: usize,
 }
 
+impl Compiled {
+    /// Budget steps for one use of the pattern: one step plus the matching of a
+    /// haystack of `haystack_len` bytes, priced per tier. An invalid pattern is
+    /// never matched, but a use still costs a step: a schema can list many of
+    /// them.
+    pub const fn use_steps(&self, haystack_len: usize) -> usize {
+        let matching = if self.regex.is_some() {
+            haystack_len.saturating_mul(self.matching_work_per_byte)
+        } else {
+            0
+        };
+        (matching / WORK_PER_STEP).saturating_add(1)
+    }
+}
+
 /// Budget steps for one compile attempt of a pattern of `len` bytes under the
 /// tier with base price `base`.
 const fn attempt_steps(base: usize, len: usize) -> usize {

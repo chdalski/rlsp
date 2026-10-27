@@ -496,3 +496,157 @@ async fn should_complete_the_other_item_keys_on_a_key_in_an_item_of_a_sequence_d
         "should exclude present key 'host', got: {result_str}"
     );
 }
+
+// ── Completion below keys that patterns and additionalProperties describe ────
+
+const WORKFLOW_SCHEMA_URL: &str = "https://example.com/test-completion-workflow.json";
+const COMPOSE_SCHEMA_URL: &str = "https://example.com/test-completion-compose.json";
+
+/// Complete at (`line`, `character`) in `document` against `schema` served
+/// under `url`, returning the serialized completion result.
+async fn completion_with_schema(
+    url: &str,
+    schema: &serde_json::Value,
+    document: &str,
+    line: u32,
+    character: u32,
+) -> String {
+    let schema = parse_schema(schema).expect("schema parse failed");
+
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    service.inner().seed_schema_cache(url, schema);
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/completion-patterns.yaml";
+    let text = format!("# yaml-language-server: $schema={url}\n{document}");
+    send(&mut service, did_open_notification(uri, &text)).await;
+
+    // The modeline occupies line 0, so the document's lines start at 1.
+    let resp = send(
+        &mut service,
+        completion_request(2, uri, line + 1, character),
+    )
+    .await;
+    let resp = resp.expect("completion should return a response");
+    let result = resp.result().expect("completion should have a result");
+    serde_json::to_string(result).expect("serialize")
+}
+
+#[tokio::test]
+async fn should_complete_the_keys_of_both_branches_of_a_job_named_by_a_pattern() {
+    let result_str = completion_with_schema(
+        WORKFLOW_SCHEMA_URL,
+        &workflow_schema(),
+        "jobs:\n  build:\n    steps: []\n    \n",
+        3,
+        4,
+    )
+    .await;
+
+    for expected in ["runs-on", "uses", "with"] {
+        assert!(
+            result_str.contains(expected),
+            "should offer '{expected}', got: {result_str}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn should_complete_the_enum_values_of_a_key_of_a_job() {
+    let result_str = completion_with_schema(
+        WORKFLOW_SCHEMA_URL,
+        &workflow_schema(),
+        "jobs:\n  build:\n    runs-on: \n",
+        2,
+        13,
+    )
+    .await;
+
+    assert!(
+        result_str.contains("ubuntu-latest") && result_str.contains("windows-latest"),
+        "should offer the runners, got: {result_str}"
+    );
+}
+
+#[tokio::test]
+async fn should_complete_the_other_keys_of_a_step_and_leave_out_the_present_one() {
+    let result_str = completion_with_schema(
+        WORKFLOW_SCHEMA_URL,
+        &workflow_schema(),
+        "jobs:\n  build:\n    steps:\n      - uses: a\n        \n",
+        4,
+        8,
+    )
+    .await;
+
+    assert!(
+        result_str.contains("\"run\"") && result_str.contains("\"name\""),
+        "should offer 'run' and 'name', got: {result_str}"
+    );
+    assert!(
+        !result_str.contains("\"uses\""),
+        "should leave out the present key 'uses', got: {result_str}"
+    );
+}
+
+#[tokio::test]
+async fn should_complete_all_keys_of_a_step_in_a_blank_item() {
+    let result_str = completion_with_schema(
+        WORKFLOW_SCHEMA_URL,
+        &workflow_schema(),
+        "jobs:\n  build:\n    steps:\n      - \n",
+        3,
+        8,
+    )
+    .await;
+
+    for expected in ["uses", "run", "name"] {
+        assert!(
+            result_str.contains(expected),
+            "should offer '{expected}', got: {result_str}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn should_not_offer_job_names_on_a_blank_line_below_jobs() {
+    let result_str =
+        completion_with_schema(WORKFLOW_SCHEMA_URL, &workflow_schema(), "jobs:\n  \n", 1, 2).await;
+
+    assert!(
+        !result_str.contains("runs-on"),
+        "should not offer job keys where a job name goes, got: {result_str}"
+    );
+}
+
+#[tokio::test]
+async fn should_complete_the_keys_and_values_of_a_service_named_by_a_pattern() {
+    let keys = completion_with_schema(
+        COMPOSE_SCHEMA_URL,
+        &compose_schema(),
+        "services:\n  web:\n    image: nginx\n    \n",
+        3,
+        4,
+    )
+    .await;
+    let values = completion_with_schema(
+        COMPOSE_SCHEMA_URL,
+        &compose_schema(),
+        "services:\n  web:\n    restart: \n",
+        2,
+        13,
+    )
+    .await;
+
+    assert!(
+        keys.contains("restart") && !keys.contains("\"image\""),
+        "should offer 'restart' and leave out 'image', got: {keys}"
+    );
+    assert!(
+        values.contains("always") && values.contains("\"no\""),
+        "should offer the restart values, got: {values}"
+    );
+}

@@ -56,7 +56,7 @@ except the positional corrections named in Decisions.
       layer
 - [x] Task 2: item path segments carry their index; hover and
       completion share one path type
-- [ ] Task 3: keys resolve through `patternProperties` and
+- [x] Task 3: keys resolve through `patternProperties` and
       `additionalProperties`
 - [ ] Task 4: items resolve by position
 - [ ] Push to `main` and confirm the full CI matrix is green
@@ -126,7 +126,7 @@ tests all of that node's patterns against the key; if the allowance
 refuses any of them, the node offers neither its patterns nor its
 `additionalProperties`.
 
-- [ ] Resolver unit tests in `src/schema/path.rs` pin: a key matched
+- [x] Resolver unit tests in `src/schema/path.rs` pin: a key matched
       by a pattern; no match; the first matching pattern in
       pattern-text order wins, and a later matching pattern is used
       when the path dead-ends below the first; invalid and
@@ -143,26 +143,26 @@ refuses any of them, the node offers neither its patterns nor its
       and resolves the path; self-referencing schemas through `patternProperties` and
       through `additionalProperties`, as cycles, long chains, and
       wide ladders, end
-- [ ] Every path that resolves without patterns and
+- [x] Every path that resolves without patterns and
       `additionalProperties` resolves to the same schema as before,
       and every existing resolver, hover, and completion test passes
       with its assertions unchanged
-- [ ] Tests pin the resolver's charging: a compile the allowance
+- [x] Tests pin the resolver's charging: a compile the allowance
       cannot pay for is not made; a pattern found in the cache is
       charged its recorded compile price at its first use in a
       call and not again in that call; each test of a pattern costs
       one step plus its matching work; pattern validity equals a
       single compile under `REGEX_SIZE_LIMIT`
-- [ ] The allowance is a named constant whose doc comment states the
+- [x] The allowance is a named constant whose doc comment states the
       basis of its size, and the integration schemas of this task
       resolve within it
-- [ ] Hover shows the docs, and completion offers the keys and enum
+- [x] Hover shows the docs, and completion offers the keys and enum
       values, of a schema reached through a pattern key, through
       `additionalProperties`, and below them, including a `$ref`
       target between the pattern key and the resolved schema and
       one below it; pinned by unit tests through `hover_at` and
       `complete_at`
-- [ ] Integration tests in `tests/lsp_lifecycle/hover.rs` and
+- [x] Integration tests in `tests/lsp_lifecycle/hover.rs` and
       `tests/lsp_lifecycle/completion.rs`, against a seeded,
       inline GitHub-workflow-like schema (`jobs` with a key pattern
       to a `$ref` job that is a `oneOf` of two objects, `steps` as
@@ -171,13 +171,13 @@ refuses any of them, the node offers neither its patterns nor its
       `additionalProperties: false`), pin hover docs and key
       completion under `jobs.<id>`, `jobs.<id>.steps[0]`, and
       `services.<name>`
-- [ ] The doc comment of `resolve_schema_path` describes the two
+- [x] The doc comment of `resolve_schema_path` describes the two
       passes, the patterns, and `additionalProperties` as they work
-- [ ] `rlsp-yaml/docs/feature-log.md` has an entry that tells the
+- [x] `rlsp-yaml/docs/feature-log.md` has an entry that tells the
       reader that hover and completion now work under keys described
       by `patternProperties` and `additionalProperties`, and which
       pattern wins when several match
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ### Task 4: Resolve items by position
 

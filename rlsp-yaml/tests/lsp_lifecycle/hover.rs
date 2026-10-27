@@ -220,3 +220,131 @@ async fn should_show_schema_docs_for_an_item_of_an_array_declared_in_an_any_of_b
         "hover should show the docs of the item, got: {result_str}"
     );
 }
+
+// ── Hover schema docs below keys that patterns and additionalProperties describe ──
+
+const WORKFLOW_SCHEMA_URL: &str = "https://example.com/test-hover-workflow.json";
+const COMPOSE_SCHEMA_URL: &str = "https://example.com/test-hover-compose.json";
+
+/// Hover at (`line`, `character`) in `document` against `schema` served under
+/// `url`. Returns the serialized hover result.
+async fn hover_with_schema(
+    url: &str,
+    schema: &serde_json::Value,
+    document: &str,
+    line: u32,
+    character: u32,
+) -> String {
+    let schema = parse_schema(schema).expect("schema parse failed");
+
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    service.inner().seed_schema_cache(url, schema);
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/hover-patterns.yaml";
+    let text = format!("# yaml-language-server: $schema={url}\n{document}");
+    send(&mut service, did_open_notification(uri, &text)).await;
+
+    // The modeline occupies line 0, so the document's lines start at 1.
+    let resp = send(&mut service, hover_request(2, uri, line + 1, character)).await;
+    let resp = resp.expect("hover should return a response");
+    let result = resp.result().expect("hover should have a result");
+    serde_json::to_string(result).expect("serialize")
+}
+
+#[tokio::test]
+async fn should_show_the_docs_of_a_key_below_a_job_named_by_a_pattern() {
+    let result_str = hover_with_schema(
+        WORKFLOW_SCHEMA_URL,
+        &workflow_schema(),
+        "jobs:\n  build:\n    runs-on: ubuntu-latest\n",
+        2,
+        4,
+    )
+    .await;
+
+    assert!(result_str.contains("Runner docs"), "got: {result_str}");
+}
+
+#[tokio::test]
+async fn should_show_the_docs_of_the_job_name_itself() {
+    let result_str = hover_with_schema(
+        WORKFLOW_SCHEMA_URL,
+        &workflow_schema(),
+        "jobs:\n  build:\n    runs-on: ubuntu-latest\n",
+        1,
+        2,
+    )
+    .await;
+
+    assert!(result_str.contains("Job docs"), "got: {result_str}");
+}
+
+#[tokio::test]
+async fn should_show_the_docs_of_a_key_in_the_second_branch_of_a_job() {
+    let result_str = hover_with_schema(
+        WORKFLOW_SCHEMA_URL,
+        &workflow_schema(),
+        "jobs:\n  deploy:\n    uses: ./reusable.yaml\n",
+        2,
+        4,
+    )
+    .await;
+
+    assert!(result_str.contains("Reusable docs"), "got: {result_str}");
+}
+
+#[tokio::test]
+async fn should_show_the_docs_of_the_keys_of_each_step_of_a_job() {
+    let document = "jobs:\n  build:\n    steps:\n      - uses: a\n      - run: b\n";
+
+    let first = hover_with_schema(WORKFLOW_SCHEMA_URL, &workflow_schema(), document, 3, 8).await;
+    let second = hover_with_schema(WORKFLOW_SCHEMA_URL, &workflow_schema(), document, 4, 8).await;
+
+    assert!(first.contains("Step uses docs"), "got: {first}");
+    assert!(second.contains("Step run docs"), "got: {second}");
+}
+
+#[tokio::test]
+async fn should_show_no_docs_below_a_job_name_the_pattern_does_not_match() {
+    let document = "jobs:\n  1bad:\n    runs-on: ubuntu-latest\n";
+
+    let name = hover_with_schema(WORKFLOW_SCHEMA_URL, &workflow_schema(), document, 1, 2).await;
+    let below = hover_with_schema(WORKFLOW_SCHEMA_URL, &workflow_schema(), document, 2, 4).await;
+
+    assert!(!name.contains("Job docs"), "got: {name}");
+    assert!(!below.contains("Runner docs"), "got: {below}");
+}
+
+#[tokio::test]
+async fn should_show_the_docs_of_a_service_and_of_its_keys() {
+    let document = "services:\n  web:\n    image: nginx\n";
+
+    let service = hover_with_schema(COMPOSE_SCHEMA_URL, &compose_schema(), document, 1, 2).await;
+    let image = hover_with_schema(COMPOSE_SCHEMA_URL, &compose_schema(), document, 2, 4).await;
+
+    assert!(service.contains("Service docs"), "got: {service}");
+    assert!(image.contains("Image docs"), "got: {image}");
+}
+
+#[tokio::test]
+async fn should_show_the_docs_of_an_extension_key_next_to_additional_properties_false() {
+    let known = hover_with_schema(COMPOSE_SCHEMA_URL, &compose_schema(), "x-ext: 1\n", 0, 0).await;
+    let unknown =
+        hover_with_schema(COMPOSE_SCHEMA_URL, &compose_schema(), "unknown: 1\n", 0, 0).await;
+
+    assert!(known.contains("Extension docs"), "got: {known}");
+    assert!(!unknown.contains("Extension docs"), "got: {unknown}");
+}
+
+#[tokio::test]
+async fn should_show_no_docs_below_a_service_name_the_pattern_does_not_match() {
+    let document = "services:\n  bad name:\n    image: nginx\n";
+
+    let image = hover_with_schema(COMPOSE_SCHEMA_URL, &compose_schema(), document, 2, 4).await;
+
+    assert!(!image.contains("Image docs"), "got: {image}");
+}

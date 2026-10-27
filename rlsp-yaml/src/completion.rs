@@ -13,6 +13,8 @@ mod completion_drivers;
 mod completion_items;
 mod cursor_location;
 mod formatting;
+#[cfg(test)]
+mod key_pattern_tests;
 mod navigation;
 #[cfg(test)]
 mod reference_tests;

@@ -330,7 +330,7 @@ pub(crate) mod test_support {
     use std::fmt::Debug;
 
     use super::path::SchemaPathSegment;
-    use super::{JsonSchema, ParsedSchema, SchemaRef, SchemaType, TargetId};
+    use super::{AdditionalProperties, JsonSchema, ParsedSchema, SchemaRef, SchemaType, TargetId};
 
     /// The path segment for the mapping key `name`. An array item is always
     /// written as [`SchemaPathSegment::Item`], so a key spelled `[]` stays a key.
@@ -484,6 +484,43 @@ pub(crate) mod test_support {
         JsonSchema {
             schema_type: Some(SchemaType::Single("array".to_string())),
             items: Some(Box::new(items)),
+            ..JsonSchema::default()
+        }
+    }
+
+    /// `schema` with `patternProperties`, in the order given.
+    pub fn with_patterns(schema: JsonSchema, patterns: Vec<(&str, JsonSchema)>) -> JsonSchema {
+        JsonSchema {
+            pattern_properties: Some(
+                patterns
+                    .into_iter()
+                    .map(|(pattern, sub)| (pattern.to_string(), sub))
+                    .collect(),
+            ),
+            ..schema
+        }
+    }
+
+    /// `schema` with `additionalProperties` set to the schema `additional`.
+    pub fn with_additional(schema: JsonSchema, additional: JsonSchema) -> JsonSchema {
+        JsonSchema {
+            additional_properties: Some(AdditionalProperties::Schema(Box::new(additional))),
+            ..schema
+        }
+    }
+
+    /// `schema` with `additionalProperties: false`.
+    pub fn denying_additional(schema: JsonSchema) -> JsonSchema {
+        JsonSchema {
+            additional_properties: Some(AdditionalProperties::Denied),
+            ..schema
+        }
+    }
+
+    /// A schema that has only the description `description`.
+    pub fn described(description: &str) -> JsonSchema {
+        JsonSchema {
+            description: Some(description.to_string()),
             ..JsonSchema::default()
         }
     }

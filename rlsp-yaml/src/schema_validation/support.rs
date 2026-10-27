@@ -8,7 +8,7 @@ use crate::scalar_helpers;
 use crate::schema::pattern::{MAX_PATTERN_LEN, compile_priced, lookup_or_compile};
 use crate::schema::{JsonSchema, ParsedSchema, SchemaType};
 
-use super::context::{Budget, work_steps};
+use super::context::Budget;
 
 /// Maximum recursion depth for the validation walk.
 pub(super) const MAX_VALIDATION_DEPTH: usize = 64;
@@ -51,14 +51,7 @@ pub(super) fn compile_pattern(
     })
     .ok_or(PatternUnavailable::OverBudget)?;
     budget.note_paid_for_pattern(pattern);
-    // An invalid pattern is never matched, but a use still costs a step: a schema
-    // can list many of them.
-    let matching = if compiled.regex.is_some() {
-        haystack_len.saturating_mul(compiled.matching_work_per_byte)
-    } else {
-        0
-    };
-    if !budget.spend(work_steps(matching).saturating_add(1)) {
+    if !budget.spend(compiled.use_steps(haystack_len)) {
         return Err(PatternUnavailable::OverBudget);
     }
     compiled.regex.ok_or(PatternUnavailable::Invalid)

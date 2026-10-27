@@ -31,6 +31,15 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### Hover and Completion Follow `patternProperties` and `additionalProperties` [completed]
+
+**Date:** 2026-10-27
+**Description:** Hover shows the schema docs, and completion offers the keys and enum values, below keys that a schema describes by `patternProperties` or `additionalProperties`, and anywhere further down. This covers GitHub Actions `jobs.<id>` and `jobs.<id>.steps[0].uses`, docker-compose `services.<name>` and the `x-` extension keys, and Kubernetes labels and annotations. A key that a property of the schema names is described by that property, as before, and these two keywords apply only to a key that no property names. When several patterns match a key, the first in the character-code order of the pattern text (so `[a-z]+` comes before `^a`) is used, and the next one when the path continues into something the first does not describe. A key that matches a pattern is not additional, so `additionalProperties` describes only a key that no pattern matches. A pattern that is not a valid regular expression, or is longer than 1024 characters, matches no key. Completion does not offer names for such keys (a job id, a service name): it completes what is inside them.
+**Complexity:** Medium
+**Tier:** 1
+
+---
+
 ### Hover Shows Schema Docs for Array Items, Nested Composition, and Keys with Special Characters [completed]
 
 **Date:** 2026-10-27
