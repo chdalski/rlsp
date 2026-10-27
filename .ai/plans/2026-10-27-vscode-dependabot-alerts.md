@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-10-27)
 **Created:** 2026-10-27
 
 # Fix the Open Dependabot Alerts in the VS Code Extension
@@ -39,7 +39,7 @@ dependency tree so the audit and the workflow pass again.
 - [x] Design review of the approach
 - [x] Task 1: the extension's dependency tree is free of both
       advisories
-- [ ] Push to `main` and confirm the full CI matrix, the VS Code
+- [x] Push to `main` and confirm the full CI matrix, the VS Code
       Extension workflow included, is green
 
 ## Tasks
