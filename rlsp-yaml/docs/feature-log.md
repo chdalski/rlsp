@@ -31,6 +31,15 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### Hover Shows Schema Docs for Array Items, Nested Composition, and Keys with Special Characters [completed]
+
+**Date:** 2026-10-27
+**Description:** Hover now shows the schema description, type, default, and examples at more positions. It finds the docs for a key below an array item (`containers[0].image`), for an array item itself, and for items of nested sequences. It finds them for a key that a schema declares only inside nested `allOf`, `anyOf`, or `oneOf` branches, and when the first matching branch has no match deeper in the path it tries the next branch. Keys that contain `.` or `[` (such as `app.kubernetes.io/name` or `foo[bar]`), the quoted key `"[]"`, and the empty key `""` are looked up as the keys they are, and no longer cut apart at those characters. A document that holds only a scalar shows the schema's top-level docs. When a schema declares a key in several branches, hover shows the docs of the first one it finds, taking the `allOf` branches first, then `anyOf`, then `oneOf`.
+**Complexity:** Medium
+**Tier:** 1
+
+---
+
 ### Kubernetes Auto-Detection Follows Kubernetes Naming and Built-In Groups [completed]
 
 **Date:** 2026-10-27

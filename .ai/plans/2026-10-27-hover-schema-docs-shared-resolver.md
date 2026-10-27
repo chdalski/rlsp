@@ -37,7 +37,7 @@ and schema completion.
 - [x] Design review of the approach
 - [x] Task 1: the path resolver lives in the schema layer
 - [x] Task 2: array items are a typed path segment
-- [ ] Task 3: hover resolves schema docs through the shared
+- [x] Task 3: hover resolves schema docs through the shared
       resolver
 - [ ] Task 4: array items are found through composition branches
 - [ ] Push to `main` and confirm the full CI matrix is green
@@ -91,9 +91,9 @@ shared resolver; the displayed path keeps its indices.
 `tests/lsp_lifecycle/completion.rs` serves schemas through
 `seed_schema_cache` and a `$schema` modeline.
 
-- [ ] Hover's own schema resolver and its string-splitting path
+- [x] Hover's own schema resolver and its string-splitting path
       builder are removed
-- [ ] Hover shows the schema docs of: a key below an array item
+- [x] Hover shows the schema docs of: a key below an array item
       (`items[0].name`); an array item itself (`items[0]`); an item
       of a nested sequence (`a[0][1]`) and a key below an item of
       a root sequence (`[0].name`); a key found only in a branch of
@@ -104,17 +104,17 @@ shared resolver; the displayed path keeps its indices.
       key, resolved as the property `""` and not its parent; and a
       document that is only a scalar, which shows the root
       schema's docs; each pinned by a unit test
-- [ ] Every existing hover test in `src/hover.rs` and
+- [x] Every existing hover test in `src/hover.rs` and
       `tests/lsp_lifecycle/hover.rs` passes with its assertions
       unchanged
-- [ ] An integration test in `tests/lsp_lifecycle/hover.rs` sends
+- [x] An integration test in `tests/lsp_lifecycle/hover.rs` sends
       hover requests against a seeded schema for an array item's
       key, a key reached through nested composition, and a key
       containing `.`, and asserts that each response contains the
       key's schema description
-- [ ] `rlsp-yaml/docs/feature-log.md` has an entry that tells the
+- [x] `rlsp-yaml/docs/feature-log.md` has an entry that tells the
       reader for which positions hover now shows schema docs
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ### Task 4: Find array items through composition branches
 

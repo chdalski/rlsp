@@ -6,6 +6,7 @@ use rlsp_yaml_parser::node::{Document, Node};
 use rlsp_yaml_parser::{LineIndex, Pos, Span};
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
 
+use crate::schema::path::{SchemaPathSegment, resolve_schema_path};
 use crate::schema::{JsonSchema, ParsedSchema};
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -55,8 +56,8 @@ pub fn hover_at(
     let mut markdown = format_hover_markdown(&formatted_path, &yaml_type, value.as_deref());
 
     if let Some(parsed) = schema {
-        let key_path = build_schema_key_path(&formatted_path);
-        if let Some(prop_schema) = resolve_schema_path(parsed, parsed.resolved_root(), &key_path) {
+        let schema_path = to_schema_path(&path);
+        if let Some(prop_schema) = resolve_schema_path(parsed, &parsed.root, &schema_path) {
             let schema_section = format_schema_section(prop_schema);
             if !schema_section.is_empty() {
                 markdown.push('\n');
@@ -253,74 +254,16 @@ fn format_hover_markdown(path: &str, yaml_type: &str, value: Option<&str>) -> St
 // Schema lookup
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// Build a schema key path (list of string keys) from a dotted path string like "a.b.c".
-/// Array index segments like "[0]" are represented as "[]" to match schema `items` lookups.
-fn build_schema_key_path(dotted_path: &str) -> Vec<String> {
-    dotted_path
-        .split('.')
-        .flat_map(|segment| {
-            // Handle "foo[0]" → ["foo", "[]"]
-            segment.find('[').map_or_else(
-                || vec![segment.to_string()],
-                |bracket_pos| {
-                    let key = &segment[..bracket_pos];
-                    if key.is_empty() {
-                        vec!["[]".to_string()]
-                    } else {
-                        vec![key.to_string(), "[]".to_string()]
-                    }
-                },
-            )
+/// Map an AST path to the schema path that selects the same node: a key stays a
+/// key, and an index becomes an array item, since a schema does not say which
+/// item.
+fn to_schema_path(path: &[PathSegment]) -> Vec<SchemaPathSegment> {
+    path.iter()
+        .map(|segment| match segment {
+            PathSegment::Key(key) => SchemaPathSegment::Key(key.clone()),
+            PathSegment::Index(_) => SchemaPathSegment::Item,
         })
-        .filter(|s| !s.is_empty())
         .collect()
-}
-
-/// Resolve a dotted key path through `schema`, returning the matching sub-schema
-/// for the final key, resolved. Returns `None` if the path cannot be resolved.
-///
-/// Every step consumes a path segment, so the walk ends on a schema that
-/// references itself.
-fn resolve_schema_path<'a>(
-    parsed: &'a ParsedSchema,
-    schema: &'a JsonSchema,
-    path: &[String],
-) -> Option<&'a JsonSchema> {
-    let [key, rest @ ..] = path else {
-        return None;
-    };
-
-    // Look in direct properties
-    let found = schema
-        .properties
-        .as_ref()
-        .and_then(|props| props.get(key.as_str()));
-
-    // If not in direct properties, check composition branches
-    let found = found.or_else(|| find_in_branches(parsed, schema, key));
-
-    let child = parsed.resolve(found?);
-
-    if rest.is_empty() {
-        Some(child)
-    } else {
-        resolve_schema_path(parsed, child, rest)
-    }
-}
-
-/// Search composition branches (allOf / anyOf / oneOf) for a property key.
-fn find_in_branches<'a>(
-    parsed: &'a ParsedSchema,
-    schema: &'a JsonSchema,
-    key: &str,
-) -> Option<&'a JsonSchema> {
-    schema
-        .all_of
-        .iter()
-        .flatten()
-        .chain(schema.any_of.iter().flatten())
-        .chain(schema.one_of.iter().flatten())
-        .find_map(|branch| parsed.resolve(branch).properties.as_ref()?.get(key))
 }
 
 /// Format the schema information section appended below the structural hover.
@@ -420,6 +363,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::schema::test_support::{all_of, any_of, array_of, object_schema, one_of};
     use crate::schema::{JsonSchema, SchemaType};
     use crate::test_utils::parse_docs;
 
@@ -1825,6 +1769,273 @@ mod tests {
     }
 
     // ══════════════════════════════════════════════════════════════════════
+    // Schema docs through the shared resolver
+    // ══════════════════════════════════════════════════════════════════════
+
+    fn with_root_description(description: &str, schema: JsonSchema) -> JsonSchema {
+        JsonSchema {
+            description: Some(description.to_string()),
+            ..schema
+        }
+    }
+
+    fn hover_with_schema(schema: JsonSchema, text: &str, cursor: Position) -> String {
+        let docs = parse_docs(text);
+        let hover = hover_at(&docs, cursor, Some(&ParsedSchema::new(schema)))
+            .expect("structural hover should exist");
+        hover_content(&hover).to_string()
+    }
+
+    #[rstest]
+    #[case::key_below_array_item(
+        "items:\n  - name: x\n",
+        pos(1, 4),
+        object_schema(vec![("items", array_of(object_schema(vec![("name", schema_with_description("Item name"))])))]),
+        "items[0].name",
+        "Item name"
+    )]
+    #[case::array_item_itself(
+        "items:\n  - x\n",
+        pos(1, 4),
+        object_schema(vec![("items", array_of(schema_with_description("Item doc")))]),
+        "items[0]",
+        "Item doc"
+    )]
+    #[case::item_of_nested_sequence(
+        "a:\n  - - p\n    - q\n",
+        pos(2, 6),
+        object_schema(vec![("a", array_of(array_of(schema_with_description("Cell doc"))))]),
+        "a[0][1]",
+        "Cell doc"
+    )]
+    #[case::key_below_item_of_root_sequence(
+        "- name: x\n",
+        pos(0, 2),
+        array_of(object_schema(vec![("name", schema_with_description("Root item name"))])),
+        "[0].name",
+        "Root item name"
+    )]
+    #[case::key_in_branch_of_branch(
+        "name: x\n",
+        pos(0, 0),
+        all_of(vec![any_of(vec![one_of(vec![object_schema(vec![("name", schema_with_description("Deep branch name"))])])])]),
+        "name",
+        "Deep branch name"
+    )]
+    #[case::later_branch_resolves_when_first_dead_ends(
+        "a:\n  b: 1\n",
+        pos(1, 2),
+        all_of(vec![
+            object_schema(vec![("a", object_schema(vec![("other", schema_with_description("Wrong branch"))]))]),
+            object_schema(vec![("a", object_schema(vec![("b", schema_with_description("Right branch"))]))]),
+        ]),
+        "a.b",
+        "Right branch"
+    )]
+    #[case::key_containing_dots(
+        "metadata:\n  app.kubernetes.io/name: x\n",
+        pos(1, 2),
+        object_schema(vec![("metadata", object_schema(vec![("app.kubernetes.io/name", schema_with_description("App label"))]))]),
+        "metadata.app.kubernetes.io/name",
+        "App label"
+    )]
+    #[case::key_containing_brackets(
+        "foo[bar]: x\n",
+        pos(0, 0),
+        object_schema(vec![("foo[bar]", schema_with_description("Bracketed key"))]),
+        "foo[bar]",
+        "Bracketed key"
+    )]
+    #[case::quoted_brackets_key_is_a_property(
+        "\"[]\": x\n",
+        pos(0, 0),
+        JsonSchema {
+            items: Some(Box::new(schema_with_description("Items doc"))),
+            ..object_schema(vec![("[]", schema_with_description("Brackets property"))])
+        },
+        "[]",
+        "Brackets property"
+    )]
+    #[case::empty_key_at_root(
+        "\"\": x\n",
+        pos(0, 0),
+        with_root_description("Root doc", object_schema(vec![("", schema_with_description("Empty key doc"))])),
+        "",
+        "Empty key doc"
+    )]
+    #[case::empty_key_below_another_key(
+        "a:\n  \"\": x\n",
+        pos(1, 2),
+        object_schema(vec![("a", with_root_description("A doc", object_schema(vec![("", schema_with_description("Empty child doc"))])))]),
+        "a.",
+        "Empty child doc"
+    )]
+    #[case::scalar_only_document_shows_root_docs(
+        "just text\n",
+        pos(0, 0),
+        with_root_description("Root doc", JsonSchema::default()),
+        "",
+        "Root doc"
+    )]
+    #[case::dotted_key_is_one_property(
+        "a.b: x\n",
+        pos(0, 0),
+        object_schema(vec![
+            ("a.b", schema_with_description("Dotted doc")),
+            ("a", object_schema(vec![("b", schema_with_description("Nested doc"))])),
+        ]),
+        "a.b",
+        "Dotted doc"
+    )]
+    #[case::nested_keys_are_not_one_dotted_property(
+        "a:\n  b: x\n",
+        pos(1, 2),
+        object_schema(vec![
+            ("a.b", schema_with_description("Dotted doc")),
+            ("a", object_schema(vec![("b", schema_with_description("Nested doc"))])),
+        ]),
+        "a.b",
+        "Nested doc"
+    )]
+    #[case::bracketed_key_is_not_a_key_with_an_item(
+        "foo[bar]: x\n",
+        pos(0, 0),
+        object_schema(vec![
+            ("foo[bar]", schema_with_description("Bracketed doc")),
+            ("foo", array_of(schema_with_description("Foo item doc"))),
+        ]),
+        "foo[bar]",
+        "Bracketed doc"
+    )]
+    #[case::quoted_index_looking_key_is_a_key(
+        "\"[0]\": x\n",
+        pos(0, 0),
+        JsonSchema {
+            items: Some(Box::new(schema_with_description("Items doc"))),
+            ..object_schema(vec![("[0]", schema_with_description("Index-looking key doc"))])
+        },
+        "[0]",
+        "Index-looking key doc"
+    )]
+    #[case::root_sequence_item_is_an_item_not_a_brackets_key(
+        "- x\n",
+        pos(0, 2),
+        JsonSchema {
+            items: Some(Box::new(schema_with_description("Items doc"))),
+            ..object_schema(vec![("[]", schema_with_description("Brackets property"))])
+        },
+        "[0]",
+        "Items doc"
+    )]
+    #[case::own_property_wins_over_a_branch_with_the_same_key(
+        "k: x\n",
+        pos(0, 0),
+        JsonSchema {
+            all_of: Some(vec![object_schema(vec![("k", schema_with_description("Branch doc"))])]),
+            ..object_schema(vec![("k", schema_with_description("Direct doc"))])
+        },
+        "k",
+        "Direct doc"
+    )]
+    fn hover_shows_the_schema_docs_of_the_hovered_path(
+        #[case] text: &str,
+        #[case] cursor: Position,
+        #[case] schema: JsonSchema,
+        #[case] expected_path: &str,
+        #[case] expected_docs: &str,
+    ) {
+        let content = hover_with_schema(schema, text, cursor);
+
+        assert!(
+            content.contains(&format!("**Path:** `{expected_path}`")),
+            "path {expected_path:?} missing: {content}"
+        );
+        assert!(
+            content.contains(&format!("**Description:** {expected_docs}")),
+            "docs {expected_docs:?} missing: {content}"
+        );
+        assert_eq!(
+            content.matches("**Description:**").count(),
+            1,
+            "exactly one schema's docs expected: {content}"
+        );
+    }
+
+    #[rstest]
+    #[case::quoted_brackets_key_is_not_an_item(
+        "\"[]\": x\n",
+        pos(0, 0),
+        JsonSchema {
+            items: Some(Box::new(schema_with_description("Items doc"))),
+            ..JsonSchema::default()
+        }
+    )]
+    #[case::own_property_shadows_branches(
+        "a:\n  b: 1\n",
+        pos(1, 2),
+        JsonSchema {
+            all_of: Some(vec![object_schema(vec![("a", object_schema(vec![("b", schema_with_description("Branch docs"))]))])]),
+            ..object_schema(vec![("a", object_schema(vec![]))])
+        }
+    )]
+    #[case::empty_key_is_not_its_parent(
+        "a:\n  \"\": x\n",
+        pos(1, 2),
+        object_schema(vec![("a", with_root_description("A doc", JsonSchema::default()))])
+    )]
+    #[case::sequence_index_is_not_a_key(
+        "a:\n  - x\n",
+        pos(1, 4),
+        object_schema(vec![(
+            "a",
+            with_root_description("A doc", object_schema(vec![("0", schema_with_description("Zero key doc"))])),
+        )])
+    )]
+    #[case::item_where_schema_has_no_items(
+        "tags:\n  - x\n",
+        pos(1, 4),
+        object_schema(vec![("tags", schema_with_description("Tags doc"))])
+    )]
+    #[case::key_below_item_missing_from_items_schema(
+        "items:\n  - other: x\n",
+        pos(1, 4),
+        object_schema(vec![("items", array_of(object_schema(vec![("name", schema_with_description("Name doc"))])))])
+    )]
+    #[case::one_index_more_than_the_schema_has_levels(
+        "a:\n  - - x\n",
+        pos(1, 6),
+        object_schema(vec![("a", array_of(schema_with_description("Single level doc")))])
+    )]
+    #[case::key_where_schema_is_an_array(
+        "list:\n  name: x\n",
+        pos(1, 2),
+        object_schema(vec![(
+            "list",
+            with_root_description("List doc", array_of(object_schema(vec![("name", schema_with_description("Name doc"))]))),
+        )])
+    )]
+    #[case::sequence_where_schema_is_an_object(
+        "obj:\n  - x\n",
+        pos(1, 4),
+        object_schema(vec![(
+            "obj",
+            with_root_description("Obj doc", object_schema(vec![("x", schema_with_description("X doc"))])),
+        )])
+    )]
+    fn hover_shows_no_schema_docs_when_the_path_does_not_resolve(
+        #[case] text: &str,
+        #[case] cursor: Position,
+        #[case] schema: JsonSchema,
+    ) {
+        let content = hover_with_schema(schema, text, cursor);
+
+        assert!(
+            !content.contains("**Description:**"),
+            "no schema docs expected: {content}"
+        );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
     // Reference nodes
     // ══════════════════════════════════════════════════════════════════════
 
@@ -1904,6 +2115,24 @@ mod tests {
             )]),
             "a:\n  name: x\n",
             pos(1, 2)
+        )]
+        #[case::root_of_a_scalar_only_document(
+            |t: &Sharing| t.put(described()),
+            "x\n",
+            pos(0, 0)
+        )]
+        #[case::array_item(
+            |t: &Sharing| object(vec![("list", t.put(array_of(t.put(described()))))]),
+            "list:\n  - x\n",
+            pos(1, 4)
+        )]
+        #[case::key_below_array_item(
+            |t: &Sharing| object(vec![(
+                "list",
+                array_of(t.put(object(vec![("name", t.put(described()))]))),
+            )]),
+            "list:\n  - name: x\n",
+            pos(1, 4)
         )]
         fn a_reference_at_a_position_gives_the_hover_of_the_schema_written_inline(
             #[case] build: fn(&Sharing) -> JsonSchema,
