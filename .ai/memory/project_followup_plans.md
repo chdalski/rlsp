@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 1d09bc1e-8453-49ff-a3b4-6f7a66d0a9d7
-  modified: 2026-10-26T08:51:17.157Z
+  modified: 2026-10-27T09:00:00.000Z
 ---
 
 <!-- Only track open items here. Completed work lives in its plan file
@@ -16,8 +16,7 @@ metadata:
 
 ## Open: rlsp-yaml
 
-- **Schema plan queue (one plan at a time, in this order; share-ref-targets completed 2026-10-26; validate-kubernetes-schema-url has all tasks committed and pushed but stays InProgress until the VS Code workflow is green — it fails only at `pnpm run audit` on the two Dependabot alerts below, so close it after item 2).** Each needs its own clarification + plan:
-  2. Dependabot alerts in the VS Code extension (user-requested 2026-10-26) — `@azure/msal-node` 5.6.0 (fixed in 7.1.0, major bump, likely blocked by a dependent's range) and `serialize-javascript` 7.1.2 (fixed in 7.1.3, may self-heal after Dependabot's 3-day cooldown).
+- **Schema plan queue (one plan at a time, in this order).** Each needs its own clarification + plan:
   3. Hover docs for array items and nested composition — includes unifying hover's and completion's path resolvers (they duplicate "which sub-schema describes this path").
   4. Bound the thread-local `REGEX_CACHE` and run `validate_schema` off the async executor (`spawn_blocking`).
   5. Bug: `unevaluatedItems: false` is dropped (boolean `false` sub-schema loss in the parser); check every keyword parsed through the generic sub-schema path.
@@ -35,6 +34,8 @@ metadata:
 - create bindings for python - https://pyo3.rs and typescript (wasm)
 
 ## Open: CI & integrations
+
+- **vsce is unpinned in CI and the local `package` script.** `vscode-extension.yml` (package and publish jobs, the latter with `VSCE_PAT`) and the extension's `package` script run `pnpx @vscode/vsce`, which fetches the latest vsce each run. Pinning was put to the user during the 2026-10-27 Dependabot plan and declined for now ("Nicht jetzt"); a pin inside a script string is not updated by Dependabot. Revisit only if the user raises it.
 
 <!-- Surfaced during the 2026-07-23 dependabot-followup plan
      (`.ai/plans/2026-07-23-dependabot-followup-ci-and-security-maintenance.md`).
