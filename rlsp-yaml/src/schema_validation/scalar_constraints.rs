@@ -8,13 +8,14 @@ use tower_lsp::lsp_types::DiagnosticSeverity;
 use crate::lsp_util::span_to_lsp;
 use crate::scalar_helpers;
 use crate::schema::JsonSchema;
+use crate::schema::pattern::MAX_PATTERN_LEN;
 use crate::server::YamlVersion;
 
 use super::context::Ctx;
 use super::formats;
 use super::support::{
-    MAX_CONTENT_DEPTH, MAX_PATTERN_LEN, PatternUnavailable, compile_pattern, format_path,
-    is_valid_regex_value, make_diagnostic, node_loc, yaml_to_json,
+    MAX_CONTENT_DEPTH, PatternUnavailable, compile_pattern, format_path, is_valid_regex_value,
+    make_diagnostic, node_loc, yaml_to_json,
 };
 use super::validate_node;
 

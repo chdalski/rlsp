@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-10-27
 
 # Schema Path Resolver Follows Pattern, Additional, and Positional Schemas
@@ -52,7 +52,7 @@ except the positional corrections named in Decisions.
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: the pattern compiler and its cache live in the schema
+- [x] Task 1: the pattern compiler and its cache live in the schema
       layer
 - [ ] Task 2: item path segments carry their index; hover and
       completion share one path type
@@ -74,17 +74,17 @@ compile attempt as a closure, so validation pays from its `Budget`
 and the resolver can pay from its own allowance. Behavior is
 unchanged.
 
-- [ ] `MAX_PATTERN_LEN`, `REGEX_SIZE_LIMIT`, the size tiers, the
+- [x] `MAX_PATTERN_LEN`, `REGEX_SIZE_LIMIT`, the size tiers, the
       pattern cache, and the lookup-or-compile entry point are
       defined in `src/schema/pattern.rs` and visible only inside
       the crate; validation's `compile_pattern` and
       `is_valid_regex_value` use them and keep no copy
-- [ ] The regex tests in `src/schema_validation/budget_tests.rs`
+- [x] The regex tests in `src/schema_validation/budget_tests.rs`
       (`format_regex_*`, `schema_pattern_pays_its_compile_price_once_per_run`),
       the pattern tests in `mapping_constraints.rs` and
       `scalar_constraints.rs`, and every other validation test pass
       with their assertions unchanged; only import paths change
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ### Task 2: Give item path segments their index and share one path type
 

@@ -5,10 +5,10 @@ use serde_json::json;
 
 use super::context::{MAX_DIAGNOSTICS, STEP_CEILING, STEP_FLOOR, STEPS_PER_NODE};
 use super::support::{
-    collect_evaluated_item_count, collect_evaluated_properties, compile_attempts,
-    is_valid_regex_value,
+    collect_evaluated_item_count, collect_evaluated_properties, is_valid_regex_value,
 };
 use super::*;
+use crate::schema::pattern::compile_attempts;
 use crate::schema::test_support::no_targets;
 use crate::schema::{SchemaType, parse_schema};
 use crate::test_utils::parse_docs;

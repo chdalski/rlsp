@@ -7,12 +7,13 @@ use rlsp_yaml_parser::node::Node;
 use tower_lsp::lsp_types::DiagnosticSeverity;
 
 use crate::lsp_util::span_to_lsp;
+use crate::schema::pattern::MAX_PATTERN_LEN;
 use crate::schema::{AdditionalProperties, JsonSchema};
 
 use super::context::{Ctx, node_weight};
 use super::support::{
-    MAX_ENUM_DISPLAY, MAX_PATTERN_LEN, PatternUnavailable, collect_evaluated_properties,
-    compile_pattern, entries_contains_key, format_path, make_diagnostic, node_key_str, node_loc,
+    MAX_ENUM_DISPLAY, PatternUnavailable, collect_evaluated_properties, compile_pattern,
+    entries_contains_key, format_path, make_diagnostic, node_key_str, node_loc,
 };
 use super::validate_node;
 

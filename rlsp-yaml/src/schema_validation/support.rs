@@ -1,24 +1,14 @@
 // SPDX-License-Identifier: MIT
 
-use std::cell::RefCell;
-use std::collections::HashMap;
-
-use regex::RegexBuilder;
 use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::Node;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Range};
 
 use crate::scalar_helpers;
+use crate::schema::pattern::{MAX_PATTERN_LEN, compile_priced, lookup_or_compile};
 use crate::schema::{JsonSchema, ParsedSchema, SchemaType};
 
-use super::context::{Budget, WORK_PER_STEP, work_steps};
-
-/// Maximum length of a `pattern` string we will compile and match, as a
-/// guard against pathological `ReDoS` inputs.
-pub(super) const MAX_PATTERN_LEN: usize = 1024;
-
-/// Maximum compiled NFA size for a regex, as a memory guard.
-pub(super) const REGEX_SIZE_LIMIT: usize = 512 * 1024;
+use super::context::{Budget, work_steps};
 
 /// Maximum recursion depth for the validation walk.
 pub(super) const MAX_VALIDATION_DEPTH: usize = 64;
@@ -33,114 +23,6 @@ pub(super) const MAX_DESCRIPTION_LEN: usize = 200;
 
 /// Maximum number of enum values listed verbatim in a diagnostic message.
 pub(super) const MAX_ENUM_DISPLAY: usize = 5;
-
-thread_local! {
-    /// Per-thread cache of compiled schema patterns, keyed by pattern string.
-    /// Saves the compile, never the price: a run charges what a pattern's
-    /// compilation is priced at whether or not it finds it here.
-    static REGEX_CACHE: RefCell<HashMap<String, Compiled>> = RefCell::new(HashMap::new());
-}
-
-/// Size limits a pattern is compiled under, smallest first, with the base price
-/// in budget steps of an attempt under each. A pattern too big for one limit is
-/// retried under the next; the last is `REGEX_SIZE_LIMIT`, so which patterns
-/// compile is the same as with that limit alone, but an ordinary pattern pays
-/// for the small attempt that suffices rather than for the worst case.
-///
-/// The base prices cover the compile work up to the limit. Each attempt also
-/// parses the pattern, which `REGEX_PARSE_STEPS_PER_BYTE` covers.
-///
-/// Measured worst attempts, as steps (about 183 ns each), over short (up to 16
-/// bytes) pathological patterns such as `(\w{20}){20}`: 4 KiB: ~230; 64 KiB:
-/// ~2.0k; 512 KiB: ~16.6k. Parsing a 790-byte alternation took ~0.9k steps at
-/// 4 KiB. The base prices are about twice those worst attempts; the per-byte
-/// price covers parsing with the same margin. Re-measure before lowering them.
-///
-/// The third number of a tier is the work units (`WORK_PER_STEP` of them make a
-/// step) that matching one byte of haystack costs against a pattern compiled
-/// under it. Programs up to 64 KiB match in a small fraction of a step per byte;
-/// a program near `REGEX_SIZE_LIMIT` can fall out of the lazy DFA into the NFA
-/// simulation, measured up to ~210 steps per byte on a 64 KiB haystack (for
-/// example `(a|b)*[a-z]{7276}b` against `aaaa...`), so the last tier is priced
-/// at 512 steps per byte.
-const COMPILE_TIERS: [(usize, usize, usize); 3] = [
-    (4 * 1024, 512, 1),
-    (64 * 1024, 4_096, 1),
-    (REGEX_SIZE_LIMIT, 32_768, 512 * WORK_PER_STEP),
-];
-
-#[cfg(test)]
-thread_local! {
-    /// Compile attempts made on this thread, for tests that count compilations.
-    static COMPILE_ATTEMPTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-/// Compile attempts made on this thread so far.
-#[cfg(test)]
-pub(super) fn compile_attempts() -> usize {
-    COMPILE_ATTEMPTS.with(std::cell::Cell::get)
-}
-
-/// Budget steps per byte of pattern for parsing it, charged on every attempt.
-const REGEX_PARSE_STEPS_PER_BYTE: usize = 2;
-
-/// The outcome of compiling a pattern and what that was priced at.
-#[derive(Clone)]
-struct Compiled {
-    /// `None` when the pattern is not a valid regex within `REGEX_SIZE_LIMIT`.
-    regex: Option<regex::Regex>,
-    /// Budget steps the attempts that led to this outcome were priced at.
-    steps: usize,
-    /// Work units matching one byte of haystack costs, from the tier it compiled
-    /// under.
-    matching_work_per_byte: usize,
-}
-
-/// Budget steps for one compile attempt of a pattern of `len` bytes under the
-/// tier with base price `base`.
-const fn attempt_steps(base: usize, len: usize) -> usize {
-    base.saturating_add(len.saturating_mul(REGEX_PARSE_STEPS_PER_BYTE))
-}
-
-/// Compile `pattern` tier by tier, spending each attempt's price before making
-/// it. Returns `None` when the budget refuses an attempt.
-///
-/// Only a program too big for the tier's limit moves on to the next tier: any
-/// other error, a syntax error above all, would recur under every limit.
-fn compile_priced(pattern: &str, budget: &Budget) -> Option<Compiled> {
-    let mut steps = 0_usize;
-    for (limit, base, matching_work_per_byte) in COMPILE_TIERS {
-        let price = attempt_steps(base, pattern.len());
-        if !budget.spend(price) {
-            return None;
-        }
-        steps = steps.saturating_add(price);
-        #[cfg(test)]
-        COMPILE_ATTEMPTS.with(|attempts| attempts.set(attempts.get() + 1));
-        match RegexBuilder::new(pattern).size_limit(limit).build() {
-            Ok(regex) => {
-                return Some(Compiled {
-                    regex: Some(regex),
-                    steps,
-                    matching_work_per_byte,
-                });
-            }
-            Err(regex::Error::CompiledTooBig(_)) => {}
-            Err(_) => {
-                return Some(Compiled {
-                    regex: None,
-                    steps,
-                    matching_work_per_byte,
-                });
-            }
-        }
-    }
-    Some(Compiled {
-        regex: None,
-        steps,
-        matching_work_per_byte: 0,
-    })
-}
 
 /// Why a pattern could not be used.
 pub(super) enum PatternUnavailable {
@@ -163,21 +45,11 @@ pub(super) fn compile_pattern(
     haystack_len: usize,
     budget: &Budget,
 ) -> Result<regex::Regex, PatternUnavailable> {
-    let cached = REGEX_CACHE.with(|cache| cache.borrow().get(pattern).cloned());
-    let compiled = if let Some(compiled) = cached {
-        if !budget.has_paid_for_pattern(pattern) && !budget.spend(compiled.steps) {
-            return Err(PatternUnavailable::OverBudget);
-        }
-        compiled
-    } else {
-        let compiled = compile_priced(pattern, budget).ok_or(PatternUnavailable::OverBudget)?;
-        REGEX_CACHE.with(|cache| {
-            cache
-                .borrow_mut()
-                .insert(pattern.to_string(), compiled.clone());
-        });
-        compiled
-    };
+    let paid = budget.has_paid_for_pattern(pattern);
+    let compiled = lookup_or_compile(pattern, |steps, cache_hit| {
+        (cache_hit && paid) || budget.spend(steps)
+    })
+    .ok_or(PatternUnavailable::OverBudget)?;
     budget.note_paid_for_pattern(pattern);
     // An invalid pattern is never matched, but a use still costs a step: a schema
     // can list many of them.
@@ -206,7 +78,7 @@ pub(super) fn is_valid_regex_value(value: &str, budget: &Budget) -> Option<bool>
         return budget.spend(steps).then_some(valid);
     }
     // Pay attempt by attempt before compiling, then keep the outcome.
-    let compiled = compile_priced(value, budget)?;
+    let compiled = compile_priced(value, |steps| budget.spend(steps))?;
     let valid = compiled.regex.is_some();
     budget.remember_regex_value(value, (valid, compiled.steps));
     Some(valid)

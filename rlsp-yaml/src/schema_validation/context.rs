@@ -8,6 +8,7 @@ use rlsp_yaml_parser::{LineIndex, Span};
 use tower_lsp::lsp_types::Diagnostic;
 
 use crate::schema::ParsedSchema;
+use crate::schema::pattern::WORK_PER_STEP;
 use crate::server::YamlVersion;
 
 /// Steps every run may spend regardless of document size.
@@ -20,11 +21,6 @@ pub(super) const STEPS_PER_NODE: usize = 64;
 /// Upper bound on the budget of any run, so a huge document cannot scale it
 /// without limit.
 pub(super) const STEP_CEILING: usize = 5_000_000;
-
-/// Units of scanning work (comparisons, key lookups, copied nodes, text bytes)
-/// that one step pays for. The step that enters a node covers the first block of
-/// work, so only larger scans cost more.
-pub(super) const WORK_PER_STEP: usize = 64;
 
 /// Steps that scanning `work` units costs.
 pub(super) const fn work_steps(work: usize) -> usize {

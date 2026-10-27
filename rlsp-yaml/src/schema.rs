@@ -20,6 +20,8 @@ pub mod association;
 mod budget;
 /// Lookup of the sub-schema at a path through a parsed schema.
 pub(crate) mod path;
+/// Compiled schema patterns: limits, size tiers, and the cache.
+pub(crate) mod pattern;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Constants
