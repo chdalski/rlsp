@@ -12,8 +12,9 @@ use super::cursor_location::node_span;
 use super::cursor_location::scalar_key;
 
 /// Walk `docs` following `path` and return the node at that path, or `None` if
-/// any step fails. An item segment always fails: the path does not say which
-/// item it means.
+/// any step fails. An item segment always fails, whatever its index: following
+/// it would change the structural keys that completion in a sequence item
+/// offers.
 pub(super) fn find_node_at_path<'a>(
     docs: &'a [Document<Span>],
     path: &[SchemaPathSegment],
@@ -121,10 +122,12 @@ mod tests {
     #[case::missing_key(&["name: Alice\n"], vec![key("missing")], "key not in mapping")]
     #[case::scalar_mid_path(&["name: Alice\n"], vec![key("name"), key("deeper")], "scalar terminates traversal")]
     #[case::sequence_mid_path(&["items:\n  - foo\n"], vec![key("items"), key("deeper")], "sequence terminates traversal")]
-    #[case::item_on_sequence(&["items:\n  - foo\n"], vec![key("items"), SchemaPathSegment::Item], "an item segment does not say which item")]
-    #[case::item_on_root_sequence(&["- foo\n"], vec![SchemaPathSegment::Item], "an item segment does not say which item")]
-    #[case::item_on_scalar(&["name: Alice\n"], vec![key("name"), SchemaPathSegment::Item], "scalar terminates traversal")]
-    #[case::item_is_not_a_brackets_key(&["\"[]\": x\n"], vec![SchemaPathSegment::Item], "an item segment never names a key")]
+    #[case::item_on_sequence(&["items:\n  - foo\n"], vec![key("items"), SchemaPathSegment::Item(0)], "an item segment does not say which item")]
+    #[case::item_on_root_sequence(&["- foo\n"], vec![SchemaPathSegment::Item(0)], "an item segment does not say which item")]
+    #[case::second_item_on_sequence(&["items:\n  - foo\n  - bar\n"], vec![key("items"), SchemaPathSegment::Item(1)], "an item segment is not followed, whatever its index")]
+    #[case::second_item_on_root_sequence(&["- foo\n- bar\n"], vec![SchemaPathSegment::Item(1)], "an item segment is not followed, whatever its index")]
+    #[case::item_on_scalar(&["name: Alice\n"], vec![key("name"), SchemaPathSegment::Item(0)], "scalar terminates traversal")]
+    #[case::item_is_not_a_brackets_key(&["\"[]\": x\n"], vec![SchemaPathSegment::Item(0)], "an item segment never names a key")]
     fn find_node_at_path_returns_none(
         #[case] yamls: &[&str],
         #[case] path: Vec<SchemaPathSegment>,

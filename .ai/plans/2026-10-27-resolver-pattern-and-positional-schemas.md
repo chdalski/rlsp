@@ -54,7 +54,7 @@ except the positional corrections named in Decisions.
 - [x] Design review of the approach
 - [x] Task 1: the pattern compiler and its cache live in the schema
       layer
-- [ ] Task 2: item path segments carry their index; hover and
+- [x] Task 2: item path segments carry their index; hover and
       completion share one path type
 - [ ] Task 3: keys resolve through `patternProperties` and
       `additionalProperties`
@@ -94,23 +94,23 @@ are replaced by `SchemaPathSegment`. The resolver ignores the index
 in this task, and `find_node_at_path` keeps returning nothing for an
 item segment. Behavior is unchanged.
 
-- [ ] Every builder of an item segment supplies the item's index:
+- [x] Every builder of an item segment supplies the item's index:
       hover's AST walk, the cursor locator for a key or value below
       an item, an existing item (`InSequenceItem`), and a blank line
       in a sequence (`InBlankSequence`), where the index is the
       number of items that start before the cursor
-- [ ] Hover has no path type of its own; its walk and its displayed
+- [x] Hover has no path type of its own; its walk and its displayed
       path use `SchemaPathSegment`, and the doc comment of the item
       segment says what its index is
-- [ ] Unit tests pin the index the cursor locator reports for an
+- [x] Unit tests pin the index the cursor locator reports for an
       existing item and for a blank line before the first item,
       between two items, and after the last item, at the root and
       under a mapping key
-- [ ] Every hover, completion, cursor-locator, navigation, and
+- [x] Every hover, completion, cursor-locator, navigation, and
       resolver test passes with its assertions unchanged; only path
       literals change, and the doc comment of `find_node_at_path`
       matches what it does with an item segment
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ### Task 3: Resolve keys through `patternProperties` and `additionalProperties`
 

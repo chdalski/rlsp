@@ -13,7 +13,8 @@ use crate::schema::path::SchemaPathSegment;
 /// Used by `locate_cursor` and consumed by `complete_at`.
 /// Every variant carries the `enclosing_path` — the segments from the document
 /// root down to the immediately enclosing structure: a key segment for each
-/// ancestor mapping key and an item segment for each sequence descent.
+/// ancestor mapping key and an item segment, carrying the item's index, for each
+/// sequence descent.
 #[derive(Debug)]
 pub(super) enum CursorLocation<'a> {
     /// Cursor is inside a mapping key token.
@@ -45,19 +46,22 @@ pub(super) enum CursorLocation<'a> {
     /// Cursor is inside a specific sequence item.
     ///
     /// `sequence` is the containing `Node::Sequence`; `current_item` is the
-    /// item node the cursor sits in.
+    /// item node the cursor sits in, at position `index` in it.
     InSequenceItem {
         enclosing_path: Vec<SchemaPathSegment>,
         sequence: &'a Node<Span>,
+        index: usize,
         current_item: &'a Node<Span>,
     },
     /// Cursor is on a blank/whitespace-only line directly inside a sequence.
     ///
     /// No item's span contains the cursor, but the sequence's own span covers
-    /// the cursor line.
+    /// the cursor line. `index` is the number of items that start before the
+    /// cursor, so the position a new item would take there.
     InBlankSequence {
         enclosing_path: Vec<SchemaPathSegment>,
         sequence: &'a Node<Span>,
+        index: usize,
     },
     /// Cursor cannot be located in any AST structure.
     ///
@@ -81,6 +85,20 @@ pub(super) fn span_contains_cursor(span: Span, cursor: Pos, idx: &LineIndex) -> 
     );
     let pos = (cursor.line, cursor.column);
     start <= pos && pos < end
+}
+
+/// The number of items of `sequence` that start before `cursor`.
+fn items_before_cursor(sequence: &Node<Span>, cursor: Pos, idx: &LineIndex) -> usize {
+    let Node::Sequence { items, .. } = sequence else {
+        return 0;
+    };
+    items
+        .iter()
+        .filter(|item| {
+            let (line, column) = idx.line_column(node_span(item).start);
+            (line as usize, column as usize) < (cursor.line, cursor.column)
+        })
+        .count()
 }
 
 /// Extract the `loc` span from any AST node.
@@ -280,6 +298,7 @@ pub(super) fn locate_cursor(docs: &[Document<Span>], position: Position) -> Curs
                 return CursorLocation::InBlankSequence {
                     enclosing_path: path,
                     sequence: &doc.root,
+                    index: items_before_cursor(&doc.root, cursor, idx),
                 };
             }
         }
@@ -336,6 +355,7 @@ pub(super) fn locate_in_node<'a>(
                         return CursorLocation::InBlankSequence {
                             enclosing_path: enclosing_path.clone(),
                             sequence: value_node,
+                            index: items_before_cursor(value_node, cursor, idx),
                         };
                     }
 
@@ -366,18 +386,19 @@ pub(super) fn locate_in_node<'a>(
             CursorLocation::OutsideAny
         }
         Node::Sequence { items, .. } => {
-            for item in items {
+            for (index, item) in items.iter().enumerate() {
                 let item_span = node_span(item);
                 if span_contains_cursor(item_span, cursor, idx) {
                     // Push an item segment so that inner mapping keys carry the
                     // sequence descent in their enclosing_path.
-                    enclosing_path.push(SchemaPathSegment::Item);
+                    enclosing_path.push(SchemaPathSegment::Item(index));
                     let inner = locate_in_node(item, cursor, enclosing_path, idx);
                     if matches!(inner, CursorLocation::OutsideAny) {
                         enclosing_path.pop();
                         return CursorLocation::InSequenceItem {
                             enclosing_path: enclosing_path.clone(),
                             sequence: node,
+                            index,
                             current_item: item,
                         };
                     }
@@ -391,6 +412,7 @@ pub(super) fn locate_in_node<'a>(
                 return CursorLocation::InBlankSequence {
                     enclosing_path: enclosing_path.clone(),
                     sequence: node,
+                    index: items_before_cursor(node, cursor, idx),
                 };
             }
 
@@ -425,19 +447,19 @@ mod tests {
         "items:\n  - name: foo\n    age: 1\n",
         pos(1, 4),
         "name",
-        vec![key("items"), SchemaPathSegment::Item]
+        vec![key("items"), SchemaPathSegment::Item(0)]
     )]
     #[case::on_key_in_root_sequence_item(
         "- name: foo\n  age: 1\n",
         pos(1, 2),
         "age",
-        vec![SchemaPathSegment::Item]
+        vec![SchemaPathSegment::Item(0)]
     )]
     #[case::on_key_in_nested_sequence_item(
         "- - a: 1\n    b: 2\n",
         pos(1, 4),
         "b",
-        vec![SchemaPathSegment::Item, SchemaPathSegment::Item]
+        vec![SchemaPathSegment::Item(0), SchemaPathSegment::Item(0)]
     )]
     #[case::on_key_under_brackets_key(
         "\"[]\":\n  a: 1\n  b: 2\n",
@@ -449,7 +471,7 @@ mod tests {
         "\"[]\":\n  - a: 1\n    b: 2\n",
         pos(2, 4),
         "b",
-        vec![key("[]"), SchemaPathSegment::Item]
+        vec![key("[]"), SchemaPathSegment::Item(0)]
     )]
     #[case::on_key_utf8("café: latte\n", pos(0, 0), "café", vec![])]
     #[case::on_key_three_levels(
@@ -573,6 +595,7 @@ mod tests {
             CursorLocation::InBlankSequence {
                 enclosing_path,
                 sequence,
+                ..
             } => {
                 assert_eq!(
                     enclosing_path, expected_path,
@@ -595,9 +618,9 @@ mod tests {
     #[case::in_sequence_item_mapping_second_key(
         "items:\n  - name: foo\n    age: 1\n",
         pos(2, 4),
-        vec![key("items"), SchemaPathSegment::Item]
+        vec![key("items"), SchemaPathSegment::Item(0)]
     )]
-    #[case::scalar_in_nested_sequence("- - foo\n", pos(0, 4), vec![SchemaPathSegment::Item])]
+    #[case::scalar_in_nested_sequence("- - foo\n", pos(0, 4), vec![SchemaPathSegment::Item(0)])]
     fn locate_cursor_in_sequence_item(
         #[case] yaml: &str,
         #[case] position: Position,
@@ -650,6 +673,7 @@ mod tests {
                 enclosing_path,
                 sequence,
                 current_item,
+                ..
             } => {
                 assert_eq!(enclosing_path, vec![key("tags")]);
                 assert!(
@@ -662,6 +686,187 @@ mod tests {
                 );
             }
             other => panic!("expected InSequenceItem, got: {other:?}"),
+        }
+    }
+
+    #[rstest]
+    #[case::dash_of_first_item_root("- a\n- b\n", pos(0, 1), vec![], 0)]
+    #[case::dash_of_second_item_root("- a\n- b\n", pos(1, 0), vec![], 1)]
+    #[case::blank_between_scalars_root("- a\n\n- b\n", pos(1, 0), vec![], 1)]
+    #[case::blank_after_last_scalar_root("- a\n- b\n\n", pos(2, 0), vec![], 2)]
+    #[case::past_last_item_at_eof_root("- a\n- b\n", pos(2, 0), vec![], 2)]
+    #[case::dash_before_mapping_item_0("- k: 1\n- k: 2\n", pos(0, 1), vec![], 0)]
+    #[case::dash_before_mapping_item_1("- k: 1\n- k: 2\n", pos(1, 1), vec![], 1)]
+    #[case::null_item_dash("- a\n-\n- c\n", pos(1, 1), vec![], 1)]
+    #[case::under_key_dash_first("k:\n  - a\n  - b\n", pos(1, 2), vec![key("k")], 0)]
+    #[case::under_key_left_of_second("k:\n  - a\n  - b\n", pos(2, 0), vec![key("k")], 1)]
+    #[case::under_key_blank_between("k:\n  - a\n  \n  - b\n", pos(2, 2), vec![key("k")], 1)]
+    #[case::under_key_blank_after_last("k:\n  - a\n  - b\n  \n", pos(3, 2), vec![key("k")], 2)]
+    #[case::nested_inner_index_differs(
+        "- - a\n  - b\n",
+        pos(1, 3),
+        vec![SchemaPathSegment::Item(0)],
+        1
+    )]
+    #[case::nested_outer_index_differs(
+        "- - a\n- - b\n",
+        pos(1, 3),
+        vec![SchemaPathSegment::Item(1)],
+        0
+    )]
+    fn locate_cursor_in_blank_sequence_reports_insertion_index(
+        #[case] yaml: &str,
+        #[case] position: Position,
+        #[case] expected_path: Vec<SchemaPathSegment>,
+        #[case] expected_index: usize,
+    ) {
+        let docs = parse_docs(yaml);
+        let loc = locate_cursor(&docs, position);
+        match loc {
+            CursorLocation::InBlankSequence {
+                enclosing_path,
+                index,
+                ..
+            } => {
+                assert_eq!(
+                    enclosing_path, expected_path,
+                    "path mismatch for yaml={yaml:?}"
+                );
+                assert_eq!(index, expected_index, "index mismatch for yaml={yaml:?}");
+            }
+            other => panic!(
+                "expected InBlankSequence, got different variant for yaml={yaml:?}: {other:?}"
+            ),
+        }
+    }
+
+    #[rstest]
+    #[case::scalar_first("tags:\n  - rust\n  - yaml\n", pos(1, 4), vec![key("tags")], 0)]
+    #[case::scalar_second("tags:\n  - rust\n  - yaml\n", pos(2, 4), vec![key("tags")], 1)]
+    #[case::scalar_third_root("- a\n- b\n- c\n", pos(2, 2), vec![], 2)]
+    #[case::nested_inner0_outer1(
+        "- - a\n- - b\n",
+        pos(1, 4),
+        vec![SchemaPathSegment::Item(1)],
+        0
+    )]
+    // A mapping item's span runs up to the next item, so a blank line after it
+    // belongs to it.
+    #[case::blank_after_mapping_item_belongs_to_it("- k: 1\n\n- k: 2\n", pos(1, 0), vec![], 0)]
+    #[case::blank_after_last_mapping_item("- k: 1\n- k: 2\n\n", pos(2, 0), vec![], 1)]
+    fn locate_cursor_in_sequence_item_reports_index_of_containing_item(
+        #[case] yaml: &str,
+        #[case] position: Position,
+        #[case] expected_path: Vec<SchemaPathSegment>,
+        #[case] expected_index: usize,
+    ) {
+        let docs = parse_docs(yaml);
+        let loc = locate_cursor(&docs, position);
+        match loc {
+            CursorLocation::InSequenceItem {
+                enclosing_path,
+                index,
+                ..
+            } => {
+                assert_eq!(
+                    enclosing_path, expected_path,
+                    "path mismatch for yaml={yaml:?}"
+                );
+                assert_eq!(index, expected_index, "index mismatch for yaml={yaml:?}");
+            }
+            other => panic!(
+                "expected InSequenceItem, got different variant for yaml={yaml:?}: {other:?}"
+            ),
+        }
+    }
+
+    #[rstest]
+    #[case::on_key_item0_root(
+        "- k: 1\n  j: 2\n- k: 3\n  j: 4\n",
+        pos(1, 2),
+        "j",
+        vec![SchemaPathSegment::Item(0)]
+    )]
+    #[case::on_key_item1_root(
+        "- k: 1\n  j: 2\n- k: 3\n  j: 4\n",
+        pos(3, 2),
+        "j",
+        vec![SchemaPathSegment::Item(1)]
+    )]
+    #[case::on_key_item1_under_key(
+        "items:\n  - a: 1\n  - b: 2\n    c: 3\n",
+        pos(3, 4),
+        "c",
+        vec![key("items"), SchemaPathSegment::Item(1)]
+    )]
+    #[case::on_key_nested_1_0(
+        "- - a: 1\n- - b: 2\n    c: 3\n",
+        pos(2, 4),
+        "c",
+        vec![SchemaPathSegment::Item(1), SchemaPathSegment::Item(0)]
+    )]
+    #[case::on_key_nested_0_1(
+        "- - a: 1\n  - b: 2\n    c: 3\n",
+        pos(2, 4),
+        "c",
+        vec![SchemaPathSegment::Item(0), SchemaPathSegment::Item(1)]
+    )]
+    fn locate_cursor_on_key_below_an_item_carries_the_item_index(
+        #[case] yaml: &str,
+        #[case] position: Position,
+        #[case] expected_key: &str,
+        #[case] expected_path: Vec<SchemaPathSegment>,
+    ) {
+        let docs = parse_docs(yaml);
+        let loc = locate_cursor(&docs, position);
+        match loc {
+            CursorLocation::OnKey {
+                key,
+                enclosing_path,
+                ..
+            } => {
+                assert_eq!(key, expected_key, "key mismatch for yaml={yaml:?}");
+                assert_eq!(
+                    enclosing_path, expected_path,
+                    "path mismatch for yaml={yaml:?}"
+                );
+            }
+            other => panic!("expected OnKey, got different variant for yaml={yaml:?}: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn locate_cursor_on_value_below_an_item_carries_the_item_index() {
+        let docs = parse_docs("items:\n  - a: 1\n  - b: 2\n");
+
+        let loc = locate_cursor(&docs, pos(2, 7));
+
+        match loc {
+            CursorLocation::OnValue {
+                key: value_key,
+                enclosing_path,
+            } => {
+                assert_eq!(value_key, "b");
+                assert_eq!(
+                    enclosing_path,
+                    vec![key("items"), SchemaPathSegment::Item(1)]
+                );
+            }
+            other => panic!("expected OnValue, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn locate_cursor_in_blank_mapping_below_an_item_carries_the_item_index() {
+        let docs = parse_docs("- x: 1\n- k:\n    a: 1\n    \n- y: 2\n");
+
+        let loc = locate_cursor(&docs, pos(3, 4));
+
+        match loc {
+            CursorLocation::InBlankMapping { enclosing_path, .. } => {
+                assert_eq!(enclosing_path, vec![SchemaPathSegment::Item(1), key("k")]);
+            }
+            other => panic!("expected InBlankMapping, got: {other:?}"),
         }
     }
 

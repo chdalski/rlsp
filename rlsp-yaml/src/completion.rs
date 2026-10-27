@@ -56,15 +56,17 @@ pub fn complete_at(
         CursorLocation::InSequenceItem {
             enclosing_path,
             sequence,
+            index,
             current_item,
-        } => complete_in_sequence_item(enclosing_path, sequence, current_item, schema),
+        } => complete_in_sequence_item(enclosing_path, sequence, index, current_item, schema),
         CursorLocation::InBlankSequence {
             enclosing_path,
             sequence,
+            index,
         } => {
             if let Some(s) = schema {
                 let mut items_path = enclosing_path;
-                items_path.push(SchemaPathSegment::Item);
+                items_path.push(SchemaPathSegment::Item(index));
                 if let Some(items_schema) = resolve_schema_path(s, &s.root, &items_path)
                     && schema_has_properties(s, items_schema)
                 {
@@ -515,6 +517,34 @@ mod tests {
         assert!(
             !ls.contains(&"name"),
             "should exclude current item key 'name', got: {ls:?}"
+        );
+    }
+
+    #[rstest]
+    #[case::on_key_in_first_item("servers:\n  - host: a\n  - host: b\n", pos(1, 4))]
+    #[case::on_key_in_second_item("servers:\n  - host: a\n  - host: b\n", pos(2, 4))]
+    #[case::blank_between_mapping_items("servers:\n  - host: a\n  \n  - host: b\n", pos(2, 2))]
+    #[case::blank_after_last_mapping_item("servers:\n  - host: a\n  - host: b\n  \n", pos(3, 2))]
+    #[case::blank_after_last_scalar_item("servers:\n  - x\n  - y\n  \n", pos(3, 2))]
+    fn schema_item_keys_do_not_depend_on_the_item_index(
+        #[case] yaml: &str,
+        #[case] cursor: Position,
+    ) {
+        let docs = parse_docs(yaml);
+        let schema = object_schema(vec![(
+            "servers",
+            array_of(object_schema(vec![
+                ("host", string_schema()),
+                ("port", integer_schema()),
+            ])),
+        )]);
+
+        let result = complete_at(&docs, cursor, Some(&ParsedSchema::new(schema)));
+
+        let ls = labels(&result);
+        assert!(
+            ls.contains(&"port"),
+            "should suggest 'port' for yaml={yaml:?}, got: {ls:?}"
         );
     }
 

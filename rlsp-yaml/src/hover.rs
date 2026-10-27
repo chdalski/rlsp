@@ -55,14 +55,13 @@ pub fn hover_at(
 
     let mut markdown = format_hover_markdown(&formatted_path, &yaml_type, value.as_deref());
 
-    if let Some(parsed) = schema {
-        let schema_path = to_schema_path(&path);
-        if let Some(prop_schema) = resolve_schema_path(parsed, &parsed.root, &schema_path) {
-            let schema_section = format_schema_section(prop_schema);
-            if !schema_section.is_empty() {
-                markdown.push('\n');
-                markdown.push_str(&schema_section);
-            }
+    if let Some(parsed) = schema
+        && let Some(prop_schema) = resolve_schema_path(parsed, &parsed.root, &path)
+    {
+        let schema_section = format_schema_section(prop_schema);
+        if !schema_section.is_empty() {
+            markdown.push('\n');
+            markdown.push_str(&schema_section);
         }
     }
 
@@ -79,15 +78,8 @@ pub fn hover_at(
 // AST walk — cursor resolution
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// A segment in a YAML key path.
-#[derive(Debug, Clone)]
-enum PathSegment {
-    Key(String),
-    Index(usize),
-}
-
 /// Walk all documents and return the path + deepest node whose span contains `cursor`.
-fn ast_walk(docs: &[Document<Span>], cursor: Pos) -> Option<(Vec<PathSegment>, &Node<Span>)> {
+fn ast_walk(docs: &[Document<Span>], cursor: Pos) -> Option<(Vec<SchemaPathSegment>, &Node<Span>)> {
     for doc in docs {
         let idx = doc.line_index();
         if span_contains(node_loc(&doc.root), cursor, idx) {
@@ -105,9 +97,9 @@ fn ast_walk(docs: &[Document<Span>], cursor: Pos) -> Option<(Vec<PathSegment>, &
 fn walk_node<'a>(
     node: &'a Node<Span>,
     cursor: Pos,
-    path: &mut Vec<PathSegment>,
+    path: &mut Vec<SchemaPathSegment>,
     idx: &LineIndex,
-) -> Option<(Vec<PathSegment>, &'a Node<Span>)> {
+) -> Option<(Vec<SchemaPathSegment>, &'a Node<Span>)> {
     match node {
         Node::Mapping { entries, .. } => {
             for (key, value) in entries {
@@ -118,12 +110,12 @@ fn walk_node<'a>(
 
                 if span_contains(node_loc(key), cursor, idx) {
                     // Cursor is on the key — hover shows the value at this key.
-                    path.push(PathSegment::Key(key_name));
+                    path.push(SchemaPathSegment::Key(key_name));
                     return Some((path.clone(), value));
                 }
 
                 if span_contains(node_loc(value), cursor, idx) {
-                    path.push(PathSegment::Key(key_name));
+                    path.push(SchemaPathSegment::Key(key_name));
                     return walk_node(value, cursor, path, idx)
                         .or_else(|| Some((path.clone(), value)));
                 }
@@ -133,7 +125,7 @@ fn walk_node<'a>(
         Node::Sequence { items, .. } => {
             for (i, item) in items.iter().enumerate() {
                 if span_contains(node_loc(item), cursor, idx) {
-                    path.push(PathSegment::Index(i));
+                    path.push(SchemaPathSegment::Item(i));
                     return walk_node(item, cursor, path, idx)
                         .or_else(|| Some((path.clone(), item)));
                 }
@@ -172,17 +164,17 @@ const fn node_loc(node: &Node<Span>) -> Span {
 // ──────────────────────────────────────────────────────────────────────────────
 
 /// Format the path segments into a dotted path string.
-fn format_path(path: &[PathSegment]) -> String {
+fn format_path(path: &[SchemaPathSegment]) -> String {
     let mut result = String::new();
     for (i, segment) in path.iter().enumerate() {
         match segment {
-            PathSegment::Key(key) => {
+            SchemaPathSegment::Key(key) => {
                 if i > 0 {
                     result.push('.');
                 }
                 result.push_str(key);
             }
-            PathSegment::Index(idx) => {
+            SchemaPathSegment::Item(idx) => {
                 result.push('[');
                 result.push_str(&idx.to_string());
                 result.push(']');
@@ -253,18 +245,6 @@ fn format_hover_markdown(path: &str, yaml_type: &str, value: Option<&str>) -> St
 // ──────────────────────────────────────────────────────────────────────────────
 // Schema lookup
 // ──────────────────────────────────────────────────────────────────────────────
-
-/// Map an AST path to the schema path that selects the same node: a key stays a
-/// key, and an index becomes an array item, since a schema does not say which
-/// item.
-fn to_schema_path(path: &[PathSegment]) -> Vec<SchemaPathSegment> {
-    path.iter()
-        .map(|segment| match segment {
-            PathSegment::Key(key) => SchemaPathSegment::Key(key.clone()),
-            PathSegment::Index(_) => SchemaPathSegment::Item,
-        })
-        .collect()
-}
 
 /// Format the schema information section appended below the structural hover.
 fn format_schema_section(schema: &JsonSchema) -> String {
@@ -1982,6 +1962,30 @@ mod tests {
         )]),
         "tags[0]",
         "Own item doc"
+    )]
+    #[case::second_item_of_the_second_row(
+        "a:\n  - - p\n  - - q\n    - r\n",
+        pos(3, 6),
+        object_schema(vec![("a", array_of(array_of(schema_with_description("Cell doc"))))]),
+        "a[1][1]",
+        "Cell doc"
+    )]
+    #[case::first_item_of_the_second_row(
+        "a:\n  - - p\n  - - q\n    - r\n",
+        pos(2, 6),
+        object_schema(vec![("a", array_of(array_of(schema_with_description("Cell doc"))))]),
+        "a[1][0]",
+        "Cell doc"
+    )]
+    #[case::key_below_the_second_item(
+        "items:\n  - x: 1\n  - name: y\n",
+        pos(2, 4),
+        object_schema(vec![(
+            "items",
+            array_of(object_schema(vec![("name", schema_with_description("Name doc"))])),
+        )]),
+        "items[1].name",
+        "Name doc"
     )]
     fn hover_shows_the_schema_docs_of_the_hovered_path(
         #[case] text: &str,

@@ -32,7 +32,7 @@ pub(super) fn complete_on_key<'a>(
     });
     let seq_len = enclosing_path.len().saturating_sub(1);
     let structural_keys: HashSet<String> =
-        if enclosing_path.last() == Some(&SchemaPathSegment::Item) {
+        if matches!(enclosing_path.last(), Some(SchemaPathSegment::Item(_))) {
             let seq_path = enclosing_path.get(..seq_len).unwrap_or(&[]);
             match find_node_at_path(docs, seq_path) {
                 Some(seq @ Node::Sequence { .. }) => collect_sequence_sibling_keys(seq),
@@ -99,6 +99,7 @@ pub(super) fn complete_on_value(
 pub(super) fn complete_in_sequence_item<'a>(
     enclosing_path: Vec<SchemaPathSegment>,
     sequence: &'a Node<Span>,
+    index: usize,
     current_item: &'a Node<Span>,
     schema: Option<&ParsedSchema>,
 ) -> Vec<CompletionItem> {
@@ -118,7 +119,7 @@ pub(super) fn complete_in_sequence_item<'a>(
     );
     if let Some(s) = schema {
         let mut items_path = enclosing_path;
-        items_path.push(SchemaPathSegment::Item);
+        items_path.push(SchemaPathSegment::Item(index));
         if let Some(items_schema) = resolve_schema_path(s, &s.root, &items_path)
             && schema_has_properties(s, items_schema)
         {
