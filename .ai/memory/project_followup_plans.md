@@ -17,9 +17,10 @@ metadata:
 ## Open: rlsp-yaml
 
 - **Schema plan queue (one plan at a time, in this order).** Each needs its own clarification + plan:
-  3a. Follow `patternProperties`, `additionalProperties`, and `prefixItems` in the shared schema path resolver — in progress as `.ai/plans/2026-10-27-resolver-pattern-and-positional-schemas.md`.
+  3a. Pattern-resolver plan `.ai/plans/2026-10-27-resolver-pattern-and-positional-schemas.md` stays InProgress: all 4 tasks committed and pushed (main at 56e8eddb, incl. a merge of origin/main with two Dependabot PRs), CI/Release-plz/Push green, but the Coverage workflow (`cargo llvm-cov --workspace`) aborts with `thread '<unknown>' has overflowed its stack` in an `on_a_small_stack` test thread (512 KiB, `schema::test_support`). Not reproducible locally with plain `RUSTFLAGS=-C instrument-coverage cargo test` (3281 pass); cargo-llvm-cov is not installed locally. Coverage was green through fc490730/01e673c3, so a new small-stack test of this plan (schema/path.rs) is the likely cause. Next: add a follow-up task to the plan (find the overflowing test under cargo llvm-cov, fix the cause), then tick the push step and close the plan.
   3b. Completion bug: structural sibling keys of a sequence item come from the first document of a multi-document file (`find_node_at_path` in `completion/navigation.rs` walks `docs.first()`); the cursor locator already knows the right sequence — user chose 2026-10-27 to plan it right after item 3a.
-  4. Bound the thread-local `REGEX_CACHE` and run `validate_schema` off the async executor (`spawn_blocking`).
+  4. Bound the thread-local `REGEX_CACHE` and run `validate_schema` off the async executor (`spawn_blocking`). The cache now lives in `src/schema/pattern.rs` (shared by validation and the path resolver). Moving validation to `spawn_blocking` spreads thread-local caches over the blocking pool, so a bounded process-wide cache may fit better.
+  4a. Price the path resolver's first pass (security Medium, raised 2026-10-27 during the pattern-resolver plan): the first pass of `resolve_schema_path` (`src/schema/path.rs`) is unpriced and hashes the whole key at every visited node, so a very long document key against a large untrusted schema costs schema nodes × path length × key length per hover/completion request. Only the second pass pays from `KEY_FALLBACK_STEP_ALLOWANCE`. The security engineer proposes its own plan, ideally together with item 4; the user must decide whether a path that resolves today may return nothing once an allowance runs out.
   5. Bug: `unevaluatedItems: false` is dropped (boolean `false` sub-schema loss in the parser); check every keyword parsed through the generic sub-schema path. Known instances besides `unevaluatedItems`: `prefixItems: [A, false, C]` parses as `[A, C]` (index shift in validation and the path resolver), a `false` `patternProperties` schema is dropped, `items: false` reads as absent; the resolver's positional and pattern reads must follow the fix.
   6. `httpProxy` hardening — VS Code setting has no `scope`/`restrictedConfigurations`; `configuration.md` wrongly says "requests are made directly" when unset (ureq reads proxy env vars).
   7. SSRF guard via DNS resolution — hostname-string check only (`foo.localhost`, `localtest.me`, `127.0.0.1.nip.io` pass; DNS rebinding).
@@ -35,6 +36,8 @@ metadata:
 - create bindings for python - https://pyo3.rs and typescript (wasm)
 
 ## Open: CI & integrations
+
+- **Dependabot alerts #69–#72 (opened 2026-10-27, not yet addressed; Dependabot PR branch `dependabot/cargo/rustls-0.23.46` exists with green Coverage):** `rustls` in the workspace `Cargo.lock` — GHSA-c8m5-c952-6cm4 (medium), GHSA-h2v8-394m-p7vv, GHSA-w44r-93j7-qv28, GHSA-vp88-798v-h67f (low); first patched version 0.23.46. Needs its own clarification + plan.
 
 - **vsce is unpinned in CI and the local `package` script.** `vscode-extension.yml` (package and publish jobs, the latter with `VSCE_PAT`) and the extension's `package` script run `pnpx @vscode/vsce`, which fetches the latest vsce each run. Pinning was put to the user during the 2026-10-27 Dependabot plan and declined for now ("Nicht jetzt"); a pin inside a script string is not updated by Dependabot. Revisit only if the user raises it.
 
