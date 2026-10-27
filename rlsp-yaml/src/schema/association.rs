@@ -132,6 +132,49 @@ impl KubernetesResource {
     }
 }
 
+/// A Kubernetes version for the schema repository's directory names: `master`
+/// or `MAJOR.MINOR.PATCH`.
+///
+/// The only ways to obtain a value are [`KubernetesVersion::new`] and
+/// [`KubernetesVersion::master`], so [`kubernetes_schema_url`] never receives
+/// raw setting text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KubernetesVersion(String);
+
+impl KubernetesVersion {
+    /// Validate `version`; `None` unless it is exactly `master` or three
+    /// dot-separated groups of 1–9 ASCII digits such as `1.29.0`.
+    ///
+    /// The digit cap keeps a hostile value from lengthening the URL.
+    #[must_use]
+    pub fn new(version: &str) -> Option<Self> {
+        let mut groups = version.split('.');
+        let is_group = |group: Option<&str>| {
+            group.is_some_and(|digits| {
+                (1..=MAX_VERSION_DIGITS).contains(&digits.len())
+                    && digits.bytes().all(|b| b.is_ascii_digit())
+            })
+        };
+        let numeric = is_group(groups.next())
+            && is_group(groups.next())
+            && is_group(groups.next())
+            && groups.next().is_none();
+        (version == "master" || numeric).then(|| Self(version.to_string()))
+    }
+
+    /// The `master` version, which tracks the latest schemas.
+    #[must_use]
+    pub fn master() -> Self {
+        Self("master".to_string())
+    }
+
+    /// The validated text, e.g. `master` or `1.29.0`.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 const MAX_VERSION_DIGITS: usize = 9;
 
 fn is_kind(kind: &str) -> bool {
@@ -262,7 +305,7 @@ fn schema_file_segment(group: &str) -> Option<&str> {
         .map(|&(_, segment)| segment)
 }
 
-/// Construct a Kubernetes JSON Schema URL for the given resource.
+/// Construct a Kubernetes JSON Schema URL for the given resource and version.
 ///
 /// Uses the schema repository at
 /// `https://raw.githubusercontent.com/yannh/kubernetes-json-schema`, which
@@ -278,7 +321,10 @@ fn schema_file_segment(group: &str) -> Option<&str> {
 /// - For core API versions (e.g. `v1`) the filename is
 ///   `{kind}-{api_version}.json`.
 #[must_use]
-pub fn kubernetes_schema_url(resource: &KubernetesResource, k8s_version: &str) -> Option<String> {
+pub fn kubernetes_schema_url(
+    resource: &KubernetesResource,
+    k8s_version: &KubernetesVersion,
+) -> Option<String> {
     let kind_lower = resource.kind().to_ascii_lowercase();
     let filename = if let Some((group, version)) = resource.api_version().split_once('/') {
         let segment = schema_file_segment(group)?;
@@ -286,10 +332,10 @@ pub fn kubernetes_schema_url(resource: &KubernetesResource, k8s_version: &str) -
     } else {
         format!("{kind_lower}-{}.json", resource.api_version())
     };
-    let dir_prefix = if k8s_version == "master" {
+    let dir_prefix = if k8s_version.as_str() == "master" {
         "master-standalone-strict".to_string()
     } else {
-        format!("v{k8s_version}-standalone-strict")
+        format!("v{}-standalone-strict", k8s_version.as_str())
     };
     Some(format!(
         "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/{dir_prefix}/{filename}"
@@ -530,6 +576,10 @@ mod tests {
     // match_schema_by_filename
     // ══════════════════════════════════════════════════════════════════════════
 
+    fn parsed_version(version: &str) -> KubernetesVersion {
+        KubernetesVersion::new(version).expect("valid version")
+    }
+
     fn assoc(pattern: &str, url: &str) -> SchemaAssociation {
         SchemaAssociation {
             pattern: pattern.to_string(),
@@ -722,7 +772,7 @@ mod tests {
     ) {
         let resource = KubernetesResource::new(api_version, kind).expect("valid resource");
         assert_eq!(
-            kubernetes_schema_url(&resource, k8s_version).as_deref(),
+            kubernetes_schema_url(&resource, &parsed_version(k8s_version)).as_deref(),
             Some(expected)
         );
     }
@@ -929,7 +979,7 @@ mod tests {
         let resource =
             KubernetesResource::new(&format!("{group}/v1"), "Widget").expect("valid resource");
         assert_eq!(
-            kubernetes_schema_url(&resource, "master"),
+            kubernetes_schema_url(&resource, &parsed_version("master")),
             Some(format!(
                 "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/widget-{group}-v1.json"
             ))
@@ -942,7 +992,7 @@ mod tests {
             let resource =
                 KubernetesResource::new(&format!("{group}/v1"), "Thing").expect("valid resource");
             assert_eq!(
-                kubernetes_schema_url(&resource, "master"),
+                kubernetes_schema_url(&resource, &parsed_version("master")),
                 Some(format!(
                     "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/thing-{segment}-v1.json"
                 )),
@@ -962,7 +1012,7 @@ mod tests {
                 let resource = KubernetesResource::new(&format!("{near_miss}/v1"), "Widget")
                     .expect("valid resource");
                 assert_eq!(
-                    kubernetes_schema_url(&resource, "master"),
+                    kubernetes_schema_url(&resource, &parsed_version("master")),
                     None,
                     "group {near_miss}"
                 );
@@ -991,7 +1041,135 @@ mod tests {
     fn kubernetes_schema_url_returns_none_for_custom_resource_groups(#[case] group: &str) {
         let resource =
             KubernetesResource::new(&format!("{group}/v1"), "Widget").expect("valid resource");
-        assert_eq!(kubernetes_schema_url(&resource, "master"), None);
+        assert_eq!(
+            kubernetes_schema_url(&resource, &parsed_version("master")),
+            None
+        );
+    }
+
+    /// Versions the server accepts; shared with the VS Code pattern parity test.
+    const ACCEPTED_VERSIONS: &[&str] = &[
+        "master",
+        "1.29.0",
+        "0.0.0",
+        "1.29.10",
+        "100.200.300",
+        "01.02.03",
+        "123456789.123456789.123456789",
+    ];
+
+    /// Versions the server rejects; shared with the VS Code pattern parity test.
+    const REJECTED_VERSIONS: &[&str] = &[
+        "",
+        "1.29",
+        "1",
+        "1.29.0.1",
+        "1.29.",
+        ".1.2",
+        "1..2",
+        "1.2.3.",
+        "v1.29.0",
+        "Master",
+        "MASTER",
+        "master ",
+        "master\n",
+        " 1.29.0",
+        "1.29.0 ",
+        "1.29.0\n",
+        "1.29.0\0",
+        "1.29.0-rc1",
+        "1.29.x",
+        "latest",
+        "..",
+        "../..",
+        "1.29.0/../x",
+        "1.29.0/../../attacker/repo/main/x",
+        "1/../../../../evil/repo/main/x",
+        "1.2.3?x",
+        "1.2.3#x",
+        "1.2.3%2e%2e",
+        "1.2.3@host",
+        "1.2.3\\x",
+        "\u{661}.\u{662}.\u{663}",
+        "\u{ff11}.\u{ff12}.\u{ff13}",
+        "\u{202e}1.2.3",
+        "1.29.0\u{200b}",
+        "1234567890.1.2",
+        "1.1234567890.2",
+        "1.2.1234567890",
+    ];
+
+    #[test]
+    fn kubernetes_version_new_accepts_valid_forms() {
+        for version in ACCEPTED_VERSIONS {
+            assert_eq!(
+                KubernetesVersion::new(version)
+                    .as_ref()
+                    .map(KubernetesVersion::as_str),
+                Some(*version),
+                "{version:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn kubernetes_version_new_rejects_invalid_forms() {
+        for version in REJECTED_VERSIONS {
+            assert_eq!(KubernetesVersion::new(version), None, "{version:?}");
+        }
+    }
+
+    #[test]
+    fn kubernetes_version_master_equals_parsed_master() {
+        assert_eq!(
+            Some(KubernetesVersion::master()),
+            KubernetesVersion::new("master")
+        );
+    }
+
+    #[test]
+    fn kubernetes_schema_url_keeps_leading_zeros_of_a_version() {
+        let resource = KubernetesResource::new("v1", "Pod").expect("valid resource");
+        assert_eq!(
+            kubernetes_schema_url(&resource, &parsed_version("01.02.03")).as_deref(),
+            Some(
+                "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v01.02.03-standalone-strict/pod-v1.json"
+            )
+        );
+    }
+
+    /// The `kubernetesVersion` pattern in the VS Code manifest and the server's
+    /// validator accept the same values (the settings-sync rule).
+    #[test]
+    fn vscode_kubernetes_version_pattern_agrees_with_the_server() {
+        let manifest_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("integrations/vscode/package.json");
+        let manifest: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(manifest_path).expect("package.json is readable"),
+        )
+        .expect("package.json is JSON");
+        let setting =
+            &manifest["contributes"]["configuration"]["properties"]["rlsp-yaml.kubernetesVersion"];
+        let pattern = setting["pattern"]
+            .as_str()
+            .expect("kubernetesVersion declares a pattern");
+        let pattern = regex::Regex::new(pattern).expect("pattern compiles");
+
+        assert!(
+            setting["patternErrorMessage"]
+                .as_str()
+                .is_some_and(|message| !message.is_empty()),
+            "kubernetesVersion declares a patternErrorMessage"
+        );
+        let default = setting["default"].as_str().expect("default is a string");
+        assert!(pattern.is_match(default), "default {default:?}");
+        for version in ACCEPTED_VERSIONS.iter().chain(REJECTED_VERSIONS) {
+            assert_eq!(
+                pattern.is_match(version),
+                KubernetesVersion::new(version).is_some(),
+                "{version:?}"
+            );
+        }
     }
 
     mod url_properties {
@@ -1056,6 +1234,53 @@ mod tests {
                 ..ProptestConfig::default()
             })]
 
+            /// Any accepted version yields a URL inside the schema repository
+            /// whose directory is `master-standalone-strict` or
+            /// `v{MAJOR.MINOR.PATCH}-standalone-strict`.
+            #[test]
+            fn accepted_version_yields_url_inside_the_schema_repository(
+                text in prop_oneof![
+                    "\\PC{0,40}",
+                    "[0-9./%?#:@\\\\ \\-]{0,40}",
+                    "[0-9]{1,9}\\.[0-9]{1,9}\\.[0-9]{1,9}",
+                    Just("master".to_string()),
+                ],
+            ) {
+                let Some(k8s_version) = KubernetesVersion::new(&text) else {
+                    return Ok(());
+                };
+                let resource = KubernetesResource::new("v1", "Pod").expect("valid resource");
+                let url = kubernetes_schema_url(&resource, &k8s_version)
+                    .expect("core resource has a URL");
+                assert_url_inside_the_schema_repository(&url)?;
+                let directory = url[REPOSITORY_PREFIX.len()..]
+                    .split('/')
+                    .next()
+                    .expect("directory segment");
+                prop_assert!(
+                    regex::Regex::new(r"^(master|v[0-9]{1,9}\.[0-9]{1,9}\.[0-9]{1,9})-standalone-strict$")
+                        .expect("regex compiles")
+                        .is_match(directory),
+                    "{}",
+                    directory
+                );
+            }
+
+            /// Guards the property above against passing vacuously.
+            #[test]
+            fn numeric_versions_are_accepted(
+                text in "[0-9]{1,9}\\.[0-9]{1,9}\\.[0-9]{1,9}",
+            ) {
+                prop_assert!(KubernetesVersion::new(&text).is_some());
+            }
+
+            #[test]
+            fn versions_with_a_character_outside_digits_and_dots_are_rejected(
+                text in "[0-9.]{0,10}[^0-9.][0-9.]{0,10}",
+            ) {
+                prop_assert_eq!(KubernetesVersion::new(&text), None);
+            }
+
             #[test]
             fn accepted_resource_yields_url_inside_the_schema_repository(
                 api_version in name_text(),
@@ -1066,7 +1291,7 @@ mod tests {
                 };
 
                 for k8s_version in ["1.29.0", "master"] {
-                    if let Some(url) = kubernetes_schema_url(&resource, k8s_version) {
+                    if let Some(url) = kubernetes_schema_url(&resource, &parsed_version(k8s_version)) {
                         assert_url_inside_the_schema_repository(&url)?;
                     }
                 }
@@ -1081,7 +1306,7 @@ mod tests {
             ) {
                 let resource = KubernetesResource::new(&api_version, &kind).expect("valid resource");
                 for k8s_version in ["1.29.0", "master"] {
-                    let url = kubernetes_schema_url(&resource, k8s_version);
+                    let url = kubernetes_schema_url(&resource, &parsed_version(k8s_version));
                     prop_assert!(url.is_some(), "{api_version} {kind}");
                     assert_url_inside_the_schema_repository(&url.expect("checked above"))?;
                 }
@@ -1096,7 +1321,7 @@ mod tests {
                 let resource = KubernetesResource::new(&format!("{group}/{version}"), &kind)
                     .expect("valid resource");
                 for k8s_version in ["1.29.0", "master"] {
-                    let url = kubernetes_schema_url(&resource, k8s_version);
+                    let url = kubernetes_schema_url(&resource, &parsed_version(k8s_version));
                     prop_assert!(url.is_some(), "{group}");
                     assert_url_inside_the_schema_repository(&url.expect("checked above"))?;
                 }
@@ -1111,7 +1336,7 @@ mod tests {
                 let resource = KubernetesResource::new(&format!("{group}/v1"), &kind)
                     .expect("valid resource");
                 for k8s_version in ["1.29.0", "master"] {
-                    prop_assert_eq!(kubernetes_schema_url(&resource, k8s_version), None);
+                    prop_assert_eq!(kubernetes_schema_url(&resource, &parsed_version(k8s_version)), None);
                 }
             }
 
@@ -1130,15 +1355,17 @@ mod tests {
         }
     }
 
-    // K8s-11: "Master" (capital M) falls through to versioned branch (case-sensitive match)
+    // K8s-11: "Master" (capital M) is not a valid version; the setting falls back to master.
     // Different assertion shape (contains check) — left standalone.
     #[test]
-    fn should_treat_capitalised_master_as_versioned_prefix() {
+    fn should_treat_capitalised_master_as_invalid_and_select_master() {
+        assert_eq!(KubernetesVersion::new("Master"), None);
         let pod = KubernetesResource::new("v1", "Pod").expect("valid resource");
-        let url = kubernetes_schema_url(&pod, "Master").expect("core resource has a URL");
+        let selected = KubernetesVersion::new("Master").unwrap_or_else(KubernetesVersion::master);
+        let url = kubernetes_schema_url(&pod, &selected).expect("core resource has a URL");
         assert!(
-            url.contains("vMaster-standalone-strict/"),
-            "expected vMaster-standalone-strict/ in URL, got: {url}"
+            url.contains("/master-standalone-strict/"),
+            "expected /master-standalone-strict/ in URL, got: {url}"
         );
     }
 }

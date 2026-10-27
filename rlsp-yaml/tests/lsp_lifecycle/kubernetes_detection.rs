@@ -7,6 +7,7 @@ use tower_lsp::LspService;
 use tower_lsp::jsonrpc::Request;
 
 use super::code_lens::code_lens_request;
+use super::configuration::did_change_configuration_notification;
 use super::fake_proxy::{FakeProxy, Reply};
 use super::helpers::*;
 
@@ -34,21 +35,12 @@ async fn should_record_schema_association_for_kubernetes_manifest() {
     // auto-detection. The schema fetch will fail (no network in tests)
     // but the association is recorded before the fetch.
     let uri = "file:///test/pod.yaml";
-    send(
+    let lens_str = schema_lens_after_opening(
         &mut service,
-        did_open_notification(uri, "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\n"),
+        uri,
+        "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\n",
     )
     .await;
-
-    let resp = send(&mut service, code_lens_request(2, uri)).await;
-    let resp = resp.expect("codeLens should return a response");
-    let result = resp.result().expect("codeLens should have result");
-    let arr = result.as_array().expect("codeLens result should be array");
-    assert!(
-        !arr.is_empty(),
-        "codeLens should return a lens for the K8s schema"
-    );
-    let lens_str = serde_json::to_string(&arr[0]).expect("serialize lens");
     assert!(
         lens_str.contains("kubernetes-json-schema"),
         "lens should reference the kubernetes-json-schema repository"
@@ -72,24 +64,12 @@ async fn should_use_configured_kubernetes_version_in_schema_url() {
     send(&mut service, initialized_notification()).await;
 
     let uri = "file:///test/deployment.yaml";
-    send(
+    let lens_str = schema_lens_after_opening(
         &mut service,
-        did_open_notification(
-            uri,
-            "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: test\n",
-        ),
+        uri,
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: test\n",
     )
     .await;
-
-    let resp = send(&mut service, code_lens_request(2, uri)).await;
-    let resp = resp.expect("codeLens should return a response");
-    let result = resp.result().expect("codeLens should have result");
-    let arr = result.as_array().expect("codeLens result should be array");
-    assert!(
-        !arr.is_empty(),
-        "codeLens should return a lens for the K8s schema"
-    );
-    let lens_str = serde_json::to_string(&arr[0]).expect("serialize lens");
     assert!(
         lens_str.contains("v1.29.0"),
         "lens should reference the configured Kubernetes version"
@@ -207,26 +187,268 @@ async fn should_record_kubernetes_schema_association_for_builtin_dotted_group() 
     send(&mut service, initialized_notification()).await;
 
     let uri = "file:///test/ingress.yaml";
-    send(
+    let lens_str = schema_lens_after_opening(
         &mut service,
-        did_open_notification(
-            uri,
-            "apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: test\n",
-        ),
+        uri,
+        "apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: test\n",
     )
     .await;
-
-    let resp = send(&mut service, code_lens_request(2, uri)).await;
-    let resp = resp.expect("codeLens should return a response");
-    let result = resp.result().expect("codeLens should have result");
-    let arr = result.as_array().expect("codeLens result should be array");
-    assert!(
-        !arr.is_empty(),
-        "codeLens should return a lens for the K8s schema"
-    );
-    let lens_str = serde_json::to_string(&arr[0]).expect("serialize lens");
     assert!(
         lens_str.contains("ingress-networking-v1.json"),
         "lens should reference ingress-networking-v1.json: {lens_str}"
+    );
+}
+
+// ---- kubernetesVersion validation ----
+
+const DEPLOYMENT: &str = "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: test\n";
+const MASTER_DEPLOYMENT_FILE: &str = "master-standalone-strict/deployment-apps-v1.json";
+
+/// The complete settings of a server that routes outbound requests through
+/// `proxy`, so no test reaches the network. `kubernetesVersion` is set only
+/// when given.
+///
+/// A configuration change replaces all settings, so every change must be
+/// built from this too, or it drops the proxy.
+fn k8s_settings(proxy: &FakeProxy, version: Option<serde_json::Value>) -> serde_json::Value {
+    let mut settings = json!({ "httpProxy": proxy.url(), "schemaStore": false });
+    if let Some(version) = version {
+        settings
+            .as_object_mut()
+            .expect("settings is an object")
+            .insert("kubernetesVersion".to_string(), version);
+    }
+    settings
+}
+
+/// Start a server with [`k8s_settings`] as its initialization options.
+async fn start_server_with_k8s_version(
+    version: Option<serde_json::Value>,
+) -> (
+    LspService<Backend>,
+    tokio::sync::mpsc::UnboundedReceiver<tower_lsp::lsp_types::LogMessageParams>,
+    FakeProxy,
+) {
+    let proxy = FakeProxy::start(Reply::not_found());
+    let (service, log) = start_server(k8s_settings(&proxy, version)).await;
+    (service, log, proxy)
+}
+
+/// The number of Kubernetes schema repository connections the proxy served.
+fn kubernetes_connects(proxy: &FakeProxy) -> usize {
+    proxy
+        .seen()
+        .iter()
+        .filter(|line| *line == KUBERNETES_CONNECT)
+        .count()
+}
+
+/// Open `text` as `uri` and return the code lens, which carries the schema URL.
+async fn schema_lens_after_opening(
+    service: &mut LspService<Backend>,
+    uri: &str,
+    text: &str,
+) -> String {
+    send(service, did_open_notification(uri, text)).await;
+    let resp = send(service, code_lens_request(50, uri)).await;
+    let resp = resp.expect("codeLens should return a response");
+    let result = resp.result().expect("codeLens should have result");
+    let lens = result
+        .as_array()
+        .and_then(|lenses| lenses.first())
+        .expect("codeLens should return a lens for the K8s schema");
+    serde_json::to_string(lens).expect("serialize lens")
+}
+
+#[tokio::test]
+async fn should_log_exactly_one_warning_for_an_invalid_version_in_initialization_options() {
+    let (mut service, mut log, _proxy) = start_server_with_k8s_version(Some(json!("1.29"))).await;
+
+    send(
+        &mut service,
+        did_open_notification("file:///test/one.yaml", DEPLOYMENT),
+    )
+    .await;
+    send(
+        &mut service,
+        did_open_notification("file:///test/two.yaml", "apiVersion: v1\nkind: Pod\n"),
+    )
+    .await;
+    let warnings = warnings_before_sentinel(&mut service, &mut log).await;
+
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(warnings[0].contains("kubernetesVersion"), "{warnings:?}");
+    assert!(warnings[0].contains("\"1.29\""), "{warnings:?}");
+}
+
+#[rstest]
+#[case::numeric(Some(json!("1.29.0")))]
+#[case::master(Some(json!("master")))]
+#[case::absent(None)]
+#[tokio::test]
+async fn should_log_no_warning_for_a_valid_or_absent_version(
+    #[case] version: Option<serde_json::Value>,
+) {
+    let (mut service, mut log, _proxy) = start_server_with_k8s_version(version).await;
+
+    send(
+        &mut service,
+        did_open_notification("file:///test/one.yaml", DEPLOYMENT),
+    )
+    .await;
+    let warnings = warnings_before_sentinel(&mut service, &mut log).await;
+
+    assert!(warnings.is_empty(), "{warnings:?}");
+}
+
+#[rstest]
+#[case::garbage("bad")]
+#[case::empty("")]
+#[case::capitalised_master("Master")]
+#[case::leading_v("v1.29.0")]
+#[case::two_groups("1.29")]
+#[case::traversal("1.29.0/../../attacker/repo/main/x")]
+#[tokio::test]
+async fn should_select_master_for_an_invalid_version(#[case] version: &str) {
+    let (mut service, _log, _proxy) = start_server_with_k8s_version(Some(json!(version))).await;
+
+    let lens = schema_lens_after_opening(&mut service, "file:///test/one.yaml", DEPLOYMENT).await;
+
+    assert!(lens.contains(MASTER_DEPLOYMENT_FILE), "{lens}");
+    assert!(!lens.contains("attacker"), "{lens}");
+}
+
+#[tokio::test]
+async fn should_keep_other_initialization_options_when_the_version_is_invalid() {
+    let proxy = FakeProxy::start(Reply::not_found());
+    let (mut service, _log) = start_server(json!({
+        "httpProxy": proxy.url(),
+        "kubernetesVersion": "bad"
+    }))
+    .await;
+
+    send(
+        &mut service,
+        did_open_notification("file:///test/one.yaml", DEPLOYMENT),
+    )
+    .await;
+
+    assert!(
+        proxy.seen().iter().any(|line| line == KUBERNETES_CONNECT),
+        "the proxy setting must survive an invalid kubernetesVersion: {:?}",
+        proxy.seen()
+    );
+}
+
+#[tokio::test]
+async fn should_warn_and_select_master_when_a_configuration_change_sets_an_invalid_version() {
+    let (mut service, mut log, proxy) = start_server_with_k8s_version(Some(json!("1.29.0"))).await;
+    let lens = schema_lens_after_opening(&mut service, "file:///test/one.yaml", DEPLOYMENT).await;
+    assert!(lens.contains("v1.29.0-standalone-strict"), "{lens}");
+    assert_eq!(kubernetes_connects(&proxy), 1, "{:?}", proxy.seen());
+
+    send(
+        &mut service,
+        did_change_configuration_notification(&k8s_settings(&proxy, Some(json!("bad")))),
+    )
+    .await;
+    let lens = schema_lens_after_opening(&mut service, "file:///test/two.yaml", DEPLOYMENT).await;
+    let warnings = warnings_before_sentinel(&mut service, &mut log).await;
+
+    assert!(lens.contains(MASTER_DEPLOYMENT_FILE), "{lens}");
+    assert_eq!(
+        kubernetes_connects(&proxy),
+        2,
+        "the fetch after the change must go through the proxy: {:?}",
+        proxy.seen()
+    );
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(warnings[0].contains("\"bad\""), "{warnings:?}");
+}
+
+#[tokio::test]
+async fn should_warn_again_for_each_configuration_change_with_an_invalid_version() {
+    let (mut service, mut log, proxy) = start_server_with_k8s_version(None).await;
+
+    for _ in 0..2 {
+        send(
+            &mut service,
+            did_change_configuration_notification(&k8s_settings(&proxy, Some(json!("bad")))),
+        )
+        .await;
+    }
+    let warnings = warnings_before_sentinel(&mut service, &mut log).await;
+
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+}
+
+#[tokio::test]
+async fn should_stop_warning_and_use_the_version_once_a_configuration_change_makes_it_valid() {
+    let (mut service, mut log, proxy) = start_server_with_k8s_version(Some(json!("bad"))).await;
+
+    send(
+        &mut service,
+        did_change_configuration_notification(&k8s_settings(&proxy, Some(json!("1.30.1")))),
+    )
+    .await;
+    let lens = schema_lens_after_opening(&mut service, "file:///test/one.yaml", DEPLOYMENT).await;
+    let warnings = warnings_before_sentinel(&mut service, &mut log).await;
+
+    assert!(lens.contains("v1.30.1-standalone-strict"), "{lens}");
+    assert_eq!(
+        kubernetes_connects(&proxy),
+        1,
+        "the fetch after the change must go through the proxy: {:?}",
+        proxy.seen()
+    );
+    assert_eq!(
+        warnings.len(),
+        1,
+        "only the initialization Warning: {warnings:?}"
+    );
+}
+
+#[tokio::test]
+async fn should_select_master_without_warning_when_a_configuration_change_drops_the_version() {
+    let (mut service, mut log, proxy) = start_server_with_k8s_version(Some(json!("1.29.0"))).await;
+
+    send(
+        &mut service,
+        did_change_configuration_notification(&k8s_settings(&proxy, None)),
+    )
+    .await;
+    let lens = schema_lens_after_opening(&mut service, "file:///test/one.yaml", DEPLOYMENT).await;
+    let warnings = warnings_before_sentinel(&mut service, &mut log).await;
+
+    assert!(lens.contains(MASTER_DEPLOYMENT_FILE), "{lens}");
+    assert_eq!(
+        kubernetes_connects(&proxy),
+        1,
+        "the fetch after the change must go through the proxy: {:?}",
+        proxy.seen()
+    );
+    assert!(warnings.is_empty(), "{warnings:?}");
+}
+
+#[rstest]
+#[case::control_and_bidi(json!("1.2\n[ERROR] forged\r\u{1b}[31m\u{202e}\u{2028}"))]
+#[case::very_long(json!("9".repeat(10_000)))]
+#[tokio::test]
+async fn should_sanitize_and_cap_an_invalid_version_in_the_client_log(
+    #[case] version: serde_json::Value,
+) {
+    let (mut service, mut log, _proxy) = start_server_with_k8s_version(Some(version)).await;
+
+    let warnings = warnings_before_sentinel(&mut service, &mut log).await;
+
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    let message = &warnings[0];
+    assert!(message.contains("kubernetesVersion"), "{message}");
+    assert!(message.chars().count() <= 512, "{message}");
+    assert!(
+        !message
+            .chars()
+            .any(|c| c.is_control() || matches!(c, '\u{202e}' | '\u{2028}')),
+        "{message:?}"
     );
 }

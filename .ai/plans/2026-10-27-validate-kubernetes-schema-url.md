@@ -55,7 +55,7 @@ fetch.
 - [x] Task 2: only Kubernetes names reach the schema URL
 - [x] Task 3: file names match the schema repository; custom
       resources are not fetched
-- [ ] Task 4: an invalid `kubernetesVersion` falls back to `master`
+- [x] Task 4: an invalid `kubernetesVersion` falls back to `master`
       with a Warning
 - [ ] Push to `main` and confirm the full CI matrix is green
 
@@ -174,9 +174,9 @@ a Warning sent while handling `initialize` reaches the client; the
 LSP specification allows `window/logMessage` during the
 `initialize` request.
 
-- [ ] An absent or invalid value selects `master`; the URL builder
+- [x] An absent or invalid value selects `master`; the URL builder
       accepts only the validated version
-- [ ] Applying settings with an invalid value — at initialization
+- [x] Applying settings with an invalid value — at initialization
       or on a configuration change — sends exactly one Warning to
       the client log that names the setting and the rejected
       value, sanitized like the other client log messages; a valid
@@ -185,18 +185,18 @@ LSP specification allows `window/logMessage` during the
       Warnings across `initialize`, `initialized`, and the first
       opened document, and check that the resulting schema URL
       uses `master`
-- [ ] `should_treat_capitalised_master_as_versioned_prefix` now
+- [x] `should_treat_capitalised_master_as_versioned_prefix` now
       asserts that `Master` is invalid and selects `master`
-- [ ] The VS Code setting `rlsp-yaml.kubernetesVersion` carries a
+- [x] The VS Code setting `rlsp-yaml.kubernetesVersion` carries a
       pattern that accepts exactly the values the server accepts,
       and an error message; the extension's build, tests, lint,
       format check, and typecheck pass
-- [ ] The `kubernetesVersion` section of
+- [x] The `kubernetesVersion` section of
       `rlsp-yaml/docs/configuration.md` tells the reader which
       values are accepted and what happens with any other value,
       and the feature-log entry for Kubernetes auto-detection also
       tells the reader about the `kubernetesVersion` fallback
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ## Non-Goals
 
@@ -220,6 +220,9 @@ LSP specification allows `window/logMessage` during the
 - **Version numbers are capped at 9 digits:** each digit run in an
   API version may have at most 9 digits, so a hostile value cannot
   grow the URL; real versions use one or two digits.
+- **`kubernetesVersion` groups have 1–9 digits:** like the API
+  version's digit runs, so a hostile setting cannot grow the URL;
+  the VS Code pattern accepts exactly the same set.
 - **Invalid names go on to SchemaStore:** a document with an
   invalid `kind` is not a Kubernetes manifest, and the source chain
   stays "first source that yields a URL wins".

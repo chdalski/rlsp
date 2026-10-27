@@ -108,8 +108,12 @@ pub struct Settings {
     pub format_respect_editorconfig: Option<bool>,
 }
 
-/// Default Kubernetes version used when `kubernetesVersion` is not configured.
+/// Kubernetes version used when `kubernetesVersion` is absent or invalid.
 const DEFAULT_KUBERNETES_VERSION: &str = "master";
+
+/// Longest rejected `kubernetesVersion` echoed into a client log message, in
+/// characters.
+const MAX_LOGGED_SETTING_CHARS: usize = 32;
 
 /// Longest schema URL echoed into a client log message, in characters.
 const MAX_LOGGED_URL_CHARS: usize = 200;
@@ -150,6 +154,21 @@ fn validation_incomplete_message(schema_url: &str) -> String {
          diagnostic limit, so some problems may not be reported",
         loggable_url(schema_url)
     ))
+}
+
+/// Build the Warning for a `kubernetesVersion` setting that is not a valid
+/// version, or `None` when the setting is absent or valid.
+///
+/// The rejected value comes from workspace settings, so it is cut, escaped,
+/// and put last: the cut can then never remove the explanation.
+fn invalid_kubernetes_version_message(raw: Option<&str>) -> Option<String> {
+    let raw = raw.filter(|value| schema::KubernetesVersion::new(value).is_none())?;
+    Some(printable_log_message(&format!(
+        "Setting kubernetesVersion must be \"master\" or MAJOR.MINOR.PATCH with digits only \
+         (for example \"1.29.0\", without a leading \"v\"); falling back to \
+         \"{DEFAULT_KUBERNETES_VERSION}\". Rejected value: {:?}",
+        truncate_chars(raw, MAX_LOGGED_SETTING_CHARS)
+    )))
 }
 
 /// Replace control and bidirectional-formatting characters in `message` and cap
@@ -269,12 +288,19 @@ impl Backend {
             .unwrap_or_default()
     }
 
-    pub(crate) fn get_kubernetes_version(&self) -> String {
+    /// The configured Kubernetes version, or `master` when it is absent or
+    /// invalid. Called for every document, so it never logs; the Warning for an
+    /// invalid value is sent once per settings change by `store_settings`.
+    pub(crate) fn get_kubernetes_version(&self) -> schema::KubernetesVersion {
         self.settings
             .lock()
             .ok()
-            .and_then(|s| s.kubernetes_version.clone())
-            .unwrap_or_else(|| DEFAULT_KUBERNETES_VERSION.to_string())
+            .and_then(|s| {
+                s.kubernetes_version
+                    .as_deref()
+                    .and_then(schema::KubernetesVersion::new)
+            })
+            .unwrap_or_else(schema::KubernetesVersion::master)
     }
 
     /// Return `true` if `SchemaStore` automatic association is enabled.
@@ -403,7 +429,7 @@ impl Backend {
     /// Tell the user in the client log why `schema_url` could not be applied.
     ///
     /// Auto-detected Kubernetes schemas stay silent: their URL is a guess, and
-    /// for custom resources no schema exists.
+    /// the schema repository may not hold the version asked for.
     async fn log_schema_failure(
         &self,
         source: SchemaSource,
@@ -829,9 +855,20 @@ impl Backend {
 
     /// Replace the stored settings; the single store path for `initialize`
     /// and `did_change_configuration`.
-    fn store_settings(&self, settings: Settings) {
+    ///
+    /// Sends one Warning to the client log per call when `kubernetesVersion`
+    /// is invalid. `Client::log_message` is not held back before
+    /// initialization completes, so this also reaches the client from
+    /// `initialize`.
+    async fn store_settings(&self, settings: Settings) {
+        let warning = invalid_kubernetes_version_message(settings.kubernetes_version.as_deref());
         if let Ok(mut s) = self.settings.lock() {
             *s = settings;
+        }
+        if let Some(message) = warning {
+            self.client
+                .log_message(tower_lsp::lsp_types::MessageType::WARNING, message)
+                .await;
         }
     }
 
@@ -854,7 +891,7 @@ impl LanguageServer for Backend {
             .initialization_options
             .and_then(|v| serde_json::from_value::<Settings>(v).ok())
             .unwrap_or_default();
-        self.store_settings(settings);
+        self.store_settings(settings).await;
         Ok(InitializeResult {
             capabilities: Self::capabilities(),
             ..InitializeResult::default()
@@ -863,7 +900,7 @@ impl LanguageServer for Backend {
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
         if let Ok(settings) = serde_json::from_value::<Settings>(params.settings) {
-            self.store_settings(settings);
+            self.store_settings(settings).await;
         }
     }
 
@@ -1943,7 +1980,14 @@ mod tests {
     fn get_kubernetes_version_returns_default_when_not_configured() {
         let (service, _) = tower_lsp::LspService::new(Backend::new);
         let backend = service.inner();
-        assert_eq!(backend.get_kubernetes_version(), DEFAULT_KUBERNETES_VERSION);
+        assert_eq!(
+            backend.get_kubernetes_version(),
+            schema::KubernetesVersion::master()
+        );
+        assert_eq!(
+            backend.get_kubernetes_version().as_str(),
+            DEFAULT_KUBERNETES_VERSION
+        );
     }
 
     #[test]
@@ -1957,7 +2001,82 @@ mod tests {
             *s = new_settings;
         }
 
-        assert_eq!(backend.get_kubernetes_version(), "1.29.0");
+        assert_eq!(backend.get_kubernetes_version().as_str(), "1.29.0");
+    }
+
+    #[rstest]
+    #[case::garbage("bad")]
+    #[case::empty("")]
+    #[case::capitalised_master("Master")]
+    #[case::two_groups("1.29")]
+    #[case::leading_v("v1.29.0")]
+    fn get_kubernetes_version_falls_back_to_master_for_invalid_value(#[case] raw: &str) {
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
+        let backend = service.inner();
+
+        let json = serde_json::json!({"kubernetesVersion": raw});
+        let new_settings: Settings = serde_json::from_value(json).unwrap();
+        if let Ok(mut s) = backend.settings.lock() {
+            *s = new_settings;
+        }
+
+        assert_eq!(
+            backend.get_kubernetes_version(),
+            schema::KubernetesVersion::master()
+        );
+    }
+
+    #[test]
+    fn settings_keeps_invalid_kubernetes_version_raw_and_other_settings() {
+        let json = serde_json::json!({"kubernetesVersion": "bad", "keyOrdering": true});
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.kubernetes_version.as_deref(), Some("bad"));
+        assert!(settings.key_ordering);
+    }
+
+    #[rstest]
+    #[case::absent(None)]
+    #[case::master(Some("master"))]
+    #[case::numeric(Some("1.29.0"))]
+    fn invalid_kubernetes_version_message_is_none_for_absent_or_valid_value(
+        #[case] raw: Option<&str>,
+    ) {
+        assert_eq!(invalid_kubernetes_version_message(raw), None);
+    }
+
+    #[rstest]
+    #[case::garbage("bad")]
+    #[case::empty("")]
+    #[case::leading_v("v1.29.0")]
+    #[case::traversal("1/../../x")]
+    fn invalid_kubernetes_version_message_names_setting_value_and_fallback(#[case] raw: &str) {
+        let message = invalid_kubernetes_version_message(Some(raw)).expect("invalid value warns");
+        assert!(message.contains("kubernetesVersion"), "{message}");
+        assert!(message.contains("falling back to \"master\""), "{message}");
+        assert!(
+            message.ends_with(&format!("Rejected value: {raw:?}")),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn invalid_kubernetes_version_message_escapes_control_and_bidi_characters() {
+        let raw = "1.2\n[ERROR] forged\r\u{1b}[31m\u{202e}\u{2028}\0\"";
+        let message = invalid_kubernetes_version_message(Some(raw)).expect("invalid value warns");
+        assert!(!message.chars().any(is_unsafe_log_char), "{message:?}");
+        assert!(message.contains("kubernetesVersion"), "{message}");
+    }
+
+    #[rstest]
+    #[case::long_text("x".repeat(10_000))]
+    #[case::long_escaped_characters("\u{202e}".repeat(10_000))]
+    #[case::long_multibyte("\u{e9}".repeat(10_000))]
+    fn invalid_kubernetes_version_message_caps_a_long_value(#[case] raw: String) {
+        let message = invalid_kubernetes_version_message(Some(&raw)).expect("invalid value warns");
+        assert!(message.chars().count() <= MAX_SCHEMA_LOG_CHARS, "{message}");
+        assert!(message.contains("falling back to \"master\""), "{message}");
+        assert!(message.contains("Rejected value: \""), "{message}");
+        assert!(message.contains('…'), "{message}");
     }
 
     // ---- YAML version setting ----

@@ -88,6 +88,8 @@ Set this to match your cluster version to get accurate validation:
 { "kubernetesVersion": "1.29.0" }
 ```
 
+Accepted values are `"master"` (lowercase) and a version of three dot-separated numbers such as `"1.29.0"`, each with up to nine digits and without a leading `v`. Any other value, such as `"Master"`, `"v1.29.0"`, or `"1.29"`, is rejected: the server uses `"master"` instead and writes a warning to the client log. The warning repeats each time the client sends settings while the value stays invalid. The VS Code extension marks such a value in the settings editor.
+
 ### `schemaStore`
 
 - **Type:** `boolean`

@@ -57,7 +57,9 @@
         "rlsp-yaml.kubernetesVersion": {
           "type": "string",
           "default": "master",
-          "description": "Kubernetes schema version to use"
+          "pattern": "^(master|[0-9]{1,9}\\.[0-9]{1,9}\\.[0-9]{1,9})$",
+          "patternErrorMessage": "Use \"master\" or a version such as 1.29.0 (digits only, without a leading \"v\"). Any other value falls back to \"master\".",
+          "description": "Kubernetes schema version to use: \"master\" or MAJOR.MINOR.PATCH such as 1.29.0. Any other value falls back to \"master\"."
         },
         "rlsp-yaml.schemaStore": {
           "type": "boolean",
