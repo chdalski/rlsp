@@ -213,8 +213,15 @@ impl ParsedSchema {
 
 /// A subset of JSON Schema (Draft-04 and Draft-07) sufficient for validation,
 /// completion, and hover support.
+///
+/// A schema that reads only some of the fields reads the boolean schema
+/// `false` as `true`: see [`JsonSchema::always_fails`].
 #[derive(Debug, Clone, Default)]
 pub struct JsonSchema {
+    /// Set on the boolean schema `false`, which no value satisfies. All other
+    /// fields of such a schema are unset. A reader that ignores this field
+    /// reads the schema as `true`, which accepts every value.
+    pub always_fails: bool,
     /// Schema identifier (`$id` in Draft-07, `id` in Draft-04).
     pub id: Option<String>,
     /// Value of the `type` keyword.
@@ -323,6 +330,27 @@ pub struct JsonSchema {
     pub unevaluated_items: Option<Box<Self>>,
 }
 
+impl JsonSchema {
+    /// The boolean schema `false`: no value satisfies it.
+    #[must_use]
+    pub fn always_failing() -> Self {
+        Self {
+            always_fails: true,
+            ..Self::default()
+        }
+    }
+}
+
+/// The schema a boolean stands for: `true` accepts every value and `false`
+/// accepts none.
+fn schema_of_bool(allowed: bool) -> JsonSchema {
+    if allowed {
+        JsonSchema::default()
+    } else {
+        JsonSchema::always_failing()
+    }
+}
+
 /// Builders for schemas with shared targets, for the tests of every consumer.
 #[cfg(test)]
 pub(crate) mod test_support {
@@ -336,6 +364,30 @@ pub(crate) mod test_support {
     /// written as [`SchemaPathSegment::Item`], so a key spelled `[]` stays a key.
     pub fn key(name: &str) -> SchemaPathSegment {
         SchemaPathSegment::Key(name.to_string())
+    }
+
+    /// `schema`, a JSON schema document, with every `false` below the root
+    /// replaced by a reference to a definition that is `false`.
+    pub fn behind_a_reference(schema: &serde_json::Value) -> serde_json::Value {
+        use serde_json::{Value, json};
+
+        fn replace(value: &Value) -> Value {
+            match value {
+                Value::Bool(false) => json!({ "$ref": "#/definitions/No" }),
+                Value::Object(map) => Value::Object(
+                    map.iter()
+                        .map(|(key, value)| (key.clone(), replace(value)))
+                        .collect(),
+                ),
+                Value::Array(items) => Value::Array(items.iter().map(replace).collect()),
+                other @ (Value::Null | Value::Bool(true) | Value::Number(_) | Value::String(_)) => {
+                    other.clone()
+                }
+            }
+        }
+        let mut replaced = replace(schema);
+        replaced["definitions"] = json!({ "No": false });
+        replaced
     }
 
     /// A reference node to the target at `index`.
@@ -1398,8 +1450,13 @@ fn parse_type(value: Option<&Value>) -> Option<SchemaType> {
 ///
 /// Boolean schemas:
 /// - `true`  → empty (permissive) schema
-/// - `false` → [`SchemaError::ParseFailed`] (no schema representation for
-///   "reject everything")
+/// - `false` → [`SchemaError::ParseFailed`] as the root, because a schema that
+///   rejects every document is no use for validation; `false` anywhere below
+///   the root is kept in its place as the schema with
+///   [`JsonSchema::always_fails`] set, also where a `$ref` lands on it.
+///
+/// A reader of the result that ignores [`JsonSchema::always_fails`] reads such
+/// a schema as `true`.
 ///
 /// Each `$ref` target is parsed once and shared: the parsed schema holds a
 /// reference node wherever a `$ref` stands, and the target table holds the
@@ -1622,7 +1679,8 @@ fn reference_keyword(obj: &serde_json::Map<String, Value>) -> Option<(&str, Keyw
 }
 
 /// Whether the array form of `items` is read as a tuple: `prefixItems` holds
-/// no schema, so it does not take that role. Parse and discovery share this.
+/// no schema (a boolean, `false` included, is one), so it does not take that
+/// role. Parse and discovery share this.
 fn reads_tuple_items(obj: &serde_json::Map<String, Value>) -> bool {
     let prefix_holds_a_schema = obj
         .get("prefixItems")
@@ -1732,7 +1790,7 @@ fn navigate<'a>(root: &'a Value, path: &[Rc<str>]) -> Option<&'a Value> {
 
 /// Whether `value` can be the target of a reference.
 const fn is_schema_value(value: &Value) -> bool {
-    matches!(value, Value::Object(_) | Value::Bool(true))
+    matches!(value, Value::Object(_) | Value::Bool(_))
 }
 
 /// Index the `$anchor` and `$dynamicAnchor` names of `root` to their paths.
@@ -2005,8 +2063,10 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
             return JsonSchema::default();
         }
         let source = self.source(location.key.doc);
-        let Some(Value::Object(obj)) = navigate(source.value(), &location.path) else {
-            return JsonSchema::default();
+        let obj = match navigate(source.value(), &location.path) {
+            Some(Value::Object(obj)) => obj,
+            Some(Value::Bool(allowed)) => return schema_of_bool(*allowed),
+            _ => return JsonSchema::default(),
         };
         let scope = Scope {
             doc: location.key.doc,
@@ -2078,7 +2138,9 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
     // Schema nodes
     // ──────────────────────────────────────────────────────────────────────────
 
-    /// Parse the schema `value`; `None` for a value that is no schema.
+    /// Parse the schema `value`; `None` for a value that is no schema, and
+    /// once the parsed budget is exceeded. The booleans are schemas: `false`
+    /// is the always-failing one, in whichever place it stands.
     ///
     /// A schema that a reference names is a target, built once on its own;
     /// where it sits it is a reference node.
@@ -2096,18 +2158,14 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
             }
         }
         match value {
-            Value::Bool(true) => Some(JsonSchema::default()),
+            Value::Bool(allowed) => Some(schema_of_bool(*allowed)),
             Value::Object(obj) => {
                 if let Some(reference) = self.parse_reference(obj, scope) {
                     return Some(reference);
                 }
                 Some(self.parse_object(obj, scope))
             }
-            Value::Bool(false)
-            | Value::Null
-            | Value::Number(_)
-            | Value::String(_)
-            | Value::Array(_) => None,
+            Value::Null | Value::Number(_) | Value::String(_) | Value::Array(_) => None,
         }
     }
 
@@ -3127,7 +3185,7 @@ mod tests {
         assert!(s.schema_type.is_none());
     }
 
-    // boolean false → None
+    // boolean false as the root → error
     #[test]
     fn should_parse_boolean_false_schema() {
         assert!(parse_schema(&Value::Bool(false)).is_err());
@@ -3491,7 +3549,7 @@ mod tests {
     // Discovery reads the same positions as the build, also where `prefixItems`
     // and the array form of `items` meet.
     #[rstest]
-    #[case::prefix_items_without_a_schema(json!({ "prefixItems": [false] }))]
+    #[case::prefix_items_without_a_schema(json!({ "prefixItems": [5] }))]
     #[case::prefix_items_not_an_array(json!({ "prefixItems": 5 }))]
     #[case::prefix_items_empty(json!({ "prefixItems": [] }))]
     #[case::no_prefix_items(json!({}))]
@@ -3645,7 +3703,6 @@ mod tests {
     }
 
     #[rstest]
-    #[case::boolean_false(json!(false))]
     #[case::number(json!(5))]
     #[case::string(json!("s"))]
     #[case::null(Value::Null)]
@@ -3657,6 +3714,370 @@ mod tests {
 
         // The text is the one of the reference that failed, the last of the chain.
         assert_eq!(unresolved_ref(&parsed.root), Some("#/x-chain/R2"));
+    }
+
+    // ── Boolean `false` ──────────────────────────────────────────────────────
+
+    /// The keywords whose `false` is kept in a place of its own; for the three
+    /// others it is a denial (`AdditionalProperties::Denied`).
+    fn false_keywords() -> impl Iterator<Item = &'static str> {
+        SUBSCHEMA_KEYWORDS.iter().copied().filter(|keyword| {
+            ![
+                "additionalItems",
+                "additionalProperties",
+                "unevaluatedProperties",
+            ]
+            .contains(keyword)
+        })
+    }
+
+    /// The sub-schema that [`wrap`] put under `keyword` of `schema`, as parsed.
+    fn schema_under<'a>(keyword: &str, schema: &'a JsonSchema) -> &'a JsonSchema {
+        let found = match keyword {
+            "properties" => schema.properties.as_ref().and_then(|map| map.get("k")),
+            "patternProperties" => schema
+                .pattern_properties
+                .as_ref()
+                .and_then(|entries| entries.first())
+                .map(|(_, entry)| entry),
+            "prefixItems" | "tuple-items" => {
+                schema.prefix_items.as_ref().and_then(|items| items.first())
+            }
+            "items" => schema.items.as_deref(),
+            "contains" => schema.contains.as_deref(),
+            "contentSchema" => schema.content_schema.as_deref(),
+            "propertyNames" => schema.property_names.as_deref(),
+            "not" => schema.not.as_deref(),
+            "if" => schema.if_schema.as_deref(),
+            "then" => schema.then_schema.as_deref(),
+            "else" => schema.else_schema.as_deref(),
+            "unevaluatedItems" => schema.unevaluated_items.as_deref(),
+            "allOf" => schema.all_of.as_ref().and_then(|items| items.first()),
+            "anyOf" => schema.any_of.as_ref().and_then(|items| items.first()),
+            "oneOf" => schema.one_of.as_ref().and_then(|items| items.first()),
+            "dependencies" | "dependentSchemas" => schema
+                .dependent_schemas
+                .as_ref()
+                .and_then(|map| map.get("k")),
+            other => panic!("no sub-schema position for {other}"),
+        };
+        found.unwrap_or_else(|| panic!("keyword {keyword} holds no schema"))
+    }
+
+    #[test]
+    fn false_parses_to_the_always_failing_schema_under_every_subschema_keyword() {
+        for keyword in false_keywords() {
+            let parsed = parse_schema(&wrap(keyword, &json!(false))).expect("parses");
+
+            let child = schema_under(keyword, parsed.resolved_root());
+
+            assert!(child.always_fails, "keyword {keyword}");
+            assert!(child.reference.is_none(), "keyword {keyword}");
+            assert_eq!(node_count(&parsed), 2, "keyword {keyword}");
+        }
+    }
+
+    #[test]
+    fn true_parses_to_a_schema_that_does_not_fail_under_every_subschema_keyword() {
+        for keyword in false_keywords() {
+            let parsed = parse_schema(&wrap(keyword, &json!(true))).expect("parses");
+
+            let child = schema_under(keyword, parsed.resolved_root());
+
+            assert!(!child.always_fails, "keyword {keyword}");
+        }
+    }
+
+    #[test]
+    fn false_behind_a_reference_resolves_to_the_always_failing_schema() {
+        for keyword in false_keywords() {
+            let mut value = wrap(keyword, &json!({ "$ref": "#/definitions/No" }));
+            value["definitions"] = json!({ "No": false });
+
+            let parsed = parse_schema(&value).expect("parses");
+
+            let child = schema_under(keyword, parsed.resolved_root());
+            assert!(target_of(child).is_some(), "keyword {keyword}");
+            assert!(parsed.resolve(child).always_fails, "keyword {keyword}");
+            assert_well_formed(&parsed);
+        }
+    }
+
+    #[rstest]
+    #[case::ref_keyword(json!({ "$ref": "#/properties/p" }))]
+    #[case::dynamic_ref(json!({ "$dynamicRef": "#/properties/p" }))]
+    fn false_is_the_target_of_a_ref_and_of_a_dynamic_ref(#[case] reference: Value) {
+        let value = json!({ "not": reference, "properties": { "p": false } });
+
+        let parsed = parse_schema(&value).expect("parses");
+
+        let not = parsed.resolved_root().not.as_deref().expect("not");
+        assert!(target_of(not).is_some());
+        assert!(parsed.resolve(not).always_fails);
+        assert_well_formed(&parsed);
+    }
+
+    #[test]
+    fn false_in_a_fetched_document_resolves_to_the_always_failing_schema() {
+        let url = "https://example.com/no.json";
+        for (document, reference) in [
+            (json!(false), url.to_string()),
+            (json!({ "x": false }), format!("{url}#/x")),
+        ] {
+            let mut cache = cache_with(&[(url, document)]);
+            let mut ctx = ParseContext::new(&mut cache, None);
+            let value = json!({ "not": { "$ref": reference } });
+
+            let parsed = parse_with(&value, None, Some(&mut ctx)).expect("parses");
+
+            let not = parsed.resolved_root().not.as_deref().expect("not");
+            assert!(parsed.resolve(not).always_fails, "{reference}");
+        }
+    }
+
+    #[rstest]
+    #[case::additional_properties("additionalProperties")]
+    #[case::unevaluated_properties("unevaluatedProperties")]
+    #[case::additional_items("additionalItems")]
+    fn inline_false_for_the_denying_keywords_stays_denied(#[case] keyword: &str) {
+        let parsed = parse_schema(&wrap(keyword, &json!(false))).expect("parses");
+        let root = parsed.resolved_root();
+
+        let denial = match keyword {
+            "additionalProperties" => &root.additional_properties,
+            "unevaluatedProperties" => &root.unevaluated_properties,
+            _ => &root.additional_items,
+        };
+
+        assert!(matches!(denial, Some(AdditionalProperties::Denied)));
+        assert_eq!(node_count(&parsed), 1);
+    }
+
+    #[rstest]
+    #[case::additional_properties("additionalProperties")]
+    #[case::unevaluated_properties("unevaluatedProperties")]
+    #[case::additional_items("additionalItems")]
+    fn a_reference_to_false_for_the_denying_keywords_is_a_schema(#[case] keyword: &str) {
+        let mut value = wrap(keyword, &json!({ "$ref": "#/definitions/No" }));
+        value["definitions"] = json!({ "No": false });
+
+        let parsed = parse_schema(&value).expect("parses");
+
+        let root = parsed.resolved_root();
+        let Some(AdditionalProperties::Schema(schema)) = (match keyword {
+            "additionalProperties" => &root.additional_properties,
+            "unevaluatedProperties" => &root.unevaluated_properties,
+            _ => &root.additional_items,
+        }) else {
+            panic!("a schema is expected for {keyword}");
+        };
+        assert!(parsed.resolve(schema).always_fails);
+    }
+
+    #[rstest]
+    #[case::prefix_items(json!({ "prefixItems": [{ "description": "A" }, false, { "description": "C" }] }))]
+    #[case::tuple_items(json!({ "items": [{ "description": "A" }, false, { "description": "C" }] }))]
+    fn a_false_item_keeps_the_index_of_the_items_after_it(#[case] value: Value) {
+        let parsed = parse_schema(&value).expect("parses");
+
+        let items = parsed
+            .resolved_root()
+            .prefix_items
+            .as_deref()
+            .expect("items");
+
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].description.as_deref(), Some("A"));
+        assert!(items[1].always_fails);
+        assert_eq!(items[2].description.as_deref(), Some("C"));
+    }
+
+    #[test]
+    fn a_prefix_of_only_false_is_kept() {
+        let parsed = parse_schema(&json!({ "prefixItems": [false] })).expect("parses");
+
+        let items = parsed
+            .resolved_root()
+            .prefix_items
+            .as_deref()
+            .expect("items");
+
+        assert_eq!(items.len(), 1);
+        assert!(items[0].always_fails);
+    }
+
+    // `prefixItems: [false]` holds a schema, so the array form of `items` next
+    // to it is not a tuple, in the build and in discovery alike.
+    #[test]
+    fn tuple_items_next_to_a_false_prefix_item_are_not_read() {
+        let v = json!({
+            "properties": { "a": { "$ref": "#/definitions/A" }, "b": { "$ref": "#/definitions/B" } },
+            "definitions": {
+                "A": { "properties": { "p": { "type": "string" } } },
+                "B": { "prefixItems": [false], "items": [{ "$ref": "#/definitions/A/properties/p" }] }
+            }
+        });
+
+        let parsed = parse_schema(&v).expect("parses");
+
+        let b = parsed.resolve(property(parsed.resolved_root(), "b"));
+        assert!(b.items.is_none());
+        assert_eq!(b.prefix_items.as_deref().map(<[_]>::len), Some(1));
+        let a = parsed.resolve(property(parsed.resolved_root(), "a"));
+        assert!(
+            target_of(property(a, "p")).is_none(),
+            "the position that is not read was discovered"
+        );
+        assert!(node_count(&parsed) <= json_value_count(&v));
+    }
+
+    #[rstest]
+    #[case::all_of("allOf")]
+    #[case::any_of("anyOf")]
+    #[case::one_of("oneOf")]
+    fn a_false_branch_is_kept_in_order(#[case] keyword: &str) {
+        let parsed = parse_schema(&json!({
+            keyword: [{ "description": "first" }, false, true]
+        }))
+        .expect("parses");
+        let root = parsed.resolved_root();
+
+        let branches = match keyword {
+            "allOf" => &root.all_of,
+            "anyOf" => &root.any_of,
+            _ => &root.one_of,
+        }
+        .as_deref()
+        .expect("branches");
+
+        assert_eq!(branches.len(), 3);
+        assert_eq!(branches[0].description.as_deref(), Some("first"));
+        assert!(branches[1].always_fails);
+        assert!(!branches[2].always_fails);
+    }
+
+    #[test]
+    fn a_false_dependency_schema_is_kept_beside_the_required_names() {
+        let parsed = parse_schema(&json!({
+            "dependencies": { "a": false, "b": ["x"] }
+        }))
+        .expect("parses");
+        let root = parsed.resolved_root();
+
+        let schemas = root.dependent_schemas.as_ref().expect("schemas");
+        assert!(schemas["a"].always_fails);
+        assert_eq!(schemas.len(), 1);
+        let required = root.dependent_required.as_ref().expect("required");
+        assert_eq!(required["b"], vec!["x".to_string()]);
+    }
+
+    #[rstest]
+    #[case::dependent_schemas_over_dependencies(
+        json!({ "dependencies": { "a": false }, "dependentSchemas": { "a": {} } }),
+        false
+    )]
+    #[case::false_over_dependencies(
+        json!({ "dependencies": { "a": {} }, "dependentSchemas": { "a": false } }),
+        true
+    )]
+    fn dependent_schemas_take_precedence_over_dependencies_also_for_false(
+        #[case] value: Value,
+        #[case] fails: bool,
+    ) {
+        let parsed = parse_schema(&value).expect("parses");
+
+        let schemas = parsed
+            .resolved_root()
+            .dependent_schemas
+            .as_ref()
+            .expect("schemas");
+
+        assert_eq!(schemas["a"].always_fails, fails);
+    }
+
+    #[test]
+    fn the_always_failing_schema_sets_nothing_but_its_marker() {
+        let schema = JsonSchema::always_failing();
+
+        let expected = JsonSchema {
+            always_fails: true,
+            ..JsonSchema::default()
+        };
+
+        assert_eq!(format!("{schema:?}"), format!("{expected:?}"));
+        assert!(!JsonSchema::default().always_fails);
+    }
+
+    #[test]
+    fn a_root_reference_to_false_resolves() {
+        let parsed = parse_schema(&json!({
+            "$ref": "#/definitions/No",
+            "definitions": { "No": false }
+        }))
+        .expect("parses");
+
+        assert!(parsed.resolved_root().always_fails);
+        assert_eq!(parsed.targets.len(), 1);
+    }
+
+    #[rstest]
+    #[case::one_hop(1)]
+    #[case::two_hops(2)]
+    #[case::beyond_any_old_limit(100)]
+    fn alias_chain_that_ends_in_false_resolves_to_the_always_failing_schema(#[case] hops: usize) {
+        let parsed = parse_schema(&alias_chain(hops, json!(false))).expect("parses");
+
+        assert_well_formed(&parsed);
+        assert!(unresolved_ref(&parsed.root).is_none());
+        assert!(parsed.resolved_root().always_fails);
+        assert_eq!(parsed.targets.len(), 1);
+    }
+
+    #[test]
+    fn a_false_target_shared_by_two_positions_is_built_once() {
+        let v = json!({
+            "properties": {
+                "a": { "$ref": "#/definitions/No" },
+                "b": { "$ref": "#/definitions/No" }
+            },
+            "definitions": { "No": false }
+        });
+
+        let parsed = parse_schema(&v).expect("parses");
+
+        assert_well_formed(&parsed);
+        let root = parsed.resolved_root();
+        assert_eq!(parsed.targets.len(), 1);
+        assert_eq!(
+            target_of(property(root, "a")),
+            target_of(property(root, "b"))
+        );
+        assert!(node_count(&parsed) <= json_value_count(&v));
+    }
+
+    #[test]
+    fn a_false_that_nothing_refers_to_is_no_target() {
+        let v = json!({ "definitions": { "No": false } });
+
+        let parsed = parse_schema(&v).expect("parses");
+
+        assert!(parsed.targets.is_empty());
+        assert!(!parsed.resolved_root().always_fails);
+    }
+
+    #[test]
+    fn a_reference_cycle_through_false_ends() {
+        let v = json!({
+            "allOf": [{ "$ref": "#/definitions/A" }],
+            "definitions": {
+                "A": { "allOf": [{ "$ref": "#/definitions/No" }, { "$ref": "#" }] },
+                "No": false
+            }
+        });
+
+        let parsed = parse_schema(&v).expect("parses");
+
+        assert_well_formed(&parsed);
     }
 
     // A chain of `$ref`-only schemas that comes back to itself matches
@@ -7042,6 +7463,14 @@ mod tests {
     #[rstest]
     #[case::empty_object(json!({}))]
     #[case::true_schema(json!(true))]
+    #[case::false_in_a_keyword(json!({"not": false}))]
+    #[case::false_among_branches(json!({"allOf": [false, {}]}))]
+    #[case::false_in_a_prefix(json!({"prefixItems": [false, true]}))]
+    #[case::false_dependency(json!({"dependencies": {"a": false}}))]
+    #[case::shared_false_target(json!({
+        "properties": {"a": {"$ref": "#/definitions/No"}, "b": {"$ref": "#/definitions/No"}},
+        "definitions": {"No": false}
+    }))]
     #[case::nested_properties(json!({"properties": {"a": {"properties": {"b": {}}}}}))]
     #[case::three_empty_schemas(json!({"allOf": [{}, {}, {}]}))]
     #[case::copied_values(json!({
@@ -7177,6 +7606,45 @@ mod tests {
                 matches!(result, Err(SchemaError::TooLarge(SizeBudget::Raw))),
                 "{keyword}, raw limit {limit}: {result:?}"
             );
+        }
+    }
+
+    // `false` is a node like `true`, in the same places.
+    #[test]
+    fn false_charges_like_true() {
+        for keyword in false_keywords() {
+            assert_eq!(
+                charges_of(&wrap(keyword, &json!(false))),
+                charges_of(&wrap(keyword, &json!(true))),
+                "keyword {keyword}"
+            );
+        }
+        let sets = |value: Value| charges_of(&json!({ "properties": { "a": value } }));
+        assert_eq!(sets(json!(false)), sets(json!(true)));
+    }
+
+    // A `false` that the budget leaves no room for is not left out of a
+    // schema that is returned.
+    #[test]
+    fn no_budget_below_the_charge_yields_a_schema_with_false_at_every_keyword() {
+        for keyword in SUBSCHEMA_KEYWORDS {
+            let document = nest(keyword, 3, json!(false));
+            let (parsed, raw) = charges_of(&document);
+
+            for limit in limits_below(parsed) {
+                let (result, _) = metered(&document, None, None, limit, usize::MAX);
+                assert!(
+                    matches!(result, Err(SchemaError::TooLarge(SizeBudget::Parsed))),
+                    "{keyword}, parsed limit {limit}: {result:?}"
+                );
+            }
+            for limit in limits_below(raw) {
+                let (result, _) = metered(&document, None, None, usize::MAX, limit);
+                assert!(
+                    matches!(result, Err(SchemaError::TooLarge(SizeBudget::Raw))),
+                    "{keyword}, raw limit {limit}: {result:?}"
+                );
+            }
         }
     }
 

@@ -41,7 +41,7 @@ start of the file.
 - [x] Design review of the approach
 - [x] Task 1: `propertyNames` and `dependentSchemas` diagnostics sit on
       their key or mapping
-- [ ] Task 2: `false` sub-schemas keep their place and meaning
+- [x] Task 2: `false` sub-schemas keep their place and meaning
 - [ ] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
@@ -67,7 +67,7 @@ at line 0 even in a later document.
 shared mapping of boolean values to schemas, and `is_schema_value`
 counts `false` as a schema.
 
-- [ ] For every sub-schema keyword, a `false` value parses to the
+- [x] For every sub-schema keyword, a `false` value parses to the
       always-failing schema in its place: `items`, `prefixItems` and
       the tuple form of `items` (keeping each index), `contains`,
       `allOf`/`anyOf`/`oneOf` entries, `not`, `if`, `then`, `else`,
@@ -76,9 +76,9 @@ counts `false` as a schema.
       `dependencies` schema values, and `contentSchema`; a `$ref` or
       `$dynamicRef` that lands on `false` resolves to it; parse tests
       pin each keyword, inline and behind a reference
-- [ ] A root schema that is `false` is still rejected as before, and
+- [x] A root schema that is `false` is still rejected as before, and
       a root `$ref` to `false` resolves
-- [ ] A value validated against a `false` schema gets one diagnostic
+- [x] A value validated against a `false` schema gets one diagnostic
       with a new code `schemaNotAllowed`, severity Warning, and the
       message "Value at {path} is not allowed by the schema"; this
       applies to each item beyond the prefix under `items: false`, the
@@ -92,31 +92,31 @@ counts `false` as a schema.
       present, and the decoded content under `contentSchema: false`
       (path of the scalar followed by `(content)`, located like other
       `contentSchema` diagnostics); validation tests pin each
-- [ ] Keywords that probe a `false` sub-schema keep their own
+- [x] Keywords that probe a `false` sub-schema keep their own
       diagnostics: `contains: false` reports `schemaContains` on every
       array unless `minContains` is 0, `anyOf`/`oneOf` report their
       existing "does not match" diagnostics counting `false` branches,
       `not: false` reports nothing, and `if: false` applies `else`;
       validation tests pin each
-- [ ] Validation tests also pin the index of a `prefixItems` entry
+- [x] Validation tests also pin the index of a `prefixItems` entry
       after a `false` entry, a `false` pattern excluding
       `additionalProperties` for its keys, `false` properties and
       patterns counting as evaluated for `unevaluatedProperties`, and
       `items: false` and `false` `prefixItems` entries counting as
       evaluated for `unevaluatedItems`
-- [ ] Inline `false` for `additionalProperties`, `additionalItems`, and
+- [x] Inline `false` for `additionalProperties`, `additionalItems`, and
       `unevaluatedProperties` keeps its current diagnostic and wording
-- [ ] The resolver dead-ends at a `false` schema, inline or behind a
+- [x] The resolver dead-ends at a `false` schema, inline or behind a
       reference, so a later sibling branch can still answer; a `false`
       entry at a positional index is that node's own answer of
       nothing; a `false` property is the node's own answer and its
       branches are not tried; resolver tests pin each
-- [ ] Completion does not offer a key whose property schema is
+- [x] Completion does not offer a key whose property schema is
       `false`, also not in the snippet that inserts the missing
       required keys, and hover shows no schema section at a `false`
       schema; pinned by unit tests through `complete_at` and
       `hover_at`
-- [ ] The existing tests whose assertions describe the old reading are
+- [x] The existing tests whose assertions describe the old reading are
       changed and no others: the `prefix_items_without_a_schema` case
       of `tuple_items_are_discovered_where_the_build_reads_them` uses
       a non-schema value and a new case pins `false`; the
@@ -124,21 +124,21 @@ counts `false` as a schema.
       `ref_to_a_value_that_is_no_schema_stays_unresolved` moves to a
       test that pins the resolved reference; and
       `every_child_schema_position_has_a_case` lists the new field
-- [ ] The parse budget charges a `false` node like a `true` node,
+- [x] The parse budget charges a `false` node like a `true` node,
       pinned by `false` cases in the charge-boundary test
-- [ ] An integration test in `tests/lsp_lifecycle/` validates a
+- [x] An integration test in `tests/lsp_lifecycle/` validates a
       document against a seeded schema with a `false` sub-schema and
       receives the `schemaNotAllowed` diagnostic at the value
-- [ ] The doc comments of the new field and of `parse_schema` tell a
+- [x] The doc comments of the new field and of `parse_schema` tell a
       library user what the marker means and that a reader ignoring it
       reads the schema as `true`, and no doc comment still describes
       `false` as dropped or as no schema (among them `parse_node`,
       `reads_tuple_items`, and `resolve_schema_path`)
-- [ ] `rlsp-yaml/docs/configuration.md` lists `schemaNotAllowed`, and
+- [x] `rlsp-yaml/docs/configuration.md` lists `schemaNotAllowed`, and
       `rlsp-yaml/docs/feature-log.md` has an entry that tells the
       reader that `false` sub-schemas now take effect for every
       keyword
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ## Non-Goals
 

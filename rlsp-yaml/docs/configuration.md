@@ -545,6 +545,7 @@ The comment can appear anywhere in the file. The first `# rlsp-yaml-disable-file
 | `schemaType` | Value does not match declared JSON Schema type |
 | `schemaEnum` | Value not in the declared `enum` list |
 | `schemaAdditionalProperty` | Additional property not allowed by schema |
+| `schemaNotAllowed` | Value covered by a `false` sub-schema, which no value satisfies |
 | `schemaFormat` | Value does not match declared `format` (requires `formatValidation: true`) |
 | `schemaContentEncoding` | Value cannot be decoded with declared `contentEncoding` |
 | `schemaContentMediaType` | Decoded content does not match declared `contentMediaType` |

@@ -707,7 +707,7 @@ fn item_covered_by_the_twenty_fifth_all_of_branch_is_not_unevaluated() {
 /// evaluating it takes `width.pow(levels)` leaf probes.
 ///
 /// `unevaluatedItems` is `{"not": {}}` (rejects everything) rather than `false`:
-/// `parse_schema` drops a boolean `false` there, which would leave it untested.
+/// the cost under test is the probe of a `not`, which `false` does not start.
 fn hostile_composition(levels: usize, width: usize) -> serde_json::Value {
     if levels == 0 {
         return json!({"required": ["z"]});

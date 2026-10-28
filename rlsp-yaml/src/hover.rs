@@ -2587,4 +2587,55 @@ mod tests {
             );
         }
     }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // The schema `false`
+    // ──────────────────────────────────────────────────────────────────────────
+
+    fn hover_text(schema: &JsonValue, text: &str, position: Position) -> String {
+        let parsed = crate::schema::parse_schema(schema).expect("the schema parses");
+        let hover = hover_at(&parse_docs(text), position, Some(&parsed)).expect("a hover");
+        hover_content(&hover).to_string()
+    }
+
+    #[rstest]
+    #[case::property(
+        json!({ "properties": { "x": false },
+                "allOf": [{ "properties": { "x": { "description": "Leaked" } } }] }),
+        "x: 1\n",
+        pos(0, 0)
+    )]
+    #[case::item(
+        json!({ "items": false, "allOf": [{ "items": { "description": "Leaked" } }] }),
+        "- a\n",
+        pos(0, 2)
+    )]
+    #[case::beyond_the_prefix(
+        json!({ "prefixItems": [{}], "items": false,
+                "allOf": [{ "items": { "description": "Leaked" } }] }),
+        "- a\n- b\n",
+        pos(1, 2)
+    )]
+    fn hover_at_a_false_schema_shows_no_schema_section(
+        #[case] schema: JsonValue,
+        #[case] text: &str,
+        #[case] position: Position,
+    ) {
+        for schema in [
+            schema.clone(),
+            crate::schema::test_support::behind_a_reference(&schema),
+        ] {
+            let content = hover_text(&schema, text, position);
+
+            assert!(!content.contains("Leaked"), "{content}");
+            assert!(!content.contains("Description"), "{content}");
+        }
+    }
+
+    #[test]
+    fn hover_at_a_property_that_is_not_false_shows_its_description() {
+        let schema = json!({ "properties": { "x": { "description": "Shown" } } });
+
+        assert!(hover_text(&schema, "x: 1\n", pos(0, 0)).contains("Shown"));
+    }
 }

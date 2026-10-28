@@ -13,6 +13,8 @@ mod array_constraints;
 mod budget_tests;
 mod composition;
 mod context;
+#[cfg(test)]
+mod false_schema_tests;
 mod formats;
 mod mapping_constraints;
 #[cfg(test)]
@@ -141,6 +143,20 @@ fn validate_node(
         return;
     }
     if ctx.probe_decided() || !ctx.budget.spend(1) {
+        return;
+    }
+
+    // The schema `false`: no value satisfies it, whatever its type.
+    if schema.always_fails {
+        ctx.diagnostics.push(make_diagnostic(
+            span_to_lsp(node_loc(node), ctx.idx),
+            DiagnosticSeverity::WARNING,
+            "schemaNotAllowed",
+            format!(
+                "Value at {} is not allowed by the schema",
+                format_path(path)
+            ),
+        ));
         return;
     }
 

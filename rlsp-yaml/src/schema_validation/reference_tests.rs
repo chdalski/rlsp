@@ -167,6 +167,7 @@ fn every_child_schema_position_has_a_case() {
         reason = "listing every field is the point: a new field fails to compile here"
     )]
     let JsonSchema {
+        always_fails: _, // marks the schema `false`; it holds no child schema
         id: _,
         schema_type: _,
         title: _,

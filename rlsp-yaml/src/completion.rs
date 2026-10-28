@@ -12,6 +12,8 @@ use crate::schema::path::{SchemaPathSegment, resolve_schema_path};
 mod completion_drivers;
 mod completion_items;
 mod cursor_location;
+#[cfg(test)]
+mod false_schema_tests;
 mod formatting;
 #[cfg(test)]
 mod key_pattern_tests;

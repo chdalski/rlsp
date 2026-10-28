@@ -19,7 +19,8 @@ use super::support::MAX_COMPLETION_ITEMS;
 
 /// Visit every property `schema` offers, directly and through `allOf`,
 /// `anyOf` and `oneOf` branches, until `visit` breaks. `visit` gets each
-/// property's schema resolved.
+/// property's schema resolved. A property whose schema is `false` allows no
+/// value, so it is not visited.
 ///
 /// Own properties come first, then each branch list in that order, depth
 /// first. A shared target is entered once, wherever the branches reach it, so
@@ -42,7 +43,11 @@ fn walk_properties<'a>(
         }
         if let Some(props) = &schema.properties {
             for (key, prop_schema) in props {
-                visit(key, parsed.resolve(prop_schema))?;
+                let prop_schema = parsed.resolve(prop_schema);
+                // No value is allowed for the key, so it is no suggestion.
+                if !prop_schema.always_fails {
+                    visit(key, prop_schema)?;
+                }
             }
         }
         stack.extend(composition_branches(schema).rev());
@@ -70,6 +75,13 @@ pub(super) fn schema_key_completions(
         let missing: Vec<&String> = required
             .iter()
             .filter(|r| !present.contains(r.as_str()))
+            .filter(|r| {
+                !schema
+                    .properties
+                    .as_ref()
+                    .and_then(|props| props.get(r.as_str()))
+                    .is_some_and(|prop| parsed.resolve(prop).always_fails)
+            })
             .collect();
         if missing.len() >= 2 {
             let snippet_body: String = missing

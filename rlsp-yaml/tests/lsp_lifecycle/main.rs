@@ -9,6 +9,7 @@ mod custom_tags;
 mod document_links;
 mod document_management;
 mod fake_proxy;
+mod false_schema;
 mod folding_ranges;
 mod formatting_integration;
 mod helpers;

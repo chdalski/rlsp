@@ -65,7 +65,12 @@ pub fn composition_branches(schema: &JsonSchema) -> impl DoubleEndedIterator<Ite
 /// it is within the prefix, otherwise `items`, otherwise the `additionalItems`
 /// schema, as validation applies them. A node that has one of these does not
 /// try its branches; `additionalItems: false` beyond the prefix offers nothing,
-/// and only dead-ends that node, so a later sibling branch may still answer. A
+/// and only dead-ends that node, so a later sibling branch may still answer.
+/// So does the schema `false` ([`JsonSchema::always_fails`]), inline or behind a
+/// reference, wherever it stands: as the entry for a key or an item, as the
+/// schema of a pattern, or as a branch. It is never the answer, also when the
+/// path ends at it, and the entry that holds it still shadows the branches of
+/// its node. A
 /// schema that has no `properties` entry for the key, or no schema for the
 /// position, tries every composition branch with the same path, so a schema that
 /// references itself can come back to the same schema with the same rest of the
@@ -276,6 +281,11 @@ fn walk<'a>(
         };
         let schema = parsed.resolve(node);
         if node.reference.is_some() && !tried.insert((ptr::from_ref(schema), path.len())) {
+            continue;
+        }
+        // The schema `false` offers nothing, so this branch dead-ends; the
+        // branches that are left to try can still answer.
+        if schema.always_fails {
             continue;
         }
         let [segment, rest @ ..] = path else {
@@ -2789,5 +2799,176 @@ mod tests {
             resolved_type(&schema, &[name.as_str()]).as_deref(),
             Some("integer")
         );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // The schema `false`
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /// The description of the schema that `path` resolves to in `schema`; the
+    /// empty text for one without a description, `None` for no schema.
+    fn document_description_at(schema: &Value, path: &[SchemaPathSegment]) -> Option<String> {
+        let parsed = crate::schema::parse_schema(schema).expect("the schema parses");
+        resolve_schema_path(&parsed, &parsed.root, path)
+            .map(|found| found.description.clone().unwrap_or_default())
+    }
+
+    #[rstest]
+    #[case::property(json!({ "properties": { "x": false } }), vec![key("x")], None)]
+    #[case::below_a_property(json!({ "properties": { "x": false } }), vec![key("x"), key("y")], None)]
+    #[case::property_is_the_nodes_own_answer(
+        json!({ "properties": { "x": false },
+                "allOf": [{ "properties": { "x": { "description": "S" } } }] }),
+        vec![key("x")],
+        None
+    )]
+    #[case::a_branch_answers_without_the_property(
+        json!({ "allOf": [{ "properties": { "x": { "description": "S" } } }] }),
+        vec![key("x")],
+        Some("S")
+    )]
+    #[case::a_later_all_of_branch_answers(
+        json!({ "allOf": [{ "properties": { "x": false } },
+                          { "properties": { "x": { "description": "S" } } }] }),
+        vec![key("x")],
+        Some("S")
+    )]
+    #[case::a_later_any_of_branch_answers(
+        json!({ "anyOf": [{ "properties": { "x": false } },
+                          { "properties": { "x": { "description": "S" } } }] }),
+        vec![key("x")],
+        Some("S")
+    )]
+    #[case::a_later_one_of_branch_answers(
+        json!({ "oneOf": [{ "properties": { "x": false } },
+                          { "properties": { "x": { "description": "S" } } }] }),
+        vec![key("x")],
+        Some("S")
+    )]
+    #[case::a_branch_that_is_false(
+        json!({ "allOf": [false, { "properties": { "x": { "description": "S" } } }] }),
+        vec![key("x")],
+        Some("S")
+    )]
+    #[case::only_false_branches(json!({ "anyOf": [false, false] }), vec![key("x")], None)]
+    #[case::the_entry_at_a_position(
+        json!({ "prefixItems": [{ "description": "A" }, false] }),
+        vec![SchemaPathSegment::Item(1)],
+        None
+    )]
+    #[case::the_entry_at_a_position_is_the_nodes_own_answer(
+        json!({ "prefixItems": [{}, false],
+                "allOf": [{ "prefixItems": [{}, { "description": "S" }] }] }),
+        vec![SchemaPathSegment::Item(1)],
+        None
+    )]
+    #[case::a_position_beyond_the_entries_asks_the_branches(
+        json!({ "prefixItems": [{}, false],
+                "allOf": [{ "items": { "description": "S" } }] }),
+        vec![SchemaPathSegment::Item(2)],
+        Some("S")
+    )]
+    #[case::the_entry_after_a_false_one(
+        json!({ "prefixItems": [false, { "description": "S" }] }),
+        vec![SchemaPathSegment::Item(1)],
+        Some("S")
+    )]
+    #[case::a_tuple_entry(
+        json!({ "items": [{}, false] }), vec![SchemaPathSegment::Item(1)], None
+    )]
+    #[case::items(json!({ "items": false }), vec![SchemaPathSegment::Item(0)], None)]
+    #[case::below_an_item(
+        json!({ "items": false }), vec![SchemaPathSegment::Item(0), key("x")], None
+    )]
+    #[case::a_pattern_beside_one_that_answers(
+        json!({ "patternProperties": { "^a": false, "^ab": { "description": "S" } } }),
+        vec![key("abc")],
+        Some("S")
+    )]
+    #[case::a_pattern_is_not_additional(
+        json!({ "patternProperties": { "^a": false },
+                "additionalProperties": { "description": "S" } }),
+        vec![key("a1")],
+        None
+    )]
+    #[case::additional_properties(
+        json!({ "additionalProperties": { "description": "S" },
+                "patternProperties": { "^a": false } }),
+        vec![key("zz")],
+        Some("S")
+    )]
+    #[case::a_schema_that_refers_to_itself(
+        json!({ "properties": { "x": false }, "allOf": [{ "$ref": "#" }] }),
+        vec![key("x")],
+        None
+    )]
+    fn false_offers_nothing_inline_and_behind_a_reference(
+        #[case] schema: Value,
+        #[case] path: Vec<SchemaPathSegment>,
+        #[case] expected: Option<&str>,
+    ) {
+        let expected = expected.map(str::to_string);
+
+        assert_eq!(document_description_at(&schema, &path), expected, "inline");
+        assert_eq!(
+            document_description_at(
+                &crate::schema::test_support::behind_a_reference(&schema),
+                &path
+            ),
+            expected,
+            "behind a reference"
+        );
+    }
+
+    #[test]
+    fn a_root_that_is_a_reference_to_false_offers_nothing_also_for_the_empty_path() {
+        let schema = json!({ "$ref": "#/definitions/No", "definitions": { "No": false } });
+
+        assert_eq!(document_description_at(&schema, &[]), None);
+        assert_eq!(document_description_at(&schema, &[key("x")]), None);
+    }
+
+    #[test]
+    fn a_target_that_is_false_and_shared_by_two_branches_leaves_the_sibling_to_answer() {
+        let schema = json!({
+            "allOf": [
+                { "properties": { "x": { "$ref": "#/definitions/No" } } },
+                { "properties": { "x": { "$ref": "#/definitions/No" } } },
+                { "properties": { "x": { "description": "S" } } }
+            ],
+            "definitions": { "No": false }
+        });
+
+        assert_eq!(
+            document_description_at(&schema, &[key("x")]).as_deref(),
+            Some("S")
+        );
+    }
+
+    #[test]
+    fn never_returns_the_false_schema_itself() {
+        let schema = JsonSchema {
+            properties: Some([("x".to_string(), JsonSchema::always_failing())].into()),
+            ..JsonSchema::default()
+        };
+        let parsed = no_targets();
+
+        assert!(resolve_schema_path(&parsed, &schema, &[key("x")]).is_none());
+        assert!(resolve_schema_path(&parsed, &JsonSchema::always_failing(), &[]).is_none());
+    }
+
+    #[test]
+    fn a_pattern_that_is_false_is_matched_within_the_allowance_like_any_other() {
+        let schema = JsonSchema {
+            pattern_properties: Some(vec![("^a".to_string(), JsonSchema::always_failing())]),
+            additional_properties: Some(AdditionalProperties::Schema(Box::new(string_schema()))),
+            ..JsonSchema::default()
+        };
+
+        // The price of the pattern is paid; a key that it matches is not additional.
+        assert!(resolve_within(&no_targets(), &schema, &[key("a1")], 100_000).is_none());
+        // Without steps for the walk the answer is none either.
+        assert!(resolve_within(&no_targets(), &schema, &[key("zz")], 0).is_none());
+        assert!(resolve_within(&no_targets(), &schema, &[key("zz")], 100_000).is_some());
     }
 }

@@ -31,6 +31,15 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### `false` Sub-Schemas Take Effect for Every Keyword [completed]
+
+**Date:** 2026-10-28
+**Description:** A `false` schema ("no value is allowed here") now takes effect wherever a schema can stand: in `properties`, `patternProperties`, `items`, `prefixItems` and the array form of `items`, `contains`, `allOf`, `anyOf`, `oneOf`, `not`, `if`, `then`, `else`, `propertyNames`, `dependentSchemas`, `dependencies`, `unevaluatedItems`, and `contentSchema`, and where a `$ref` points at one. Until now such a `false` was ignored, and in a `prefixItems` list the entries after it moved up one place. A value that meets a `false` schema gets a `schemaNotAllowed` warning ("Value at … is not allowed by the schema") at the value: the value of a forbidden property, an item beyond `items: false`, an item at a `false` `prefixItems` entry, each key under `propertyNames: false`, the mapping that holds a key with a `false` `dependentSchemas` schema. `anyOf`, `oneOf`, `contains`, `not`, and `if` count a `false` schema as one that no value matches. Completion no longer offers a property whose schema is `false`, also not in the snippet that inserts the missing required keys, and hover shows no schema docs at a `false` schema. A `$ref` to `false` used to be left unresolved and accept everything; it now rejects the value. A `false` that stands as the whole schema is still rejected as before, but a `$ref` at the root that points at a `false` definition is applied and reports every document at its root. `additionalProperties: false`, `additionalItems: false`, and `unevaluatedProperties: false` keep their diagnostics and wording.
+**Complexity:** Medium
+**Tier:** 1
+
+---
+
 ### Key Completion in a Sequence Item Offers the Keys of the Sequence's Other Items [completed]
 
 **Date:** 2026-10-28
