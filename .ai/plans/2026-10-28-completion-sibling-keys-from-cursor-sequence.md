@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-10-28)
 **Created:** 2026-10-28
 
 # Completion Takes Sibling Item Keys From the Cursor's Sequence
@@ -36,7 +36,7 @@ document and at every nesting level.
 - [x] Design review of the approach
 - [x] Task 1: completion integration tests share one setup helper
 - [x] Task 2: sibling item keys come from the cursor's sequence
-- [ ] Push to `main` and confirm the full CI matrix is green
+- [x] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
