@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-10-28)
 **Created:** 2026-10-27
 
 # Schema Path Resolver Follows Pattern, Additional, and Positional Schemas
@@ -60,7 +60,7 @@ except the positional corrections named in Decisions.
       `additionalProperties`
 - [x] Task 4: items resolve by position
 - [x] Task 5: the Coverage workflow passes again
-- [ ] Push to `main` and confirm the full CI matrix is green
+- [x] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
