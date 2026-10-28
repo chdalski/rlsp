@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-10-28)
 **Created:** 2026-10-28
 
 # A Wrongly Typed Setting Does Not Reset All Settings
@@ -37,7 +37,7 @@ log, while every other setting applies.
 - [x] Task 2: `Settings` lives in its own module
 - [x] Task 3: settings are read field by field, with a Warning per
       rejected field or entry
-- [ ] Push to `main` and confirm the full CI matrix is green
+- [x] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
