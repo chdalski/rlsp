@@ -33,6 +33,18 @@ Settings are passed as a JSON object via LSP `initializationOptions` at startup 
 }
 ```
 
+### Wrong settings
+
+The server reads each setting on its own, so one wrong value does not affect the others:
+
+- **A setting of the wrong type** (for example `"formatPrintWidth": "80"`, `"hover": "yes"`, or `"kubernetesVersion": 1.29`) takes its default. Strings are never converted to numbers or booleans, and a number must be a non-negative whole number. Because each update replaces the entire settings object, the setting does not keep the value from an earlier update.
+- **A wrong entry in `customTags` or `schemas`** (an entry of `customTags` that is not a string, a `schemas` value that is not a string) is dropped. The other entries apply. A `customTags` value that is not an array, or a `schemas` value that is not an object, takes its default.
+- **A `null` value** counts as absent: the setting takes its default, silently.
+- **Unknown keys** are ignored, silently.
+- **A payload that is not a JSON object** changes nothing: at startup the defaults apply, and a `workspace/didChangeConfiguration` with `null` or any other non-object `settings` leaves the current settings in place.
+
+Each rejected setting and each dropped entry produces one warning in the client log that names the setting, the entry (its index in `customTags`, its schema URL in `schemas`), the type it has to be, and the rejected value. A long text is cut after 32 characters, and an array or object is described by its size only. The value of `httpProxy` and `schemas` is never logged, because it can contain credentials; the warning gives only its type, and a schema URL in a warning has its credentials, query, and fragment removed. At most 20 warnings are sent per update, followed by one line that counts the rest.
+
 ### `customTags`
 
 - **Type:** `string[]`
@@ -88,7 +100,7 @@ Set this to match your cluster version to get accurate validation:
 { "kubernetesVersion": "1.29.0" }
 ```
 
-Accepted values are `"master"` (lowercase) and a version of three dot-separated numbers such as `"1.29.0"`, each with up to nine digits and without a leading `v`. Any other value, such as `"Master"`, `"v1.29.0"`, or `"1.29"`, is rejected: the server uses `"master"` instead and writes a warning to the client log. The warning repeats each time the client sends settings while the value stays invalid. The VS Code extension marks such a value in the settings editor.
+Accepted values are `"master"` (lowercase) and a version of three dot-separated numbers such as `"1.29.0"`, each with up to nine digits and without a leading `v`. Any other value, such as `"Master"`, `"v1.29.0"`, or `"1.29"`, is rejected, and so is a value that is not a string: the server uses `"master"` instead and writes a warning to the client log. The warning repeats each time the client sends settings while the value stays invalid. The VS Code extension marks such a value in the settings editor.
 
 ### `schemaStore`
 

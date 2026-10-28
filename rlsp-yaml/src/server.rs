@@ -29,6 +29,7 @@ use crate::parser;
 use crate::schema::{self, ParseContext, SchemaCache, SchemaStoreCatalog};
 use crate::schema_validation::Completeness;
 pub use crate::settings::Settings;
+use crate::settings::{Entry, RejectedValue, Rejection, SettingsRead};
 
 /// YAML specification version for formatting and diagnostic purposes.
 ///
@@ -45,9 +46,10 @@ pub enum YamlVersion {
 /// Kubernetes version used when `kubernetesVersion` is absent or invalid.
 const DEFAULT_KUBERNETES_VERSION: &str = "master";
 
-/// Longest rejected `kubernetesVersion` echoed into a client log message, in
-/// characters.
-const MAX_LOGGED_SETTING_CHARS: usize = 32;
+/// Longest rejected setting value echoed into a client log message, in
+/// characters: a rejected `kubernetesVersion` string and any rejected text a
+/// settings reader reports.
+pub(crate) const MAX_LOGGED_SETTING_CHARS: usize = 32;
 
 /// Longest schema URL echoed into a client log message, in characters.
 const MAX_LOGGED_URL_CHARS: usize = 200;
@@ -103,6 +105,67 @@ fn invalid_kubernetes_version_message(raw: Option<&str>) -> Option<String> {
          \"{DEFAULT_KUBERNETES_VERSION}\". Rejected value: {:?}",
         truncate_chars(raw, MAX_LOGGED_SETTING_CHARS)
     )))
+}
+
+/// Build the Warning for a setting or setting entry the settings reader
+/// rejected.
+///
+/// The rejected value and the schema key come from workspace settings, so the
+/// message names the setting from a fixed list, shows a schema key only through
+/// [`loggable_url`], describes the value in at most [`MAX_LOGGED_SETTING_CHARS`]
+/// characters (containers by size only), and puts it last so the cap of
+/// [`printable_log_message`] can never remove the explanation.
+fn rejection_message(rejection: &Rejection) -> String {
+    let subject = match &rejection.entry {
+        Entry::Whole => format!("Setting {}", rejection.setting),
+        Entry::Index(index) => format!("Setting {}, entry {index}", rejection.setting),
+        Entry::Key(key) => format!("Setting {}, entry {}", rejection.setting, loggable_url(key)),
+    };
+    let outcome = match rejection.entry {
+        Entry::Whole => "falling back to its default",
+        Entry::Index(_) | Entry::Key(_) => "the entry is ignored",
+    };
+    printable_log_message(&format!(
+        "{subject} must be {}; {outcome}. Rejected value: {}",
+        rejection.expected,
+        describe_rejected_value(&rejection.found)
+    ))
+}
+
+fn describe_rejected_value(found: &RejectedValue) -> String {
+    match found {
+        RejectedValue::Null => "null".to_string(),
+        RejectedValue::Bool(flag) => flag.to_string(),
+        RejectedValue::Number(number) => number.clone(),
+        RejectedValue::Text(text) => {
+            format!("{:?}", truncate_chars(text, MAX_LOGGED_SETTING_CHARS))
+        }
+        RejectedValue::Array(len) => format!("an array of {len} elements"),
+        RejectedValue::Object(len) => format!("an object with {len} entries"),
+        RejectedValue::Withheld(kind) => format!("{kind} (not logged)"),
+    }
+}
+
+/// Every Warning a settings update has to send: one per listed rejection, one
+/// line counting the unlisted ones, and the `kubernetesVersion` Warning.
+///
+/// A `kubernetesVersion` of the wrong type is a rejection and reads as absent,
+/// so the two never report the same value.
+fn settings_warnings(read: &SettingsRead) -> Vec<String> {
+    let unlisted = (read.unlisted_rejections > 0).then(|| {
+        format!(
+            "{} further rejected settings or entries are not listed",
+            read.unlisted_rejections
+        )
+    });
+    read.rejections
+        .iter()
+        .map(rejection_message)
+        .chain(unlisted)
+        .chain(invalid_kubernetes_version_message(
+            read.settings.kubernetes_version.as_deref(),
+        ))
+        .collect()
 }
 
 /// Replace control and bidirectional-formatting characters in `message` and cap
@@ -790,16 +853,16 @@ impl Backend {
     /// Replace the stored settings; the single store path for `initialize`
     /// and `did_change_configuration`.
     ///
-    /// Sends one Warning to the client log per call when `kubernetesVersion`
-    /// is invalid. `Client::log_message` is not held back before
-    /// initialization completes, so this also reaches the client from
-    /// `initialize`.
-    async fn store_settings(&self, settings: Settings) {
-        let warning = invalid_kubernetes_version_message(settings.kubernetes_version.as_deref());
+    /// Sends one Warning to the client log per rejected setting or entry (see
+    /// [`settings_warnings`]) and one for an invalid `kubernetesVersion`
+    /// string. `Client::log_message` is not held back before initialization
+    /// completes, so this also reaches the client from `initialize`.
+    async fn store_settings(&self, read: SettingsRead) {
+        let warnings = settings_warnings(&read);
         if let Ok(mut s) = self.settings.lock() {
-            *s = settings;
+            *s = read.settings;
         }
-        if let Some(message) = warning {
+        for message in warnings {
             self.client
                 .log_message(tower_lsp::lsp_types::MessageType::WARNING, message)
                 .await;
@@ -821,11 +884,12 @@ impl Backend {
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
-        let settings = params
+        let read = params
             .initialization_options
-            .and_then(|v| serde_json::from_value::<Settings>(v).ok())
+            .as_ref()
+            .and_then(SettingsRead::from_json)
             .unwrap_or_default();
-        self.store_settings(settings).await;
+        self.store_settings(read).await;
         Ok(InitializeResult {
             capabilities: Self::capabilities(),
             ..InitializeResult::default()
@@ -833,8 +897,8 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
-        if let Ok(settings) = serde_json::from_value::<Settings>(params.settings) {
-            self.store_settings(settings).await;
+        if let Some(read) = SettingsRead::from_json(&params.settings) {
+            self.store_settings(read).await;
         }
     }
 
@@ -1930,6 +1994,200 @@ mod tests {
         assert!(message.contains("falling back to \"master\""), "{message}");
         assert!(message.contains("Rejected value: \""), "{message}");
         assert!(message.contains('…'), "{message}");
+    }
+
+    // ---- Rejected settings ----
+
+    /// The Warnings a settings update with `json` as its payload sends.
+    fn warnings_for(json: &serde_json::Value) -> Vec<String> {
+        settings_warnings(&SettingsRead::from_json(json).expect("an object reads"))
+    }
+
+    fn sole_warning(json: &serde_json::Value) -> String {
+        let mut warnings = warnings_for(json);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        warnings.remove(0)
+    }
+
+    #[test]
+    fn settings_warnings_pins_the_text_of_a_wrong_typed_field() {
+        assert_eq!(
+            sole_warning(&serde_json::json!({"keyOrdering": "yes"})),
+            "Setting keyOrdering must be a boolean; falling back to its default. \
+             Rejected value: \"yes\""
+        );
+    }
+
+    #[test]
+    fn settings_warnings_pins_the_text_of_a_dropped_entry() {
+        assert_eq!(
+            sole_warning(&serde_json::json!({"customTags": ["!a", "!b", 5]})),
+            "Setting customTags, entry 2 must be a string; the entry is ignored. \
+             Rejected value: 5"
+        );
+    }
+
+    #[rstest]
+    #[case::boolean(serde_json::json!({"hover": 1}), "must be a boolean", "1")]
+    #[case::count(serde_json::json!({"formatPrintWidth": "80"}), "must be a non-negative integer", "\"80\"")]
+    #[case::text(serde_json::json!({"flowStyle": true}), "must be a string", "true")]
+    #[case::tags(serde_json::json!({"customTags": {}}), "must be an array of strings", "an object with 0 entries")]
+    #[case::array(serde_json::json!({"hover": [1, 2, 3]}), "must be a boolean", "an array of 3 elements")]
+    #[case::null_entry(serde_json::json!({"customTags": [null]}), "entry 0 must be a string", "null")]
+    fn settings_warnings_name_the_expected_type_and_the_rejected_value(
+        #[case] json: serde_json::Value,
+        #[case] expected: &str,
+        #[case] value: &str,
+    ) {
+        let message = sole_warning(&json);
+        assert!(message.contains(expected), "{message}");
+        assert!(
+            message.ends_with(&format!("Rejected value: {value}")),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn settings_warnings_distinguish_a_string_from_a_number() {
+        let string = sole_warning(&serde_json::json!({"formatPrintWidth": "1"}));
+        let number = sole_warning(&serde_json::json!({"keyOrdering": 1}));
+        assert!(string.ends_with("\"1\""), "{string}");
+        assert!(number.ends_with(": 1"), "{number}");
+    }
+
+    #[rstest]
+    #[case::credentials_query_fragment("https://user:secret@example.com/s.json?token=abc#frag")]
+    #[case::unparsable_with_forged_line("not a url\n[ERROR] forged")]
+    #[case::very_long_key(&format!("https://example.com/{}", "a".repeat(10_000)))]
+    #[case::empty_key("")]
+    fn settings_warnings_show_a_schema_key_only_through_loggable_url(#[case] key: &str) {
+        let message = sole_warning(&serde_json::json!({"schemas": {key: 5}}));
+        assert!(message.starts_with("Setting schemas, entry "), "{message}");
+        assert!(message.contains(&loggable_url(key)), "{message}");
+        assert!(message.chars().count() <= MAX_SCHEMA_LOG_CHARS, "{message}");
+        for secret in ["secret", "token", "frag", "forged"] {
+            assert!(!message.contains(secret), "{message}");
+        }
+        assert!(
+            message.contains("must be a string; the entry is ignored"),
+            "{message}"
+        );
+    }
+
+    #[rstest]
+    #[case::proxy_object(serde_json::json!({"httpProxy": {"u": "http://u:pw@proxy"}}))]
+    #[case::proxy_array(serde_json::json!({"httpProxy": ["http://u:pw@proxy"]}))]
+    #[case::schemas_string(serde_json::json!({"schemas": "https://u:pw@h/x"}))]
+    #[case::schema_entry_array(serde_json::json!({"schemas": {"https://h/a.json": ["https://u:pw@h/x"]}}))]
+    fn settings_warnings_never_show_the_value_of_a_url_setting(#[case] json: serde_json::Value) {
+        let message = sole_warning(&json);
+        assert!(!message.contains("pw"), "{message}");
+        assert!(message.contains("not logged"), "{message}");
+    }
+
+    #[rstest]
+    #[case::long_text(serde_json::json!({"formatPrintWidth": "x".repeat(1_000_000)}))]
+    #[case::long_multibyte(serde_json::json!({"formatPrintWidth": "\u{e9}".repeat(1_000_000)}))]
+    #[case::long_array(serde_json::json!({"keyOrdering": vec![0; 100_000]}))]
+    fn settings_warnings_cap_a_large_rejected_value(#[case] json: serde_json::Value) {
+        let message = sole_warning(&json);
+        assert!(message.chars().count() <= MAX_SCHEMA_LOG_CHARS, "{message}");
+        assert!(message.contains("must be a"), "{message}");
+    }
+
+    #[test]
+    fn settings_warnings_cut_a_long_text_after_the_logged_prefix() {
+        let message = sole_warning(&serde_json::json!({"formatPrintWidth": "x".repeat(100)}));
+        assert!(
+            message.ends_with(&format!("\"{}…\"", "x".repeat(MAX_LOGGED_SETTING_CHARS))),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn settings_warnings_escape_control_and_bidi_characters() {
+        let hostile = "a\nb[ERROR] forged\r\u{1b}[31m\u{202e}\u{2028}\0\u{2066}";
+        for json in [
+            serde_json::json!({"keyOrdering": hostile}),
+            serde_json::json!({"customTags": [hostile]}),
+            serde_json::json!({"schemas": {hostile: 1}}),
+            serde_json::json!({hostile: 1, "hover": 1}),
+        ] {
+            for message in warnings_for(&json) {
+                assert!(!message.chars().any(is_unsafe_log_char), "{message:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn settings_warnings_never_name_an_unknown_key() {
+        let warnings = warnings_for(&serde_json::json!({"fooBar\n[ERROR]": 1, "keyOrdering": 1}));
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(!warnings[0].contains("fooBar"), "{warnings:?}");
+    }
+
+    #[test]
+    fn settings_warnings_are_empty_for_valid_absent_or_null_settings() {
+        assert!(warnings_for(&serde_json::json!({})).is_empty());
+        assert!(
+            warnings_for(&serde_json::json!({"keyOrdering": null, "customTags": null})).is_empty()
+        );
+        assert!(warnings_for(&serde_json::json!({"keyOrdering": true, "unknown": 1})).is_empty());
+    }
+
+    #[test]
+    fn settings_warnings_send_one_per_rejection_in_declaration_order() {
+        let warnings = warnings_for(&serde_json::json!({
+            "httpProxy": 1,
+            "customTags": [1, "!a", null],
+            "keyOrdering": "x",
+        }));
+        assert_eq!(warnings.len(), 4, "{warnings:?}");
+        for (warning, expected) in warnings.iter().zip([
+            "customTags, entry 0",
+            "customTags, entry 2",
+            "keyOrdering",
+            "httpProxy",
+        ]) {
+            assert!(
+                warning.starts_with(&format!("Setting {expected}")),
+                "{warning}"
+            );
+        }
+    }
+
+    #[test]
+    fn settings_warnings_list_a_bounded_number_and_count_the_rest() {
+        let warnings = warnings_for(&serde_json::json!({"customTags": vec![0; 10_000]}));
+        assert_eq!(warnings.len(), crate::settings::MAX_LISTED_REJECTIONS + 1);
+        assert_eq!(
+            warnings.last().map(String::as_str),
+            Some("9980 further rejected settings or entries are not listed")
+        );
+    }
+
+    #[rstest]
+    #[case::fractional(serde_json::json!(1.29))]
+    #[case::integer(serde_json::json!(129))]
+    #[case::boolean(serde_json::json!(true))]
+    #[case::array(serde_json::json!(["1.29.0"]))]
+    fn settings_warnings_send_one_for_a_wrong_typed_kubernetes_version(
+        #[case] version: serde_json::Value,
+    ) {
+        let message = sole_warning(&serde_json::json!({"kubernetesVersion": version}));
+        assert!(
+            message.starts_with("Setting kubernetesVersion must be a string"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn settings_warnings_keep_the_existing_warning_for_an_invalid_kubernetes_version_string() {
+        let message = sole_warning(&serde_json::json!({"kubernetesVersion": "bad"}));
+        assert_eq!(
+            Some(message),
+            invalid_kubernetes_version_message(Some("bad"))
+        );
     }
 
     // ---- YAML version setting ----

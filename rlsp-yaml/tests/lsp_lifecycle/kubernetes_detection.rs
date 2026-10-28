@@ -285,6 +285,7 @@ async fn should_log_exactly_one_warning_for_an_invalid_version_in_initialization
 #[case::numeric(Some(json!("1.29.0")))]
 #[case::master(Some(json!("master")))]
 #[case::absent(None)]
+#[case::null(Some(json!(null)))]
 #[tokio::test]
 async fn should_log_no_warning_for_a_valid_or_absent_version(
     #[case] version: Option<serde_json::Value>,
@@ -451,4 +452,45 @@ async fn should_sanitize_and_cap_an_invalid_version_in_the_client_log(
             .any(|c| c.is_control() || matches!(c, '\u{202e}' | '\u{2028}')),
         "{message:?}"
     );
+}
+
+#[rstest]
+#[case::fractional(json!(1.29))]
+#[case::integer(json!(129))]
+#[case::boolean(json!(true))]
+#[case::array(json!(["1.29.0"]))]
+#[tokio::test]
+async fn should_log_one_warning_and_select_master_for_a_wrong_typed_version_at_initialization(
+    #[case] version: serde_json::Value,
+) {
+    let (mut service, mut log, proxy) = start_server_with_k8s_version(Some(version)).await;
+
+    let lens = schema_lens_after_opening(&mut service, "file:///test/one.yaml", DEPLOYMENT).await;
+    let warnings = warnings_before_sentinel(&mut service, &mut log).await;
+
+    assert!(lens.contains(MASTER_DEPLOYMENT_FILE), "{lens}");
+    assert_eq!(kubernetes_connects(&proxy), 1, "{:?}", proxy.seen());
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].starts_with("Setting kubernetesVersion must be a string"),
+        "{warnings:?}"
+    );
+}
+
+#[tokio::test]
+async fn should_log_one_warning_and_select_master_for_a_wrong_typed_version_on_configuration_change()
+ {
+    let (mut service, mut log, proxy) = start_server_with_k8s_version(Some(json!("1.29.0"))).await;
+
+    send(
+        &mut service,
+        did_change_configuration_notification(&k8s_settings(&proxy, Some(json!(1.29)))),
+    )
+    .await;
+    let lens = schema_lens_after_opening(&mut service, "file:///test/one.yaml", DEPLOYMENT).await;
+    let warnings = warnings_before_sentinel(&mut service, &mut log).await;
+
+    assert!(lens.contains(MASTER_DEPLOYMENT_FILE), "{lens}");
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(warnings[0].contains("kubernetesVersion"), "{warnings:?}");
 }

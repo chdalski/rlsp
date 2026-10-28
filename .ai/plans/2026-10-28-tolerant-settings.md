@@ -35,7 +35,7 @@ log, while every other setting applies.
 - [x] Task 1: every settings key name and every default is pinned by
       a test
 - [x] Task 2: `Settings` lives in its own module
-- [ ] Task 3: settings are read field by field, with a Warning per
+- [x] Task 3: settings are read field by field, with a Warning per
       rejected field or entry
 - [ ] Push to `main` and confirm the full CI matrix is green
 
@@ -86,12 +86,12 @@ an invalid `kubernetesVersion` value through
 `invalid_kubernetes_version_message`, `printable_log_message`, and
 `MAX_LOGGED_SETTING_CHARS`.
 
-- [ ] A key whose value has the wrong type for its field (including
+- [x] A key whose value has the wrong type for its field (including
       a number outside `usize` and a float for an integer field)
       leaves that field at its default and yields one rejection; a
       key that is absent or `null` leaves its field at its default
       and yields none; strings are not coerced to numbers or booleans
-- [ ] In `customTags`, an entry that is not a string, `null`
+- [x] In `customTags`, an entry that is not a string, `null`
       included, is dropped and yields one rejection while the other
       tags apply; in `schemas`, an entry whose value is not a string,
       `null` included, is dropped and yields one rejection while the
@@ -99,7 +99,7 @@ an invalid `kubernetesVersion` value through
       value that is not an array, or a `schemas` value that is not an
       object, leaves the field at its default and yields one
       rejection
-- [ ] Each rejection yields one Warning in the client log that names
+- [x] Each rejection yields one Warning in the client log that names
       the setting, the entry where one is dropped (its index, or its
       key — for `schemas`, the schema URL passed through
       `loggable_url` so credentials are stripped), and the expected
@@ -107,37 +107,37 @@ an invalid `kubernetesVersion` value through
       `MAX_LOGGED_SETTING_CHARS` and sanitized with
       `printable_log_message` like the existing `kubernetesVersion`
       Warning; unit tests pin the messages without a client
-- [ ] `kubernetesVersion` of the wrong type selects `master` with
+- [x] `kubernetesVersion` of the wrong type selects `master` with
       exactly one Warning, and an invalid `kubernetesVersion` string
       keeps its existing Warning
-- [ ] At initialization, a settings object applies every valid field
+- [x] At initialization, a settings object applies every valid field
       and sends the Warnings, and a missing or non-object payload
       applies the defaults without a Warning; on a configuration
       change, a settings object replaces the settings with every
       valid field and the defaults of the rejected ones and sends the
       Warnings, and a non-object payload, `null` included, changes
       nothing and sends no Warning
-- [ ] Reading `Settings` through `Deserialize` gives the same settings
+- [x] Reading `Settings` through `Deserialize` gives the same settings
       as the field-by-field reader for an object and fails for any
       other JSON value
-- [ ] The tests of Task 1 and every other existing test pass with
+- [x] The tests of Task 1 and every other existing test pass with
       their assertions unchanged
-- [ ] Integration tests in `tests/lsp_lifecycle/` pin, through
+- [x] Integration tests in `tests/lsp_lifecycle/` pin, through
       `initialize` and through `workspace/didChangeConfiguration`,
       that a wrongly typed field and a wrong `schemas` entry each
       send a Warning while the other settings take effect, and that
       `kubernetesVersion: 1.29` sends exactly one Warning and selects
       `master`
-- [ ] The doc comment of `MAX_LOGGED_SETTING_CHARS` and of
+- [x] The doc comment of `MAX_LOGGED_SETTING_CHARS` and of
       `store_settings` describe what they cover now, and
       `rlsp-yaml/Cargo.toml` enables no `serde` feature that nothing
       uses
-- [ ] `rlsp-yaml/docs/configuration.md` tells the reader what happens
+- [x] `rlsp-yaml/docs/configuration.md` tells the reader what happens
       to a wrongly typed setting, a wrong `customTags` or `schemas`
       entry, and a `null` value, and `rlsp-yaml/docs/feature-log.md`
       has an entry that tells the reader that a wrongly typed setting
       no longer resets the others
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ## Non-Goals
 
@@ -179,3 +179,10 @@ an invalid `kubernetesVersion` value through
   and no client sends.
 - **`Settings` in its own module:** reading settings is separate from
   the LSP handlers; the public path stays through a re-export.
+- **The security-engineer's logging controls apply to the rejection
+  Warnings (settled with the user during Task 3):** at most 20
+  rejections per update get their own Warning, followed by one line
+  that counts the rest, so a payload full of wrong entries cannot
+  flood the client log; a rejected value of `httpProxy` or `schemas`
+  is never logged, only its JSON type, since it can carry credentials;
+  a rejected array or object is described by its size only.

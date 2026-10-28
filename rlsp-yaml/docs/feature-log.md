@@ -31,6 +31,15 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### A Wrongly Typed Setting No Longer Resets the Others [completed]
+
+**Date:** 2026-10-28
+**Description:** The server used to read its workspace settings as a whole: one value of the wrong type, such as `"kubernetesVersion": 1.29`, `"formatPrintWidth": "80"`, or `"hover": "yes"`, made the read fail. At startup every setting then fell back to its default, a `workspace/didChangeConfiguration` with such a value was dropped as a whole, and nothing told the user. The settings are now read one by one: a setting of the wrong type takes its default, a wrong entry in `customTags` or `schemas` is dropped while the other entries apply, and every other setting takes effect. Each rejected setting or entry writes one warning to the client log that names the setting, the entry, the type it has to be, and the rejected value (never the value of `httpProxy` or `schemas`, which can contain credentials; at most 20 warnings per update). A `null` value and an unknown key stay silent, and a settings payload that is not an object changes nothing. See [Wrong settings](configuration.md#wrong-settings).
+**Complexity:** Medium
+**Tier:** 1
+
+---
+
 ### `false` Sub-Schemas Take Effect for Every Keyword [completed]
 
 **Date:** 2026-10-28
