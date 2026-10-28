@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-10-28)
 **Created:** 2026-10-28
 
 # Deterministic Small Test Stack
@@ -38,7 +38,7 @@ that overflows once the stack is truly small.
 - [x] Clarify scope with the user
 - [x] Design review of the approach
 - [x] Task 1: the small test stack is truly small and proven so
-- [ ] Push to `main` and confirm the full CI matrix is green
+- [x] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
