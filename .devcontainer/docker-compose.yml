@@ -19,6 +19,7 @@ services:
     # substitution, so a team default belongs in the fallback here.
     cpus: ${DEVCONTAINER_CPUS:-0}
     mem_limit: ${DEVCONTAINER_MEMORY:-0}
+    memswap_limit: ${DEVCONTAINER_MEMORY:-0}
     # Container environment: committed defaults, then personal overrides.
     # Never add .env.credentials here — the devcontainer CLI prints the
     # resolved Compose config, env_file values included, in its start log.
