@@ -1,8 +1,7 @@
 ---
-name: follow-up-task-queue
-description: "Remaining items after parser implementation, conformance hardening, migration, and workaround removal"
+name: project_followup_plans
+description: "Open work queue: schema plan order, rlsp-yaml follow-ups, parser bindings, CI/integration items"
 metadata:
-  node_type: memory
   type: project
   originSessionId: 1d09bc1e-8453-49ff-a3b4-6f7a66d0a9d7
   modified: 2026-10-28T15:40:00.000Z
@@ -11,8 +10,6 @@ metadata:
 <!-- Only track open items here. Completed work lives in its plan file
      and git history — duplicating it here adds noise and stale state.
      Remove items when their plan is marked Completed. -->
-
-## Open: rlsp-fmt
 
 ## Open: rlsp-yaml
 
@@ -33,6 +30,8 @@ metadata:
 - **`autoWrapFlowStyle` opt-out for `block_to_flow`** — The code-action user-format-config plan (`.ai/plans/2026-04-27-code-action-respect-user-format-config.md`) sets `block_to_flow`'s default to auto-wrap output to fit `formatPrintWidth`, removing the misleading `(long line)` title suffix. If users later report wanting single-line flow output regardless of length (e.g., for tooling that prefers compact JSON-like flow), add a setting like `autoWrapFlowStyle: false` (default `true`) so the action emits unwrapped flow when the user opts out. Defer until evidence shows demand — pre-emptively shipping the setting risks configuration sprawl across all code actions. Bias: do nothing unless a user explicitly asks for it.
 
 - **Expand corpus beyond the 4 seed files** — Move 0 seeded the corpus with `release-plz-workflow.yml`, `kubernetes-deployment.yaml`, `docker-compose.yml`, `github-actions-matrix.yml`. Real-world YAML covers many more shapes: Ansible playbooks, Helm chart templates, GitLab CI pipelines, CloudFormation/CDK YAML, Prometheus alert rules, SOPS-encrypted files, Swagger/OpenAPI specs, Argo CD `Application` manifests, Flux CD `Kustomization`s, Tekton `Pipeline`/`Task` resources. Each adds new coverage. File as one plan per shape, or a batch-add plan for 3-5 at a time. Each new file may surface new I4 failures that flag latent bugs — treat those under the Surprise Failure Protocol.
+
+- **Replace `WORKLIST.md` + `SKIP_LIST` with `#[ignore]`** (user preference, 2026-04-18; never planned): the shrink-only skip-list machinery is heavier than needed. Delete `rlsp-yaml/tests/corpus/WORKLIST.md`, remove `SKIP_LIST` and its matching logic from `tests/corpus_invariants/shared.rs` (empty since April), rewrite the top-of-file comment in `tests/corpus_invariants/main.rs` to "no known failures; fix a new one or `#[ignore]` it with a plan reference". The harness is already split into one test per invariant (2026-05-20 plan), so per-test `#[ignore]` works. If the corpus expansion above lands first, its new failures go through `#[ignore]` instead of the Surprise Failure Protocol.
 ## Open: rlsp-yaml-parser
 
 - create bindings for python - https://pyo3.rs and typescript (wasm)

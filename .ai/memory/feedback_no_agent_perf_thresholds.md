@@ -1,8 +1,9 @@
 ---
-name: No agent-verifiable perf thresholds
+name: feedback_no_agent_perf_thresholds
 description: Don't put hard throughput/latency numbers in agent acceptance criteria when agents run in a different environment than the perf target
-type: feedback
-originSessionId: 00c09f36-ddb7-414d-95d8-24766bd6d134
+metadata:
+  type: feedback
+  originSessionId: 00c09f36-ddb7-414d-95d8-24766bd6d134
 ---
 When a plan involves performance work, do NOT include hard
 throughput, latency, or memory-allocation numbers as

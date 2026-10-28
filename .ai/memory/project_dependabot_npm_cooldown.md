@@ -1,7 +1,8 @@
 ---
-name: Dependabot npm runs fail on its own 3-day cooldown
+name: project_dependabot_npm_cooldown
 description: npm_and_yarn Dependabot job fails intermittently with ERR_PNPM_NO_MATURE_MATCHING_VERSION; cause is Dependabot's injected minimumReleaseAge=4320, not repo config
-type: project
+metadata:
+  type: project
 ---
 
 Dependabot invokes pnpm with its own supply-chain cooldown injected on the

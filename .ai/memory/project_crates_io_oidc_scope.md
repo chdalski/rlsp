@@ -1,7 +1,8 @@
 ---
-name: crates.io OIDC token is publish-only
+name: project_crates_io_oidc_scope
 description: The `CARGO_REGISTRY_TOKEN` provisioned by GitHub OIDC for crates.io publishing is scoped to publish only — yank operations are 403'd. Yanks require a personal crates.io API token.
-type: project
+metadata:
+  type: project
 ---
 
 The repo uses OIDC trusted publishing to crates.io

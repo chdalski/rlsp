@@ -1,8 +1,9 @@
 ---
-name: Present full plan before approval
+name: feedback_plan_presentation
 description: Always show the complete plan file content to the user before asking for approval — never summarize and rush past the review gate
-type: feedback
-originSessionId: 7e50f19a-7cbf-4b38-81bd-268ef8f9b01f
+metadata:
+  type: feedback
+  originSessionId: 7e50f19a-7cbf-4b38-81bd-268ef8f9b01f
 ---
 Present the full plan file content to the user before asking for approval. Do not summarize the plan and treat a quick yes/no on the summary as approval.
 

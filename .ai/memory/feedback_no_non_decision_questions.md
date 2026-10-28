@@ -1,8 +1,7 @@
 ---
 name: feedback_no_non_decision_questions
 description: "Don't ask the user to decide low-stakes items that don't change the outcome; resolve as lead"
-metadata: 
-  node_type: memory
+metadata:
   type: feedback
   originSessionId: 6e598ae3-52c4-47ec-8d26-7e18f55dc4a5
   modified: 2026-08-07T12:51:51.020Z

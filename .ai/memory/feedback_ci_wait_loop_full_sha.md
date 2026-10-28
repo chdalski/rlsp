@@ -2,7 +2,6 @@
 name: feedback_ci_wait_loop_full_sha
 description: gh run list --commit needs the full 40-char SHA; a short SHA returns zero runs and silently breaks CI wait loops
 metadata:
-  node_type: memory
   type: feedback
   originSessionId: 3b76f14d-c522-46da-878e-68c9890a64c1
   modified: 2026-10-11T09:06:56.175Z

@@ -1,8 +1,9 @@
 ---
-name: Project memory location
+name: feedback_project_memory_location
 description: Store all memory for this project in the git-tracked .ai/memory/, not home-dir memory; /ensure-ai-dirs points auto-memory there via settings.local.json
-type: feedback
-originSessionId: 1ec2c7dc-e29d-4a65-8486-e9d5df8df19d
+metadata:
+  type: feedback
+  originSessionId: 1ec2c7dc-e29d-4a65-8486-e9d5df8df19d
 ---
 Store all memory for this project — feedback, follow-up items, design decisions, pending work — in `.ai/memory/` in the workspace, not in the home-dir memory (`~/.claude/projects/-workspace/memory/`).
 

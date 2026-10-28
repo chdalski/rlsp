@@ -1,8 +1,7 @@
 ---
 name: feedback_verify_ci_pipeline_after_push
 description: "After pushing, check the full CI pipeline (gh run list), not just local gates and Dependabot alerts"
-metadata: 
-  node_type: memory
+metadata:
   type: feedback
   originSessionId: 6e598ae3-52c4-47ec-8d26-7e18f55dc4a5
   modified: 2026-08-10T07:12:10.373Z
@@ -14,4 +13,4 @@ Concretely (2026-08-07): the VS Code extension CI (`vscode-extension.yml`) was r
 
 **Why:** "Dependabot alerts closed" + "local build/lint/test pass on Linux" is NOT "CI green." Marking a plan Completed while its CI workflow is red overstates the outcome.
 
-**How to apply:** after the post-approval push for any task touching CI-covered code, run `gh run list --limit ~10` and confirm the relevant workflow(s) succeeded across the whole matrix (incl. Windows/macOS). If a workflow is path-filtered, confirm it actually ran. Treat a standalone `tsc --noEmit` typecheck as part of the definition of done for TypeScript, distinct from vitest. Relates to [[feedback_clean_build_before_lint_verification]].
+**How to apply:** after the post-approval push for any task touching CI-covered code, run `gh run list --limit ~10` and confirm the relevant workflow(s) succeeded across the whole matrix (incl. Windows/macOS). If a workflow is path-filtered, confirm it actually ran. Treat a standalone `tsc --noEmit` typecheck as part of the definition of done for TypeScript, distinct from vitest. Relates to [[feedback_ci_wait_loop_full_sha]].

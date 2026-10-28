@@ -1,8 +1,7 @@
 ---
-name: claude-plugin-update-needs-version-bump
+name: project_claude_plugin_update_needs_version_bump
 description: "`claude plugin update` only fetches when plugin.json `version` changes; a plugin-root CLAUDE.md fails `claude plugin validate --strict`"
-metadata: 
-  node_type: memory
+metadata:
   type: project
   originSessionId: ecd903e1-51ea-4549-ad69-68bb702531bd
   modified: 2026-09-16T10:36:38.368Z
@@ -14,4 +13,4 @@ A `CLAUDE.md` placed at the plugin root (`rlsp-yaml/integrations/claude-code/CLA
 
 **Why:** the rlsp-yaml plugin stayed at `0.1.0` while its content changed (the auto-provision hook was removed in `a7a937c9`), so existing installs never received the change.
 
-**How to apply:** any change under `rlsp-yaml/integrations/claude-code/` must come with a `plugin.json` version bump, or existing installs never see it. Don't put instruction files inside the plugin folder while `validate --strict` is a gate.
+**How to apply:** the bump rule itself is in root `CLAUDE.md` (Claude Code Plugin Versioning). What it does not say: never remove `version` from `plugin.json`, and don't put instruction files inside the plugin folder while `validate --strict` is a gate.

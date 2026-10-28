@@ -1,8 +1,7 @@
 ---
-name: feedback-one-plan-at-a-time
+name: feedback_one_plan_at_a_time
 description: "User wants to approve and execute one plan at a time, never batch-present or batch-approve multi-plan programs"
-metadata: 
-  node_type: memory
+metadata:
   type: feedback
   originSessionId: 69991bad-bc0f-411d-972c-0fdb9ad7151c
 ---
@@ -38,6 +37,6 @@ batch.
   `Status: NotStarted` and stop. Don't ask whether they
   want to approve more — wait for them to bring it up next
   session.
-- See [[feedback-plan-presentation]] for the
+- See [[feedback_plan_presentation]] for the
   show-full-content rule that still applies when
   presenting any single plan.

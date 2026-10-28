@@ -1,8 +1,7 @@
 ---
-name: feedback-no-auto-proceed-on-question-timeout
+name: feedback_no_auto_proceed_on_question_timeout
 description: "On AskUserQuestion \"no response after 60s / proceed with best judgment\" notices, do not guess user-owned decisions — hold and wait for the real answer"
-metadata: 
-  node_type: memory
+metadata:
   type: feedback
   originSessionId: b6ff04e3-b575-489e-838c-bb64974f3620
 ---
@@ -22,4 +21,4 @@ not the user's instruction.
 reversible, non-decisional prep (e.g. read-only investigation) — never
 commit the user to a choice among presented options. Genuine decision
 points stay open until the user answers. Relatedly, prefer waiting over
-proceeding even when a fix looks low-risk. See [[feedback-wait-for-reviewer-direct-approval]].
+proceeding even when a fix looks low-risk. Related: [[feedback_no_non_decision_questions]].

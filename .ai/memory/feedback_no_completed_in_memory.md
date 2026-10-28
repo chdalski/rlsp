@@ -1,8 +1,9 @@
 ---
-name: No completed items in memory files
+name: feedback_no_completed_in_memory
 description: Remove completed plans and todos from memory — completed work lives in plan files and git history
-type: feedback
-originSessionId: 4da03109-f825-431a-8ef9-29e249d33e7d
+metadata:
+  type: feedback
+  originSessionId: 4da03109-f825-431a-8ef9-29e249d33e7d
 ---
 Do not keep completed items in memory files (especially the follow-up task queue). Remove items when their plan is marked Completed.
 

@@ -1,7 +1,8 @@
 ---
-name: Verify existing capabilities before claiming gaps
+name: feedback_verify_before_claiming_gaps
 description: Always check ServerCapabilities and handler implementations before listing LSP features as unimplemented
-type: feedback
+metadata:
+  type: feedback
 ---
 
 Before presenting LSP features as "gaps" or "follow-up work," verify against the actual codebase — grep `ServerCapabilities` in server.rs for capability registration and check for handler implementations. A surface-level scan of docs and feature-log is not sufficient; features may be implemented without being documented in feature-log.md.

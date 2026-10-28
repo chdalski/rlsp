@@ -1,7 +1,8 @@
 ---
-name: Always consider performance
+name: feedback_always_consider_performance
 description: When planning conformance fixes, proactively assess and report performance implications without being asked
-type: feedback
+metadata:
+  type: feedback
 ---
 
 When planning conformance or correctness fixes, always proactively assess performance implications as part of the planning analysis — don't wait to be asked.

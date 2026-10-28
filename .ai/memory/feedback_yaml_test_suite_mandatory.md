@@ -1,7 +1,8 @@
 ---
-name: yaml-test-suite corpus is mandatory coverage
+name: feedback_yaml_test_suite_mandatory
 description: Any behavior or invariant that can be exercised against the yaml-test-suite corpus MUST be tested against it — synthetic-only fixtures are not an acceptable substitute
-type: feedback
+metadata:
+  type: feedback
 ---
 Every test target in the rlsp-yaml workspace that can plausibly be
 exercised against the yaml-test-suite corpus MUST be exercised

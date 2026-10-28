@@ -1,5 +1,5 @@
 ---
-name: rust-toolchain-pin-also-pins-ci
+name: project_rust_toolchain_pin_ci_behavior
 description: The repo-root rust-toolchain.toml pins CI too (it overrides dtolnay's rustup default); full-pin uses @<version> action refs matching the pin
 metadata:
   type: project
@@ -47,5 +47,4 @@ scratch workflow on a branch (a `workflow_dispatch`-only workflow can't
 be dispatched from a branch — GitHub requires it on the default branch;
 `on: push:` to the scratch branch works, and delete the branch after).
 
-See plans `.ai/plans/completed/2026-07-09-adopt-rust-1-97-toolchain.md`, `.ai/plans/2026-09-23-adopt-rust-1-98-toolchain.md`, and `.ai/plans/2026-10-16-zed-crate-on-zed-registry-toolchain.md`. Related:
-[[clean-build-before-lint-verification]].
+See plans `.ai/plans/completed/2026-07-09-adopt-rust-1-97-toolchain.md`, `.ai/plans/completed/2026-09-23-adopt-rust-1-98-toolchain.md`, and `.ai/plans/completed/2026-10-16-zed-crate-on-zed-registry-toolchain.md`. After a bump, `cargo clean` before trusting clippy (root `CLAUDE.md`, Build and Test).

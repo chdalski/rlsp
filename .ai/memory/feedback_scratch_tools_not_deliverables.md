@@ -1,8 +1,9 @@
 ---
-name: Scratch measurement tools are not deliverables
+name: feedback_scratch_tools_not_deliverables
 description: When dispatching a task that requires empirical measurement, explicitly state that scratch tooling (throwaway tests, measurement binaries, debug scaffolds) is not a committable artifact
-type: feedback
-originSessionId: 4cbb91b1-6f2e-4945-9836-1f67b91dfb9c
+metadata:
+  type: feedback
+  originSessionId: 4cbb91b1-6f2e-4945-9836-1f67b91dfb9c
 ---
 When a task requires the developer to measure behavior empirically — running the formatter, probing an API, checking wrap boundaries, etc. — the developer often creates a scratch Rust/TS file to do the measurement. That scratch file is a **tool**, not a **deliverable**. The user flagged this during Task 5 of a formatter-fixture plan: the developer had created `rlsp-yaml/tests/measure_tabs_interaction.rs` and left it in the working tree; without intervention it could have ended up in the commit.
 

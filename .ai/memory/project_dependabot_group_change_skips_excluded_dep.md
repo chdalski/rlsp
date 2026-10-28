@@ -1,8 +1,7 @@
 ---
 name: project_dependabot_group_change_skips_excluded_dep
 description: "After a dependabot.yml group change, the push-triggered run rebuilds the open group PR but skips a newly excluded dependency until the next scheduled run"
-metadata: 
-  node_type: memory
+metadata:
   type: project
   originSessionId: 8b23f9b2-69ac-4d57-9bd4-69ba0e149629
   modified: 2026-09-17T11:26:15.305Z

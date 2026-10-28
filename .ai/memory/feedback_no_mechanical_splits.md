@@ -1,7 +1,8 @@
 ---
-name: No mechanical code splits from line counts
+name: feedback_no_mechanical_splits
 description: Do not split code (especially tests from production) just to hit arbitrary line-count thresholds — splits must have structural justification
-type: feedback
+metadata:
+  type: feedback
 ---
 
 Do not use fixed line counts as hard acceptance criteria that
