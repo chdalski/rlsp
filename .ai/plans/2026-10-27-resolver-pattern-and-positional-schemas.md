@@ -59,6 +59,7 @@ except the positional corrections named in Decisions.
 - [x] Task 3: keys resolve through `patternProperties` and
       `additionalProperties`
 - [x] Task 4: items resolve by position
+- [ ] Task 5: the Coverage workflow passes again
 - [ ] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
@@ -211,6 +212,31 @@ walk.
       position
 - [x] Build, tests, clippy, and fmt pass
 
+### Task 5: Make the Coverage workflow pass again
+
+After Tasks 1–4 were pushed, the Coverage workflow
+(`cargo llvm-cov --workspace --lcov --output-path lcov.info`, see
+`.github/workflows/coverage.yml`) aborts the `rlsp-yaml` library
+tests with a stack overflow on a thread started by
+`schema::test_support::on_a_small_stack` (512 KiB); it passed on
+the commits before this plan. `cargo-llvm-cov` is not installed in
+the dev container.
+
+- [ ] The handoff names the overflowing test and the cause of the
+      overflow, shown by a `cargo llvm-cov --workspace` run that
+      overflows at the task's baseline commit and passes with the
+      fix
+- [ ] `on_a_small_stack` still sets a stack of exactly 512 KiB, with
+      no size that depends on `cfg` or the environment; every test
+      that calls it keeps its depth and its assertions; the overflow
+      is removed in the code under test, not by changing the helper,
+      the tests, or the build or run configuration
+- [ ] Every existing hover, completion, resolver, and validation test
+      passes with its assertions unchanged
+- [ ] `cargo llvm-cov --workspace --lcov --output-path lcov.info`
+      passes locally on the pinned toolchain
+- [ ] Build, tests, clippy, and fmt pass
+
 ## Non-Goals
 
 - Following `if`/`then`/`else`, `dependentSchemas`, and
@@ -291,6 +317,11 @@ walk.
   6. The same with an `additionalItems` schema on the earlier
      branch's tuple, index beyond its prefix: that schema instead
      of the later branch's `items`.
+- **The small stack stays at 512 KiB:** the small-stack tests prove
+  that the code under test does not grow the call stack with schema,
+  document, or chain depth; a larger stack would prove less. If the
+  overflow cannot be removed in the code under test, the user
+  decides how to proceed.
 - **Inline test schemas:** the integration tests use trimmed
   GitHub-workflow-like and compose-like schemas written in the
   tests; the real upstream schemas are large and change.
