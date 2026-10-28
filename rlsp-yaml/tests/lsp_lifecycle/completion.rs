@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 use futures::StreamExt;
-use rlsp_yaml::schema::parse_schema;
+use rlsp_yaml::schema::{ParsedSchema, parse_schema};
 use rlsp_yaml::server::Backend;
 use serde_json::json;
 use tower_lsp::LspService;
@@ -18,26 +18,45 @@ pub fn completion_request(id: i64, uri: &str, line: u32, character: u32) -> Requ
         .finish()
 }
 
-#[tokio::test]
-async fn should_return_completion_items_for_valid_position() {
+/// Initialize a server, open `text` as `uri`, and complete at (`line`,
+/// `character`), returning the completion result. `schema` is a parsed schema
+/// seeded into the cache under its URL before the document opens.
+async fn complete_at(
+    schema: Option<(&str, ParsedSchema)>,
+    uri: &str,
+    text: &str,
+    line: u32,
+    character: u32,
+) -> serde_json::Value {
     let (mut service, socket) = LspService::new(Backend::new);
     tokio::spawn(socket.for_each(|_| async {}));
+    if let Some((url, schema)) = schema {
+        service.inner().seed_schema_cache(url, schema);
+    }
 
     send(&mut service, initialize_request(1)).await;
     send(&mut service, initialized_notification()).await;
+    send(&mut service, did_open_notification(uri, text)).await;
 
-    let uri = "file:///test/completion.yaml";
-    send(
-        &mut service,
-        did_open_notification(uri, "name: Alice\nage: 30\n"),
+    let resp = send(&mut service, completion_request(2, uri, line, character)).await;
+    let resp = resp.expect("completion should return a response");
+    resp.result()
+        .expect("completion should have a result")
+        .clone()
+}
+
+#[tokio::test]
+async fn should_return_completion_items_for_valid_position() {
+    let result = complete_at(
+        None,
+        "file:///test/completion.yaml",
+        "name: Alice\nage: 30\n",
+        0,
+        0,
     )
     .await;
-
-    let resp = send(&mut service, completion_request(2, uri, 0, 0)).await;
-    let resp = resp.expect("completion should return a response");
-    let result = resp.result().expect("completion should have a result");
     assert!(!result.is_null(), "completion result should not be null");
-    let result_str = serde_json::to_string(result).expect("serialize result");
+    let result_str = serde_json::to_string(&result).expect("serialize result");
     assert!(
         result_str.contains("age"),
         "completion should suggest sibling key 'age', got: {result_str}"
@@ -68,24 +87,16 @@ async fn should_return_empty_completions_for_unknown_document() {
 // B-1: OnValue branch — cursor on a value position returns sibling values for the key
 #[tokio::test]
 async fn completion_on_value_position_returns_sibling_values() {
-    let (mut service, socket) = LspService::new(Backend::new);
-    tokio::spawn(socket.for_each(|_| async {}));
-
-    send(&mut service, initialize_request(1)).await;
-    send(&mut service, initialized_notification()).await;
-
-    let uri = "file:///test/completion_value.yaml";
-    send(
-        &mut service,
-        did_open_notification(uri, "env: production\nenv: \n"),
+    // Cursor on line 1 col 5 — after "env: ", inside the value position
+    let result = complete_at(
+        None,
+        "file:///test/completion_value.yaml",
+        "env: production\nenv: \n",
+        1,
+        5,
     )
     .await;
-
-    // Cursor on line 1 col 5 — after "env: ", inside the value position
-    let resp = send(&mut service, completion_request(2, uri, 1, 5)).await;
-    let resp = resp.expect("completion should return a response");
-    let result = resp.result().expect("completion should have a result");
-    let result_str = serde_json::to_string(result).expect("serialize");
+    let result_str = serde_json::to_string(&result).expect("serialize");
     assert!(
         result_str.contains("production"),
         "value completion should suggest sibling value 'production', got: {result_str}"
@@ -95,30 +106,22 @@ async fn completion_on_value_position_returns_sibling_values() {
 // B-2: OnKey branch with schema — cursor on a key position with schema returns schema properties
 #[tokio::test]
 async fn completion_on_key_position_with_schema_returns_schema_properties() {
-    let (mut service, socket) = LspService::new(Backend::new);
-    tokio::spawn(socket.for_each(|_| async {}));
-
-    send(&mut service, initialize_request(1)).await;
-    send(&mut service, initialized_notification()).await;
-
-    let uri = "file:///test/completion_key_schema.yaml";
     // Use a $schema modeline; schema fetch will fail but sibling structural
     // suggestions still work from the document itself.
-    send(
-        &mut service,
-        did_open_notification(uri, "name: Alice\nage: 30\n"),
+    // Cursor at line 0 col 0 — on "name" key
+    let result = complete_at(
+        None,
+        "file:///test/completion_key_schema.yaml",
+        "name: Alice\nage: 30\n",
+        0,
+        0,
     )
     .await;
-
-    // Cursor at line 0 col 0 — on "name" key
-    let resp = send(&mut service, completion_request(2, uri, 0, 0)).await;
-    let resp = resp.expect("completion should return a response");
-    let result = resp.result().expect("completion should have a result");
     assert!(
         !result.is_null(),
         "key completion with schema should return a result"
     );
-    let result_str = serde_json::to_string(result).expect("serialize");
+    let result_str = serde_json::to_string(&result).expect("serialize");
     assert!(
         result_str.contains("age"),
         "key completion should include sibling key 'age', got: {result_str}"
@@ -128,28 +131,20 @@ async fn completion_on_key_position_with_schema_returns_schema_properties() {
 // B-3: OnKey inside nested mapping — cursor on a key in a nested mapping returns its sibling keys
 #[tokio::test]
 async fn completion_inside_nested_mapping_returns_sibling_keys() {
-    let (mut service, socket) = LspService::new(Backend::new);
-    tokio::spawn(socket.for_each(|_| async {}));
-
-    send(&mut service, initialize_request(1)).await;
-    send(&mut service, initialized_notification()).await;
-
-    let uri = "file:///test/completion_nested.yaml";
-    send(
-        &mut service,
-        did_open_notification(uri, "server:\n  host: localhost\n  port: 8080\n"),
+    // Cursor at line 1 col 2 — on "host" key inside nested mapping
+    let result = complete_at(
+        None,
+        "file:///test/completion_nested.yaml",
+        "server:\n  host: localhost\n  port: 8080\n",
+        1,
+        2,
     )
     .await;
-
-    // Cursor at line 1 col 2 — on "host" key inside nested mapping
-    let resp = send(&mut service, completion_request(2, uri, 1, 2)).await;
-    let resp = resp.expect("completion should return a response");
-    let result = resp.result().expect("completion should have a result");
     assert!(
         !result.is_null(),
         "nested mapping key completion should return a result"
     );
-    let result_str = serde_json::to_string(result).expect("serialize");
+    let result_str = serde_json::to_string(&result).expect("serialize");
     assert!(
         result_str.contains("port"),
         "nested mapping completion should suggest sibling key 'port', got: {result_str}"
@@ -159,31 +154,20 @@ async fn completion_inside_nested_mapping_returns_sibling_keys() {
 // B-4: InSequenceItem branch — cursor inside a sequence item returns sibling keys from other items
 #[tokio::test]
 async fn completion_inside_sequence_item_returns_sibling_item_keys() {
-    let (mut service, socket) = LspService::new(Backend::new);
-    tokio::spawn(socket.for_each(|_| async {}));
-
-    send(&mut service, initialize_request(1)).await;
-    send(&mut service, initialized_notification()).await;
-
-    let uri = "file:///test/completion_seq.yaml";
-    send(
-        &mut service,
-        did_open_notification(
-            uri,
-            "items:\n  - name: Alice\n    role: admin\n  - name: Bob\n    \n",
-        ),
+    // Cursor at line 4 col 4 — blank key position inside second sequence item
+    let result = complete_at(
+        None,
+        "file:///test/completion_seq.yaml",
+        "items:\n  - name: Alice\n    role: admin\n  - name: Bob\n    \n",
+        4,
+        4,
     )
     .await;
-
-    // Cursor at line 4 col 4 — blank key position inside second sequence item
-    let resp = send(&mut service, completion_request(2, uri, 4, 4)).await;
-    let resp = resp.expect("completion should return a response");
-    let result = resp.result().expect("completion should have a result");
     assert!(
         !result.is_null(),
         "sequence-item completion should return a result"
     );
-    let result_str = serde_json::to_string(result).expect("serialize");
+    let result_str = serde_json::to_string(&result).expect("serialize");
     assert!(
         result_str.contains("role"),
         "sequence-item completion should suggest sibling key 'role' from other items, got: {result_str}"
@@ -195,24 +179,16 @@ async fn completion_inside_sequence_item_returns_sibling_item_keys() {
 // B-1: Cursor on existing mapping key, asserts sibling key label
 #[tokio::test]
 async fn should_complete_at_mapping_key_suggests_sibling() {
-    let (mut service, socket) = LspService::new(Backend::new);
-    tokio::spawn(socket.for_each(|_| async {}));
-
-    send(&mut service, initialize_request(1)).await;
-    send(&mut service, initialized_notification()).await;
-
-    let uri = "file:///test/b1.yaml";
-    send(
-        &mut service,
-        did_open_notification(uri, "name: Alice\nage: 30\nregion: us-east\n"),
+    let result = complete_at(
+        None,
+        "file:///test/b1.yaml",
+        "name: Alice\nage: 30\nregion: us-east\n",
+        0,
+        0,
     )
     .await;
-
-    let resp = send(&mut service, completion_request(2, uri, 0, 0)).await;
-    let resp = resp.expect("completion should return a response");
-    let result = resp.result().expect("completion should have a result");
     assert!(!result.is_null(), "result should not be null");
-    let result_str = serde_json::to_string(result).expect("serialize");
+    let result_str = serde_json::to_string(&result).expect("serialize");
     assert!(
         result_str.contains("age") || result_str.contains("region"),
         "should suggest sibling keys, got: {result_str}"
@@ -222,24 +198,16 @@ async fn should_complete_at_mapping_key_suggests_sibling() {
 // B-2: Cursor on value position, asserts structural value fallback
 #[tokio::test]
 async fn should_complete_at_value_position_suggests_structural_values() {
-    let (mut service, socket) = LspService::new(Backend::new);
-    tokio::spawn(socket.for_each(|_| async {}));
-
-    send(&mut service, initialize_request(1)).await;
-    send(&mut service, initialized_notification()).await;
-
-    let uri = "file:///test/b2.yaml";
-    send(
-        &mut service,
-        did_open_notification(uri, "env: production\nenv: staging\nenv: \n"),
+    let result = complete_at(
+        None,
+        "file:///test/b2.yaml",
+        "env: production\nenv: staging\nenv: \n",
+        2,
+        5,
     )
     .await;
-
-    let resp = send(&mut service, completion_request(2, uri, 2, 5)).await;
-    let resp = resp.expect("completion should return a response");
-    let result = resp.result().expect("completion should have a result");
     assert!(!result.is_null(), "result should not be null");
-    let result_str = serde_json::to_string(result).expect("serialize");
+    let result_str = serde_json::to_string(&result).expect("serialize");
     assert!(
         result_str.contains("production") || result_str.contains("staging"),
         "should suggest structural values, got: {result_str}"
@@ -267,28 +235,23 @@ async fn should_complete_at_blank_line_in_nested_mapping_suggests_sibling_keys()
     }))
     .expect("b3 schema parse failed");
 
-    let (mut service, socket) = LspService::new(Backend::new);
-    tokio::spawn(socket.for_each(|_| async {}));
-
-    service.inner().seed_schema_cache(B3_SCHEMA_URL, schema);
-
-    send(&mut service, initialize_request(1)).await;
-    send(&mut service, initialized_notification()).await;
-
-    let uri = "file:///test/b3.yaml";
     // Blank line after "host:" — cursor at line 3, col 2 is on the blank line
     // inside the "server" nested mapping. InBlankMapping fires; schema supplies "port".
     let yaml = format!(
         "# yaml-language-server: $schema={B3_SCHEMA_URL}\nserver:\n  host: localhost\n  \n"
     );
-    send(&mut service, did_open_notification(uri, &yaml)).await;
 
     // Cursor at line 3, col 2 — blank line inside nested "server" mapping
-    let resp = send(&mut service, completion_request(2, uri, 3, 2)).await;
-    let resp = resp.expect("completion should return a response");
-    let result = resp.result().expect("completion should have a result");
+    let result = complete_at(
+        Some((B3_SCHEMA_URL, schema)),
+        "file:///test/b3.yaml",
+        &yaml,
+        3,
+        2,
+    )
+    .await;
     assert!(!result.is_null(), "result should not be null");
-    let result_str = serde_json::to_string(result).expect("serialize");
+    let result_str = serde_json::to_string(&result).expect("serialize");
     assert!(
         result_str.contains("port"),
         "should suggest schema key 'port' on blank line in nested mapping, got: {result_str}"
@@ -302,24 +265,16 @@ async fn should_complete_at_blank_line_in_nested_mapping_suggests_sibling_keys()
 // B-4: Cursor on key inside sequence item, asserts sibling key from another item
 #[tokio::test]
 async fn should_complete_at_sequence_item_key_suggests_sibling_from_other_item() {
-    let (mut service, socket) = LspService::new(Backend::new);
-    tokio::spawn(socket.for_each(|_| async {}));
-
-    send(&mut service, initialize_request(1)).await;
-    send(&mut service, initialized_notification()).await;
-
-    let uri = "file:///test/b4.yaml";
-    send(
-        &mut service,
-        did_open_notification(uri, "items:\n  - name: Alice\n    age: 30\n  - name: Bob\n"),
+    let result = complete_at(
+        None,
+        "file:///test/b4.yaml",
+        "items:\n  - name: Alice\n    age: 30\n  - name: Bob\n",
+        3,
+        4,
     )
     .await;
-
-    let resp = send(&mut service, completion_request(2, uri, 3, 4)).await;
-    let resp = resp.expect("completion should return a response");
-    let result = resp.result().expect("completion should have a result");
     assert!(!result.is_null(), "result should not be null");
-    let result_str = serde_json::to_string(result).expect("serialize");
+    let result_str = serde_json::to_string(&result).expect("serialize");
     assert!(
         result_str.contains("age"),
         "should suggest sibling key 'age' from another item, got: {result_str}"
@@ -338,31 +293,14 @@ async fn completion_with_all_of(
     line: u32,
     character: u32,
 ) -> String {
-    let schema = parse_schema(&json!({ "type": "object", "allOf": all_of_branches }))
-        .expect("many-branches schema parse failed");
-
-    let (mut service, socket) = LspService::new(Backend::new);
-    tokio::spawn(socket.for_each(|_| async {}));
-    service
-        .inner()
-        .seed_schema_cache(MANY_BRANCHES_SCHEMA_URL, schema);
-
-    send(&mut service, initialize_request(1)).await;
-    send(&mut service, initialized_notification()).await;
-
-    let uri = "file:///test/many-branches-completion.yaml";
-    let text = format!("# yaml-language-server: $schema={MANY_BRANCHES_SCHEMA_URL}\n{document}");
-    send(&mut service, did_open_notification(uri, &text)).await;
-
-    // The modeline occupies line 0, so the document's lines start at 1.
-    let resp = send(
-        &mut service,
-        completion_request(2, uri, line + 1, character),
+    completion_with_schema(
+        MANY_BRANCHES_SCHEMA_URL,
+        &json!({ "type": "object", "allOf": all_of_branches }),
+        document,
+        line,
+        character,
     )
-    .await;
-    let resp = resp.expect("completion should return a response");
-    let result = resp.result().expect("completion should have a result");
-    serde_json::to_string(result).expect("serialize")
+    .await
 }
 
 /// 25 `allOf` branches: branch `i` (below 24) defines `field_{i}`; the last
@@ -430,46 +368,29 @@ const ANY_OF_ITEMS_SCHEMA_URL: &str = "https://example.com/test-any-of-items-com
 /// `servers` key is an array declared in an `anyOf` branch next to a null
 /// branch, returning the serialized completion result.
 async fn completion_with_servers_in_any_of(document: &str, line: u32, character: u32) -> String {
-    let schema = parse_schema(&json!({
-        "type": "object",
-        "properties": { "servers": { "anyOf": [
-            {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "host": { "type": "string" },
-                        "port": { "type": "integer" }
+    completion_with_schema(
+        ANY_OF_ITEMS_SCHEMA_URL,
+        &json!({
+            "type": "object",
+            "properties": { "servers": { "anyOf": [
+                {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "host": { "type": "string" },
+                            "port": { "type": "integer" }
+                        }
                     }
-                }
-            },
-            { "type": "null" }
-        ] } }
-    }))
-    .expect("any-of items schema parse failed");
-
-    let (mut service, socket) = LspService::new(Backend::new);
-    tokio::spawn(socket.for_each(|_| async {}));
-    service
-        .inner()
-        .seed_schema_cache(ANY_OF_ITEMS_SCHEMA_URL, schema);
-
-    send(&mut service, initialize_request(1)).await;
-    send(&mut service, initialized_notification()).await;
-
-    let uri = "file:///test/any-of-items-completion.yaml";
-    let text = format!("# yaml-language-server: $schema={ANY_OF_ITEMS_SCHEMA_URL}\n{document}");
-    send(&mut service, did_open_notification(uri, &text)).await;
-
-    // The modeline occupies line 0, so the document's lines start at 1.
-    let resp = send(
-        &mut service,
-        completion_request(2, uri, line + 1, character),
+                },
+                { "type": "null" }
+            ] } }
+        }),
+        document,
+        line,
+        character,
     )
-    .await;
-    let resp = resp.expect("completion should return a response");
-    let result = resp.result().expect("completion should have a result");
-    serde_json::to_string(result).expect("serialize")
+    .await
 }
 
 #[tokio::test]
@@ -512,27 +433,18 @@ async fn completion_with_schema(
     character: u32,
 ) -> String {
     let schema = parse_schema(schema).expect("schema parse failed");
-
-    let (mut service, socket) = LspService::new(Backend::new);
-    tokio::spawn(socket.for_each(|_| async {}));
-    service.inner().seed_schema_cache(url, schema);
-
-    send(&mut service, initialize_request(1)).await;
-    send(&mut service, initialized_notification()).await;
-
-    let uri = "file:///test/completion-patterns.yaml";
     let text = format!("# yaml-language-server: $schema={url}\n{document}");
-    send(&mut service, did_open_notification(uri, &text)).await;
 
     // The modeline occupies line 0, so the document's lines start at 1.
-    let resp = send(
-        &mut service,
-        completion_request(2, uri, line + 1, character),
+    let result = complete_at(
+        Some((url, schema)),
+        "file:///test/completion-patterns.yaml",
+        &text,
+        line + 1,
+        character,
     )
     .await;
-    let resp = resp.expect("completion should return a response");
-    let result = resp.result().expect("completion should have a result");
-    serde_json::to_string(result).expect("serialize")
+    serde_json::to_string(&result).expect("serialize")
 }
 
 #[tokio::test]

@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-10-28
 
 # Completion Takes Sibling Item Keys From the Cursor's Sequence
@@ -34,7 +34,7 @@ document and at every nesting level.
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: completion integration tests share one setup helper
+- [x] Task 1: completion integration tests share one setup helper
 - [ ] Task 2: sibling item keys come from the cursor's sequence
 - [ ] Push to `main` and confirm the full CI matrix is green
 
@@ -47,15 +47,15 @@ document open, and completion request in each test and in its three
 schema helpers. One helper serves them all, so the tests of Task 2
 stay short. Test-only; behavior is unchanged.
 
-- [ ] One async helper initializes the server, opens a document,
+- [x] One async helper initializes the server, opens a document,
       requests completion at a position, and returns the result; the
       schemaless tests and the schema helpers
       (`completion_with_all_of`, `completion_with_servers_in_any_of`,
       `completion_with_schema`) use it, and no other copy of that
       sequence remains in the file
-- [ ] Every test in the file keeps its document, position, and
+- [x] Every test in the file keeps its document, position, and
       assertions
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ### Task 2: Take sibling item keys from the cursor's sequence
 
