@@ -360,13 +360,36 @@ pub(crate) mod test_support {
     /// Runs `body` on a thread with a stack far smaller than the default one,
     /// so a recursion that the schema does not bound overflows it instead of
     /// passing unnoticed.
+    ///
+    /// The stack is 448 KiB and not a rounder 512 KiB because of how glibc
+    /// allocates thread stacks. libtest runs every test on a 2 MiB thread
+    /// (`RUST_MIN_STACK`), and glibc hands a finished thread's cached stack to
+    /// the next thread that asks for at least a quarter of its size, guard page
+    /// included. A 512 KiB request is therefore served the cached 2 MiB stack
+    /// and the test passes or fails by scheduling. 448 KiB stays below that
+    /// bound for any guard page up to 85 KiB, and it is a multiple of 64 KiB,
+    /// so neither 16 KiB pages nor Windows' 64 KiB allocation granularity round
+    /// it. `RUST_MIN_STACK` sets the size of libtest's threads and so of the
+    /// cached stacks: a value from 448 KiB up to about 1.76 MiB (1804 KiB with a
+    /// 4 KiB guard page) makes them small enough for glibc to reuse for this
+    /// thread as well, which defeats the helper, while the default 2 MiB and
+    /// values below 448 KiB do not.
+    /// The thread's own explicit `stack_size` ignores the variable.
+    ///
+    /// The thread carries the caller's name, which libtest sets to the test's
+    /// name. A stack overflow cannot be caught: it aborts the whole test
+    /// binary, with a message that names the thread and so the test.
     pub fn on_a_small_stack(body: impl FnOnce() + Send + 'static) {
-        std::thread::Builder::new()
-            .stack_size(512 * 1024)
+        let builder = std::thread::Builder::new().stack_size(448 * 1024);
+        let builder = match std::thread::current().name() {
+            Some(name) => builder.name(name.to_string()),
+            None => builder,
+        };
+        builder
             .spawn(body)
             .expect("thread spawns")
             .join()
-            .expect("the body does not panic or overflow its stack");
+            .expect("the small-stack body panicked");
     }
 
     /// How [`Sharing::put`] places a schema.
@@ -642,6 +665,151 @@ pub(crate) mod test_support {
             object_schema(vec![("here", reference_to(0)), ("a", string_schema())]),
             vec![target],
         )
+    }
+
+    mod tests {
+        use std::sync::mpsc;
+
+        use super::on_a_small_stack;
+
+        #[test]
+        fn small_stack_runs_the_body_on_another_thread() {
+            let (sender, receiver) = mpsc::channel();
+
+            on_a_small_stack(move || {
+                sender.send(std::thread::current().id()).expect("sends");
+            });
+
+            assert_ne!(
+                receiver.recv().expect("receives"),
+                std::thread::current().id()
+            );
+        }
+
+        #[test]
+        fn small_stack_thread_carries_the_callers_thread_name() {
+            let caller = std::thread::current().name().map(str::to_owned);
+            let (sender, receiver) = mpsc::channel();
+
+            on_a_small_stack(move || {
+                let name = std::thread::current().name().map(str::to_owned);
+                sender.send(name).expect("sends");
+            });
+
+            let body = receiver.recv().expect("receives");
+            assert!(body.is_some());
+            assert_eq!(body, caller);
+        }
+
+        #[test]
+        fn small_stack_from_an_unnamed_thread_stays_unnamed() {
+            let (sender, receiver) = mpsc::channel();
+
+            std::thread::spawn(move || {
+                on_a_small_stack(move || {
+                    let name = std::thread::current().name().map(str::to_owned);
+                    sender.send(name).expect("sends");
+                });
+            })
+            .join()
+            .expect("the unnamed caller does not panic");
+
+            assert_eq!(receiver.recv().expect("receives"), None);
+        }
+
+        #[test]
+        #[should_panic(expected = "the small-stack body panicked")]
+        fn small_stack_propagates_a_panic_of_the_body() {
+            on_a_small_stack(|| panic!("boom"));
+        }
+
+        /// The canary for the helper's stack size. glibc caches finished
+        /// threads' stacks, which is what it guards against, so it runs only
+        /// where that cache exists.
+        #[cfg(all(target_os = "linux", target_env = "gnu"))]
+        mod stack_cache_canary {
+            use std::os::unix::process::ExitStatusExt as _;
+
+            use super::on_a_small_stack;
+
+            /// The probe's frame size, so [`FRAMES`] of them fill about 1 MiB: more
+            /// than the helper's stack, less than the 2 MiB of a libtest thread.
+            const FRAME_BYTES: usize = 1024;
+            const FRAMES: usize = 1024;
+            /// Gates the probe: set only by the canary, so a plain run of the probe
+            /// returns at once.
+            const PROBE_VARIABLE: &str = "RLSP_YAML_STACK_CACHE_CANARY_PROBE";
+            const PROBE: &str = "stack_cache_canary_child_probe";
+
+            /// Recurses `frames` deep with one `FRAME_BYTES` frame per level. The
+            /// addition after the call keeps it from becoming a tail call, and
+            /// `black_box` keeps the frame from being optimised away.
+            fn recurse(frames: usize) -> u8 {
+                let mut frame = [0_u8; FRAME_BYTES];
+                std::hint::black_box(&mut frame);
+                if frames == 0 {
+                    return frame[0];
+                }
+                recurse(frames - 1).wrapping_add(frame[frames % FRAME_BYTES])
+            }
+
+            /// The child side of the canary. Without the variable it does nothing,
+            /// so it never aborts a run of the whole suite, `--include-ignored`
+            /// included.
+            ///
+            /// With it, the probe first runs the recursion on a 2 MiB thread and
+            /// joins it. That proves the recursion fits 2 MiB and leaves a 2 MiB
+            /// stack in glibc's cache. Then it runs the same recursion through
+            /// [`on_a_small_stack`], which overflows unless the helper's stack is
+            /// too small for glibc to reuse that cached one.
+            #[test]
+            fn stack_cache_canary_child_probe() {
+                if std::env::var_os(PROBE_VARIABLE).is_none() {
+                    return;
+                }
+                std::thread::Builder::new()
+                    .stack_size(2 * 1024 * 1024)
+                    .spawn(|| recurse(FRAMES))
+                    .expect("thread spawns")
+                    .join()
+                    .expect("the recursion fits 2 MiB");
+
+                on_a_small_stack(|| {
+                    std::hint::black_box(recurse(FRAMES));
+                });
+            }
+
+            /// glibc serves a new thread's stack from a finished thread's cached
+            /// stack when the cached one is large enough, so a helper that asks
+            /// for too much gets 2 MiB and never overflows. This runs the probe in
+            /// a child process, where the 2 MiB stack is seeded deterministically,
+            /// and requires the child to overflow in the helper's thread.
+            #[test]
+            fn small_stack_is_not_served_from_a_cached_2_mib_stack() {
+                let output =
+                    std::process::Command::new(std::env::current_exe().expect("test binary"))
+                        .args([PROBE, "--test-threads=1"])
+                        .env(PROBE_VARIABLE, "1")
+                        .env_remove("RUST_MIN_STACK")
+                        .output()
+                        .expect("child runs");
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let report = format!("child stdout:\n{stdout}\nchild stderr:\n{stderr}");
+
+                assert!(
+                    stdout.contains("running 1 test"),
+                    "the filter drifted\n{report}"
+                );
+                assert_eq!(output.status.signal(), Some(6), "no abort\n{report}");
+                assert!(
+                    stderr.lines().any(|line| line.starts_with("thread '")
+                        && line.contains(&format!("{PROBE}'"))
+                        && line.contains("has overflowed its stack")),
+                    "the helper's thread did not overflow\n{report}"
+                );
+            }
+        }
     }
 }
 

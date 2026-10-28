@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-10-28
 
 # Deterministic Small Test Stack
@@ -37,43 +37,43 @@ that overflows once the stack is truly small.
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: the small test stack is truly small and proven so
+- [x] Task 1: the small test stack is truly small and proven so
 - [ ] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
 ### Task 1: Make the small test stack truly small and prove it
 
-- [ ] `on_a_small_stack` requests a stack of exactly 448 KiB, and its
+- [x] `on_a_small_stack` requests a stack of exactly 448 KiB, and its
       doc comment tells a maintainer why the size is 448 KiB and not
       512 KiB, which `RUST_MIN_STACK` values would defeat it, and what
       happens on an overflow
-- [ ] The helper's failure message no longer claims to catch a stack
+- [x] The helper's failure message no longer claims to catch a stack
       overflow
-- [ ] The small-stack thread carries the name of the test thread that
+- [x] The small-stack thread carries the name of the test thread that
       calls the helper, so an overflow message names the test
-- [ ] A canary test, compiled only for Linux with glibc, runs its own
+- [x] A canary test, compiled only for Linux with glibc, runs its own
       test binary as a child process that first spawns and joins a
       2 MiB thread and then recurses about 1 MiB deep through
       `on_a_small_stack`; it passes only when the child fails and its
       stderr contains `has overflowed its stack`; the handoff shows
       the canary failing with the helper at 512 KiB and passing at
       448 KiB
-- [ ] All tests pass at 448 KiB, each of these run twice:
+- [x] All tests pass at 448 KiB, each of these run twice:
       `cargo test -p rlsp-yaml --lib`, the same with
       `--test-threads=1`, and
       `cargo llvm-cov --no-report -p rlsp-yaml --lib` with
       `--test-threads=64` and with `--test-threads=1`
-- [ ] Every test that overflows at 448 KiB keeps its depth and its
+- [x] Every test that overflows at 448 KiB keeps its depth and its
       assertions, the handoff names its cause, and the cause is
       removed in the code under test, or in the test's own setup when
       the overflow lies in setup code and not in what the test pins;
       for a setup-side fix the handoff names the setup code that
       recursed
-- [ ] Every other existing test passes with its assertions unchanged
-- [ ] `cargo llvm-cov --workspace --lcov --output-path lcov.info`
+- [x] Every other existing test passes with its assertions unchanged
+- [x] `cargo llvm-cov --workspace --lcov --output-path lcov.info`
       passes locally on the pinned toolchain
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ## Non-Goals
 
