@@ -32,6 +32,8 @@ pub mod schema;
 pub mod schema_validation;
 /// LSP server implementation (request/notification handlers).
 pub mod server;
+/// Workspace settings received from the client.
+pub mod settings;
 /// Diagnostic validation: suppression and validators.
 pub mod validation;
 

@@ -34,7 +34,7 @@ log, while every other setting applies.
 - [x] Design review of the approach
 - [x] Task 1: every settings key name and every default is pinned by
       a test
-- [ ] Task 2: `Settings` lives in its own module
+- [x] Task 2: `Settings` lives in its own module
 - [ ] Task 3: settings are read field by field, with a Warning per
       rejected field or entry
 - [ ] Push to `main` and confirm the full CI matrix is green
@@ -65,13 +65,13 @@ Reading settings is a concern of its own beside the LSP handlers in
 `rlsp_yaml::server::Settings` keeps working through a re-export.
 Behavior is unchanged.
 
-- [ ] `Settings` is defined in `src/settings.rs`, and
+- [x] `Settings` is defined in `src/settings.rs`, and
       `rlsp_yaml::server::Settings` names it
-- [ ] The unit tests that only read `Settings` from JSON live with it
+- [x] The unit tests that only read `Settings` from JSON live with it
       in `src/settings.rs`, with their assertions unchanged
-- [ ] The tests of Task 1 and every other existing test pass with
+- [x] The tests of Task 1 and every other existing test pass with
       their assertions unchanged
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ### Task 3: Read settings field by field
 
