@@ -218,7 +218,7 @@ pub(super) fn validate_mapping(
                 value: key_str.clone(),
                 style: rlsp_yaml_parser::ScalarStyle::Plain,
                 tag: Some(Cow::Borrowed("tag:yaml.org,2002:str")),
-                loc: rlsp_yaml_parser::Span { start: 0, end: 0 },
+                loc: node_loc(k),
                 meta: None,
             };
             validate_node(&key_node, pn_schema, path, ctx, depth + 1);
@@ -291,7 +291,7 @@ pub(super) fn validate_dependencies(
                     entries: entries.to_vec(),
                     style: rlsp_yaml_parser::CollectionStyle::Block,
                     tag: None,
-                    loc: rlsp_yaml_parser::Span { start: 0, end: 0 },
+                    loc: mapping_loc,
                     meta: None,
                 };
                 validate_node(&mapping_node, dep_schema, path, ctx, depth + 1);
@@ -359,7 +359,7 @@ pub(super) fn validate_pattern_properties(
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
-    use tower_lsp::lsp_types::{DiagnosticSeverity, Position};
+    use tower_lsp::lsp_types::{DiagnosticSeverity, Position, Range};
 
     use crate::schema::{AdditionalProperties, JsonSchema, ParsedSchema, SchemaType};
     use crate::server::YamlVersion;
@@ -1333,6 +1333,213 @@ mod tests {
         assert_eq!(
             diag.range.start.line, 1,
             "nested mapping is on 0-indexed line 1"
+        );
+    }
+
+    // ── Diagnostic range — propertyNames and dependentSchemas ───────────────
+
+    type Pos = (u32, u32);
+
+    fn range_of(start: Pos, end: Pos) -> Range {
+        Range::new(Position::new(start.0, start.1), Position::new(end.0, end.1))
+    }
+
+    fn object_schema_with(configure: impl FnOnce(&mut JsonSchema)) -> JsonSchema {
+        let mut schema = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            ..JsonSchema::default()
+        };
+        configure(&mut schema);
+        schema
+    }
+
+    fn lowercase_names() -> JsonSchema {
+        JsonSchema {
+            pattern: Some("^[a-z]+$".to_string()),
+            ..JsonSchema::default()
+        }
+    }
+
+    fn requires_age() -> JsonSchema {
+        JsonSchema {
+            required: Some(vec!["age".to_string()]),
+            ..JsonSchema::default()
+        }
+    }
+
+    /// Codes and ranges of all diagnostics, in report order.
+    fn codes_and_ranges(schema: JsonSchema, text: &str) -> Vec<(String, Range)> {
+        let docs = parse_docs(text);
+        validate_schema(&docs, &ParsedSchema::new(schema), false, YamlVersion::V1_2)
+            .diagnostics
+            .iter()
+            .map(|d| (code_of(d).to_string(), d.range))
+            .collect()
+    }
+
+    fn property_names_schema(names: JsonSchema) -> JsonSchema {
+        object_schema_with(|s| s.property_names = Some(Box::new(names)))
+    }
+
+    fn dependent_name_schema(dep: JsonSchema) -> JsonSchema {
+        object_schema_with(|s| s.dependent_schemas = Some([("name".to_string(), dep)].into()))
+    }
+
+    #[rstest]
+    #[case::key_on_later_line("good: 1\nBadKey: 2", &[((1, 0), (1, 6))])]
+    #[case::key_on_first_line("BadKey: 1", &[((0, 0), (0, 6))])]
+    #[case::later_document("good: 1\n---\nBadKey: 1", &[((2, 0), (2, 6))])]
+    #[case::one_per_document("Bad1: 1\n---\ngood: 1\n---\nBad2: 2", &[((0, 0), (0, 4)), ((4, 0), (4, 4))])]
+    #[case::each_violating_key("UPPER: 1\ngood: 3\nAlso_Bad: 2", &[((0, 0), (0, 5)), ((2, 0), (2, 8))])]
+    #[case::quoted_keys("\"BadKey\": 1\n'Bad2': 2", &[((0, 0), (0, 8)), ((1, 0), (1, 6))])]
+    #[case::flow_mapping("{BadKey: 1, ok: 2}", &[((0, 1), (0, 7))])]
+    #[case::anchored_key("&k BadKey: 1", &[((0, 3), (0, 9))])]
+    fn property_names_diagnostic_covers_the_key(
+        #[case] text: &str,
+        #[case] expected: &[(Pos, Pos)],
+    ) {
+        let result = codes_and_ranges(property_names_schema(lowercase_names()), text);
+        let expected: Vec<(String, Range)> = expected
+            .iter()
+            .map(|&(start, end)| ("schemaPattern".to_string(), range_of(start, end)))
+            .collect();
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn property_names_diagnostic_in_nested_mapping_covers_the_nested_key() {
+        let inner = property_names_schema(lowercase_names());
+        let schema = object_schema_with_props(vec![("spec", inner)]);
+        let result = codes_and_ranges(schema, "spec:\n  BadKey: 1\n  good: 2");
+        assert_eq!(
+            result,
+            vec![("schemaPattern".to_string(), range_of((1, 2), (1, 8)))]
+        );
+    }
+
+    #[rstest]
+    #[case::pattern(JsonSchema { pattern: Some("^[a-z_]+$".to_string()), ..JsonSchema::default() }, "schemaPattern")]
+    #[case::min_length(JsonSchema { min_length: Some(7), ..JsonSchema::default() }, "schemaMinLength")]
+    #[case::enum_values(
+        JsonSchema { enum_values: Some(vec![json!("ok_key_x"), json!("bar")]), ..JsonSchema::default() },
+        "schemaEnum"
+    )]
+    #[case::not(
+        JsonSchema {
+            not: Some(Box::new(JsonSchema {
+                pattern: Some("^Bad".to_string()),
+                ..JsonSchema::default()
+            })),
+            ..JsonSchema::default()
+        },
+        "schemaNot"
+    )]
+    fn property_names_diagnostic_of_every_keyword_covers_the_key(
+        #[case] names: JsonSchema,
+        #[case] code: &str,
+    ) {
+        let result = codes_and_ranges(property_names_schema(names), "ok_key_x: 1\nBadKey: 2");
+        assert_eq!(result, vec![(code.to_string(), range_of((1, 0), (1, 6)))]);
+    }
+
+    #[rstest]
+    #[case::first_line("name: Alice", (0, 0), (0, 11))]
+    #[case::later_document("other: 1\n---\nname: Alice\nextra: 1", (2, 0), (3, 8))]
+    #[case::middle_document("a: 1\n---\nname: Alice\n---\nb: 2", (2, 0), (3, 0))]
+    fn dependent_schemas_diagnostic_covers_the_mapping(
+        #[case] text: &str,
+        #[case] start: Pos,
+        #[case] end: Pos,
+    ) {
+        let result = codes_and_ranges(dependent_name_schema(requires_age()), text);
+        assert_eq!(
+            result,
+            vec![("schemaRequired".to_string(), range_of(start, end))]
+        );
+    }
+
+    #[test]
+    fn dependent_schemas_diagnostic_in_nested_mapping_covers_the_nested_mapping() {
+        let inner = dependent_name_schema(requires_age());
+        let schema = object_schema_with_props(vec![("spec", inner)]);
+        let result = codes_and_ranges(schema, "spec:\n  name: Alice\n  extra: 1");
+        assert_eq!(
+            result,
+            vec![("schemaRequired".to_string(), range_of((1, 2), (2, 10)))]
+        );
+    }
+
+    #[rstest]
+    #[case::required(requires_age(), "schemaRequired")]
+    #[case::max_properties(JsonSchema { max_properties: Some(0), ..JsonSchema::default() }, "schemaMaxProperties")]
+    #[case::min_properties(JsonSchema { min_properties: Some(2), ..JsonSchema::default() }, "schemaMinProperties")]
+    #[case::wrong_type(
+        JsonSchema { schema_type: Some(SchemaType::Single("array".to_string())), ..JsonSchema::default() },
+        "schemaType"
+    )]
+    fn dependent_schemas_diagnostic_of_every_keyword_covers_the_mapping(
+        #[case] dep: JsonSchema,
+        #[case] code: &str,
+    ) {
+        let result = codes_and_ranges(dependent_name_schema(dep), "name: Alice");
+        assert_eq!(result, vec![(code.to_string(), range_of((0, 0), (0, 11)))]);
+    }
+
+    #[test]
+    fn dependent_required_and_dependent_schemas_report_the_same_mapping_range() {
+        let schema = object_schema_with(|s| {
+            s.dependent_required = Some([("name".to_string(), vec!["age".to_string()])].into());
+            s.dependent_schemas = Some([("name".to_string(), requires_age())].into());
+        });
+        let mut result = codes_and_ranges(schema, "other: 1\n---\nname: Alice");
+        result.sort_by(|a, b| a.0.cmp(&b.0));
+        let range = range_of((2, 0), (2, 11));
+        assert_eq!(
+            result,
+            vec![
+                ("schemaDependentRequired".to_string(), range),
+                ("schemaRequired".to_string(), range),
+            ]
+        );
+    }
+
+    #[test]
+    fn dependent_schemas_keeps_value_ranges_of_the_mapping_entries() {
+        let dep = JsonSchema {
+            properties: Some([("extra".to_string(), integer_schema())].into()),
+            ..JsonSchema::default()
+        };
+        let result = codes_and_ranges(dependent_name_schema(dep), "name: Alice\nextra: x");
+        assert_eq!(
+            result,
+            vec![("schemaType".to_string(), range_of((1, 7), (1, 8)))]
+        );
+    }
+
+    #[test]
+    fn dependent_schemas_keeps_key_ranges_of_denied_additional_properties() {
+        let dep = JsonSchema {
+            properties: Some([("name".to_string(), string_schema())].into()),
+            additional_properties: Some(AdditionalProperties::Denied),
+            ..JsonSchema::default()
+        };
+        let result = codes_and_ranges(dependent_name_schema(dep), "name: Alice\nextra: 1");
+        assert_eq!(
+            result,
+            vec![(
+                "schemaAdditionalProperty".to_string(),
+                range_of((1, 0), (1, 5))
+            )]
+        );
+    }
+
+    #[test]
+    fn dependent_schemas_property_names_diagnostic_covers_the_key() {
+        let dep = property_names_schema(lowercase_names());
+        let result = codes_and_ranges(dependent_name_schema(dep), "name: Alice\nBad: 1");
+        assert_eq!(
+            result,
+            vec![("schemaPattern".to_string(), range_of((1, 0), (1, 3)))]
         );
     }
 

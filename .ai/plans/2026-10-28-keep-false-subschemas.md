@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-10-28
 
 # Keep Boolean `false` Sub-Schemas
@@ -39,7 +39,7 @@ start of the file.
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: `propertyNames` and `dependentSchemas` diagnostics sit on
+- [x] Task 1: `propertyNames` and `dependentSchemas` diagnostics sit on
       their key or mapping
 - [ ] Task 2: `false` sub-schemas keep their place and meaning
 - [ ] Push to `main` and confirm the full CI matrix is green
@@ -53,12 +53,12 @@ key node and `dependentSchemas` against a reconstructed mapping, both
 with the span at the start of the input, so their diagnostics appear
 at line 0 even in a later document.
 
-- [ ] A `propertyNames` diagnostic covers the key it concerns, and a
+- [x] A `propertyNames` diagnostic covers the key it concerns, and a
       `dependentSchemas` diagnostic covers the mapping it concerns,
       also in a later document of the file; unit tests pin both
       ranges
-- [ ] Every other existing test passes with its assertions unchanged
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Every other existing test passes with its assertions unchanged
+- [x] Build, tests, clippy, and fmt pass
 
 ### Task 2: Keep `false` sub-schemas in their place
 
