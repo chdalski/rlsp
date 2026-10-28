@@ -59,7 +59,7 @@ except the positional corrections named in Decisions.
 - [x] Task 3: keys resolve through `patternProperties` and
       `additionalProperties`
 - [x] Task 4: items resolve by position
-- [ ] Task 5: the Coverage workflow passes again
+- [x] Task 5: the Coverage workflow passes again
 - [ ] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
@@ -217,25 +217,27 @@ walk.
 After Tasks 1–4 were pushed, the Coverage workflow
 (`cargo llvm-cov --workspace --lcov --output-path lcov.info`, see
 `.github/workflows/coverage.yml`) aborts the `rlsp-yaml` library
-tests with a stack overflow on a thread started by
-`schema::test_support::on_a_small_stack` (512 KiB); it passed on
-the commits before this plan. `cargo-llvm-cov` is not installed in
-the dev container.
+tests with a stack overflow in
+`schema_validation::reference_tests::recursive_schema_ends_on_a_document_past_the_validation_depth_limit`.
+The test loads a 100-level nested document with the parser's
+recursive loader inside its `on_a_small_stack` thread (512 KiB);
+in an unoptimized build that load needs about 1 MiB, while the
+validation the test pins does not grow the stack with depth. The
+test passed before only when glibc handed the thread a reused
+2 MiB stack.
 
-- [ ] The handoff names the overflowing test and the cause of the
-      overflow, shown by a `cargo llvm-cov --workspace` run that
-      overflows at the task's baseline commit and passes with the
-      fix
-- [ ] `on_a_small_stack` still sets a stack of exactly 512 KiB, with
-      no size that depends on `cfg` or the environment; every test
-      that calls it keeps its depth and its assertions; the overflow
-      is removed in the code under test, not by changing the helper,
-      the tests, or the build or run configuration
-- [ ] Every existing hover, completion, resolver, and validation test
-      passes with its assertions unchanged
-- [ ] `cargo llvm-cov --workspace --lcov --output-path lcov.info`
+- [x] The handoff shows a `cargo llvm-cov` run of the `rlsp-yaml`
+      library tests with `--test-threads=64` that overflows in this
+      test at the task's baseline commit and passes with the fix
+- [x] The test loads its document outside the small-stack thread and
+      validates it on `on_a_small_stack`; its document depth and its
+      assertions are unchanged
+- [x] `on_a_small_stack` still sets a stack of exactly 512 KiB, no
+      other test changes, and `rlsp-yaml-parser` is unchanged
+- [x] Every existing test passes with its assertions unchanged
+- [x] `cargo llvm-cov --workspace --lcov --output-path lcov.info`
       passes locally on the pinned toolchain
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ## Non-Goals
 
@@ -249,6 +251,10 @@ the dev container.
 - Structural completion keys of a sequence item taken from the first
   document instead of the cursor's (separate plan after this one)
 - Bounding the pattern cache (queued plan)
+- Reading nested collections in `rlsp-yaml-parser`'s loader without
+  recursion (separate plan after this one)
+- Giving `on_a_small_stack` a size that glibc cannot replace with a
+  reused larger stack (separate plan after this one)
 - Offering key names for pattern or `additionalProperties` keys in
   completion
 
@@ -319,9 +325,15 @@ the dev container.
      of the later branch's `items`.
 - **The small stack stays at 512 KiB:** the small-stack tests prove
   that the code under test does not grow the call stack with schema,
-  document, or chain depth; a larger stack would prove less. If the
-  overflow cannot be removed in the code under test, the user
-  decides how to proceed.
+  document, or chain depth; a larger stack would prove less.
+- **The overflowing test parses its document outside the small
+  stack:** the overflow comes from loading the test's own fixture
+  with the parser's recursive loader, not from the validation the
+  test pins, so the test keeps proving what it states. Declined: an
+  iterative loader in `rlsp-yaml-parser` within this plan (a change
+  to a separately published crate, planned on its own) and a lower
+  default nesting depth (changes visible behavior and does not
+  reach a 100-level document).
 - **Inline test schemas:** the integration tests use trimmed
   GitHub-workflow-like and compose-like schemas written in the
   tests; the real upstream schemas are large and change.

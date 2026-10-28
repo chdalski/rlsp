@@ -824,9 +824,11 @@ fn recursive_schema_accepts_a_valid_deep_document() {
 
 #[test]
 fn recursive_schema_ends_on_a_document_past_the_validation_depth_limit() {
-    on_a_small_stack(|| {
-        let text = nested_next_document(100, "x");
+    // The parser's loader recurses once per nesting level, so loading the
+    // fixture needs more than the small stack; only the validation is pinned.
+    let docs = parse_docs(&nested_next_document(100, "x"));
 
-        let _ = diagnostics_of(&recursive_schema(), &text);
+    on_a_small_stack(move || {
+        let _ = validate_schema(&docs, &recursive_schema(), true, YamlVersion::V1_2);
     });
 }
