@@ -11,9 +11,7 @@ use crate::schema::path::{SchemaPathSegment, resolve_schema_path};
 
 use super::completion_items::{collect_values_for_key_ast, keys_to_items, merge_completions};
 use super::cursor_location::{node_span, scalar_key};
-use super::navigation::{
-    collect_sequence_sibling_keys, collect_sibling_keys_ast, find_node_at_path, present_keys,
-};
+use super::navigation::{collect_sequence_sibling_keys, collect_sibling_keys_ast, present_keys};
 use super::schema_completions::{
     collect_schema_properties_keys, schema_has_properties, schema_key_completions,
     schema_value_completions,
@@ -25,22 +23,16 @@ pub(super) fn complete_on_key<'a>(
     key: String,
     enclosing_path: &[SchemaPathSegment],
     mapping: &'a Node<Span>,
+    sequence: Option<&'a Node<Span>>,
     schema: Option<&ParsedSchema>,
 ) -> Vec<CompletionItem> {
     let present = docs.first().map_or_else(HashSet::new, |d| {
         present_keys(mapping, cursor_line, d.line_index())
     });
-    let seq_len = enclosing_path.len().saturating_sub(1);
-    let structural_keys: HashSet<String> =
-        if matches!(enclosing_path.last(), Some(SchemaPathSegment::Item(_))) {
-            let seq_path = enclosing_path.get(..seq_len).unwrap_or(&[]);
-            match find_node_at_path(docs, seq_path) {
-                Some(seq @ Node::Sequence { .. }) => collect_sequence_sibling_keys(seq),
-                _ => collect_sibling_keys_ast(mapping).into_iter().collect(),
-            }
-        } else {
-            collect_sibling_keys_ast(mapping).into_iter().collect()
-        };
+    let structural_keys: HashSet<String> = sequence.map_or_else(
+        || collect_sibling_keys_ast(mapping).into_iter().collect(),
+        collect_sequence_sibling_keys,
+    );
     let structural = keys_to_items(structural_keys.into_iter().filter(|k| k != &key).collect());
     if let Some(s) = schema
         && let Some(resolved_schema) = resolve_schema_path(s, &s.root, enclosing_path)

@@ -49,7 +49,16 @@ pub fn complete_at(
             key,
             enclosing_path,
             mapping,
-        } => complete_on_key(docs, cursor_line, key, &enclosing_path, mapping, schema),
+            sequence,
+        } => complete_on_key(
+            docs,
+            cursor_line,
+            key,
+            &enclosing_path,
+            mapping,
+            sequence,
+            schema,
+        ),
         CursorLocation::OnValue {
             key,
             enclosing_path,
@@ -853,24 +862,194 @@ mod tests {
     }
 
     #[rstest]
-    #[case::without_schema(None, &["b"][..])]
+    #[case::without_schema(None, &["b", "c"][..])]
     #[case::with_schema(
         Some(ParsedSchema::new(array_of(array_of(object_schema(vec![
             ("a", string_schema()),
             ("b", string_schema()),
-            ("c", string_schema()),
+            ("d", string_schema()),
         ]))))),
-        &["c"][..]
+        &["c", "d"][..]
     )]
-    fn on_a_key_in_a_nested_sequence_item_the_mapping_siblings_apply(
+    fn on_a_key_in_a_nested_sequence_item_the_keys_of_the_innermost_sequence_apply(
         #[case] schema: Option<ParsedSchema>,
         #[case] expected: &[&str],
     ) {
-        let docs = parse_docs("- - a: 1\n    b: 2\n");
+        let docs = parse_docs("- - a: 1\n    b: 2\n  - c: 3\n");
 
         let result = complete_at(&docs, pos(0, 4), schema.as_ref());
 
-        assert_eq!(labels(&result), expected);
+        assert_eq!(sorted_labels(&result), expected);
+    }
+
+    /// The labels of `items`, sorted: structural keys come from a `HashSet`, so
+    /// their order is not stable.
+    fn sorted_labels(items: &[CompletionItem]) -> Vec<&str> {
+        let mut ls = labels(items);
+        ls.sort_unstable();
+        ls
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Sibling keys come from the sequence the cursor is in
+    // ══════════════════════════════════════════════════════════════════════════
+
+    #[rstest]
+    #[case::first_doc_has_a_sequence_at_the_same_key_path(
+        "items:\n  - p: 1\n  - q: 2\n---\nitems:\n  - x: 1\n  - y: 2\n",
+        pos(5, 4),
+        &["y"][..]
+    )]
+    #[case::first_doc_has_a_mapping_at_the_key_path(
+        "items:\n  p: 1\n---\nitems:\n  - x: 1\n  - y: 2\n",
+        pos(4, 4),
+        &["y"][..]
+    )]
+    #[case::first_doc_is_a_mapping_root(
+        "a: 1\n---\n- x: 1\n- y: 2\n",
+        pos(2, 2),
+        &["y"][..]
+    )]
+    #[case::first_doc_is_empty(
+        "---\n---\n- x: 1\n- y: 2\n",
+        pos(2, 2),
+        &["y"][..]
+    )]
+    #[case::first_doc_has_a_brackets_key_with_a_mapping(
+        "\"[]\":\n  a: 1\n---\n\"[]\":\n  - x: 1\n  - y: 2\n",
+        pos(4, 4),
+        &["y"][..]
+    )]
+    #[case::third_document(
+        "- a: 1\n---\n- b: 1\n---\n- c: 1\n- d: 1\n",
+        pos(4, 2),
+        &["d"][..]
+    )]
+    #[case::explicit_start_in_every_document(
+        "---\n- a: 1\n- p: 2\n---\n- x: 1\n- y: 2\n",
+        pos(4, 2),
+        &["y"][..]
+    )]
+    #[case::after_an_explicit_document_end(
+        "- a: 1\n- p: 2\n...\n---\n- x: 1\n- y: 2\n",
+        pos(4, 2),
+        &["y"][..]
+    )]
+    #[case::nested_sequence_in_a_later_document(
+        "items:\n  - p: 1\n---\n- items:\n    - a: 1\n    - b: 2\n",
+        pos(4, 6),
+        &["b"][..]
+    )]
+    fn a_key_in_a_later_document_gets_the_sibling_keys_of_its_own_sequence(
+        #[case] text: &str,
+        #[case] position: Position,
+        #[case] expected: &[&str],
+    ) {
+        let docs = parse_docs(text);
+
+        let result = complete_at(&docs, position, None);
+
+        assert_eq!(sorted_labels(&result), expected);
+    }
+
+    #[rstest]
+    #[case::sequence_directly_inside_an_item(
+        "- - a: 1\n  - b: 2\n    c: 3\n- d: 4\n",
+        pos(0, 4),
+        &["b", "c"][..]
+    )]
+    #[case::sequence_under_a_key_inside_an_item_first_item(
+        "containers:\n  - name: web\n    image: nginx\n    ports:\n      - containerPort: 80\n      - protocol: TCP\n",
+        pos(4, 8),
+        &["protocol"][..]
+    )]
+    #[case::sequence_under_a_key_inside_an_item_second_item(
+        "containers:\n  - name: web\n    image: nginx\n    ports:\n      - containerPort: 80\n      - protocol: TCP\n",
+        pos(5, 8),
+        &["containerPort"][..]
+    )]
+    #[case::enclosing_sequence_decides_not_an_ancestor(
+        "- items:\n    - a: 1\n    - b: 2\n  other: 3\n- items:\n    - c: 4\n",
+        pos(1, 6),
+        &["b"][..]
+    )]
+    #[case::outer_sequence_still_decides_for_a_key_of_the_outer_item(
+        "- items:\n    - a: 1\n    - b: 2\n  other: 3\n- items:\n    - c: 4\n",
+        pos(3, 2),
+        &["items"][..]
+    )]
+    #[case::mapping_under_a_key_inside_an_item_offers_its_own_keys_only(
+        "servers:\n  - name: x\n    meta:\n      a: 1\n      b: 2\n  - name: y\n    other: 1\n",
+        pos(3, 6),
+        &["b"][..]
+    )]
+    #[case::duplicate_keys_on_the_path_follow_the_cursor(
+        "a:\n  - x: 1\na:\n  - y: 1\n  - z: 2\n",
+        pos(3, 4),
+        &["z"][..]
+    )]
+    #[case::complex_key_on_the_path_follows_the_cursor(
+        "? [k]\n: - a: 1\n  - b: 2\n",
+        pos(1, 4),
+        &["b"][..]
+    )]
+    #[case::scalar_items_contribute_no_keys(
+        "- x\n- a: 1\n- b: 2\n",
+        pos(1, 2),
+        &["b"][..]
+    )]
+    #[case::an_alias_item_is_not_expanded(
+        "m: &m\n  z: 1\nlist:\n  - *m\n  - a: 1\n  - b: 2\n",
+        pos(4, 4),
+        &["b"][..]
+    )]
+    #[case::flow_sequence_items(
+        "items: [{a: 1}, {b: 2}]\n",
+        pos(0, 9),
+        &["b"][..]
+    )]
+    fn a_key_in_a_sequence_item_gets_the_keys_of_the_innermost_sequence(
+        #[case] text: &str,
+        #[case] position: Position,
+        #[case] expected: &[&str],
+    ) {
+        let docs = parse_docs(text);
+
+        let result = complete_at(&docs, position, None);
+
+        assert_eq!(sorted_labels(&result), expected);
+    }
+
+    #[rstest]
+    #[case::root_array(
+        "- p: 1\n---\n- host: a\n- extra: 1\n",
+        pos(2, 2),
+        ParsedSchema::new(array_of(object_schema(vec![
+            ("host", string_schema()),
+            ("port", integer_schema()),
+        ])))
+    )]
+    #[case::array_under_a_key(
+        "items:\n  - p: 1\n---\nitems:\n  - host: a\n  - extra: 1\n",
+        pos(4, 4),
+        ParsedSchema::new(object_schema(vec![(
+            "items",
+            array_of(object_schema(vec![
+                ("host", string_schema()),
+                ("port", integer_schema()),
+            ])),
+        )]))
+    )]
+    fn a_schema_in_a_later_document_adds_to_the_sibling_keys_of_its_own_sequence(
+        #[case] text: &str,
+        #[case] position: Position,
+        #[case] schema: ParsedSchema,
+    ) {
+        let docs = parse_docs(text);
+
+        let result = complete_at(&docs, position, Some(&schema));
+
+        assert_eq!(sorted_labels(&result), ["extra", "port"]);
     }
 
     // ══════════════════════════════════════════════════════════════════════════

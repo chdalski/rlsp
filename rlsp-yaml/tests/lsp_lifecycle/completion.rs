@@ -641,3 +641,51 @@ async fn should_complete_the_missing_key_of_the_second_prefix_item() {
     assert!(result_str.contains("delta"), "got: {result_str}");
     assert!(!result_str.contains("beta"), "got: {result_str}");
 }
+
+/// The labels of a completion result, sorted. Comparing them exactly keeps an
+/// absent key from hiding behind a substring of the serialized response.
+fn sorted_labels(result: &serde_json::Value) -> Vec<String> {
+    let items = result
+        .as_array()
+        .or_else(|| result["items"].as_array())
+        .expect("completion result should be a list of items");
+    let mut labels: Vec<String> = items
+        .iter()
+        .map(|item| {
+            item["label"]
+                .as_str()
+                .expect("completion item should have a label")
+                .to_string()
+        })
+        .collect();
+    labels.sort_unstable();
+    labels
+}
+
+#[tokio::test]
+async fn should_complete_the_sibling_item_keys_of_the_second_document() {
+    let result = complete_at(
+        None,
+        "file:///test/completion_second_document.yaml",
+        "items:\n  - name: a\n    age: 1\n---\nitems:\n  - id: 1\n  - id: 2\n    tag: x\n",
+        5,
+        4,
+    )
+    .await;
+
+    assert_eq!(sorted_labels(&result), ["tag"]);
+}
+
+#[tokio::test]
+async fn should_complete_the_sibling_item_keys_of_a_sequence_under_a_key_inside_an_item() {
+    let result = complete_at(
+        None,
+        "file:///test/completion_nested_sequence.yaml",
+        "containers:\n  - name: web\n    image: nginx\n    ports:\n      - containerPort: 80\n      - protocol: TCP\n",
+        4,
+        8,
+    )
+    .await;
+
+    assert_eq!(sorted_labels(&result), ["protocol"]);
+}

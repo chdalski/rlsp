@@ -31,6 +31,15 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### Key Completion in a Sequence Item Offers the Keys of the Sequence's Other Items [completed]
+
+**Date:** 2026-10-28
+**Description:** Completing a key inside a sequence item offers the keys of the other items of that same sequence. This now holds in every document of a multi-document file, where it used to offer the keys of the first document's sequence at the same path, or none, and in sequences nested inside another sequence's item (`containers[].ports[]`, or a sequence directly inside a sequence item), where it used to offer only the keys of the current item. The innermost sequence around the cursor decides: a key of an item of `ports` offers the keys of the other `ports` items, not those of the enclosing `containers` items. A key in a mapping that sits under a key inside an item still offers only that mapping's own keys.
+**Complexity:** Low
+**Tier:** 1
+
+---
+
 ### Hover and Completion Follow `patternProperties`, `additionalProperties`, and Positional Array Items [completed]
 
 **Date:** 2026-10-27

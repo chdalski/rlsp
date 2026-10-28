@@ -35,7 +35,7 @@ document and at every nesting level.
 - [x] Clarify scope with the user
 - [x] Design review of the approach
 - [x] Task 1: completion integration tests share one setup helper
-- [ ] Task 2: sibling item keys come from the cursor's sequence
+- [x] Task 2: sibling item keys come from the cursor's sequence
 - [ ] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
@@ -63,11 +63,11 @@ stay short. Test-only; behavior is unchanged.
 is, and the key driver takes its structural keys from it; the locator
 passes that sequence down when it descends into an item.
 
-- [ ] `OnKey` carries the enclosing sequence when its mapping is an
+- [x] `OnKey` carries the enclosing sequence when its mapping is an
       item of one, and none otherwise; `complete_on_key` takes its
       structural keys from it; `find_node_at_path` and its tests and
       imports are removed
-- [ ] Locator tests pin the carried sequence: present for a key in an
+- [x] Locator tests pin the carried sequence: present for a key in an
       item of a root sequence, of a sequence under a key, of a
       sequence under a `"[]"` key, of a sequence directly inside an
       item, and of a sequence under a key inside an item; absent for
@@ -75,7 +75,7 @@ passes that sequence down when it descends into an item.
       outside sequences; for a key in the second document it is that
       document's sequence; and wherever present, the mapping is one
       of its items
-- [ ] Unit tests through `complete_at` pin, comparing labels as sets
+- [x] Unit tests through `complete_at` pin, comparing labels as sets
       (the structural keys come from a `HashSet` without a stable
       order):
       a key in a later document offers that document's sibling item
@@ -91,19 +91,19 @@ passes that sequence down when it descends into an item.
       match by key text; and with a
       schema in the second document, a sibling key the schema does not
       declare appears and a first-document key does not
-- [ ] `on_a_key_in_a_nested_sequence_item_the_mapping_siblings_apply`
+- [x] `on_a_key_in_a_nested_sequence_item_the_mapping_siblings_apply`
       is renamed to state the new rule and uses a document whose
       result differs between the old and the new rule
-- [ ] Every other existing test passes with its assertions unchanged
-- [ ] Integration tests in `tests/lsp_lifecycle/completion.rs` pin
+- [x] Every other existing test passes with its assertions unchanged
+- [x] Integration tests in `tests/lsp_lifecycle/completion.rs` pin
       completion of sibling item keys in the second document of a
       multi-document file, without the first document's keys, and in
       a sequence under a key inside an item (`containers[].ports[]`)
-- [ ] `rlsp-yaml/docs/feature-log.md` has an entry that tells the
+- [x] `rlsp-yaml/docs/feature-log.md` has an entry that tells the
       reader that key completion in a sequence item offers the keys of
       the other items of that sequence, in every document of a file
       and in nested sequences
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Build, tests, clippy, and fmt pass
 
 ## Non-Goals
 

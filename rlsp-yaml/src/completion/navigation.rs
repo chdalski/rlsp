@@ -4,39 +4,10 @@ use std::collections::HashSet;
 
 use rlsp_yaml_parser::LineIndex;
 use rlsp_yaml_parser::Span;
-use rlsp_yaml_parser::node::{Document, Node};
-
-use crate::schema::path::SchemaPathSegment;
+use rlsp_yaml_parser::node::Node;
 
 use super::cursor_location::node_span;
 use super::cursor_location::scalar_key;
-
-/// Walk `docs` following `path` and return the node at that path, or `None` if
-/// any step fails. An item segment always fails, whatever its index: following
-/// it would change the structural keys that completion in a sequence item
-/// offers.
-pub(super) fn find_node_at_path<'a>(
-    docs: &'a [Document<Span>],
-    path: &[SchemaPathSegment],
-) -> Option<&'a Node<Span>> {
-    let root = docs.first().map(|d| &d.root)?;
-    let mut current = root;
-    for segment in path {
-        let SchemaPathSegment::Key(key) = segment else {
-            return None;
-        };
-        match current {
-            Node::Mapping { entries, .. } => {
-                let entry = entries
-                    .iter()
-                    .find(|(k, _)| scalar_key(k) == Some(key.as_str()));
-                current = entry.map(|(_, v)| v)?;
-            }
-            Node::Scalar { .. } | Node::Sequence { .. } | Node::Alias { .. } => return None,
-        }
-    }
-    Some(current)
-}
 
 /// Return all keys present in `mapping`, excluding the entry whose key token
 /// starts on `cursor_line` (the line currently being edited).
@@ -107,68 +78,9 @@ mod tests {
 
     use rstest::rstest;
 
-    use super::{
-        collect_sequence_sibling_keys, collect_sibling_keys_ast, find_node_at_path, present_keys,
-    };
-    use crate::schema::path::SchemaPathSegment;
-    use crate::schema::test_support::key;
+    use super::{collect_sequence_sibling_keys, collect_sibling_keys_ast, present_keys};
     use crate::test_utils::parse_docs;
     use rlsp_yaml_parser::node::Node;
-
-    // ── find_node_at_path: None cases ─────────────────────────────────────────
-
-    #[rstest]
-    #[case::empty_docs(&[], vec![key("any")], "empty docs slice")]
-    #[case::missing_key(&["name: Alice\n"], vec![key("missing")], "key not in mapping")]
-    #[case::scalar_mid_path(&["name: Alice\n"], vec![key("name"), key("deeper")], "scalar terminates traversal")]
-    #[case::sequence_mid_path(&["items:\n  - foo\n"], vec![key("items"), key("deeper")], "sequence terminates traversal")]
-    #[case::item_on_sequence(&["items:\n  - foo\n"], vec![key("items"), SchemaPathSegment::Item(0)], "an item segment does not say which item")]
-    #[case::item_on_root_sequence(&["- foo\n"], vec![SchemaPathSegment::Item(0)], "an item segment does not say which item")]
-    #[case::second_item_on_sequence(&["items:\n  - foo\n  - bar\n"], vec![key("items"), SchemaPathSegment::Item(1)], "an item segment is not followed, whatever its index")]
-    #[case::second_item_on_root_sequence(&["- foo\n- bar\n"], vec![SchemaPathSegment::Item(1)], "an item segment is not followed, whatever its index")]
-    #[case::item_on_scalar(&["name: Alice\n"], vec![key("name"), SchemaPathSegment::Item(0)], "scalar terminates traversal")]
-    #[case::item_is_not_a_brackets_key(&["\"[]\": x\n"], vec![SchemaPathSegment::Item(0)], "an item segment never names a key")]
-    fn find_node_at_path_returns_none(
-        #[case] yamls: &[&str],
-        #[case] path: Vec<SchemaPathSegment>,
-        #[case] desc: &str,
-    ) {
-        let docs = yamls.first().map_or_else(Vec::new, |y| parse_docs(y));
-        assert!(
-            find_node_at_path(&docs, &path).is_none(),
-            "expected None for {desc}"
-        );
-    }
-
-    enum NodeKind {
-        Mapping,
-        Scalar,
-    }
-
-    #[rstest]
-    #[case::empty_path_returns_root("key: val\n", vec![], NodeKind::Mapping)]
-    #[case::single_key_found("name: Alice\n", vec![key("name")], NodeKind::Scalar)]
-    #[case::nested_path("outer:\n  inner: value\n", vec![key("outer"), key("inner")], NodeKind::Scalar)]
-    #[case::brackets_key_found("\"[]\": x\n", vec![key("[]")], NodeKind::Scalar)]
-    #[case::brackets_key_nested("a:\n  \"[]\":\n    b: 1\n", vec![key("a"), key("[]")], NodeKind::Mapping)]
-    fn find_node_at_path_returns_node(
-        #[case] yaml: &str,
-        #[case] path: Vec<SchemaPathSegment>,
-        #[case] expected_kind: NodeKind,
-    ) {
-        let docs = parse_docs(yaml);
-        let node = find_node_at_path(&docs, &path).expect("expected Some node, got None");
-        match expected_kind {
-            NodeKind::Mapping => assert!(
-                matches!(node, Node::Mapping { .. }),
-                "expected Mapping, got non-Mapping"
-            ),
-            NodeKind::Scalar => assert!(
-                matches!(node, Node::Scalar { .. }),
-                "expected Scalar, got non-Scalar"
-            ),
-        }
-    }
 
     // ── present_keys ──────────────────────────────────────────────────────────
 
