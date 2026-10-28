@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-10-28)
 **Created:** 2026-10-28
 
 # Keep Boolean `false` Sub-Schemas
@@ -42,7 +42,7 @@ start of the file.
 - [x] Task 1: `propertyNames` and `dependentSchemas` diagnostics sit on
       their key or mapping
 - [x] Task 2: `false` sub-schemas keep their place and meaning
-- [ ] Push to `main` and confirm the full CI matrix is green
+- [x] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
