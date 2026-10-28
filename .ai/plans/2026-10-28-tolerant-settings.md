@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-10-28
 
 # A Wrongly Typed Setting Does Not Reset All Settings
@@ -32,7 +32,7 @@ log, while every other setting applies.
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: every settings key name and every default is pinned by
+- [x] Task 1: every settings key name and every default is pinned by
       a test
 - [ ] Task 2: `Settings` lives in its own module
 - [ ] Task 3: settings are read field by field, with a Warning per
@@ -49,14 +49,14 @@ camelCase key names, with hand-written key strings; four keys
 `formatRespectEditorconfig`) have no test today. Test-only apart from
 an additive derive; behavior is unchanged.
 
-- [ ] `Settings` derives `PartialEq`
-- [ ] A unit test reads an object that sets every key to a non-default
+- [x] `Settings` derives `PartialEq`
+- [x] A unit test reads an object that sets every key to a non-default
       value and compares the result with a full `Settings` literal
       that names every field
-- [ ] A unit test reads `{}` and compares the result with
+- [x] A unit test reads `{}` and compares the result with
       `Settings::default()`
-- [ ] Both tests pass against the current derived reader
-- [ ] Build, tests, clippy, and fmt pass
+- [x] Both tests pass against the current derived reader
+- [x] Build, tests, clippy, and fmt pass
 
 ### Task 2: Move `Settings` into its own module
 

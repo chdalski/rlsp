@@ -43,7 +43,7 @@ pub enum YamlVersion {
 
 /// Workspace settings received via LSP initialization options or
 /// `workspace/didChangeConfiguration`.
-#[derive(Debug, Default, Clone, serde::Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     /// Custom YAML tag names to treat as valid (suppresses unknown-tag diagnostics).
@@ -1871,6 +1871,75 @@ mod tests {
     }
 
     // ---- Settings deserialization ----
+
+    #[test]
+    fn settings_reads_every_key_with_a_non_default_value() {
+        let json = serde_json::json!({
+            "customTags": ["!include"],
+            "keyOrdering": true,
+            "schemas": {"https://example.com/s.json": "*.yaml"},
+            "kubernetesVersion": "1.29.0",
+            "schemaStore": false,
+            "formatPrintWidth": 100,
+            "formatSingleQuote": true,
+            "formatPreserveQuotes": true,
+            "httpProxy": "http://proxy.corp:8080",
+            "colorDecorators": false,
+            "formatValidation": false,
+            "yamlVersion": "1.1",
+            "validate": false,
+            "hover": false,
+            "completion": false,
+            "maxItemsComputed": 10,
+            "flowStyle": "error",
+            "duplicateKeys": "off",
+            "formatEnforceBlockStyle": true,
+            "formatRemoveDuplicateKeys": true,
+            "formatBracketSpacing": false,
+            "formatIndentSequences": false,
+            "formatEnable": false,
+            "formatRespectEditorconfig": false,
+        });
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            settings,
+            Settings {
+                custom_tags: vec!["!include".to_string()],
+                key_ordering: true,
+                schemas: HashMap::from([(
+                    "https://example.com/s.json".to_string(),
+                    "*.yaml".to_string()
+                )]),
+                kubernetes_version: Some("1.29.0".to_string()),
+                schema_store: Some(false),
+                format_print_width: Some(100),
+                format_single_quote: Some(true),
+                format_preserve_quotes: Some(true),
+                http_proxy: Some("http://proxy.corp:8080".to_string()),
+                color_decorators: Some(false),
+                format_validation: Some(false),
+                yaml_version: Some("1.1".to_string()),
+                validate: Some(false),
+                hover: Some(false),
+                completion: Some(false),
+                max_items_computed: Some(10),
+                flow_style: Some("error".to_string()),
+                duplicate_keys: Some("off".to_string()),
+                format_enforce_block_style: Some(true),
+                format_remove_duplicate_keys: Some(true),
+                format_bracket_spacing: Some(false),
+                format_indent_sequences: Some(false),
+                format_enable: Some(false),
+                format_respect_editorconfig: Some(false),
+            }
+        );
+    }
+
+    #[test]
+    fn settings_reads_empty_object_as_default() {
+        let settings: Settings = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(settings, Settings::default());
+    }
 
     #[test]
     fn settings_deserializes_custom_tags_from_json() {
