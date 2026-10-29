@@ -810,9 +810,14 @@ pub(crate) mod test_support {
             /// so it never aborts a run of the whole suite, `--include-ignored`
             /// included.
             ///
-            /// With it, the probe first runs the recursion on a 2 MiB thread and
-            /// joins it. That proves the recursion fits 2 MiB and leaves a 2 MiB
-            /// stack in glibc's cache. Then it runs the same recursion through
+            /// With it, the probe first marks its own process non-dumpable: its
+            /// abort is deliberate, so the kernel must not hand a core dump to the
+            /// host's core-dump handler. Only the probe's process can do that,
+            /// because `execve` resets the flag and a parent that cleared it would
+            /// also stop genuine crashes of the whole test binary from dumping
+            /// core. Next it runs the recursion on a 2 MiB thread and joins it.
+            /// That proves the recursion fits 2 MiB and leaves a 2 MiB stack in
+            /// glibc's cache. Then it runs the same recursion through
             /// [`on_a_small_stack`], which overflows unless the helper's stack is
             /// too small for glibc to reuse that cached one.
             #[test]
@@ -820,6 +825,11 @@ pub(crate) mod test_support {
                 if std::env::var_os(PROBE_VARIABLE).is_none() {
                     return;
                 }
+                rustix::process::set_dumpable_behavior(
+                    rustix::process::DumpableBehavior::NotDumpable,
+                )
+                .expect("the probe marks itself non-dumpable");
+
                 std::thread::Builder::new()
                     .stack_size(2 * 1024 * 1024)
                     .spawn(|| recurse(FRAMES))
@@ -836,7 +846,10 @@ pub(crate) mod test_support {
             /// stack when the cached one is large enough, so a helper that asks
             /// for too much gets 2 MiB and never overflows. This runs the probe in
             /// a child process, where the 2 MiB stack is seeded deterministically,
-            /// and requires the child to overflow in the helper's thread.
+            /// and requires the child to overflow in the helper's thread without
+            /// dumping core. The core-dump check cannot detect a missing flag on a
+            /// host where the kernel writes no dump anyway, such as one whose
+            /// `core_pattern` names a file and whose core limit is 0.
             #[test]
             fn small_stack_is_not_served_from_a_cached_2_mib_stack() {
                 let output =
@@ -855,6 +868,10 @@ pub(crate) mod test_support {
                     "the filter drifted\n{report}"
                 );
                 assert_eq!(output.status.signal(), Some(6), "no abort\n{report}");
+                assert!(
+                    !output.status.core_dumped(),
+                    "the probe left a core dump: it did not mark itself non-dumpable\n{report}"
+                );
                 assert!(
                     stderr.lines().any(|line| line.starts_with("thread '")
                         && line.contains(&format!("{PROBE}'"))

@@ -1124,6 +1124,7 @@ dependencies = [
  "rlsp-fmt",
  "rlsp-yaml-parser",
  "rstest",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",
