@@ -40,7 +40,7 @@ a restart.
 - [x] Design review of the approach
 - [x] Task 1: the server keeps the extension's settings
 - [x] Task 2: the dependency updates of PR #94 are on `main`
-- [ ] Task 3: the settings listener lives exactly as long as its client
+- [x] Task 3: the settings listener lives exactly as long as its client
 - [ ] Push to `main`, confirm the full CI matrix is green, and confirm
       PR #94 is closed
 
@@ -96,26 +96,28 @@ workspace trust grant, through `makeRestartServer` in
 today, so after a restart the old listener keeps sending to its stopped
 client and each settings change raises an unhandled rejection.
 
-- [ ] A client's settings listener is disposed once that client's
+- [x] A client's settings listener is disposed once that client's
       `stop()` has settled with the client in the Stopped state, whether
       `stop()` resolved or rejected (shutdown timeout, connection
       error); it stays registered when `stop()` rejects with the client
       Starting or Running, and across the library's restart of the
       server after a crash
-- [ ] The settings the client sends at initialize are read at each
+- [x] A client's settings listener is disposed when the client enters
+      the StartFailed state, from which the library does not restart it
+- [x] The settings the client sends at initialize are read at each
       initialize, so a client that the library restarts after a crash
       sends the current settings
-- [ ] A settings notification that fails is written to the extension's
+- [x] A settings notification that fails is written to the extension's
       output channel instead of becoming an unhandled rejection
-- [ ] Unit tests in `src/client.test.ts` pin each outcome above,
+- [x] Unit tests in `src/client.test.ts` pin each outcome above,
       including that the listener is not disposed without `stop()`, and
       that the initialization options return the current settings on
       each call; the test of Task 1 that pins the settings sent at
       initialize reads them through the new form and still pins the
       flat `getConfig()` result
-- [ ] The restart tests in `src/commands.test.ts` pass with their
+- [x] The restart tests in `src/commands.test.ts` pass with their
       assertions unchanged
-- [ ] Typecheck, lint, format, unit tests, and integration tests pass
+- [x] Typecheck, lint, format, unit tests, and integration tests pass
 
 ## Non-Goals
 
@@ -143,8 +145,12 @@ client and each settings change raises an unhandled rejection.
   small `LanguageClient` subclass in `client.ts` disposes the listener
   once `stop()` has settled — resolved or rejected — and only when the
   client is then in the Stopped state, which also covers a shutdown
-  that timed out. Not on a state change: a crash restart reports the
-  client stopped without `stop()` and keeps running. Not in the restart
+  that timed out. Not on a change to Stopped: a crash restart reports
+  the client stopped without `stop()` and keeps running. A client whose
+  start failed is the exception: no caller keeps it to call `stop()`,
+  and in `vscode-languageclient` 11 StartFailed is a public state that
+  the library never restarts from, so entering it disposes the
+  listener. Not in the restart
   path or `deactivate`: that spreads disposal over three call sites.
   Declined: one listener in `activate` that sends to the current client
   — a change during the restart window is lost.
