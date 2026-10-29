@@ -381,7 +381,9 @@ each document. Inside each document it calls `parse_node` recursively.
 - `SequenceStart` → enters a loop, collecting items until `SequenceEnd`;
   increments/decrements depth
 - `Alias` → delegates to `resolve_alias`
-- `Comment` → skips and recurses
+- `Comment` → a comment run at a mapping value position: moves the whole run
+  into `pending_leading` and calls `parse_node` once for the value that follows
+  (see "Comment attachment strategy")
 - Structural boundary events (e.g. `StreamEnd`) → returns an empty scalar
 
 ### Anchor and alias resolution
@@ -422,6 +424,19 @@ resulting `Vec<String>` is passed to `attach_leading_comments`, which writes it
 into the next node's `leading_comments` field. Document-level leading comments
 are handled separately by `consume_leading_doc_comments` and stored in
 `Document::comments`.
+
+**Comments between a key and its value.** Keys, sequence items, and the
+document root drain their leading comments in a loop, so a `Comment` event
+reaches `parse_node` only at a mapping value position (`key:\n  # c\n  value`).
+The `Comment` arm moves the whole run into `LoadState::pending_leading` — it
+takes the first comment, drains the rest with `consume_leading_comments`, and
+calls `parse_node` once. The recursive call never sees another `Comment`, so
+the stack use does not grow with the number of comments. The node that follows
+the run decides who inherits it: a nested collection (block or flow) hands the
+run to its first entry or item; a scalar, empty value, or alias leaves it for
+the next key of the same mapping, or for the parent collection's next entry
+when the mapping ends there. When nothing follows (the mapping and document
+end after the value), no node receives the comments.
 
 **Trailing comments.** After parsing a mapping value or sequence item, the
 loader peeks at the event stream via `peek_trailing_comment`. A comment is
@@ -575,7 +590,9 @@ deeply-nested documents from overflowing the call stack.
 
 The loader's `parse_node` is recursive (matching tree structure), but its depth
 is bounded by `max_nesting_depth` (default 512), which is well within default
-Rust stack limits.
+Rust stack limits. The one recursion outside that bound is the `Comment` arm,
+which adds at most one level per value position because it drains the whole
+comment run before recursing.
 
 ### Lossless mode as the default
 

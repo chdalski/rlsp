@@ -363,11 +363,13 @@ struct LoadState<'opt> {
     depth: usize,
     /// Total nodes produced via alias expansion (resolved mode only).
     expanded_nodes: usize,
-    /// Leading comments accumulated by `parse_node` when it encounters a
-    /// `Comment` event between a mapping key and its value's collection start,
-    /// or by a sequence/mapping loop when it hits End with leftover leading
-    /// comments.  The next mapping/sequence loop iteration picks these up and
-    /// prepends them to the next entry's leading comments.
+    /// Leading comments accumulated by `parse_node` when it meets a run of
+    /// `Comment` events at a mapping value position (between the key and the
+    /// value, whatever the value is), or by a sequence/mapping loop when it
+    /// hits End with leftover leading comments.  The next mapping/sequence
+    /// loop iteration picks these up and prepends them to the next entry's
+    /// leading comments; when no entry follows (the document ends), they are
+    /// dropped.
     pending_leading: Vec<String>,
     /// Line index for the current document source; shared across all documents
     /// produced from the same input via `Arc` to avoid N full copies.
@@ -754,12 +756,22 @@ impl<'opt> LoadState<'opt> {
             }
 
             Event::Comment { text } => {
-                // Comment between a mapping key and its collection value (e.g.
-                // `key:\n  # comment\n  subkey: val`).  The comment appears
-                // after the key Scalar and before the MappingStart/SequenceStart
-                // that begins the value.  Save it in `pending_leading` so the
-                // first entry of the upcoming collection can inherit it.
+                // Comment run between a mapping key and its value (e.g.
+                // `key:\n  # comment\n  subkey: val`): only the mapping value
+                // position reaches this arm, because keys, sequence items,
+                // and the document root drain their comments in a loop first.
+                // Save the run in `pending_leading`; the node that follows the
+                // run decides who inherits it — the first entry of a nested
+                // collection, or, for a scalar, empty, or alias value, the
+                // next key of the mapping (or the parent's next entry).  When
+                // the mapping or document ends after the value, no node does.
+                //
+                // Drain the rest of the run here so the recursive call below
+                // never sees another `Comment`: the stack depth stays
+                // constant however many comments the run holds.
                 self.pending_leading.push(with_hash_prefix(text));
+                self.pending_leading
+                    .extend(consume_leading_comments(stream)?);
                 self.parse_node(stream)
             }
 
@@ -1525,6 +1537,130 @@ mod tests {
         assert!(
             inner_key.leading_comments().is_empty(),
             "inner key should have no leading comments when there is no comment"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Long comment runs between a mapping key and its value
+    // -----------------------------------------------------------------------
+
+    const TWO_MIB: usize = 2 * 1024 * 1024;
+
+    /// Runs `f` on a thread with a fixed stack size, so the stack budget does
+    /// not depend on the test runner's thread or `RUST_MIN_STACK`.
+    fn on_stack<T: Send + 'static>(bytes: usize, f: impl FnOnce() -> T + Send + 'static) -> T {
+        std::thread::Builder::new()
+            .stack_size(bytes)
+            .spawn(f)
+            .unwrap()
+            .join()
+            .unwrap()
+    }
+
+    fn input_with_comment_run(prefix: &str, count: usize, suffix: &str) -> String {
+        use std::fmt::Write as _;
+        let mut input = String::from(prefix);
+        for i in 0..count {
+            writeln!(input, "  # c{i}").unwrap();
+        }
+        input.push_str(suffix);
+        input
+    }
+
+    fn comment_run(count: usize) -> Vec<String> {
+        (0..count).map(|i| format!("# c{i}")).collect()
+    }
+
+    #[test]
+    fn long_comment_run_before_nested_mapping_loads_on_small_stack() {
+        const COUNT: usize = 100_000;
+        let (outer_key_comments, inner_key_comments) = on_stack(TWO_MIB, || {
+            let input = input_with_comment_run("key:\n", COUNT, "  inner: val\n");
+            let docs = load(&input).unwrap();
+            let Node::Mapping { entries, .. } = &docs[0].root else {
+                panic!("expected root mapping");
+            };
+            assert_eq!(entries.len(), 1);
+            let (key, nested) = &entries[0];
+            let Node::Mapping {
+                entries: nested_entries,
+                ..
+            } = nested
+            else {
+                panic!("expected nested mapping");
+            };
+            assert_eq!(nested_entries.len(), 1);
+            (
+                key.leading_comments().to_vec(),
+                nested_entries[0].0.leading_comments().to_vec(),
+            )
+        });
+        assert!(outer_key_comments.is_empty());
+        assert!(
+            inner_key_comments == comment_run(COUNT),
+            "inner key carries {} comments, expected {COUNT} in order",
+            inner_key_comments.len()
+        );
+    }
+
+    // Same placement as the short runs pinned above, for a run long enough to
+    // overflow the stack when each comment costs a `parse_node` frame.
+    #[rstest]
+    #[case::nested_block_sequence("key:\n", "  - item\n", &["item"])]
+    #[case::nested_flow_mapping("key:\n", "  {k: v}\nb: 1\n", &["k"])]
+    #[case::nested_flow_sequence("key:\n", "  [1, 2]\n", &["1"])]
+    #[case::scalar_value_goes_to_next_key("key:\n", "  v\nb: 1\n", &["b"])]
+    #[case::empty_value_goes_to_next_key("key:\n", "b: 1\n", &["b"])]
+    #[case::alias_value_goes_to_next_key("x: &x 1\na:\n", "  *x\nb: 2\n", &["b"])]
+    #[case::mapping_end_reaches_next_item("- a:\n", "- z\n", &["z"])]
+    #[case::last_entry_drops_comments("a:\n", "", &[])]
+    #[case::document_end_drops_comments("a:\n", "---\nb: 1\n", &[])]
+    fn long_comment_run_at_value_position_is_placed_like_short_run(
+        #[case] prefix: &'static str,
+        #[case] suffix: &'static str,
+        #[case] expected: &[&str],
+    ) {
+        const COUNT: usize = 20_000;
+        let placement = on_stack(TWO_MIB, move || {
+            let input = input_with_comment_run(prefix, COUNT, suffix);
+            nodes_with_leading_comments(&load(&input).unwrap())
+        });
+        let expected: Vec<(String, Vec<String>)> = expected
+            .iter()
+            .map(|label| ((*label).to_owned(), comment_run(COUNT)))
+            .collect();
+        assert!(
+            placement == expected,
+            "placement differs: got {:?}",
+            placement
+                .iter()
+                .map(|(label, comments)| (label.as_str(), comments.len()))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn comment_run_before_parse_error_returns_the_parse_error() {
+        let err = load("a:\n  # c1\n  # c2\n  \"unterminated\n").unwrap_err();
+        let LoadError::Parse { message, pos, .. } = err else {
+            panic!("expected a parse error, got {err:?}");
+        };
+        assert!(message.contains("unterminated"), "message: {message}");
+        assert_eq!(pos.line, 5);
+    }
+
+    #[test]
+    fn comment_run_without_trailing_newline_at_end_of_input_is_dropped() {
+        let docs = load("a:\n  # c1\n  # c2").unwrap();
+        assert_eq!(nodes_with_leading_comments(&docs), []);
+    }
+
+    #[test]
+    fn comment_run_before_value_with_crlf_line_endings_matches_lf() {
+        let docs = load("a:\r\n  # c1\r\n  # c2\r\n  v\r\nb: 1\r\n").unwrap();
+        assert_eq!(
+            nodes_with_leading_comments(&docs),
+            expected_placement(&[("b", &["# c1", "# c2"][..])])
         );
     }
 

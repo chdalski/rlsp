@@ -35,7 +35,7 @@ comments, while every loaded document stays as it is today.
 - [x] Clarify scope with the user
 - [x] Design review of the approach
 - [x] Task 1: tests pin where comments at a value position land
-- [ ] Task 2: comment runs at a value position use bounded stack
+- [x] Task 2: comment runs at a value position use bounded stack
 - [ ] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
@@ -61,25 +61,25 @@ The `Event::Comment` arm drains the rest of the run with
 `consume_leading_comments` and then calls `parse_node` once, so the
 recursion is at most one level deep whatever the number of comments.
 
-- [ ] On a thread with a 2 MiB stack, `load()` of a document with a key
+- [x] On a thread with a 2 MiB stack, `load()` of a document with a key
       followed by 100 000 comment lines and a nested mapping returns in
       a debug build, and the nested mapping's first key carries all
       100 000 comments as leading comments; a test pins this, and it
       overflows the stack on the code before this task
-- [ ] The comment tests in `loader.rs` and the tests Task 1 added pass
+- [x] The comment tests in `loader.rs` and the tests Task 1 added pass
       with their assertions unchanged
-- [ ] The yaml-test-suite loader conformance test
+- [x] The yaml-test-suite loader conformance test
       (`rlsp-yaml-parser/tests/conformance/loader.rs`) passes
-- [ ] A maintainer reading the `pending_leading` field doc or the
+- [x] A maintainer reading the `pending_leading` field doc or the
       comment on the `Event::Comment` arm can tell which comments reach
       this path and which node receives them; neither text says they
       appear only before collections
-- [ ] A reader of `rlsp-yaml-parser/docs/architecture.md` finds how the
+- [x] A reader of `rlsp-yaml-parser/docs/architecture.md` finds how the
       loader handles a run of comments between a key and its value,
       which node receives them, and what bounds the recursion depth of
       `parse_node`; no passage says the `Comment` arm skips comments or
       recurses once per comment
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ## Non-Goals
 
