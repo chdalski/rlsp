@@ -163,7 +163,7 @@ If you prefer to point Zed at a locally installed binary, add to Zed settings (`
 **Schema support:**
 
 - Schema association via modeline (`# yaml-language-server: $schema=<url>`)
-- Schema association via workspace settings (glob-based `schemas` mapping)
+- Schema association via workspace settings (`schemas` mapping of a schema URL to a glob or an array of globs, with `!` exclusions)
 - Schema disable via `$schema=none` modeline
 - HTTP schema fetching with caching and SSRF guards
 - Deprecated property tagging in completions

@@ -6,23 +6,10 @@ use tower_lsp::LspService;
 use tower_lsp::jsonrpc::Request;
 
 use super::code_lens::code_lens_request;
+use super::fake_proxy::{FakeProxy, Reply, SCHEMA_HOST};
 use super::helpers::*;
 
 const GITHUB_WORKFLOW_SCHEMA_URL: &str = "https://json.schemastore.org/github-workflow.json";
-
-pub fn initialize_request_with_schema_glob(id: i64, schema_url: &str, glob: &str) -> Request {
-    Request::build("initialize")
-        .id(id)
-        .params(json!({
-            "capabilities": {},
-            "processId": null,
-            "rootUri": null,
-            "initializationOptions": {
-                "schemas": { schema_url: glob }
-            }
-        }))
-        .finish()
-}
 
 // ---- $schema=none modeline ----
 
@@ -110,17 +97,14 @@ async fn should_suppress_code_lens_after_schema_none_modeline() {
 
 #[tokio::test]
 async fn should_attempt_schema_validation_via_glob_association() {
-    let (mut service, socket) = LspService::new(Backend::new);
-    tokio::spawn(socket.for_each(|_| async {}));
-
-    // Configure a schema glob that matches *.yaml; the fetch will fail (no
-    // real network) but the path through match_schema_by_filename is exercised.
-    send(
-        &mut service,
-        initialize_request_with_schema_glob(1, "https://example.com/schema.json", "*.yaml"),
-    )
+    // The schema host is served by a fake proxy, so the fetch needs no network.
+    let proxy = FakeProxy::start(Reply::not_found());
+    let (mut service, _log) = start_server(json!({
+        "httpProxy": proxy.url(),
+        "schemaStore": false,
+        "schemas": { "http://schema.invalid/schema.json": "*.yaml" },
+    }))
     .await;
-    send(&mut service, initialized_notification()).await;
 
     let uri = "file:///test/glob-doc.yaml";
     let resp = send(&mut service, did_open_notification(uri, "key: value\n")).await;
@@ -129,8 +113,15 @@ async fn should_attempt_schema_validation_via_glob_association() {
         "didOpen notification should not return a response"
     );
 
-    // Document should be stored; schema fetch will fail silently, yielding no
-    // schema-validation diagnostics but the code path is exercised.
+    assert!(
+        proxy
+            .seen()
+            .iter()
+            .any(|line| line.starts_with(&format!("CONNECT {SCHEMA_HOST}"))),
+        "the glob association must fetch its schema, saw: {:?}",
+        proxy.seen()
+    );
+    // Document should be stored even when the schema fetch fails.
     let text = service.inner().get_document_text(uri);
     assert_eq!(
         text.as_deref(),

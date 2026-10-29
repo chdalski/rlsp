@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 
+use std::collections::BTreeMap;
+
 use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::{Document, Node};
-
-use super::SchemaAssociation;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Schema association — modeline
@@ -346,76 +346,212 @@ pub fn kubernetes_schema_url(
 // Schema association — file pattern matching
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// Return the schema URL for the first association whose glob pattern matches
-/// `filename`, or `None` if no association matches.
+/// Longest glob, in bytes after the leading `!` and `/` are removed.
+///
+/// With [`MAX_PATH_BYTES`] it bounds one match at 256 × 4096 steps.
+pub const MAX_PATTERN_BYTES: usize = 256;
+
+/// Most globs one `schemas` entry may list.
+pub const MAX_PATTERNS_PER_ENTRY: usize = 32;
+
+/// Longest document path that is matched; a longer one matches no `schemas`
+/// entry.
+pub const MAX_PATH_BYTES: usize = 4096;
+
+/// The globs of one `schemas` entry: the files its schema applies to, minus
+/// the files it excludes.
+///
+/// Follows yaml-language-server. A leading `!` marks a glob as an exclusion
+/// and is removed once, then one leading `/` is removed, and the rest matches
+/// at any directory level, as if it began with `**/`. A glob that is empty
+/// after that is ignored. The only way to obtain a value is
+/// [`FilePatterns::new`], so no value lacks a glob that includes files.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FilePatterns {
+    include: Vec<Glob>,
+    exclude: Vec<Glob>,
+}
+
+impl FilePatterns {
+    /// Sort `patterns` into inclusions and exclusions; `None` when there are
+    /// more than [`MAX_PATTERNS_PER_ENTRY`], when one is longer than
+    /// [`MAX_PATTERN_BYTES`], or when none includes files.
+    ///
+    /// The entry is refused as a whole rather than without the faulty glob: a
+    /// dropped exclusion would apply the schema to more files than intended.
+    #[must_use]
+    pub fn new(patterns: &[String]) -> Option<Self> {
+        if patterns.len() > MAX_PATTERNS_PER_ENTRY {
+            return None;
+        }
+        let (mut include, mut exclude) = (Vec::new(), Vec::new());
+        for pattern in patterns {
+            let (excluded, rest) = pattern
+                .strip_prefix('!')
+                .map_or((false, pattern.as_str()), |rest| (true, rest));
+            let rest = rest.strip_prefix('/').unwrap_or(rest);
+            if rest.len() > MAX_PATTERN_BYTES {
+                return None;
+            }
+            if rest.is_empty() {
+                continue;
+            }
+            let glob = Glob::anywhere(rest);
+            if excluded {
+                exclude.push(glob);
+            } else {
+                include.push(glob);
+            }
+        }
+        (!include.is_empty()).then_some(Self { include, exclude })
+    }
+
+    /// Whether the schema applies to the document at `path`: some inclusion
+    /// matches and no exclusion does. The order of the globs does not matter.
+    #[must_use]
+    pub fn matches(&self, path: &str) -> bool {
+        path.len() <= MAX_PATH_BYTES
+            && self.include.iter().any(|glob| glob.is_match(path))
+            && !self.exclude.iter().any(|glob| glob.is_match(path))
+    }
+}
+
+/// Return the schema URL of the first entry of `schemas` whose patterns match
+/// `filename`, or `None` if no entry matches.
+///
+/// `schemas` is ordered by URL, so the entry whose URL sorts first wins among
+/// overlapping entries. See [`FilePatterns`] for the pattern rules.
+#[must_use]
+pub fn match_schema_by_filename(
+    filename: &str,
+    schemas: &BTreeMap<String, FilePatterns>,
+) -> Option<String> {
+    schemas
+        .iter()
+        .find(|(_, patterns)| patterns.matches(filename))
+        .map(|(url, _)| url.clone())
+}
+
+/// Return `true` if `pattern` matches `text` using simple glob rules.
 ///
 /// Supported glob syntax:
 /// - `*` matches any sequence of characters that does not include `/`
 /// - `**` matches any sequence of characters including `/`
 /// - All other characters match literally
-#[must_use]
-pub fn match_schema_by_filename(
-    filename: &str,
-    associations: &[SchemaAssociation],
-) -> Option<String> {
-    associations
-        .iter()
-        .find(|a| glob_matches(&a.pattern, filename))
-        .map(|a| a.url.clone())
-}
-
-/// Return `true` if `pattern` matches `text` using simple glob rules.
 pub(super) fn glob_matches(pattern: &str, text: &str) -> bool {
-    glob_matches_inner(pattern.as_bytes(), text.as_bytes())
+    Glob::new(pattern).is_match(text)
 }
 
-fn glob_matches_inner(pattern: &[u8], text: &[u8]) -> bool {
-    match (pattern.first(), text.first()) {
-        // Both exhausted — full match
-        (None, None) => true,
+/// One element of a compiled glob.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Token {
+    Literal(u8),
+    /// `*`: any run of bytes other than `/`.
+    Star,
+    /// `**`, and the `/` after it if there is one: any run of bytes.
+    /// With `at_segment_start` the run has to end where a path segment begins.
+    DoubleStar {
+        at_segment_start: bool,
+    },
+}
 
-        // Double-star: matches zero or more path segments
-        (Some(&b'*'), _) if pattern.get(1) == Some(&b'*') => {
-            let rest_pattern = pattern.get(2..).unwrap_or(&[]);
-            // Skip any leading slash after **
-            let rest_pattern = rest_pattern.strip_prefix(b"/").unwrap_or(rest_pattern);
-            // Try matching rest_pattern against every suffix of text
-            for i in 0..=text.len() {
-                if glob_matches_inner(rest_pattern, text.get(i..).unwrap_or(&[])) {
-                    return true;
-                }
-            }
-            false
+/// A glob compiled to tokens and matched without backtracking, so a match
+/// costs at most the glob length times the text length however many
+/// wildcards the glob has.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Glob {
+    tokens: Vec<Token>,
+}
+
+impl Glob {
+    /// A glob in which `**/` may end only at the start of a path segment.
+    fn anywhere(pattern: &str) -> Self {
+        let leading = Token::DoubleStar {
+            at_segment_start: true,
+        };
+        Self {
+            tokens: std::iter::once(leading)
+                .chain(tokenize(pattern, true))
+                .collect(),
         }
-
-        // Single-star: matches any sequence of non-slash characters
-        (Some(&b'*'), _) => {
-            let rest_pattern = pattern.get(1..).unwrap_or(&[]);
-            for i in 0..=text.len() {
-                if text.get(..i).is_some_and(|prefix| !prefix.contains(&b'/'))
-                    && glob_matches_inner(rest_pattern, text.get(i..).unwrap_or(&[]))
-                {
-                    return true;
-                }
-            }
-            false
-        }
-
-        // Literal character match
-        (Some(&pc), Some(&tc)) => {
-            if pc == tc {
-                glob_matches_inner(
-                    pattern.get(1..).unwrap_or(&[]),
-                    text.get(1..).unwrap_or(&[]),
-                )
-            } else {
-                false
-            }
-        }
-
-        // One side exhausted but not the other — no match
-        (None, Some(_)) | (Some(_), None) => false,
     }
+
+    /// A glob in which `**/` may end at any byte.
+    fn new(pattern: &str) -> Self {
+        Self {
+            tokens: tokenize(pattern, false).collect(),
+        }
+    }
+
+    /// Track the tokens the text so far can have reached; the text matches
+    /// when the end of the glob is among them at the end of the text.
+    fn is_match(&self, candidate: &str) -> bool {
+        let text = candidate.as_bytes();
+        let mut reached = vec![false; self.tokens.len() + 1];
+        let mut next = vec![false; self.tokens.len() + 1];
+        mark(&mut reached, 0);
+        self.skip_empty_runs(&mut reached, text, 0);
+        for (position, &byte) in text.iter().enumerate() {
+            next.fill(false);
+            for (index, token) in self.tokens.iter().enumerate() {
+                if !reached.get(index).copied().unwrap_or(false) {
+                    continue;
+                }
+                match *token {
+                    Token::Literal(literal) if literal == byte => mark(&mut next, index + 1),
+                    Token::Star if byte != b'/' => mark(&mut next, index),
+                    Token::DoubleStar { .. } => mark(&mut next, index),
+                    Token::Literal(_) | Token::Star => {}
+                }
+            }
+            self.skip_empty_runs(&mut next, text, position + 1);
+            std::mem::swap(&mut reached, &mut next);
+            if !reached.contains(&true) {
+                return false;
+            }
+        }
+        reached.last().copied().unwrap_or(false)
+    }
+
+    /// A wildcard may match nothing: from each reached wildcard, also reach
+    /// the token after it, where `position` in `text` allows it.
+    fn skip_empty_runs(&self, reached: &mut [bool], text: &[u8], position: usize) {
+        let at_segment_start = position == 0 || text.get(position - 1) == Some(&b'/');
+        for (index, token) in self.tokens.iter().enumerate() {
+            let can_end_here = match *token {
+                Token::Literal(_) => false,
+                Token::Star => true,
+                Token::DoubleStar {
+                    at_segment_start: required,
+                } => at_segment_start || !required,
+            };
+            if can_end_here && reached.get(index).copied().unwrap_or(false) {
+                mark(reached, index + 1);
+            }
+        }
+    }
+}
+
+fn mark(states: &mut [bool], index: usize) {
+    if let Some(state) = states.get_mut(index) {
+        *state = true;
+    }
+}
+
+/// Split `pattern` into tokens. With `anchored`, a `**/` ends only at the
+/// start of a path segment.
+fn tokenize(pattern: &str, anchored: bool) -> impl Iterator<Item = Token> + '_ {
+    let mut bytes = pattern.bytes().peekable();
+    std::iter::from_fn(move || {
+        let byte = bytes.next()?;
+        Some(match byte {
+            b'*' if bytes.next_if_eq(&b'*').is_some() => Token::DoubleStar {
+                at_segment_start: bytes.next_if_eq(&b'/').is_some() && anchored,
+            },
+            b'*' => Token::Star,
+            literal => Token::Literal(literal),
+        })
+    })
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -573,70 +709,464 @@ mod tests {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // match_schema_by_filename
+    // FilePatterns + match_schema_by_filename
     // ══════════════════════════════════════════════════════════════════════════
 
     fn parsed_version(version: &str) -> KubernetesVersion {
         KubernetesVersion::new(version).expect("valid version")
     }
 
-    fn assoc(pattern: &str, url: &str) -> SchemaAssociation {
-        SchemaAssociation {
-            pattern: pattern.to_string(),
-            url: url.to_string(),
+    fn file_patterns(globs: &[&str]) -> FilePatterns {
+        let globs: Vec<String> = globs.iter().map(ToString::to_string).collect();
+        FilePatterns::new(&globs).expect("globs include a file")
+    }
+
+    fn schemas(entries: &[(&str, &[&str])]) -> BTreeMap<String, FilePatterns> {
+        entries
+            .iter()
+            .map(|(url, globs)| ((*url).to_string(), file_patterns(globs)))
+            .collect()
+    }
+
+    #[rstest]
+    #[case::exact_filename("config.yaml", "/work/config.yaml")]
+    #[case::exact_filename_at_the_root("config.yaml", "/config.yaml")]
+    #[case::extension_glob_below_directories("*.yaml", "/a/b/c.yaml")]
+    #[case::workflow_glob_below_a_directory(
+        ".github/workflows/*.yml",
+        "/home/u/proj/.github/workflows/ci.yml"
+    )]
+    #[case::absolute_path_still_matches("/work/config.yaml", "/work/config.yaml")]
+    #[case::leading_slash_is_removed("/config.yaml", "/a/config.yaml")]
+    #[case::only_one_leading_slash_is_removed("//x", "/a//x")]
+    #[case::double_star_directory("configs/**/*.yaml", "/p/configs/nested/file.yaml")]
+    #[case::leading_double_star("**/*.yaml", "/a/b.yaml")]
+    #[case::leading_double_star_at_the_root("**/b.yaml", "/b.yaml")]
+    #[case::single_star_only("*", "/a/b")]
+    #[case::percent_encoded_path_is_not_decoded("a%20b.yaml", "/dir/a%20b.yaml")]
+    #[case::empty_segments_are_not_normalized("b/x.yaml", "/a//b/x.yaml")]
+    #[case::bare_name_after_an_empty_segment("x.yaml", "/a//b/x.yaml")]
+    #[case::star_matches_a_dot_file("*.yaml", "/a/.yaml")]
+    #[case::double_star_matches_an_empty_last_segment("**", "/a/")]
+    #[case::drive_letter_path("*.yaml", "/C:/Users/me/a.yaml")]
+    #[case::drive_letter_path_with_a_directory_glob(
+        ".github/workflows/*.yml",
+        "/C:/repo/.github/workflows/ci.yml"
+    )]
+    #[case::exclamation_mark_after_a_slash_is_literal("/!x", "/d/!x")]
+    #[case::double_star_with_slashes_on_both_sides("/**/x.yaml", "/r/s/x.yaml")]
+    #[case::double_star_with_slashes_matches_the_root("/**/x.yaml", "/x.yaml")]
+    #[case::directory_glob_at_the_root(".github/workflows/*.yml", "/.github/workflows/ci.yml")]
+    #[case::multibyte_literal("é/*.yaml", "/dir/é/ü.yaml")]
+    fn file_patterns_match(#[case] glob: &str, #[case] path: &str) {
+        assert!(file_patterns(&[glob]).matches(path), "{glob} on {path}");
+    }
+
+    #[rstest]
+    #[case::other_extension("*.json", "/a/myfile.yaml")]
+    #[case::name_is_a_suffix_of_the_segment("config.yaml", "/a/my-config.yaml")]
+    #[case::name_is_a_suffix_of_the_segment_after_a_double_star("**/foo.yaml", "/a/barfoo.yaml")]
+    #[case::directory_is_a_suffix_of_the_segment("config/*.yaml", "/x/myconfig/a.yaml")]
+    #[case::workflow_dir_is_a_suffix_of_the_segment(
+        ".github/workflows/*.yml",
+        "/home/my.github/workflows/ci.yml"
+    )]
+    #[case::second_slash_is_not_removed("//x", "/a/x")]
+    #[case::single_star_stops_at_a_slash("a/*", "/a/b/c")]
+    #[case::case_differs("*.YAML", "/a/b.yaml")]
+    #[case::literal_does_not_match_a_percent_decoded_path("a b.yaml", "/dir/a%20b.yaml")]
+    #[case::three_empty_segments_are_not_one("a/b/x.yaml", "/a//b/x.yaml")]
+    #[case::trailing_slash("*.yaml", "/a/c.yaml/")]
+    #[case::directory_glob_does_not_reach_a_subdirectory(
+        ".github/workflows/*.yml",
+        "/repo/.github/workflows/sub/ci.yml"
+    )]
+    #[case::backslashes_are_literal(".github\\workflows\\*.yml", "/r/.github/workflows/ci.yml")]
+    #[case::exclamation_mark_after_a_slash_is_not_an_exclusion("/!x", "/d/x")]
+    #[case::empty_path("*.yaml", "")]
+    #[case::trailing_double_star_slash_needs_a_segment("**/", "/a/b")]
+    fn file_patterns_do_not_match(#[case] glob: &str, #[case] path: &str) {
+        assert!(!file_patterns(&[glob]).matches(path), "{glob} on {path}");
+    }
+
+    #[rstest]
+    #[case::exclusion_hits(&["*.yaml", "!skip.yaml"], "/a/skip.yaml", false)]
+    #[case::exclusion_misses(&["*.yaml", "!skip.yaml"], "/a/other.yaml", true)]
+    #[case::exclusion_first(&["!skip.yaml", "*.yaml"], "/a/skip.yaml", false)]
+    #[case::exclusion_first_other_file(&["!skip.yaml", "*.yaml"], "/a/other.yaml", true)]
+    #[case::exclusion_is_anywhere(&["**", "!tests/*"], "/p/tests/a.yaml", false)]
+    #[case::exclusion_slash_removed(&["**", "!/x"], "/a/x", false)]
+    #[case::exclusion_slash_removed_other_file(&["**", "!/x"], "/a/y", true)]
+    #[case::only_one_exclamation_mark_is_removed_hit(&["**", "!!x"], "/a/!x", false)]
+    #[case::only_one_exclamation_mark_is_removed_miss(&["**", "!!x"], "/a/x", true)]
+    #[case::bare_exclamation_mark_is_ignored(&["x", "!"], "/a/x", true)]
+    #[case::bare_exclamation_mark_is_ignored_other_file(&["x", "!"], "/a/y", false)]
+    #[case::bare_slash_is_ignored(&["x", "/"], "/a/x", true)]
+    #[case::empty_glob_is_ignored(&["x", ""], "/a/x", true)]
+    #[case::second_inclusion_applies(&["a.yaml", "b.yaml"], "/p/b.yaml", true)]
+    #[case::no_inclusion_hits(&["a.yaml", "b.yaml"], "/p/c.yaml", false)]
+    #[case::several_exclusions(&["**", "!a.yaml", "!b.yaml"], "/p/b.yaml", false)]
+    #[case::exclusion_follows_the_segment_rules(&["*.yaml", "!config.yaml"], "/p/my-config.yaml", true)]
+    #[case::exclusion_follows_the_segment_rules_on_the_bare_name(&["*.yaml", "!config.yaml"], "/p/config.yaml", false)]
+    #[case::exclusion_wins_over_several_inclusions(&["a.yaml", "*.yaml", "!a.yaml"], "/c/a.yaml", false)]
+    #[case::slash_then_bang_is_a_literal_inclusion(&["/!x"], "/d/!x", true)]
+    #[case::slash_then_bang_does_not_include_the_bare_name(&["/!x"], "/d/x", false)]
+    fn file_patterns_include_and_exclude(
+        #[case] globs: &[&str],
+        #[case] path: &str,
+        #[case] expected: bool,
+    ) {
+        assert_eq!(
+            file_patterns(globs).matches(path),
+            expected,
+            "{globs:?} on {path}"
+        );
+    }
+
+    #[test]
+    fn file_patterns_ignore_the_order_of_their_globs() {
+        let forward = file_patterns(&["*.yaml", "!a.yaml", "b/*.yaml"]);
+        let reverse = file_patterns(&["b/*.yaml", "!a.yaml", "*.yaml"]);
+        for path in [
+            "/a.yaml",
+            "/x/a.yaml",
+            "/x/b/a.yaml",
+            "/x/c.yaml",
+            "/x.json",
+        ] {
+            assert_eq!(forward.matches(path), reverse.matches(path), "{path}");
         }
     }
 
     #[rstest]
-    #[case::exact_filename_match(
-        "config.yaml",
-        vec![assoc("config.yaml", "https://example.com/config-schema.json")],
-        "https://example.com/config-schema.json"
-    )]
-    #[case::single_star_glob(
-        "myfile.yaml",
-        vec![assoc("*.yaml", "https://example.com/generic.json")],
-        "https://example.com/generic.json"
-    )]
-    #[case::double_star_glob(
-        "configs/nested/file.yaml",
-        vec![assoc("configs/**/*.yaml", "https://example.com/schema.json")],
-        "https://example.com/schema.json"
-    )]
-    #[case::first_matching_wins(
-        "test.yaml",
-        vec![
-            assoc("*.yaml", "https://example.com/first.json"),
-            assoc("*.yaml", "https://example.com/second.json"),
-        ],
-        "https://example.com/first.json"
-    )]
-    fn match_schema_by_filename_returns_url(
-        #[case] filename: &str,
-        #[case] associations: Vec<SchemaAssociation>,
-        #[case] expected: &str,
-    ) {
+    #[case::empty_array(&[])]
+    #[case::empty_string(&[""])]
+    #[case::only_a_slash(&["/"])]
+    #[case::only_a_bare_exclamation_mark(&["!"])]
+    #[case::only_a_slash_exclusion(&["!/"])]
+    #[case::only_exclusions(&["!x", "!y"])]
+    #[case::only_empty_globs(&["", "/", "!", "!/"])]
+    fn file_patterns_refuse_globs_that_include_no_file(#[case] globs: &[&str]) {
+        let globs: Vec<String> = globs.iter().map(ToString::to_string).collect();
+        assert_eq!(FilePatterns::new(&globs), None);
+    }
+
+    #[test]
+    fn file_patterns_accept_the_limits_and_refuse_one_more() {
+        let globs = |count: usize, length: usize| vec!["x".repeat(length); count];
+        assert!(FilePatterns::new(&globs(MAX_PATTERNS_PER_ENTRY, MAX_PATTERN_BYTES)).is_some());
         assert_eq!(
-            match_schema_by_filename(filename, &associations),
-            Some(expected.to_string())
+            FilePatterns::new(&globs(MAX_PATTERNS_PER_ENTRY + 1, 1)),
+            None
+        );
+        assert_eq!(FilePatterns::new(&globs(1, MAX_PATTERN_BYTES + 1)), None);
+    }
+
+    #[test]
+    fn file_patterns_measure_the_length_of_a_glob_without_its_prefixes() {
+        let at_the_limit = "x".repeat(MAX_PATTERN_BYTES);
+        let over_the_limit = "x".repeat(MAX_PATTERN_BYTES + 1);
+        assert!(FilePatterns::new(&["a".into(), format!("!/{at_the_limit}")]).is_some());
+        assert!(FilePatterns::new(&["a".into(), format!("!/{over_the_limit}")]).is_none());
+    }
+
+    #[test]
+    fn file_patterns_measure_the_length_of_a_glob_in_bytes() {
+        let two_bytes = "\u{e9}";
+        assert!(FilePatterns::new(&[two_bytes.repeat(MAX_PATTERN_BYTES / 2)]).is_some());
+        assert_eq!(
+            FilePatterns::new(&[two_bytes.repeat(MAX_PATTERN_BYTES / 2 + 1)]),
+            None
+        );
+    }
+
+    #[test]
+    fn file_patterns_count_every_listed_glob_not_only_the_usable_ones() {
+        let mut globs = vec![String::new(); MAX_PATTERNS_PER_ENTRY];
+        globs.push("x".to_string());
+        assert_eq!(FilePatterns::new(&globs), None);
+        globs.remove(0);
+        assert!(FilePatterns::new(&globs).is_some());
+    }
+
+    #[test]
+    fn file_patterns_match_a_huge_path_to_nothing_without_work() {
+        let path = format!("/{}.yaml", "a".repeat(10 << 20));
+        assert!(!file_patterns(&["**"]).matches(&path));
+    }
+
+    #[test]
+    fn the_shared_glob_matcher_has_no_path_limit() {
+        let path = "a/".repeat(MAX_PATH_BYTES);
+        assert!(glob_matches("**", &path));
+        assert!(glob_matches("**/a/", &path));
+    }
+
+    #[test]
+    fn file_patterns_refuse_a_whole_entry_for_one_glob_over_the_limit() {
+        let globs = [
+            "x".to_string(),
+            "!".to_string() + &"y".repeat(MAX_PATTERN_BYTES + 1),
+        ];
+        assert_eq!(FilePatterns::new(&globs), None);
+    }
+
+    #[test]
+    fn file_patterns_match_a_path_up_to_the_limit_and_no_longer() {
+        let patterns = file_patterns(&["*.yaml"]);
+        let path = |length: usize| format!("/{}.yaml", "a".repeat(length - "/.yaml".len()));
+        assert!(patterns.matches(&path(MAX_PATH_BYTES)));
+        assert!(!patterns.matches(&path(MAX_PATH_BYTES + 1)));
+    }
+
+    /// Run `work` on a thread and fail, instead of hanging, if it does not
+    /// finish: a backtracking matcher takes years on the globs below.
+    fn finishes_within_thirty_seconds(work: impl FnOnce() + Send + 'static) {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            work();
+            let _ = sender.send(());
+        });
+        assert!(
+            receiver
+                .recv_timeout(std::time::Duration::from_secs(30))
+                .is_ok(),
+            "matching did not finish"
         );
     }
 
     #[rstest]
-    #[case::extension_mismatch(
-        "myfile.yaml",
-        vec![assoc("*.json", "https://example.com/schema.json")]
+    #[case::stacked_double_stars(format!("{}x", "**/".repeat(80)))]
+    #[case::stacked_double_stars_without_slashes(format!("{}x", "**".repeat(120)))]
+    #[case::stars_between_letters(format!("{}b", "*a".repeat(120)))]
+    #[case::stars_between_slashes(format!("{}b", "*/".repeat(120)))]
+    #[case::double_stars_between_letters(format!("{}b", "a**".repeat(80)))]
+    fn matching_ends_for_a_glob_that_made_backtracking_explode(#[case] glob: String) {
+        let paths = [
+            "a/".repeat(MAX_PATH_BYTES / 2),
+            "a".repeat(MAX_PATH_BYTES),
+            "/aa".repeat(MAX_PATH_BYTES / 3),
+        ];
+        finishes_within_thirty_seconds(move || {
+            let patterns = file_patterns(&[&glob]);
+            for path in &paths {
+                assert!(!patterns.matches(path));
+                assert!(!glob_matches(&glob, path));
+            }
+        });
+    }
+
+    #[rstest]
+    #[case::first_url_wins(
+        "/a/test.yaml",
+        &[("https://example.com/first.json", &["*.yaml"][..]), ("https://example.com/second.json", &["*.yaml"])],
+        Some("https://example.com/first.json")
     )]
-    #[case::empty_associations("myfile.yaml", vec![])]
-    #[case::partial_filename_no_match(
-        "my-config.yaml",
-        vec![assoc("config.yaml", "https://example.com/schema.json")]
+    #[case::only_the_matching_entry_applies(
+        "/a/test.yaml",
+        &[("https://a.test/json.json", &["*.json"][..]), ("https://b.test/yaml.json", &["*.yaml"])],
+        Some("https://b.test/yaml.json")
     )]
-    fn match_schema_by_filename_returns_none(
+    #[case::an_excluded_entry_yields_to_the_next(
+        "/a/test.yaml",
+        &[("https://a.test/s.json", &["*.yaml", "!test.yaml"][..]), ("https://b.test/s.json", &["*.yaml"])],
+        Some("https://b.test/s.json")
+    )]
+    #[case::every_entry_excludes_the_file(
+        "/a/test.yaml",
+        &[("https://a.test/s.json", &["*.yaml", "!test.yaml"][..]), ("https://b.test/s.json", &["**", "!/a/test.yaml"])],
+        None
+    )]
+    #[case::no_entry(
+        "/a/test.yaml",
+        &[],
+        None
+    )]
+    #[case::no_entry_matches(
+        "/a/my-config.yaml",
+        &[("https://a.test/s.json", &["config.yaml"][..])],
+        None
+    )]
+    fn match_schema_by_filename_picks_the_first_matching_entry(
         #[case] filename: &str,
-        #[case] associations: Vec<SchemaAssociation>,
+        #[case] entries: &[(&str, &[&str])],
+        #[case] expected: Option<&str>,
     ) {
-        assert_eq!(match_schema_by_filename(filename, &associations), None);
+        assert_eq!(
+            match_schema_by_filename(filename, &schemas(entries)).as_deref(),
+            expected
+        );
+    }
+
+    #[test]
+    fn match_schema_by_filename_ignores_the_order_the_entries_were_added_in() {
+        let urls = [
+            "https://c.test/s.json",
+            "https://a.test/s.json",
+            "https://b.test/s.json",
+        ];
+        for rotation in 0..urls.len() {
+            let mut rotated = urls;
+            rotated.rotate_left(rotation);
+            let schemas: BTreeMap<_, _> = rotated
+                .iter()
+                .map(|url| ((*url).to_string(), file_patterns(&["*.yaml"])))
+                .collect();
+            assert_eq!(
+                match_schema_by_filename("/x.yaml", &schemas).as_deref(),
+                Some("https://a.test/s.json")
+            );
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // glob_matches
+    // ══════════════════════════════════════════════════════════════════════════
+
+    #[rstest]
+    #[case::literal("a.yaml", "a.yaml", true)]
+    #[case::literal_mismatch("a.yaml", "b.yaml", false)]
+    #[case::star_in_a_segment("*.yaml", "a.yaml", true)]
+    #[case::star_stops_at_a_slash("*.yaml", "a/b.yaml", false)]
+    #[case::star_may_match_nothing("a*b", "ab", true)]
+    #[case::double_star_crosses_slashes("**/c.yaml", "a/b/c.yaml", true)]
+    #[case::double_star_may_match_nothing("**/c.yaml", "c.yaml", true)]
+    #[case::double_star_mid_pattern("a/**/c", "a/b/b/c", true)]
+    #[case::double_star_ends_inside_a_segment("**/c.yaml", "a/bc.yaml", true)]
+    #[case::double_star_alone("**", "a/b/c", true)]
+    #[case::double_star_matches_empty_text("**", "", true)]
+    #[case::star_matches_empty_text("*", "", true)]
+    #[case::empty_pattern_matches_empty_text("", "", true)]
+    #[case::empty_pattern_rejects_text("", "a", false)]
+    #[case::pattern_longer_than_text("abc", "ab", false)]
+    #[case::text_longer_than_pattern("ab", "abc", false)]
+    #[case::three_stars_are_a_double_star_and_a_star("***", "a/b", true)]
+    #[case::the_plain_matcher_adds_no_implicit_double_star("c.yaml", "a/c.yaml", false)]
+    #[case::leading_exclamation_mark_is_literal("!x", "!x", true)]
+    #[case::leading_exclamation_mark_is_not_an_exclusion("!x", "y", false)]
+    #[case::triple_star_between_letters("a***b", "a/x/b", true)]
+    #[case::double_star_inside_a_name("a**b", "a/x/b", true)]
+    #[case::trailing_double_star_matches_nothing_after_a_slash("a/**", "a/", true)]
+    #[case::question_mark_is_literal("?.yaml", "a.yaml", false)]
+    #[case::brackets_are_literal("[a].yaml", "a.yaml", false)]
+    #[case::multibyte_literal("é.yaml", "é.yaml", true)]
+    #[case::star_matches_multibyte("*", "é", true)]
+    #[case::star_matches_a_dot_file("*.yaml", ".yaml", true)]
+    #[case::star_matches_a_hidden_name("*", ".hidden", true)]
+    #[case::one_slash_after_a_double_star_is_swallowed("**//c", "a/c", true)]
+    #[case::a_second_slash_after_a_double_star_is_not("**//c", "ac", false)]
+    fn glob_matches_follows_the_documented_syntax(
+        #[case] pattern: &str,
+        #[case] text: &str,
+        #[case] expected: bool,
+    ) {
+        assert_eq!(glob_matches(pattern, text), expected, "{pattern} on {text}");
+    }
+
+    /// The matcher this module used before it stopped backtracking, kept to
+    /// check that the new one agrees with it.
+    fn backtracking_glob_matches(pattern: &[u8], text: &[u8]) -> bool {
+        match (pattern.first(), text.first()) {
+            (None, None) => true,
+            (Some(&b'*'), _) if pattern.get(1) == Some(&b'*') => {
+                let rest = pattern.get(2..).unwrap_or(&[]);
+                let rest = rest.strip_prefix(b"/").unwrap_or(rest);
+                (0..=text.len()).any(|i| backtracking_glob_matches(rest, &text[i..]))
+            }
+            (Some(&b'*'), _) => {
+                let rest = &pattern[1..];
+                (0..=text.len()).any(|i| {
+                    !text[..i].contains(&b'/') && backtracking_glob_matches(rest, &text[i..])
+                })
+            }
+            (Some(&p), Some(&t)) => p == t && backtracking_glob_matches(&pattern[1..], &text[1..]),
+            (None, Some(_)) | (Some(_), None) => false,
+        }
+    }
+
+    mod glob_properties {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig {
+                cases: 4096,
+                ..ProptestConfig::default()
+            })]
+
+            /// `glob_matches` agrees with the backtracking matcher on every
+            /// short glob and text, so SchemaStore `fileMatch` is unchanged.
+            #[test]
+            fn glob_matches_agrees_with_the_backtracking_matcher(
+                pattern in "[ab\u{e9}*/!.]{0,9}",
+                text in "[ab\u{e9}/!.]{0,12}",
+            ) {
+                prop_assert_eq!(
+                    glob_matches(&pattern, &text),
+                    backtracking_glob_matches(pattern.as_bytes(), text.as_bytes()),
+                    "{} on {}", pattern, text
+                );
+            }
+
+            /// No glob and path make matching panic.
+            #[test]
+            fn file_patterns_never_panic(
+                globs in prop::collection::vec("[ab\u{e9}*/!.]{0,9}", 0..4),
+                path in "[ab\u{e9}/.]{0,12}",
+            ) {
+                if let Some(patterns) = FilePatterns::new(&globs) {
+                    let _ = patterns.matches(&path);
+                }
+            }
+
+            /// A glob and its own exclusion together match nothing.
+            #[test]
+            fn a_glob_and_its_exclusion_match_nothing(
+                glob in "[ab*.]{1,6}",
+                path in "[ab/.]{0,10}",
+            ) {
+                let patterns = file_patterns(&[&glob, &format!("!{glob}")]);
+                prop_assert!(!patterns.matches(&path), "{} on {}", glob, path);
+            }
+
+            /// Adding an exclusion never adds a match; adding an inclusion
+            /// never removes one.
+            #[test]
+            fn exclusions_only_remove_and_inclusions_only_add(
+                base in "[ab*.]{1,6}",
+                extra in "[ab*.]{1,6}",
+                path in "[ab/.]{0,10}",
+            ) {
+                let alone = file_patterns(&[&base]).matches(&path);
+                let excluded = file_patterns(&[&base, &format!("!{extra}")]).matches(&path);
+                let included = file_patterns(&[&base, &extra]).matches(&path);
+                prop_assert!(alone || !excluded);
+                prop_assert!(!alone || included);
+            }
+
+            /// Without `**`, a pattern matches anywhere exactly when the plain
+            /// glob matches the whole path or what follows one of its slashes.
+            #[test]
+            fn file_patterns_match_what_follows_any_slash(
+                pattern in "([ab./]|\\*[ab./]){1,5}\\*?",
+                text in "[ab/.]{0,12}",
+            ) {
+                let glob = pattern.strip_prefix('/').unwrap_or(&pattern);
+                prop_assume!(!glob.is_empty());
+                let starts = std::iter::once(0).chain(
+                    text.match_indices('/').map(|(i, _)| i + 1),
+                );
+                let expected = starts.into_iter().any(|start| {
+                    backtracking_glob_matches(glob.as_bytes(), &text.as_bytes()[start..])
+                });
+                prop_assert_eq!(
+                    file_patterns(&[&pattern]).matches(&text),
+                    expected,
+                    "{} on {}", pattern, text
+                );
+            }
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════════

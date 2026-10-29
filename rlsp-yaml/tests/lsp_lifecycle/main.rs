@@ -21,6 +21,7 @@ mod on_type_formatting;
 mod rename;
 mod schema_fetch;
 mod schema_modelines;
+mod schemas_setting;
 mod selection_ranges;
 mod semantic_tokens;
 mod validation_limits;

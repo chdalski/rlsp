@@ -883,15 +883,6 @@ pub(crate) mod test_support {
     }
 }
 
-/// A mapping from a file glob pattern to a JSON Schema URL.
-#[derive(Debug, Clone)]
-pub struct SchemaAssociation {
-    /// Glob pattern matched against the document file path.
-    pub pattern: String,
-    /// URL of the JSON Schema to apply to matching documents.
-    pub url: String,
-}
-
 /// A single entry from the `SchemaStore` catalog.
 #[derive(Debug, Clone)]
 pub struct SchemaStoreEntry {
@@ -4924,6 +4915,59 @@ mod tests {
         };
         let result = match_schemastore("config.yaml", &catalog);
         assert_eq!(result, Some("https://example.com/first.json".to_string()));
+    }
+
+    fn catalog_with_file_match(file_match: &[&str]) -> SchemaStoreCatalog {
+        SchemaStoreCatalog {
+            entries: vec![SchemaStoreEntry {
+                url: "https://example.com/s.json".to_string(),
+                file_match: file_match.iter().map(ToString::to_string).collect(),
+            }],
+        }
+    }
+
+    // The `schemas` setting reads a leading `!` as an exclusion; SchemaStore
+    // `fileMatch` patterns do not.
+    #[rstest]
+    #[case::bang_pattern_matches_the_literal_name("!x.yaml", "!x.yaml", true)]
+    #[case::bang_pattern_does_not_match_the_bare_name("!x.yaml", "x.yaml", false)]
+    #[case::bang_glob_does_not_exclude("!*.yaml", "a.yaml", false)]
+    #[case::bang_glob_does_not_match_below_a_directory("!*.yaml", "/dir/a.yaml", false)]
+    // A `fileMatch` pattern is matched from the start of the path: it has no
+    // implicit `**/`, which only the `schemas` setting adds.
+    #[case::bare_name_is_not_matched_below_a_directory("config.yaml", "/p/config.yaml", false)]
+    #[case::bare_name_matches_the_whole_path("config.yaml", "config.yaml", true)]
+    #[case::double_star_matches_below_a_directory("**/config.yaml", "/p/config.yaml", true)]
+    fn match_schemastore_reads_file_match_patterns_literally(
+        #[case] pattern: &str,
+        #[case] filename: &str,
+        #[case] expected: bool,
+    ) {
+        let catalog = catalog_with_file_match(&[pattern]);
+        assert_eq!(
+            match_schemastore(filename, &catalog).is_some(),
+            expected,
+            "{pattern} on {filename}"
+        );
+    }
+
+    #[test]
+    fn match_schemastore_has_no_path_length_limit() {
+        let catalog = catalog_with_file_match(&["**"]);
+        assert!(match_schemastore(&"a/".repeat(10_000), &catalog).is_some());
+    }
+
+    #[test]
+    fn match_schemastore_ends_for_a_file_match_that_made_backtracking_explode() {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let catalog = catalog_with_file_match(&["a**a**a**a**a**a**a**a**a**a**a**b"]);
+            let _ = sender.send(match_schemastore(&"a".repeat(4096), &catalog));
+        });
+        assert_eq!(
+            receiver.recv_timeout(std::time::Duration::from_secs(30)),
+            Ok(None)
+        );
     }
 
     // SS-13: match_schemastore returns None for empty catalog

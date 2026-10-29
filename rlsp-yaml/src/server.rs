@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
 use tower_lsp::jsonrpc::Result;
@@ -269,19 +269,13 @@ impl Backend {
         self.settings.lock().is_ok_and(|s| s.key_ordering)
     }
 
-    pub(crate) fn get_schema_associations(&self) -> Vec<crate::schema::SchemaAssociation> {
+    /// The workspace's `schemas` setting, cloned so no lock is held while
+    /// matching.
+    pub(crate) fn get_schemas(&self) -> BTreeMap<String, schema::FilePatterns> {
         self.settings
             .lock()
             .ok()
-            .map(|s| {
-                s.schemas
-                    .iter()
-                    .map(|(url, pattern)| crate::schema::SchemaAssociation {
-                        pattern: pattern.clone(),
-                        url: url.clone(),
-                    })
-                    .collect()
-            })
+            .map(|s| s.schemas.clone())
             .unwrap_or_default()
     }
 
@@ -603,14 +597,14 @@ impl Backend {
             return;
         }
         // No modeline — check workspace associations, then auto-detection.
-        // get_schema_associations(), get_kubernetes_version(), and
+        // get_schemas(), get_kubernetes_version(), and
         // get_schema_store_enabled() each acquire and release the settings
         // lock before any schema_associations or schema_cache lock is taken.
-        let associations = self.get_schema_associations();
+        let schemas = self.get_schemas();
         let k8s_version = self.get_kubernetes_version();
         let schema_store_enabled = self.get_schema_store_enabled();
         let filename = uri.path();
-        if let Some(schema_url) = crate::schema::match_schema_by_filename(filename, &associations) {
+        if let Some(schema_url) = crate::schema::match_schema_by_filename(filename, &schemas) {
             self.process_schema(
                 uri,
                 &schema_url,
@@ -1871,14 +1865,14 @@ mod tests {
     // ---- Schema associations wiring ----
 
     #[test]
-    fn get_schema_associations_returns_empty_by_default() {
+    fn get_schemas_returns_empty_by_default() {
         let (service, _) = tower_lsp::LspService::new(Backend::new);
         let backend = service.inner();
-        assert!(backend.get_schema_associations().is_empty());
+        assert!(backend.get_schemas().is_empty());
     }
 
     #[test]
-    fn get_schema_associations_converts_settings_to_vec() {
+    fn get_schemas_returns_the_configured_entries() {
         let (service, _) = tower_lsp::LspService::new(Backend::new);
         let backend = service.inner();
 
@@ -1888,10 +1882,13 @@ mod tests {
             *s = new_settings;
         }
 
-        let associations = backend.get_schema_associations();
-        assert_eq!(associations.len(), 1);
-        assert_eq!(associations[0].url, "https://example.com/schema.json");
-        assert_eq!(associations[0].pattern, "*.yaml");
+        let schemas = backend.get_schemas();
+        assert_eq!(schemas.len(), 1);
+        assert!(
+            schemas
+                .get("https://example.com/schema.json")
+                .is_some_and(|patterns| patterns.matches("/docs/a.yaml"))
+        );
     }
 
     // ---- Kubernetes version setting ----
@@ -2069,16 +2066,17 @@ mod tests {
             assert!(!message.contains(secret), "{message}");
         }
         assert!(
-            message.contains("must be a string; the entry is ignored"),
+            message.contains("must be a glob or an array of at most 32 globs"),
             "{message}"
         );
+        assert!(message.contains("the entry is ignored"), "{message}");
     }
 
     #[rstest]
     #[case::proxy_object(serde_json::json!({"httpProxy": {"u": "http://u:pw@proxy"}}))]
     #[case::proxy_array(serde_json::json!({"httpProxy": ["http://u:pw@proxy"]}))]
     #[case::schemas_string(serde_json::json!({"schemas": "https://u:pw@h/x"}))]
-    #[case::schema_entry_array(serde_json::json!({"schemas": {"https://h/a.json": ["https://u:pw@h/x"]}}))]
+    #[case::schema_entry_array(serde_json::json!({"schemas": {"https://h/a.json": ["https://u:pw@h/x", 5]}}))]
     fn settings_warnings_never_show_the_value_of_a_url_setting(#[case] json: serde_json::Value) {
         let message = sole_warning(&json);
         assert!(!message.contains("pw"), "{message}");

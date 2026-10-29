@@ -28,7 +28,7 @@ Settings are passed as a JSON object via LSP `initializationOptions` at startup 
   "maxItemsComputed": 5000,
   "schemas": {
     "https://json.schemastore.org/github-workflow": ".github/workflows/*.yml",
-    "https://example.com/schema.json": "deploy/**/*.yaml"
+    "https://example.com/schema.json": ["deploy/**/*.yaml", "!deploy/legacy/*.yaml"]
   }
 }
 ```
@@ -38,12 +38,12 @@ Settings are passed as a JSON object via LSP `initializationOptions` at startup 
 The server reads each setting on its own, so one wrong value does not affect the others:
 
 - **A setting of the wrong type** (for example `"formatPrintWidth": "80"`, `"hover": "yes"`, or `"kubernetesVersion": 1.29`) takes its default. Strings are never converted to numbers or booleans, and a number must be a non-negative whole number. Because each update replaces the entire settings object, the setting does not keep the value from an earlier update.
-- **A wrong entry in `customTags` or `schemas`** (an entry of `customTags` that is not a string, a `schemas` value that is not a string) is dropped. The other entries apply. A `customTags` value that is not an array, or a `schemas` value that is not an object, takes its default.
+- **A wrong entry in `customTags` or `schemas`** is dropped. The other entries apply. For `customTags`, a wrong entry is one that is not a string. For `schemas`, a wrong entry is one whose value is not a glob or an array of globs, or that breaks the limits or has no glob that includes files (see [`schemas`](#schemas)); the entry is dropped as a whole, never glob by glob. A `customTags` value that is not an array, or a `schemas` value that is not an object, takes its default.
 - **A `null` value** counts as absent: the setting takes its default, silently.
 - **Unknown keys** are ignored, silently.
 - **A payload that is not a JSON object** changes nothing: at startup the defaults apply, and a `workspace/didChangeConfiguration` with `null` or any other non-object `settings` leaves the current settings in place.
 
-Each rejected setting and each dropped entry produces one warning in the client log that names the setting, the entry (its index in `customTags`, its schema URL in `schemas`), the type it has to be, and the rejected value. A long text is cut after 32 characters, and an array or object is described by its size only. The value of `httpProxy` and `schemas` is never logged, because it can contain credentials; the warning gives only its type, and a schema URL in a warning has its credentials, query, and fragment removed. At most 20 warnings are sent per update, followed by one line that counts the rest.
+Each rejected setting and each dropped entry produces one warning in the client log that names the setting, the entry (its index in `customTags`, its schema URL in `schemas`), the form it has to have, and the rejected value. A long text is cut after 32 characters, and an array or object is described by its size only. The value of `httpProxy` and `schemas` is never logged, because it can contain credentials; the warning gives only its type, and a schema URL in a warning has its credentials, query, and fragment removed. At most 20 warnings are sent per update, followed by one line that counts the rest.
 
 ### `customTags`
 
@@ -121,20 +121,46 @@ To disable SchemaStore association:
 
 ### `schemas`
 
-- **Type:** `object` (schema URL → glob pattern)
+- **Type:** `object` (schema URL → glob, or array of globs)
 - **Default:** `{}` (empty — no schema associations)
 
-Maps JSON Schema URLs to file glob patterns. When a document's URI matches a pattern, the corresponding schema is fetched and used for validation, completion, and hover.
+Maps JSON Schema URLs to the files they apply to, in the form of the [yaml-language-server](https://github.com/redhat-developer/yaml-language-server) `yaml.schemas` setting, so an existing entry can be copied unchanged. The value is one glob or an array of globs. When a document's path matches an entry, the schema is fetched and used for validation, completion, and hover.
 
-Glob syntax:
-- `*` matches any characters except `/`
-- `**` matches any characters including `/`
+```json
+{
+  "schemas": {
+    "https://json.schemastore.org/github-workflow": ".github/workflows/*.yml",
+    "https://example.com/schema.json": ["deploy/**/*.yaml", "!deploy/legacy/*.yaml"]
+  }
+}
+```
+
+**How a glob is read:**
+
+- A glob matches at any directory level, as if it began with `**/`, and only from the start of a path segment. `.github/workflows/*.yml` matches `/home/me/proj/.github/workflows/ci.yml` but not `/home/me/my.github/workflows/ci.yml`, and `config.yaml` matches `/a/config.yaml` but not `/a/my-config.yaml`. A glob that is an absolute path matches that path.
+- A leading `!` makes the glob an exclusion: a document it matches does not get the entry's schema. Only one `!` is removed, so `!!x` excludes files named `!x`.
+- One leading `/` is removed after the `!`, so `/config.yaml` and `config.yaml` mean the same.
+- A glob that is empty after that (`""`, `"/"`, `"!"`) is ignored.
+- `*` matches any characters except `/`; `**` matches any characters including `/`; every other character matches itself, so `?` and `[...]` are not wildcards. The path is matched as the editor sends it, not decoded: `%20` stays `%20`.
+
+**When an entry applies to a document:** at least one of its globs that is not an exclusion matches the document's path, and none of its exclusions does. The order of the globs does not matter. A document that an entry excludes is handled as if the entry were not there: it goes on to the next source in [Schema Resolution Priority](#schema-resolution-priority).
+
+**When several entries match,** the entry whose schema URL sorts first (by byte order) wins, on every run. To make a more specific entry win over a general one, exclude the files from the general entry or use a URL that sorts first.
+
+**An entry is dropped, with one warning, when**
+
+- its value is neither a string nor an array of strings;
+- it has no glob that includes files: an empty array, only exclusions, or only globs that are empty after the prefixes are removed;
+- it lists more than 32 globs, or a glob is longer than 256 bytes (not counting its `!` and `/` prefixes);
+- together with the entries kept before it in URL order, it would list more than 512 globs.
+
+An entry is dropped as a whole rather than without the faulty glob, because a dropped exclusion would apply the schema to more files than intended. A document path longer than 4096 bytes matches no entry.
 
 A modeline `$schema=` in the document takes priority over glob-based associations.
 
 ### `formatPrintWidth`
 
-- **Type:** `number`
+- **Type:** `integer` (non-negative, written without a decimal point)
 - **Default:** `80`
 
 Maximum line width for the full-document formatter. The formatter tries to fit content on a single line up to this width; if it doesn't fit, it breaks to block style.
@@ -442,7 +468,7 @@ Enable or disable completion suggestions. When `false`, the server returns no re
 
 ### `maxItemsComputed`
 
-- **Type:** `number` (optional)
+- **Type:** `integer` (non-negative, written without a decimal point)
 - **Default:** `5000`
 
 Maximum number of items returned by document symbol (`textDocument/documentSymbol`) and folding range (`textDocument/foldingRange`) requests. Results are truncated to this limit before being returned to the client. Setting this to `0` suppresses all results from these two requests.
@@ -663,7 +689,7 @@ Equivalent Prettier settings to keep in sync with rlsp-yaml:
 When a YAML file is opened or changed, the server resolves a schema using the following chain (first match wins):
 
 1. **Modeline** — `# yaml-language-server: $schema=<url>` in the first 10 lines of the file. Highest priority; overrides everything else. Use `$schema=none` to disable schema processing for a specific file.
-2. **Workspace glob** — the `schemas` setting maps schema URLs to glob patterns. The first pattern that matches the file's URI path wins.
+2. **Workspace glob** — the `schemas` setting maps schema URLs to globs. An entry applies when one of its globs matches the file's URI path (anywhere in the path) and none of its `!` exclusions does; among matching entries, the one whose schema URL sorts first wins. A file that every matching entry excludes goes on to step 3. See [`schemas`](#schemas).
 3. **Kubernetes auto-detection** — if the document's root mapping contains both `apiVersion` and `kind`, and both follow Kubernetes naming rules, the server fetches the corresponding schema from [yannh/kubernetes-json-schema](https://github.com/yannh/kubernetes-json-schema) using the configured `kubernetesVersion`.
 4. **SchemaStore** — if enabled (`schemaStore: true`, the default), the server fetches the [SchemaStore](https://www.schemastore.org/) catalog and matches the file's path against catalog `fileMatch` patterns. The catalog is fetched lazily on first need and cached for the session.
 

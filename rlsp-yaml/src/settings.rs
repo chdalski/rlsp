@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value};
 
+use crate::schema::{FilePatterns, MAX_PATTERNS_PER_ENTRY};
 use crate::server::MAX_LOGGED_SETTING_CHARS;
 
 /// Most rejections [`SettingsRead`] lists; further ones are only counted, so a
@@ -20,6 +21,14 @@ const URL_SETTINGS: [&str; 2] = ["httpProxy", "schemas"];
 const BOOLEAN: &str = "a boolean";
 const COUNT: &str = "a non-negative integer";
 const TEXT: &str = "a string";
+const SCHEMAS: &str = "an object mapping schema URLs to globs";
+const SCHEMA_GLOBS: &str = "a glob or an array of at most 32 globs (at most 256 bytes each, \
+                            at least one non-empty and without a leading \"!\")";
+const SCHEMA_GLOBS_BUDGET: &str = "within the limit of 512 globs across all schemas";
+
+/// Most globs the `schemas` entries may list together, so the work of matching
+/// a document stays bounded however large the setting is.
+const MAX_SCHEMA_GLOBS: usize = 512;
 
 /// Workspace settings received via LSP initialization options or
 /// `workspace/didChangeConfiguration`.
@@ -33,8 +42,9 @@ pub struct Settings {
     pub custom_tags: Vec<String>,
     /// Whether to enforce alphabetical key ordering in mappings.
     pub key_ordering: bool,
-    /// Maps schema URL → glob pattern (upstream yaml-language-server convention).
-    pub schemas: HashMap<String, String>,
+    /// Maps schema URL → the files it applies to, ordered by URL
+    /// (upstream yaml-language-server convention).
+    pub schemas: BTreeMap<String, FilePatterns>,
     /// Kubernetes cluster version for schema resolution (e.g. `"1.29.0"`).
     /// Defaults to `"master"` (tracks latest schemas) when absent.
     pub kubernetes_version: Option<String>,
@@ -325,23 +335,72 @@ impl<'a> FieldReader<'a> {
         }
     }
 
-    fn schemas(&mut self) -> HashMap<String, String> {
+    fn schemas(&mut self) -> BTreeMap<String, FilePatterns> {
         match self.present("schemas") {
-            None => HashMap::new(),
-            Some(Value::Object(associations)) => associations
-                .iter()
-                .filter_map(|(url, pattern)| {
-                    self.string_entry("schemas", || Entry::Key(url.clone()), pattern)
-                        .map(|pattern| (url.clone(), pattern))
-                })
-                .collect(),
+            None => BTreeMap::new(),
+            Some(Value::Object(entries)) => {
+                let mut budget = MAX_SCHEMA_GLOBS;
+                let mut schemas = BTreeMap::new();
+                // Sorted by URL, so the entries over the budget are the same on every read.
+                let mut sorted: Vec<_> = entries.iter().collect();
+                sorted.sort_unstable_by_key(|(url, _)| *url);
+                for (url, value) in sorted {
+                    if let Some(patterns) = self.schema_entry(url, value, &mut budget) {
+                        schemas.insert(url.clone(), patterns);
+                    }
+                }
+                schemas
+            }
             Some(other) => {
-                self.record(|| {
-                    Rejection::new("schemas", Entry::Whole, "an object of strings", other)
-                });
-                HashMap::new()
+                self.record(|| Rejection::new("schemas", Entry::Whole, SCHEMAS, other));
+                BTreeMap::new()
             }
         }
+    }
+
+    /// Read the value of one `schemas` entry, a glob or an array of globs; the
+    /// entry is recorded as rejected, as a whole, when it has another form,
+    /// breaks the limits of [`FilePatterns::new`], or does not fit in `budget`
+    /// (the globs still allowed across all entries).
+    fn schema_entry(
+        &mut self,
+        url: &str,
+        value: &Value,
+        budget: &mut usize,
+    ) -> Option<FilePatterns> {
+        let globs = match value {
+            Value::String(glob) => Some(vec![glob.clone()]),
+            Value::Array(items) if items.len() <= MAX_PATTERNS_PER_ENTRY => items
+                .iter()
+                .map(|item| item.as_str().map(str::to_string))
+                .collect(),
+            Value::Array(_)
+            | Value::Null
+            | Value::Bool(_)
+            | Value::Number(_)
+            | Value::Object(_) => None,
+        };
+        let Some((count, patterns)) =
+            globs.and_then(|globs| Some((globs.len(), FilePatterns::new(&globs)?)))
+        else {
+            self.record(|| {
+                Rejection::new("schemas", Entry::Key(url.to_string()), SCHEMA_GLOBS, value)
+            });
+            return None;
+        };
+        let Some(left) = budget.checked_sub(count) else {
+            self.record(|| {
+                Rejection::new(
+                    "schemas",
+                    Entry::Key(url.to_string()),
+                    SCHEMA_GLOBS_BUDGET,
+                    value,
+                )
+            });
+            return None;
+        };
+        *budget = left;
+        Some(patterns)
     }
 }
 
@@ -388,6 +447,11 @@ mod tests {
             COLLECTION_KEYS.as_slice(),
         ]
         .concat()
+    }
+
+    fn file_patterns(globs: &[&str]) -> FilePatterns {
+        let globs: Vec<String> = globs.iter().map(ToString::to_string).collect();
+        FilePatterns::new(&globs).expect("globs include a file")
     }
 
     fn read(value: &Value) -> SettingsRead {
@@ -437,9 +501,9 @@ mod tests {
             Settings {
                 custom_tags: vec!["!include".to_string()],
                 key_ordering: true,
-                schemas: HashMap::from([(
+                schemas: BTreeMap::from([(
                     "https://example.com/s.json".to_string(),
-                    "*.yaml".to_string()
+                    file_patterns(&["*.yaml"])
                 )]),
                 kubernetes_version: Some("1.29.0".to_string()),
                 schema_store: Some(false),
@@ -514,11 +578,8 @@ mod tests {
         let json = serde_json::json!({"schemas": {"https://example.com/schema.json": "*.yaml"}});
         let settings: Settings = serde_json::from_value(json).unwrap();
         assert_eq!(
-            settings
-                .schemas
-                .get("https://example.com/schema.json")
-                .map(String::as_str),
-            Some("*.yaml")
+            settings.schemas.get("https://example.com/schema.json"),
+            Some(&file_patterns(&["*.yaml"]))
         );
     }
 
@@ -991,7 +1052,7 @@ mod tests {
                 "a string",
                 "a string",
                 "an array of strings",
-                "an object of strings",
+                SCHEMAS,
             ]
         );
     }
@@ -1043,31 +1104,191 @@ mod tests {
     // ---- schemas entries ----
 
     #[test]
-    fn schemas_drops_entries_with_a_non_string_value_and_keeps_the_rest() {
+    fn schemas_reads_a_glob_and_an_array_of_globs() {
+        let read = read(&json!({"schemas": {
+            "https://a.test/s.json": "*.yaml",
+            "https://b.test/s.json": ["a/*.yml", "!a/skip.yml"],
+        }}));
+        assert_eq!(
+            read.settings.schemas,
+            BTreeMap::from([
+                (
+                    "https://a.test/s.json".to_string(),
+                    file_patterns(&["*.yaml"])
+                ),
+                (
+                    "https://b.test/s.json".to_string(),
+                    file_patterns(&["a/*.yml", "!a/skip.yml"])
+                ),
+            ])
+        );
+        assert!(read.rejections.is_empty());
+    }
+
+    #[test]
+    fn schemas_drops_entries_of_another_form_and_keeps_the_rest() {
         let read = read(&json!({"schemas": {
             "https://a.test/s.json": "*.yaml",
             "https://b.test/s.json": 5,
             "https://c.test/s.json": null,
-            "https://d.test/s.json": ["x"],
-            "https://e.test/s.json": {},
+            "https://d.test/s.json": {},
+            "https://e.test/s.json": ["x", 5],
+            "https://f.test/s.json": [["x"]],
+            "https://g.test/s.json": true,
         }}));
         assert_eq!(
             read.settings.schemas,
-            HashMap::from([("https://a.test/s.json".to_string(), "*.yaml".to_string())])
+            BTreeMap::from([(
+                "https://a.test/s.json".to_string(),
+                file_patterns(&["*.yaml"])
+            )])
         );
         let keys: Vec<_> = read.rejections.iter().map(|r| r.entry.clone()).collect();
         assert_eq!(
             keys,
-            ["b", "c", "d", "e"]
+            ["b", "c", "d", "e", "f", "g"]
                 .map(|host| Entry::Key(format!("https://{host}.test/s.json")))
                 .to_vec()
+        );
+        assert!(read.rejections.iter().all(|r| r.expected == SCHEMA_GLOBS));
+    }
+
+    #[rstest]
+    #[case::empty_string(json!(""))]
+    #[case::only_a_slash(json!("/"))]
+    #[case::only_an_exclusion(json!("!x"))]
+    #[case::only_a_bare_exclusion(json!("!"))]
+    #[case::empty_array(json!([]))]
+    #[case::only_exclusions(json!(["!x", "!y"]))]
+    #[case::only_empty_globs(json!(["", "/", "!", "!/"]))]
+    #[case::too_many_globs(json!(vec!["x"; 33]))]
+    #[case::too_many_globs_counting_empty_ones(json!([vec![""; 32], vec!["x"]].concat()))]
+    #[case::too_long_multibyte_glob(json!(["\u{e9}".repeat(129)]))]
+    #[case::exclusion_over_the_length_limit(json!(["x", format!("!{}", "y".repeat(257))]))]
+    #[case::glob_too_long(json!(["x".repeat(257)]))]
+    #[case::glob_too_long_after_a_prefix(json!([format!("!/{}", "x".repeat(257))]))]
+    fn schemas_drops_an_entry_without_a_usable_glob_whole(#[case] value: Value) {
+        let read = read(&json!({"schemas": {"https://a.test/s.json": value}}));
+        assert!(read.settings.schemas.is_empty());
+        assert_eq!(read.rejections.len(), 1);
+        assert_eq!(
+            read.rejections[0].entry,
+            Entry::Key("https://a.test/s.json".to_string())
+        );
+        assert_eq!(read.rejections[0].expected, SCHEMA_GLOBS);
+    }
+
+    #[rstest]
+    #[case::exactly_32_globs(json!(vec!["x"; 32]))]
+    #[case::exactly_256_bytes(json!(["x".repeat(256)]))]
+    #[case::exactly_256_bytes_after_a_prefix(json!([format!("!/{}", "x".repeat(256)), "y"]))]
+    #[case::a_bare_exclusion_next_to_a_glob(json!(["x", "!"]))]
+    #[case::exclusion_at_the_length_limit(json!(["x", format!("!{}", "y".repeat(256))]))]
+    #[case::multibyte_glob_at_the_length_limit(json!(["\u{e9}".repeat(128)]))]
+    #[case::empty_globs_up_to_the_count_limit(json!([vec!["x"], vec![""; 31]].concat()))]
+    fn schemas_keeps_an_entry_at_the_limits(#[case] value: Value) {
+        let read = read(&json!({"schemas": {"https://a.test/s.json": value}}));
+        assert_eq!(read.settings.schemas.len(), 1);
+        assert!(read.rejections.is_empty());
+    }
+
+    #[rstest]
+    #[case::bad_first(json!([5, "*.yaml"]))]
+    #[case::bad_last(json!(["*.yaml", 5]))]
+    #[case::nested_array(json!([["x"]]))]
+    #[case::null_element(json!([null, "*.yaml"]))]
+    #[case::several_bad(json!(["a", 1, 2, null]))]
+    fn schemas_drops_an_entry_with_a_wrong_element_whole_and_records_one_rejection(
+        #[case] value: Value,
+    ) {
+        let read = read(
+            &json!({"schemas": {"https://a.test/s.json": value, "https://b.test/s.json": "x"}}),
+        );
+        assert_eq!(
+            read.settings.schemas.keys().collect::<Vec<_>>(),
+            ["https://b.test/s.json"]
+        );
+        assert_eq!(read.rejections.len(), 1);
+        assert_eq!(
+            read.rejections[0].found,
+            RejectedValue::Withheld("an array")
         );
     }
 
     #[test]
-    fn schemas_keeps_an_empty_key_and_an_empty_pattern() {
-        let read = read(&json!({"schemas": {"": "", "x": ""}}));
-        assert_eq!(read.settings.schemas.len(), 2);
+    fn schemas_records_one_rejection_for_an_array_of_a_million_globs() {
+        let read = read(&json!({"schemas": {"https://a.test/s.json": vec!["x"; 1_000_000]}}));
+        assert!(read.settings.schemas.is_empty());
+        assert_eq!(read.rejections.len(), 1);
+        assert_eq!(
+            read.rejections[0].found,
+            RejectedValue::Withheld("an array")
+        );
+    }
+
+    #[test]
+    fn schemas_records_a_rejection_for_an_exclusion_without_showing_it() {
+        let rejection =
+            sole_rejection(&json!({"schemas": {"https://a.test/s.json": "!https://u:pw@h/x"}}));
+        assert_eq!(rejection.found, RejectedValue::Withheld("a string"));
+        assert_eq!(rejection.expected, SCHEMA_GLOBS);
+    }
+
+    #[test]
+    fn schemas_phrase_names_the_limits_of_the_constructor() {
+        assert!(SCHEMA_GLOBS.contains(&crate::schema::MAX_PATTERNS_PER_ENTRY.to_string()));
+        assert!(SCHEMA_GLOBS.contains(&crate::schema::MAX_PATTERN_BYTES.to_string()));
+        assert!(SCHEMA_GLOBS_BUDGET.contains(&MAX_SCHEMA_GLOBS.to_string()));
+    }
+
+    #[test]
+    fn schemas_keeps_an_empty_key() {
+        let read = read(&json!({"schemas": {"": "x"}}));
+        assert_eq!(read.settings.schemas.len(), 1);
+        assert!(read.rejections.is_empty());
+    }
+
+    #[test]
+    fn schemas_drops_the_entries_over_the_budget_in_url_order() {
+        // 16 entries of 32 globs fill the budget of 512; the 17th does not fit,
+        // although a later single-glob entry would.
+        let mut entries: Map<String, Value> = (0..16)
+            .map(|n| (format!("https://a{n:02}.test/s.json"), json!(vec!["x"; 32])))
+            .collect();
+        entries.insert("https://b.test/s.json".to_string(), json!(["x"]));
+        entries.insert("https://c.test/s.json".to_string(), json!("x"));
+        let read = read(&json!({ "schemas": entries }));
+
+        assert_eq!(read.settings.schemas.len(), 16);
+        assert!(!read.settings.schemas.contains_key("https://b.test/s.json"));
+        assert!(!read.settings.schemas.contains_key("https://c.test/s.json"));
+        let rejected: Vec<_> = read
+            .rejections
+            .iter()
+            .map(|r| (r.entry.clone(), r.expected))
+            .collect();
+        assert_eq!(
+            rejected,
+            [
+                (
+                    Entry::Key("https://b.test/s.json".to_string()),
+                    SCHEMA_GLOBS_BUDGET
+                ),
+                (
+                    Entry::Key("https://c.test/s.json".to_string()),
+                    SCHEMA_GLOBS_BUDGET
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn schemas_fills_the_budget_exactly() {
+        let entries: Map<String, Value> = (0..16)
+            .map(|n| (format!("https://a{n:02}.test/s.json"), json!(vec!["x"; 32])))
+            .collect();
+        let read = read(&json!({ "schemas": entries }));
+        assert_eq!(read.settings.schemas.len(), 16);
         assert!(read.rejections.is_empty());
     }
 
@@ -1079,7 +1300,7 @@ mod tests {
     fn schemas_rejects_a_value_that_is_not_an_object(#[case] bad: Value) {
         let rejection = sole_rejection(&json!({"schemas": bad}));
         assert_eq!(rejection.entry, Entry::Whole);
-        assert_eq!(rejection.expected, "an object of strings");
+        assert_eq!(rejection.expected, SCHEMAS);
         assert!(read(&json!({"schemas": bad})).settings.schemas.is_empty());
     }
 
@@ -1090,9 +1311,17 @@ mod tests {
     #[case::proxy_array(json!({"httpProxy": ["http://u:pw@proxy"]}), "an array")]
     #[case::proxy_number(json!({"httpProxy": 5}), "a number")]
     #[case::schemas_string(json!({"schemas": "https://u:pw@h/x"}), "a string")]
-    #[case::schema_entry_array(
-        json!({"schemas": {"https://h/a.json": ["https://u:pw@h/x"]}}),
+    #[case::schema_entry_array_with_a_number(
+        json!({"schemas": {"https://h/a.json": ["https://u:pw@h/x", 5]}}),
         "an array"
+    )]
+    #[case::schema_entry_exclusion_only(
+        json!({"schemas": {"https://h/a.json": "!https://u:pw@h/x"}}),
+        "a string"
+    )]
+    #[case::schema_entry_object(
+        json!({"schemas": {"https://h/a.json": {"u": "https://u:pw@h/x"}}}),
+        "an object"
     )]
     fn rejection_of_a_url_setting_keeps_only_the_json_type(
         #[case] value: Value,

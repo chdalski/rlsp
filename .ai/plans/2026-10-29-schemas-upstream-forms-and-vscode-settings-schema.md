@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-10-29
 
 # `schemas` in the Upstream Forms, and a VS Code Settings Schema That Matches the Server
@@ -44,7 +44,7 @@ offer the three settings it reads but the extension leaves out
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: the server accepts and matches `schemas` in the upstream
+- [x] Task 1: the server accepts and matches `schemas` in the upstream
       forms
 - [ ] Task 2: the VS Code settings schema matches the server and offers
       `hover`, `completion`, and `maxItemsComputed`
@@ -58,47 +58,47 @@ A schemas entry becomes a set of positive and negative patterns built by
 one constructor that the settings reader and the matcher share, and the
 matcher reads the settings map directly.
 
-- [ ] A `schemas` value of one glob string or an array of glob strings
+- [x] A `schemas` value of one glob string or an array of glob strings
       is read and matched by the upstream pattern rules in Context
-- [ ] An entry whose value is neither a string nor an array of strings,
+- [x] An entry whose value is neither a string nor an array of strings,
       or that has no positive pattern (an empty array, only `!`
       patterns, only patterns empty after stripping), is dropped as a
       whole with one Warning that names the entry and the accepted
       forms; the other entries apply, and the rejected value is still
       never logged
-- [ ] When several entries match a file, the entry whose schema URL
+- [x] When several entries match a file, the entry whose schema URL
       sorts first wins, on every run
-- [ ] No code or comment in `rlsp-yaml` refers to a `SchemaAssociation`
+- [x] No code or comment in `rlsp-yaml` refers to a `SchemaAssociation`
       type; schema association by file name reads the settings'
       `schemas` map
-- [ ] SchemaStore `fileMatch` patterns are matched as before: a leading
+- [x] SchemaStore `fileMatch` patterns are matched as before: a leading
       `!` stays literal there
-- [ ] Unit tests pin the pattern rules, including `!!x`, `!/x`,
+- [x] Unit tests pin the pattern rules, including `!!x`, `!/x`,
       `["x", "!"]`, `"/"`, `""`, and overlapping entries
-- [ ] Integration tests in `tests/lsp_lifecycle/`, through `initialize`
+- [x] Integration tests in `tests/lsp_lifecycle/`, through `initialize`
       and through `workspace/didChangeConfiguration`, pin that an array
       entry whose positive pattern matches the document applies its
       schema, that the same entry with a matching `!` pattern does not
       and the document falls through to the next resolution source, and
       that a pattern written like `.github/workflows/*.yml` applies to a
       document below that directory
-- [ ] Tests that pinned the single-string form or the old Warning text
+- [x] Tests that pinned the single-string form or the old Warning text
       assert the new forms and text, and the tests that check withheld
       `schemas` values use a value that is still rejected
-- [ ] With `rlsp-yaml/docs/configuration.md`, a user who copies a
+- [x] With `rlsp-yaml/docs/configuration.md`, a user who copies a
       yaml-language-server `schemas` entry can tell whether it applies,
       why a document is or is not matched, and which entry wins when
       several match
-- [ ] `rlsp-yaml/docs/configuration.md` gives `formatPrintWidth` and
+- [x] `rlsp-yaml/docs/configuration.md` gives `formatPrintWidth` and
       `maxItemsComputed` as non-negative integers without a decimal
       point
-- [ ] `rlsp-yaml/docs/feature-log.md` has an entry that tells the reader
+- [x] `rlsp-yaml/docs/feature-log.md` has an entry that tells the reader
       that `schemas` accepts the yaml-language-server forms and that
       patterns now match anywhere in the path
-- [ ] The commit is marked breaking, and its `BREAKING CHANGE:` footer
+- [x] The commit is marked breaking, and its `BREAKING CHANGE:` footer
       tells library users that `Settings.schemas` has a new value type
       and that `SchemaAssociation` is removed
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 2: A VS Code settings schema that matches the server
 
@@ -161,7 +161,12 @@ against the server.
 - **One `FilePatterns` type, built by one constructor:** the reader and
   the matcher share it, so the pattern rules live in one place and no
   `Settings` value can hold an entry without a positive pattern.
-  `glob_matches` is unchanged, because SchemaStore uses it too.
+  `glob_matches` keeps its semantics, because SchemaStore uses it too.
+- **The security-engineer's controls for the glob matching apply:** the
+  matching runs without backtracking at the same semantics, `**/` is
+  anchored at path segment boundaries as upstream, and pattern length,
+  pattern count, and path length are bounded; an entry beyond a bound
+  is dropped like any faulty entry.
 - **`schemas` is a `BTreeMap`:** the entry whose URL sorts first wins
   among overlapping entries; today the winner follows `HashMap` order.
 - **`SchemaAssociation` is removed:** it is a per-document copy of the

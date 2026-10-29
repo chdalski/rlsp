@@ -31,6 +31,15 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### `schemas` Accepts the yaml-language-server Forms [completed]
+
+**Date:** 2026-10-29
+**Description:** A `schemas` entry can now be copied from a yaml-language-server `yaml.schemas` setting. The value is one glob or an array of globs, and a glob that starts with `!` excludes files from the entry. A glob matches anywhere in the document's path, as in yaml-language-server: `.github/workflows/*.yml` and `*.yaml` now match, where until now only a glob that started at the root of the absolute path (a leading `/` or `**/`) did, so the examples in this project's own README did not apply. An array of globs used to be dropped with a warning; now it applies. A string that starts with `!`, or an entry with only empty globs, used to be accepted silently and is now dropped with a warning, as is an entry with no glob that includes files, with more than 32 globs, with a glob over 256 bytes, or beyond a total of 512 globs. When several entries match a file, the one whose schema URL sorts first wins; before, the winner changed from run to run. A file that an entry excludes goes on to Kubernetes detection and SchemaStore. See [`schemas`](configuration.md#schemas).
+**Complexity:** Medium
+**Tier:** 1
+
+---
+
 ### VS Code Settings Stay in Effect After Startup and After a Change [completed]
 
 **Date:** 2026-10-29
