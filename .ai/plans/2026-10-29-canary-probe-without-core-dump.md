@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** Completed (2026-10-29)
 **Created:** 2026-10-29
 
 # Stop the stack-cache canary's child probe from dumping core
