@@ -4,9 +4,15 @@
 
 mod fixtures;
 
+use std::collections::BTreeMap;
+use std::hint::black_box;
+
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use rlsp_yaml::editing::formatter::{YamlFormatOptions, format_yaml};
 use rlsp_yaml::parser::parse_yaml;
+use rlsp_yaml::schema::{
+    FilePatterns, match_schema_by_filename, match_schemastore, parse_schemastore_catalog,
+};
 use rlsp_yaml::schema_validation::validate_schema;
 use rlsp_yaml::server::YamlVersion;
 use rlsp_yaml::validation::ValidationSettings;
@@ -148,11 +154,89 @@ fn bench_formatter(c: &mut Criterion) {
     group.finish();
 }
 
+/// Schema association: matching a document path against the `SchemaStore`
+/// catalog and the workspace `schemas` setting.
+///
+/// This is the cost paid on every validation of a document that no workspace
+/// `schemas` entry matches. The IDs stay fixed so results compare across
+/// changes to the matcher.
+#[expect(
+    clippy::expect_used,
+    reason = "bench setup; a malformed fixture must stop the run"
+)]
+fn bench_schema_glob_matching(c: &mut Criterion) {
+    let catalog_json = fixtures::schemastore_catalog_json();
+    assert_eq!(
+        catalog_json,
+        fixtures::schemastore_catalog_json(),
+        "the catalog generator must be deterministic"
+    );
+    let catalog = parse_schemastore_catalog(&catalog_json).expect("the catalog parses");
+
+    let (late_path, late_url) = fixtures::schemastore_late_match();
+    let no_match_path = fixtures::schemastore_no_match_path();
+    let deep_path = fixtures::schemastore_deep_path();
+    assert_eq!(deep_path.len(), 200);
+
+    // Each path must measure what its ID says; a generator change that breaks
+    // one of these would otherwise go unnoticed.
+    assert_eq!(match_schemastore(&late_path, &catalog), Some(late_url));
+    assert_eq!(match_schemastore(&no_match_path, &catalog), None);
+    assert_eq!(match_schemastore(&deep_path, &catalog), None);
+    assert_eq!(
+        match_schemastore(&fixtures::schemastore_non_yaml_only_path(), &catalog),
+        None,
+        "non-YAML patterns must be dropped when the catalog loads"
+    );
+
+    let schemas: BTreeMap<String, FilePatterns> = fixtures::workspace_schemas()
+        .into_iter()
+        .map(|(url, patterns)| {
+            let patterns = FilePatterns::new(&patterns).expect("the workspace patterns are valid");
+            (url, patterns)
+        })
+        .collect();
+    let (workspace_path, workspace_url) = fixtures::workspace_match();
+    let workspace_no_match_path = fixtures::workspace_no_match_path();
+    assert_eq!(
+        match_schema_by_filename(&workspace_path, &schemas),
+        Some(workspace_url)
+    );
+    assert_eq!(
+        match_schema_by_filename(&workspace_no_match_path, &schemas),
+        None
+    );
+
+    let mut group = c.benchmark_group("schema_glob_matching");
+    group.bench_function("schemastore_load", |b| {
+        b.iter(|| parse_schemastore_catalog(black_box(&catalog_json)));
+    });
+    for (name, path) in [
+        ("schemastore_no_match", &no_match_path),
+        ("schemastore_late_match", &late_path),
+        ("schemastore_deep_path_200_bytes", &deep_path),
+    ] {
+        group.bench_function(name, |b| {
+            b.iter(|| match_schemastore(black_box(path), black_box(&catalog)));
+        });
+    }
+    for (name, path) in [
+        ("workspace_match", &workspace_path),
+        ("workspace_no_match", &workspace_no_match_path),
+    ] {
+        group.bench_function(name, |b| {
+            b.iter(|| match_schema_by_filename(black_box(path), black_box(&schemas)));
+        });
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_parse_and_validate,
     bench_schema_validation,
     bench_composition_validation,
-    bench_formatter
+    bench_formatter,
+    bench_schema_glob_matching
 );
 criterion_main!(benches);

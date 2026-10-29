@@ -215,3 +215,160 @@ fn build_leaf_schema(index: usize) -> JsonSchema {
         },
     }
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Schema association generators
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Entries in the synthetic `SchemaStore` catalog.
+pub const SCHEMASTORE_ENTRIES: usize = 700;
+
+/// The entry that [`schemastore_late_match`] resolves to, in the last fifth of
+/// the catalog.
+const SCHEMASTORE_LATE_ENTRY: usize = 697;
+
+/// URL of catalog entry `index`; the zero-padded index keeps URL order equal
+/// to catalog order.
+fn schemastore_url(index: usize) -> String {
+    format!("https://json.schemastore.org/svc{index:04}.json")
+}
+
+/// A synthetic `SchemaStore` catalog in the shape the real one has.
+///
+/// 700 entries hold 1 500 YAML patterns (three in the first 100 entries, two in
+/// the rest) and 20 non-YAML patterns (one in each of the first 20 entries). A
+/// pattern's shape follows `(entry + position) % 6`, so each shape of the real
+/// catalog is present. Every pattern names its entry, so no two entries match
+/// the same path.
+#[must_use]
+pub fn schemastore_catalog_json() -> Value {
+    let schemas: Vec<Value> = (0..SCHEMASTORE_ENTRIES)
+        .map(|i| {
+            let yaml_count = if i < 100 { 3 } else { 2 };
+            let mut file_match: Vec<String> = (0..yaml_count)
+                .map(|j| match (i + j) % 6 {
+                    0 => format!("**/.github/workflows/svc{i:04}-*.yml"),
+                    1 => format!("**/svc{i:04}.yaml"),
+                    2 => format!("**/*.svc{i:04}.yml"),
+                    3 => format!("svc{i:04}.yml"),
+                    4 => format!("config{i:04}/**/svc{i:04}.yaml"),
+                    _ => format!("*.svc{i:04}.yaml"),
+                })
+                .collect();
+            if i < 20 {
+                file_match.push(format!("**/svc{i:04}.json"));
+            }
+            serde_json::json!({
+                "name": format!("Service {i:04}"),
+                "url": schemastore_url(i),
+                "fileMatch": file_match,
+            })
+        })
+        .collect();
+    let catalog = serde_json::json!({ "schemas": schemas });
+    assert_catalog_shape(&catalog);
+    catalog
+}
+
+/// Panic unless `catalog` has the documented 700 entries with 1 500 YAML and
+/// 20 non-YAML patterns, each entry holding at least one YAML pattern.
+#[expect(
+    clippy::expect_used,
+    reason = "bench setup; a malformed fixture must stop the run"
+)]
+fn assert_catalog_shape(catalog: &Value) {
+    let (mut yaml, mut other) = (0, 0);
+    let entries = catalog["schemas"].as_array().expect("schemas is an array");
+    assert_eq!(entries.len(), SCHEMASTORE_ENTRIES);
+    for entry in entries {
+        let patterns = entry["fileMatch"]
+            .as_array()
+            .expect("fileMatch is an array");
+        let entry_yaml = patterns
+            .iter()
+            .filter(|p| {
+                let p = p.as_str().expect("fileMatch holds strings");
+                matches!(p.rsplit('.').next(), Some("yaml" | "yml"))
+            })
+            .count();
+        assert!(entry_yaml > 0, "every entry keeps a YAML pattern");
+        yaml += entry_yaml;
+        other += patterns.len() - entry_yaml;
+    }
+    assert_eq!((yaml, other), (1_500, 20));
+}
+
+/// A path that only the last fifth of the catalog matches, and the URL of the
+/// entry it resolves to.
+#[must_use]
+pub fn schemastore_late_match() -> (String, String) {
+    (
+        format!("/workspace/projects/app/svc{SCHEMASTORE_LATE_ENTRY:04}.yaml"),
+        schemastore_url(SCHEMASTORE_LATE_ENTRY),
+    )
+}
+
+/// An absolute YAML path that no catalog entry matches.
+#[must_use]
+pub fn schemastore_no_match_path() -> String {
+    "/workspace/projects/app/config.yaml".to_string()
+}
+
+/// An absolute YAML path of exactly 200 bytes that no catalog entry matches.
+#[must_use]
+pub fn schemastore_deep_path() -> String {
+    const TAIL: &str = "/config.yaml";
+    const SEGMENT_BYTES: usize = 4;
+    let mut path = String::new();
+    for i in 0..(200 - TAIL.len()) / SEGMENT_BYTES {
+        let _ = write!(path, "/d{:02}", i % 100);
+    }
+    path.push_str(TAIL);
+    path
+}
+
+/// A path that only a non-YAML catalog pattern matches.
+#[must_use]
+pub fn schemastore_non_yaml_only_path() -> String {
+    "/workspace/projects/app/svc0003.json".to_string()
+}
+
+/// Entries in the synthetic workspace `schemas` setting.
+const WORKSPACE_ENTRIES: usize = 40;
+
+/// A synthetic workspace `schemas` setting: URL and glob list per entry.
+///
+/// Each entry has a directory glob, an extension glob, a deep glob, and an
+/// exclusion. The zero-padded index keeps URL order equal to entry order.
+#[must_use]
+pub fn workspace_schemas() -> Vec<(String, Vec<String>)> {
+    (0..WORKSPACE_ENTRIES)
+        .map(|i| {
+            (
+                format!("https://example.com/ws/schema{i:03}.json"),
+                vec![
+                    format!("config/svc{i:03}-*.yaml"),
+                    format!("*.svc{i:03}.yml"),
+                    format!("/deploy/svc{i:03}/**/*.yaml"),
+                    format!("!**/skip-svc{i:03}.yaml"),
+                ],
+            )
+        })
+        .collect()
+}
+
+/// A path that the last workspace entry matches, and its URL.
+#[must_use]
+pub fn workspace_match() -> (String, String) {
+    let last = WORKSPACE_ENTRIES - 1;
+    (
+        format!("/workspace/config/svc{last:03}-prod.yaml"),
+        format!("https://example.com/ws/schema{last:03}.json"),
+    )
+}
+
+/// A path that no workspace entry matches.
+#[must_use]
+pub fn workspace_no_match_path() -> String {
+    "/workspace/projects/app/other/config.yaml".to_string()
+}

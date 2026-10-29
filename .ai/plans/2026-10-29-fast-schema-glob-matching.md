@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-10-29
 
 # Fast Schema Glob Matching
@@ -37,7 +37,7 @@ to measure before and after on bare metal.
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: a benchmark measures schema glob matching, and test
+- [x] Task 1: a benchmark measures schema glob matching, and test
       catalogs are built in one place
 - [ ] Task 2: the SchemaStore catalog holds compiled globs and is shared,
       not cloned
@@ -55,24 +55,24 @@ is unchanged. `rlsp-yaml/benches/hot_path.rs` holds the Criterion groups
 for code hit on every validation; `benches/fixtures/mod.rs` holds the
 shared generators.
 
-- [ ] Every test that builds a `SchemaStoreCatalog` builds it through
+- [x] Every test that builds a `SchemaStoreCatalog` builds it through
       one helper, and the `SchemaStore` catalog and `match_schemastore`
       tests in `schema.rs` pass with their assertions unchanged
-- [ ] `parse_schemastore_catalog` is public
-- [ ] A Criterion group in `benches/hot_path.rs` measures, through
+- [x] `parse_schemastore_catalog` is public
+- [x] A Criterion group in `benches/hot_path.rs` measures, through
       `parse_schemastore_catalog`, `match_schemastore`,
       `FilePatterns::new`, and `match_schema_by_filename` only: catalog
       loading; a SchemaStore scan with no match, with a late match, and
       for a deep path of 200 bytes; and workspace `schemas` matching for
       a matching and a non-matching path
-- [ ] The benchmark's catalog is a deterministic synthetic catalog
+- [x] The benchmark's catalog is a deterministic synthetic catalog
       generated in `benches/fixtures/mod.rs`, of 700 entries holding
       1500 YAML patterns in the shapes the real catalog uses
       (`**/.github/workflows/*.yml`, `**/<name>.yaml`, `**/*.<tool>.yml`,
       bare `<name>.yml`, `<dir>/**/<name>.yaml`, `*.<x>.yaml`) and 20
       non-YAML patterns, and paths are absolute like `uri.path()`
-- [ ] `cargo bench --bench hot_path` runs the new group to completion
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] `cargo bench --bench hot_path` runs the new group to completion
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 2: Compile the catalog once and share it
 
