@@ -1,6 +1,63 @@
 # Changelog
 
 
+## [0.14.0] - 2026-10-29
+
+### Bug Fixes
+
+- Build the Zed crate on Zed's registry toolchain 1.90 (e4ba67e)
+- Load remote schemas regardless of Content-Type (2eef668)
+- Parse each $ref target once and share it (37ac848)
+- Accept only Kubernetes names in the schema URL (20de495)
+- Build the schema repository's file names, skip custom resources (eb69e88)
+- Fall back to master for an invalid kubernetesVersion (2fb309b)
+- Remove the msal-node and serialize-javascript advisories (f47baf1)
+- Mark array items with a typed schema path segment (b8006be)
+- Take sibling item keys from the cursor's sequence (3a35128)
+- Place propertyNames and dependentSchemas diagnostics (200b9c9)
+- Keep valid settings when one setting has a wrong type (5ad75b8)
+- Give false one representation under every keyword (7a9cff2)
+- Stop sending settings nested under rlsp-yaml (db90792)
+- Tie the settings listener to its client's lifetime (a971ebf)
+
+### Features
+
+- Log why a declared schema could not be applied (ec36d70)
+- Validate every composition branch within a step budget (ac66bd9)
+- Log a Warning when schema validation stops early (56e45d6)
+- Complete keys from every composition branch (187812b)
+- Reject a schema whose parse exceeds its memory budget (be46586)
+- Resolve hover schema docs through the shared resolver (1fcf15f)
+- Find array items through composition branches (fc49073)
+- Resolve schema keys through patternProperties and additionalProperties (6716a89)
+- Resolve array items by their position (1d7b56f)
+- Keep boolean false sub-schemas in their place (8ce3c16)
+- Accept yaml-language-server forms for schemas (963a198)
+- Match the settings schema to the server and add hover, completion, maxItemsComputed (ae88812)
+- Add schema glob benchmark, expose catalog parsing (9a4c706)
+- Match SchemaStore patterns by the upstream rules (dddf36f)
+
+### Performance
+
+- Compile SchemaStore globs once and share the catalog (cf073fb)
+- Match schema globs without allocating, reject early (252d01f)
+
+### Refactoring
+
+- Route validation probes through one helper (4702cb8)
+- Share parsed schemas through ParsedSchema (0b0d3f4)
+- Carry per-parse state in a SchemaParser struct (79e8aad)
+- Stop parsing definitions/$defs into the schema tree (25221c4)
+- Follow schema reference nodes in every consumer (8db1cc3)
+- Cache remote documents raw and parse only targets (dc62373)
+- Store settings through one method (22eb5f3)
+- Move schema path resolver into the schema layer (10bc9d1)
+- Move the pattern compiler and cache into schema (acd644e)
+- Give item path segments their index (a9e5cbd)
+- Move Settings into its own settings module (85103eb)
+- Build FilePatterns without the settings bounds (236ad52)
+- Remove the plain glob mode (93db671)
+
 ## [0.13.1] - 2026-10-11
 
 ### Bug Fixes
