@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-10-29)
 **Created:** 2026-10-29
 
 # VS Code Settings Reach the Server, and `vscode-languageclient` 11
@@ -41,7 +41,7 @@ a restart.
 - [x] Task 1: the server keeps the extension's settings
 - [x] Task 2: the dependency updates of PR #94 are on `main`
 - [x] Task 3: the settings listener lives exactly as long as its client
-- [ ] Push to `main`, confirm the full CI matrix is green, and confirm
+- [x] Push to `main`, confirm the full CI matrix is green, and confirm
       PR #94 is closed
 
 ## Tasks
