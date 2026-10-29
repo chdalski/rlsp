@@ -420,6 +420,19 @@ impl Backend {
         }
     }
 
+    /// Pre-populate the `SchemaStore` catalog so integration tests can exercise
+    /// catalog matching without a network fetch.
+    ///
+    /// Build `catalog` with [`crate::schema::parse_schemastore_catalog`] and
+    /// seed the schema it names with [`Self::seed_schema_cache`], so that
+    /// `process_schema` finds it in the cache.
+    #[doc(hidden)]
+    pub fn seed_schemastore_catalog(&self, catalog: SchemaStoreCatalog) {
+        if let Ok(mut cached) = self.schemastore_catalog.lock() {
+            *cached = Some(Arc::new(catalog));
+        }
+    }
+
     /// Tell the user in the client log why `schema_url` could not be applied.
     ///
     /// Auto-detected Kubernetes schemas stay silent: their URL is a guess, and

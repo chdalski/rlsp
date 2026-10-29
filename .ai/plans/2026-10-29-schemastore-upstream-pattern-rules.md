@@ -46,7 +46,7 @@ the glob mode that nothing uses afterwards.
       settings bounds
 - [x] Task 2: the benchmark catalog contains the shapes the new rules
       make costly
-- [ ] Task 3: SchemaStore patterns follow the upstream rules
+- [x] Task 3: SchemaStore patterns follow the upstream rules
 - [ ] Task 4: the unused plain glob mode is gone
 - [ ] Push to `main` and confirm the full CI matrix is green
 
@@ -103,53 +103,53 @@ catalog entries hold the bound-free `FilePatterns` of Task 1, so the
 catalog follows the same rules as the `schemas` setting. Tests build
 catalogs through a `catalog_of` helper today.
 
-- [ ] A catalog entry's patterns are matched by the upstream rules: one
+- [x] A catalog entry's patterns are matched by the upstream rules: one
       leading `!` excludes, one leading `/` is stripped, a pattern
       matches anywhere in the path with `**/` anchored at segment starts
       (an explicit `**/` too), and a pattern empty after stripping is
       ignored; the first matching entry in catalog order still wins
-- [ ] The catalog drops a pattern exactly when its POSIX extension —
+- [x] The catalog drops a pattern exactly when its POSIX extension —
       from the last `.` of its last `/`-separated segment, unless that
       `.` starts the segment — is `.json`, `.jsonc`, or `.json5`,
       compared case-sensitively, and keeps every other pattern, the same
       on every platform
-- [ ] An entry with no positive pattern after filtering is dropped
+- [x] An entry with no positive pattern after filtering is dropped
       without a message; a non-string `fileMatch` item is skipped and
       the entry kept, as today
-- [ ] The catalog applies none of the settings bounds
-- [ ] Every test catalog is built through `parse_schemastore_catalog`;
+- [x] The catalog applies none of the settings bounds
+- [x] Every test catalog is built through `parse_schemastore_catalog`;
       `match_schemastore_reads_file_match_patterns_literally` and
       `parsed_catalog_reads_file_match_patterns_literally` are one table
       that pins the upstream rules on absolute paths, including a bare
       name matched below a directory, `*.yaml` below a directory, an
       exclusion, a stripped leading `/`, and an explicit `**/` that does
       not match in the middle of a file name
-- [ ] The parse tests pin the new filter (`.jsonc` and `.json5` dropped,
+- [x] The parse tests pin the new filter (`.jsonc` and `.json5` dropped,
       `*.JSON` and a bare `.json` name kept, a pattern that is neither
       JSON-family nor YAML kept) and the dropped entries without a
       positive pattern; the catalog tests without a bound
       (`parsed_catalog_matches_a_file_match_beyond_what_a_schemas_pattern_can_be`,
       `match_schemastore_has_no_path_length_limit`, the heap test in
       `tests/schema_memory.rs`) pass with their assertions unchanged
-- [ ] An integration test in `tests/lsp_lifecycle/` seeds a catalog and
+- [x] An integration test in `tests/lsp_lifecycle/` seeds a catalog and
       its schema through a hidden server entry point and pins that
       opening `/p/docker-compose.yml` applies the schema while
       `/p/legacy/docker-compose.yml`, excluded by a `!` pattern, does
       not
-- [ ] With `rlsp-yaml/docs/configuration.md`, a user can tell how a
+- [x] With `rlsp-yaml/docs/configuration.md`, a user can tell how a
       SchemaStore `fileMatch` pattern applies to a document, and which
       entry wins when several match
-- [ ] `rlsp-yaml/docs/feature-log.md` has an entry that tells the reader
+- [x] `rlsp-yaml/docs/feature-log.md` has an entry that tells the reader
       that SchemaStore now assigns schemas to files such as
       `docker-compose.yml` and `.gitlab-ci.yml` in any directory
-- [ ] No doc comment or code comment describes the catalog as filtered
+- [x] No doc comment or code comment describes the catalog as filtered
       to YAML patterns, catalog patterns as matched literally, or
       `FilePatterns` as used only by the `schemas` setting
-- [ ] `cargo bench --bench hot_path` runs the `schema_glob_matching`
+- [x] `cargo bench --bench hot_path` runs the `schema_glob_matching`
       group to completion, its setup assertions holding, and the
       fixture's doc comments and assertion messages describe the new
       filter
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 4: Remove the plain glob mode
 

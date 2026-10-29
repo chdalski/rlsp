@@ -403,6 +403,39 @@ pub fn schemastore_yml_no_match_path() -> String {
     "/workspace/projects/app/config.yml".to_string()
 }
 
+/// Paths that each pin one rule of the upstream pattern matching, with the URL
+/// of the entry each resolves to, or `None` when the rule keeps the path from
+/// the entry that names it.
+#[must_use]
+pub fn schemastore_upstream_rule_cases() -> Vec<(String, Option<String>)> {
+    let dir = "/workspace/projects/app";
+    let entry = |index: usize| Some(schemastore_url(index));
+    vec![
+        // A bare name matches below a directory.
+        (format!("{dir}/svc0003.yml"), entry(3)),
+        // `<dir>/**/<name>` matches below a directory.
+        (format!("{dir}/config0004/sub/svc0004.yaml"), entry(4)),
+        // `<dir>/*.yml`, `.<tool>rc` and `*.toml` are kept, though not `.yaml`.
+        (format!("{dir}/deploy0000/a.yml"), entry(0)),
+        (format!("{dir}/.svc0001rc"), entry(1)),
+        (format!("{dir}/a.svc0002.toml"), entry(2)),
+        // The one `!` pattern excludes, and the pattern with a leading `/`
+        // matches below a directory.
+        (
+            format!("{dir}/legacy/svc{SCHEMASTORE_EXCLUSION_ENTRY:04}.yaml"),
+            None,
+        ),
+        (
+            format!("{dir}/svc{SCHEMASTORE_EXCLUSION_ENTRY:04}.yaml"),
+            entry(SCHEMASTORE_EXCLUSION_ENTRY),
+        ),
+        (
+            format!("{dir}/deploy/svc{SCHEMASTORE_ROOTED_ENTRY:04}.yml"),
+            entry(SCHEMASTORE_ROOTED_ENTRY),
+        ),
+    ]
+}
+
 /// A path that only a JSON-family catalog pattern names.
 #[must_use]
 pub fn schemastore_json_only_path() -> String {

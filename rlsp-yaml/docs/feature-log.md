@@ -31,6 +31,15 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### SchemaStore Assigns Schemas to Files in Any Directory [completed]
+
+**Date:** 2026-10-29
+**Description:** SchemaStore now assigns its schemas to files such as `docker-compose.yml`, `.gitlab-ci.yml`, and `action.yml` in any directory. Until now a catalog pattern without a leading `**/` had to match the whole absolute path of the document, so most of the catalog's patterns never applied. A catalog pattern is now read the way yaml-language-server reads it, and like a `schemas` glob: it matches at any directory level from the start of a path segment, a leading `!` excludes files, and one leading `/` is removed. Only the patterns that name a JSON file (`.json`, `.jsonc`, `.json5`) are left out, so files that are not named `*.yml` or `*.yaml`, such as `.clang-format`, get their schema as well. An explicit `**/` no longer matches in the middle of a file name: `**/docker-compose.yml` does not match `my-docker-compose.yml`. When several catalog entries match, the first one in the catalog's order wins, and a modeline or a `schemas` entry still overrides it. See [`schemaStore`](configuration.md#schemastore).
+**Complexity:** Medium
+**Tier:** 1
+
+---
+
 ### `schemas` Accepts the yaml-language-server Forms [completed]
 
 **Date:** 2026-10-29

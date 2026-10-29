@@ -376,6 +376,8 @@ pub const MAX_PATH_BYTES: usize = 4096;
 ///
 /// [`FilePatterns::new`] builds the entries of the `schemas` setting, which
 /// can come from a cloned repository, and enforces the limits for them.
+/// [`FilePatterns::without_limits`] builds the entries of the `SchemaStore`
+/// catalog with the same rules.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FilePatterns {
     include: Vec<Glob>,
@@ -511,12 +513,14 @@ impl Glob {
         }
     }
 
-    /// A glob in which `**/` may end at any byte.
+    /// A glob in which `**/` may end at any byte; the tests use it to pin the
+    /// matcher on plain globs.
     ///
     /// Supported glob syntax:
     /// - `*` matches any sequence of characters that does not include `/`
     /// - `**` matches any sequence of characters including `/`
     /// - All other characters match literally
+    #[cfg(test)]
     pub(super) fn new(pattern: &str) -> Self {
         Self {
             tokens: tokenize(pattern, false).collect(),

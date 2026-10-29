@@ -188,8 +188,15 @@ fn bench_schema_glob_matching(c: &mut Criterion) {
     assert_eq!(
         match_schemastore(&fixtures::schemastore_json_only_path(), &catalog),
         None,
-        "JSON-family patterns must be dropped when the catalog loads"
+        "patterns ending in .json, .jsonc or .json5 must be dropped when the catalog loads"
     );
+    for (path, url) in fixtures::schemastore_upstream_rule_cases() {
+        assert_eq!(
+            match_schemastore(&path, &catalog),
+            url,
+            "the catalog must match {path} by the upstream rules"
+        );
+    }
 
     let schemas: BTreeMap<String, FilePatterns> = fixtures::workspace_schemas()
         .into_iter()

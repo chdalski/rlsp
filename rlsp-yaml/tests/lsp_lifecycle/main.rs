@@ -22,6 +22,7 @@ mod rename;
 mod schema_fetch;
 mod schema_modelines;
 mod schemas_setting;
+mod schemastore_catalog;
 mod selection_ranges;
 mod semantic_tokens;
 mod validation_limits;
