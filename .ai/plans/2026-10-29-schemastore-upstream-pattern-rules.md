@@ -47,7 +47,7 @@ the glob mode that nothing uses afterwards.
 - [x] Task 2: the benchmark catalog contains the shapes the new rules
       make costly
 - [x] Task 3: SchemaStore patterns follow the upstream rules
-- [ ] Task 4: the unused plain glob mode is gone
+- [x] Task 4: the unused plain glob mode is gone
 - [ ] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
@@ -156,10 +156,10 @@ catalogs through a `catalog_of` helper today.
 After Task 3 nothing in production builds a plain glob (`Glob::new`,
 the plain mode of `tokenize`).
 
-- [ ] `Glob::new`, `glob_matches`, and the plain mode of `tokenize` are
+- [x] `Glob::new`, `glob_matches`, and the plain mode of `tokenize` are
       gone; `**` followed by `/` always ends at a path segment start,
       and the supported glob syntax stays documented on what remains
-- [ ] Every behavior the plain-mode tests pinned is pinned in the
+- [x] Every behavior the plain-mode tests pinned is pinned in the
       anchored mode: the tests compare `FilePatterns` with a reference
       model in the test module that anchors `**/` at segment starts;
       the two proptests that compared the plain mode and `FilePatterns`
@@ -169,11 +169,11 @@ the plain mode of `tokenize`).
       cases checked against both the reference model and the
       implementation; the stack-bound and worst-case-bound tests run on
       anchored globs
-- [ ] No comment, doc comment, or test name refers to a plain or
+- [x] No comment, doc comment, or test name refers to a plain or
       non-anchored glob mode
-- [ ] `cargo bench --bench hot_path` runs the `schema_glob_matching`
+- [x] `cargo bench --bench hot_path` runs the `schema_glob_matching`
       group to completion, its setup assertions holding
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ## Non-Goals
 

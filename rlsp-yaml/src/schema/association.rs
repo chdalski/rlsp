@@ -473,12 +473,6 @@ pub fn match_schema_by_filename(
         .map(|(url, _)| url.clone())
 }
 
-/// Return `true` if `pattern` matches `text`; compiles `pattern` on every call.
-#[cfg(test)]
-fn glob_matches(pattern: &str, text: &str) -> bool {
-    Glob::new(pattern).is_match(text)
-}
-
 /// One element of a compiled glob.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Token {
@@ -496,34 +490,26 @@ enum Token {
 /// costs at most the glob length times the text length however many
 /// wildcards the glob has.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct Glob {
+struct Glob {
     tokens: Vec<Token>,
 }
 
 impl Glob {
-    /// A glob in which `**/` may end only at the start of a path segment.
+    /// A glob that matches the whole text or what follows any `/` in it, as if
+    /// it began with `**/`.
+    ///
+    /// Supported glob syntax:
+    /// - `*` matches any sequence of characters that does not include `/`
+    /// - `**` matches any sequence of characters including `/`
+    /// - `**/` is `**` and the `/` after it; it ends only at the start of a
+    ///   path segment: at the start of the text or after a `/`
+    /// - All other characters match literally
     fn anywhere(pattern: &str) -> Self {
         let leading = Token::DoubleStar {
             at_segment_start: true,
         };
         Self {
-            tokens: std::iter::once(leading)
-                .chain(tokenize(pattern, true))
-                .collect(),
-        }
-    }
-
-    /// A glob in which `**/` may end at any byte; the tests use it to pin the
-    /// matcher on plain globs.
-    ///
-    /// Supported glob syntax:
-    /// - `*` matches any sequence of characters that does not include `/`
-    /// - `**` matches any sequence of characters including `/`
-    /// - All other characters match literally
-    #[cfg(test)]
-    pub(super) fn new(pattern: &str) -> Self {
-        Self {
-            tokens: tokenize(pattern, false).collect(),
+            tokens: std::iter::once(leading).chain(tokenize(pattern)).collect(),
         }
     }
 
@@ -533,7 +519,7 @@ impl Glob {
     /// The states of the simulation live on the stack for every glob that a
     /// `schemas` pattern can compile to; a longer glob, which only the
     /// `SchemaStore` catalog can bring, takes them from the heap.
-    pub(super) fn is_match(&self, candidate: &str) -> bool {
+    fn is_match(&self, candidate: &str) -> bool {
         let text = candidate.as_bytes();
         if !self.ends_with_trailing_literals(text) {
             return false;
@@ -625,15 +611,15 @@ fn mark(states: &mut [bool], index: usize) {
     }
 }
 
-/// Split `pattern` into tokens. With `anchored`, a `**/` ends only at the
-/// start of a path segment.
-fn tokenize(pattern: &str, anchored: bool) -> impl Iterator<Item = Token> + '_ {
+/// Split `pattern` into tokens. A `**/` ends only at the start of a path
+/// segment.
+fn tokenize(pattern: &str) -> impl Iterator<Item = Token> + '_ {
     let mut bytes = pattern.bytes().peekable();
     std::iter::from_fn(move || {
         let byte = bytes.next()?;
         Some(match byte {
             b'*' if bytes.next_if_eq(&b'*').is_some() => Token::DoubleStar {
-                at_segment_start: bytes.next_if_eq(&b'/').is_some() && anchored,
+                at_segment_start: bytes.next_if_eq(&b'/').is_some(),
             },
             b'*' => Token::Star,
             literal => Token::Literal(literal),
@@ -1048,10 +1034,11 @@ mod tests {
     }
 
     #[test]
-    fn the_shared_glob_matcher_has_no_path_limit() {
+    fn the_glob_matcher_has_no_path_limit() {
         let path = "a/".repeat(MAX_PATH_BYTES);
-        assert!(glob_matches("**", &path));
-        assert!(glob_matches("**/a/", &path));
+        assert!(anywhere_matches("**", &path));
+        assert!(anywhere_matches("**/a/", &path));
+        assert!(!anywhere_matches("**/x/", &path));
     }
 
     #[test]
@@ -1110,57 +1097,60 @@ mod tests {
 
     /// Each path ends in the glob's trailing literal, so the simulation runs
     /// over all of it; a path that does not is rejected before. Each path comes
-    /// with its result for a `schemas` pattern (matched anywhere) and for the
-    /// plain matcher: no path with the trailing literal of the first two globs
-    /// is missed by the plain matcher, whose `**/` may end at any byte.
+    /// with its result for a `schemas` pattern (matched anywhere). The first
+    /// case has paths with a segment start every two bytes: the stacked `**/`
+    /// keep many states alive over the whole text.
     #[rstest]
     #[case::stacked_double_stars(
         format!("{}x", "**/".repeat(80)),
         "x",
-        vec![("a".repeat(MAX_PATH_BYTES - 1) + "x", false, true)],
+        vec![
+            ("a".repeat(MAX_PATH_BYTES - 1) + "x", false),
+            ("a/".repeat(MAX_PATH_BYTES / 2 - 1) + "x", true),
+            ("a/".repeat(MAX_PATH_BYTES / 2 - 1) + "yx", false),
+        ],
     )]
     #[case::stacked_double_stars_without_slashes(
         format!("{}x", "**".repeat(120)),
         "x",
-        vec![("a".repeat(MAX_PATH_BYTES - 1) + "x", true, true)],
+        vec![("a".repeat(MAX_PATH_BYTES - 1) + "x", true)],
     )]
     #[case::stars_between_letters(
         format!("{}b", "*a".repeat(120)),
         "ab",
         vec![
-            ("a/".repeat(MAX_PATH_BYTES / 2 - 1) + "ab", false, false),
-            ("a".repeat(MAX_PATH_BYTES - 2) + "ab", true, true),
+            ("a/".repeat(MAX_PATH_BYTES / 2 - 1) + "ab", false),
+            ("a".repeat(MAX_PATH_BYTES - 2) + "ab", true),
         ],
     )]
     #[case::stars_between_slashes(
         format!("{}b", "*/".repeat(120)),
         "/b",
         vec![
-            ("a".repeat(MAX_PATH_BYTES - 2) + "/b", false, false),
-            ("a/".repeat(MAX_PATH_BYTES / 2 - 1) + "b", true, false),
+            ("a".repeat(MAX_PATH_BYTES - 2) + "/b", false),
+            ("a/".repeat(MAX_PATH_BYTES / 2 - 1) + "b", true),
         ],
     )]
     #[case::double_stars_between_letters(
         format!("{}b", "a**".repeat(80)),
         "b",
         vec![
-            ("a".repeat(79) + &"/".repeat(MAX_PATH_BYTES - 80) + "b", false, false),
-            ("a".repeat(MAX_PATH_BYTES - 1) + "b", true, true),
+            ("a".repeat(79) + &"/".repeat(MAX_PATH_BYTES - 80) + "b", false),
+            ("a".repeat(MAX_PATH_BYTES - 1) + "b", true),
         ],
     )]
     fn matching_ends_for_a_glob_that_made_backtracking_explode(
         #[case] glob: String,
         #[case] trailing_literal: &'static str,
-        #[case] paths: Vec<(String, bool, bool)>,
+        #[case] paths: Vec<(String, bool)>,
     ) {
-        for (path, ..) in &paths {
+        for (path, _) in &paths {
             assert!(path.ends_with(trailing_literal), "{path}");
         }
         finishes_within_thirty_seconds(move || {
             let patterns = file_patterns(&[&glob]);
-            for (path, anywhere, plain) in &paths {
-                assert_eq!(patterns.matches(path), *anywhere, "anywhere: {path}");
-                assert_eq!(glob_matches(&glob, path), *plain, "plain: {path}");
+            for (path, expected) in &paths {
+                assert_eq!(patterns.matches(path), *expected, "{path}");
             }
         });
     }
@@ -1229,40 +1219,106 @@ mod tests {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // glob_matches
+    // Glob
     // ══════════════════════════════════════════════════════════════════════════
 
+    fn anywhere_matches(pattern: &str, text: &str) -> bool {
+        Glob::anywhere(pattern).is_match(text)
+    }
+
+    fn literal(byte: u8) -> Token {
+        Token::Literal(byte)
+    }
+
+    const SEGMENT_START: Token = Token::DoubleStar {
+        at_segment_start: true,
+    };
+    const ANY_BYTE: Token = Token::DoubleStar {
+        at_segment_start: false,
+    };
+
+    #[rstest]
+    #[case::empty("", vec![])]
+    #[case::double_star_alone_ends_anywhere("**", vec![ANY_BYTE])]
+    #[case::double_star_slash_ends_at_a_segment_start("**/", vec![SEGMENT_START])]
+    #[case::second_slash_stays_literal("**//", vec![SEGMENT_START, literal(b'/')])]
+    #[case::three_stars_are_a_double_star_and_a_star("***", vec![ANY_BYTE, Token::Star])]
+    #[case::three_stars_and_a_slash_do_not_fold_the_slash(
+        "***/",
+        vec![ANY_BYTE, Token::Star, literal(b'/')]
+    )]
+    #[case::star_slash_is_a_star_and_a_literal("*/", vec![Token::Star, literal(b'/')])]
+    #[case::mixed(
+        "a**/b*c**d",
+        vec![
+            literal(b'a'),
+            SEGMENT_START,
+            literal(b'b'),
+            Token::Star,
+            literal(b'c'),
+            ANY_BYTE,
+            literal(b'd'),
+        ]
+    )]
+    fn anywhere_glob_tokenizes_double_stars_left_to_right(
+        #[case] pattern: &str,
+        #[case] tokens: Vec<Token>,
+    ) {
+        let expected: Vec<Token> = std::iter::once(SEGMENT_START).chain(tokens).collect();
+        assert_eq!(Glob::anywhere(pattern).tokens, expected);
+    }
+
+    // Each case derives from the rules: the glob matches the whole text or
+    // what follows one of its slashes, `*` stops at a slash, `**` does not,
+    // and the `/` after a `**` is folded into it and ends it only at the
+    // start of the text or after a slash.
     #[rstest]
     #[case::literal("a.yaml", "a.yaml", true)]
     #[case::literal_mismatch("a.yaml", "b.yaml", false)]
     #[case::star_in_a_segment("*.yaml", "a.yaml", true)]
-    #[case::star_stops_at_a_slash("*.yaml", "a/b.yaml", false)]
+    #[case::star_matches_in_a_later_segment("*.yaml", "a/b.yaml", true)]
+    #[case::star_stops_at_a_slash("a*.yaml", "a/b.yaml", false)]
+    #[case::star_stops_at_a_slash_in_a_directory("a/*.yaml", "a/b/c.yaml", false)]
     #[case::star_may_match_nothing("a*b", "ab", true)]
     #[case::double_star_crosses_slashes("**/c.yaml", "a/b/c.yaml", true)]
     #[case::double_star_may_match_nothing("**/c.yaml", "c.yaml", true)]
     #[case::double_star_mid_pattern("a/**/c", "a/b/b/c", true)]
-    #[case::double_star_ends_inside_a_segment("**/c.yaml", "a/bc.yaml", true)]
+    #[case::double_star_slash_does_not_end_inside_a_segment("**/c.yaml", "a/bc.yaml", false)]
+    #[case::double_star_without_slash_ends_inside_a_segment("**c.yaml", "a/bc.yaml", true)]
     #[case::double_star_alone("**", "a/b/c", true)]
     #[case::double_star_matches_empty_text("**", "", true)]
     #[case::star_matches_empty_text("*", "", true)]
-    #[case::empty_pattern_matches_empty_text("", "", true)]
-    #[case::empty_pattern_rejects_text("", "a", false)]
     #[case::pattern_longer_than_text("abc", "ab", false)]
     #[case::text_longer_than_pattern("ab", "abc", false)]
     #[case::three_stars_are_a_double_star_and_a_star("***", "a/b", true)]
-    #[case::the_plain_matcher_adds_no_implicit_double_star("c.yaml", "a/c.yaml", false)]
-    #[case::leading_exclamation_mark_is_literal("!x", "!x", true)]
-    #[case::leading_exclamation_mark_is_not_an_exclusion("!x", "y", false)]
+    #[case::a_bare_name_matches_at_a_later_segment("c.yaml", "a/c.yaml", true)]
+    #[case::a_bare_name_does_not_match_inside_a_segment("c.yaml", "ac.yaml", false)]
     #[case::triple_star_between_letters("a***b", "a/x/b", true)]
     #[case::double_star_inside_a_name("a**b", "a/x/b", true)]
     #[case::trailing_double_star_matches_nothing_after_a_slash("a/**", "a/", true)]
+    #[case::trailing_double_star_needs_its_slash("a/**", "a", false)]
     #[case::question_mark_is_literal("?.yaml", "a.yaml", false)]
     #[case::brackets_are_literal("[a].yaml", "a.yaml", false)]
     #[case::multibyte_literal("é.yaml", "é.yaml", true)]
     #[case::star_matches_multibyte("*", "é", true)]
     #[case::star_matches_a_dot_file("*.yaml", ".yaml", true)]
     #[case::star_matches_a_hidden_name("*", ".hidden", true)]
-    #[case::one_slash_after_a_double_star_is_swallowed("**//c", "a/c", true)]
+    #[case::double_star_slash_at_the_start_of_the_text("**/c", "c", true)]
+    #[case::double_star_slash_right_after_a_slash("a/**/c", "a//c", true)]
+    #[case::double_star_slash_inside_a_segment("a/**/c", "a/bc", false)]
+    #[case::double_star_slash_may_match_nothing_mid_pattern("a/**/c", "a/c", true)]
+    #[case::a_name_after_a_slash_is_a_segment_start("b*", "a/bc", true)]
+    #[case::a_name_inside_a_segment_is_not("b*", "abc", false)]
+    #[case::a_directory_path_matches_at_a_later_segment("x/y", "a/x/y", true)]
+    #[case::a_directory_path_does_not_match_inside_a_segment("x/y", "ax/y", false)]
+    #[case::three_stars_and_a_slash_fold_no_slash("***/c", "a/b/c", true)]
+    #[case::three_stars_and_a_slash_need_the_slash("***/c", "c", false)]
+    #[case::double_star_without_slash_may_end_in_a_segment("a**b", "axb", true)]
+    #[case::double_star_slash_then_star("**/*.yaml", "a/b/c.yaml", true)]
+    #[case::double_star_slash_then_star_at_the_start("**/*.yaml", "ab.yaml", true)]
+    #[case::one_slash_after_a_double_star_ends_at_a_segment_start("**//c", "a//c", true)]
+    #[case::double_star_slash_then_a_slash_at_the_start("**//c", "/c", true)]
+    #[case::the_slash_folded_into_a_double_star_is_not_the_literal("**//c", "a/c", false)]
     #[case::a_second_slash_after_a_double_star_is_not("**//c", "ac", false)]
     #[case::trailing_literal_is_the_whole_text("*abc", "abc", true)]
     #[case::text_shorter_than_the_trailing_literal("*abc", "bc", false)]
@@ -1274,20 +1330,25 @@ mod tests {
     #[case::a_repeated_byte_after_a_prefix("*aa", "baa", true)]
     #[case::a_repeated_byte_after_a_repeat("*aa", "aaa", true)]
     #[case::star_then_literal("*b", "ab", true)]
-    #[case::star_then_literal_fails_in_the_simulation("*b", "a/b", false)]
+    #[case::star_then_literal_in_a_later_segment("*b", "a/b", true)]
+    #[case::star_then_literal_fails_in_the_simulation("x*b", "x/b", false)]
     #[case::trailing_literal_fits_but_the_head_fails("a*c", "xbc", false)]
     #[case::trailing_literal_fits_and_the_head_matches("a*c", "abc", true)]
     #[case::a_trailing_star_rejects_a_slash("a*", "a/b", false)]
     #[case::a_trailing_star_matches_a_name("a*", "ab", true)]
     #[case::a_trailing_double_star_matches_a_slash("a**", "a/b", true)]
-    #[case::a_double_star_slash_may_end_the_glob_on_nothing("a**/", "a", true)]
+    #[case::a_double_star_slash_ending_the_glob_needs_a_segment_start("a**/", "a", false)]
     #[case::a_double_star_slash_may_end_the_glob_on_a_slash("a**/", "a/", true)]
-    #[case::a_double_star_slash_may_end_the_glob_on_a_name("a**/", "ax/", true)]
-    #[case::a_glob_of_only_wildcards("**/", "a/b", true)]
-    #[case::the_slash_folded_into_a_double_star_is_not_literal("a**/b", "ab", true)]
+    #[case::a_double_star_slash_may_end_the_glob_after_a_name("a**/", "ax/", true)]
+    #[case::a_double_star_slash_may_not_end_the_glob_inside_a_name("a**/", "ax", false)]
+    #[case::a_glob_of_only_wildcards_needs_a_segment_start("**/", "a/b", false)]
+    #[case::a_glob_of_only_wildcards_matches_a_trailing_slash("**/", "a/b/", true)]
+    #[case::a_glob_of_only_wildcards_matches_empty_text("**/", "", true)]
+    #[case::the_slash_folded_into_a_double_star_is_not_literal("a**/b", "ab", false)]
     #[case::the_slash_folded_into_a_double_star_may_match("a**/b", "a/b", true)]
     #[case::the_second_slash_is_literal_and_missing("a**//b", "ab", false)]
-    #[case::the_second_slash_is_literal_and_present("a**//b", "a/b", true)]
+    #[case::the_second_slash_is_literal_and_missing_after_one_slash("a**//b", "a/b", false)]
+    #[case::the_second_slash_is_literal_and_present("a**//b", "a//b", true)]
     #[case::a_slash_in_the_trailing_literal_matches("*/c", "a/c", true)]
     #[case::a_slash_in_the_trailing_literal_is_missing("*/c", "ac", false)]
     #[case::multibyte_trailing_literal_matches("*é", "xé", true)]
@@ -1295,84 +1356,168 @@ mod tests {
     #[case::multibyte_literal_with_only_the_last_byte_in_common("*é", "\u{2a9}", false)]
     #[case::multibyte_trailing_literal_longer_than_the_text("*éé", "é", false)]
     #[case::multibyte_trailing_literal_before_an_ascii_tail("*é.yaml", "é.yaml", true)]
-    fn glob_matches_follows_the_documented_syntax(
+    fn anywhere_glob_follows_the_documented_syntax(
         #[case] pattern: &str,
         #[case] text: &str,
         #[case] expected: bool,
     ) {
-        assert_eq!(glob_matches(pattern, text), expected, "{pattern} on {text}");
+        assert_eq!(
+            anywhere_reference(pattern, text),
+            expected,
+            "the reference: {pattern} on {text}"
+        );
+        assert_eq!(
+            anywhere_matches(pattern, text),
+            expected,
+            "{pattern} on {text}"
+        );
+        assert_eq!(
+            file_patterns(&[pattern]).matches(text),
+            expected,
+            "file patterns: {pattern} on {text}"
+        );
     }
 
-    /// The matcher this module used before it stopped backtracking, kept to
-    /// check that the new one agrees with it.
-    fn backtracking_glob_matches(pattern: &[u8], text: &[u8]) -> bool {
-        match (pattern.first(), text.first()) {
-            (None, None) => true,
-            (Some(&b'*'), _) if pattern.get(1) == Some(&b'*') => {
-                let rest = pattern.get(2..).unwrap_or(&[]);
-                let rest = rest.strip_prefix(b"/").unwrap_or(rest);
-                (0..=text.len()).any(|i| backtracking_glob_matches(rest, &text[i..]))
-            }
-            (Some(&b'*'), _) => {
-                let rest = &pattern[1..];
-                (0..=text.len()).any(|i| {
-                    !text[..i].contains(&b'/') && backtracking_glob_matches(rest, &text[i..])
+    // `FilePatterns` reads a leading `!` and `/` and ignores an empty glob;
+    // the glob itself does not.
+    #[rstest]
+    #[case::leading_exclamation_mark_is_literal("!x", "!x", true)]
+    #[case::leading_exclamation_mark_is_not_an_exclusion("!x", "y", false)]
+    #[case::empty_pattern_matches_empty_text("", "", true)]
+    #[case::empty_pattern_rejects_text("", "a", false)]
+    #[case::empty_pattern_matches_after_a_trailing_slash("", "a/", true)]
+    fn anywhere_glob_reads_a_leading_exclamation_mark_and_an_empty_glob_literally(
+        #[case] pattern: &str,
+        #[case] text: &str,
+        #[case] expected: bool,
+    ) {
+        assert_eq!(
+            anywhere_reference(pattern, text),
+            expected,
+            "the reference: {pattern} on {text}"
+        );
+        assert_eq!(
+            anywhere_matches(pattern, text),
+            expected,
+            "{pattern} on {text}"
+        );
+    }
+
+    /// Whether `pattern` matches `text` from byte `from` to its end. A `*`
+    /// stops at a `/`, a `**` does not, and the `/` after a `**` is part of
+    /// it: it ends at the start of the text or after a `/`. `text` stays whole
+    /// and `from` is a position in it, so that "after a `/`" looks at the byte
+    /// before `from` rather than at the start of a slice.
+    fn reference_matches(pattern: &[u8], text: &[u8], from: usize) -> bool {
+        match pattern.split_first() {
+            None => from == text.len(),
+            Some((&b'*', [b'*', after @ ..])) => {
+                let (after, ends_at_a_segment_start) = after
+                    .strip_prefix(b"/")
+                    .map_or((after, false), |after| (after, true));
+                (from..=text.len()).any(|end| {
+                    (!ends_at_a_segment_start || end == 0 || text[end - 1] == b'/')
+                        && reference_matches(after, text, end)
                 })
             }
-            (Some(&p), Some(&t)) => p == t && backtracking_glob_matches(&pattern[1..], &text[1..]),
-            (None, Some(_)) | (Some(_), None) => false,
+            Some((&b'*', after)) => (from..=text.len())
+                .any(|end| !text[from..end].contains(&b'/') && reference_matches(after, text, end)),
+            Some((&byte, after)) => {
+                text.get(from) == Some(&byte) && reference_matches(after, text, from + 1)
+            }
         }
     }
 
-    /// What a `schemas` pattern without `**` matches: the glob matches the
-    /// whole path or what follows one of its slashes.
+    /// What a `schemas` pattern matches: the glob matches the whole path or
+    /// what follows one of its slashes.
     fn anywhere_reference(glob: &str, text: &str) -> bool {
         let starts = std::iter::once(0).chain(text.match_indices('/').map(|(i, _)| i + 1));
         starts
             .into_iter()
-            .any(|start| backtracking_glob_matches(glob.as_bytes(), &text.as_bytes()[start..]))
+            .any(|start| reference_matches(glob.as_bytes(), text.as_bytes(), start))
     }
 
     /// Globs of `tokens` tokens: `tokens - 2` letters, a star and a letter.
-    /// `Glob::new` gives them `tokens + 1` states; the stack buffers of
-    /// `Glob::is_match` hold [`STACK_STATES`].
+    /// `Glob::anywhere` adds the leading `**/` and gives them `tokens + 2`
+    /// states; the stack buffers of `Glob::is_match` hold [`STACK_STATES`].
     #[rstest]
-    #[case::one_state_below_the_stack_bound(STACK_STATES - 2)]
-    #[case::at_the_stack_bound(STACK_STATES - 1)]
-    #[case::one_state_above_the_stack_bound(STACK_STATES)]
-    fn glob_matches_agrees_with_the_backtracking_matcher_around_the_stack_bound(
+    #[case::one_state_below_the_stack_bound(STACK_STATES - 3, STACK_STATES - 1)]
+    #[case::at_the_stack_bound(STACK_STATES - 2, STACK_STATES)]
+    #[case::one_state_above_the_stack_bound(STACK_STATES - 1, STACK_STATES + 1)]
+    fn anywhere_glob_agrees_with_the_reference_around_the_stack_bound(
         #[case] tokens: usize,
+        #[case] states: usize,
     ) {
         let glob = "a".repeat(tokens - 2) + "*b";
+        assert_eq!(Glob::anywhere(&glob).tokens.len() + 1, states);
         let texts = [
             ("a".repeat(tokens - 2) + "b", true),
             ("a".repeat(tokens - 2) + "zzb", true),
             ("a".repeat(tokens - 3) + "b", false),
             ("a".repeat(tokens - 2) + "/b", false),
             ("a".repeat(tokens - 2) + "c", false),
+            ("/d/".to_string() + &"a".repeat(tokens - 2) + "b", true),
+            ("x".to_string() + &"a".repeat(tokens - 2) + "b", false),
         ];
         for (text, expected) in &texts {
             assert_eq!(
-                backtracking_glob_matches(glob.as_bytes(), text.as_bytes()),
+                anywhere_reference(&glob, text),
                 *expected,
                 "the reference on {text}"
             );
             assert_eq!(
-                glob_matches(&glob, text),
+                anywhere_matches(&glob, text),
                 *expected,
                 "{tokens} tokens on {text}"
             );
         }
     }
 
+    /// Every string of up to `max_len` characters over `alphabet`.
+    fn strings_over(alphabet: &[char], max_len: usize) -> Vec<String> {
+        let mut all = vec![String::new()];
+        let mut longest = all.clone();
+        for _ in 0..max_len {
+            longest = longest
+                .iter()
+                .flat_map(|prefix| alphabet.iter().map(move |c| format!("{prefix}{c}")))
+                .collect();
+            all.extend(longest.iter().cloned());
+        }
+        all
+    }
+
+    /// Every glob of up to six bytes and every text of up to seven bytes over
+    /// `a`, `/` and `*`: each `**/`, `***` and `**//` next to the end of the
+    /// text is covered, with no luck of the draw.
+    #[test]
+    fn anywhere_glob_agrees_with_the_reference_model_on_every_short_glob_and_text() {
+        let texts = strings_over(&['a', '/'], 7);
+        for pattern in strings_over(&['a', '/', '*'], 6) {
+            let glob = Glob::anywhere(&pattern);
+            for text in &texts {
+                assert_eq!(
+                    glob.is_match(text),
+                    anywhere_reference(&pattern, text),
+                    "{pattern} on {text}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn one_glob_gives_the_same_results_on_every_call() {
-        let glob = Glob::new("a*b");
+        let glob = Glob::anywhere("a*b");
+        let with_double_star = Glob::anywhere("a**/b");
         for _ in 0..3 {
             assert!(glob.is_match("axxb"));
             assert!(!glob.is_match("axxc"));
             assert!(!glob.is_match("a/b"));
             assert!(glob.is_match("ab"));
+            assert!(glob.is_match("x/axxb"));
+            assert!(!glob.is_match("xaxxb"));
+            assert!(with_double_star.is_match("a/b"));
+            assert!(!with_double_star.is_match("ab"));
         }
     }
 
@@ -1430,37 +1575,51 @@ mod tests {
                 ..ProptestConfig::default()
             })]
 
-            /// `glob_matches` agrees with the backtracking matcher on every
-            /// short glob and text, so SchemaStore `fileMatch` is unchanged.
+            /// `Glob::anywhere` and `FilePatterns` agree with the reference
+            /// model on every short glob and text. A suffix that ends the text
+            /// too keeps the trailing-literal check from skipping the
+            /// simulation, and a `/` folded into a `**/` before the suffix is
+            /// not part of it.
             #[test]
-            fn glob_matches_agrees_with_the_backtracking_matcher(
-                pattern in "[ab\u{e9}*/!.]{0,9}",
-                text in "[ab\u{e9}/!.]{0,12}",
+            fn anywhere_glob_agrees_with_the_reference_model(
+                parts in prop::collection::vec(
+                    prop::sample::select(vec!["a", "b", "\u{e9}", "/", "!", ".", "*", "**", "**/"]),
+                    0..6,
+                ),
+                suffix in prop::sample::select(vec!["", ".y", "b", "/b", "\u{e9}", "a.yaml"]),
+                text_body in "[ab\u{e9}/!.]{0,12}",
+                text_ends_with_the_suffix in any::<bool>(),
             ) {
+                let pattern = parts.concat() + suffix;
+                let text = if text_ends_with_the_suffix {
+                    text_body + suffix
+                } else {
+                    text_body
+                };
                 prop_assert_eq!(
-                    glob_matches(&pattern, &text),
-                    backtracking_glob_matches(pattern.as_bytes(), text.as_bytes()),
+                    anywhere_matches(&pattern, &text),
+                    anywhere_reference(&pattern, &text),
                     "{} on {}", pattern, text
                 );
-            }
-
-            /// With a literal suffix that ends the text too, the matcher still
-            /// agrees with the backtracking matcher: the suffix never skips
-            /// the simulation, and a `/` folded into a `**/` before it is not
-            /// part of it.
-            #[test]
-            fn glob_matches_agrees_with_the_backtracking_matcher_when_a_literal_ends_the_text(
-                body in "[ab*/]{0,6}",
-                suffix in prop::sample::select(vec![".y", "b", "/b", "\u{e9}", "a.yaml"]),
-                text_body in "[ab/.\u{e9}]{0,12}",
-            ) {
-                let pattern = format!("{body}{suffix}");
-                let text = format!("{text_body}{suffix}");
-                prop_assert_eq!(
-                    glob_matches(&pattern, &text),
-                    backtracking_glob_matches(pattern.as_bytes(), text.as_bytes()),
-                    "{} on {}", pattern, text
-                );
+                // `FilePatterns` adds the reading of a leading `!` as an
+                // exclusion and the removal of one leading `/`.
+                let (excluded, rest) = pattern
+                    .strip_prefix('!')
+                    .map_or((false, pattern.as_str()), |rest| (true, rest));
+                let glob = rest.strip_prefix('/').unwrap_or(rest);
+                if !glob.is_empty() {
+                    let globbed = anywhere_reference(glob, &text);
+                    let (patterns, expected) = if excluded {
+                        (file_patterns(&["**", &pattern]), !globbed)
+                    } else {
+                        (file_patterns(&[&pattern]), globbed)
+                    };
+                    prop_assert_eq!(
+                        patterns.matches(&text),
+                        expected,
+                        "file patterns: {} on {}", pattern, text
+                    );
+                }
             }
 
             /// No glob and path make matching panic.
@@ -1514,8 +1673,8 @@ mod tests {
                 prop_assert!(!alone || included);
             }
 
-            /// Without `**`, a pattern matches anywhere exactly when the plain
-            /// glob matches the whole path or what follows one of its slashes.
+            /// Without `**`, a pattern matches anywhere exactly when the glob
+            /// matches the whole path or what follows one of its slashes.
             #[test]
             fn file_patterns_match_what_follows_any_slash(
                 pattern in "([ab./]|\\*[ab./]){1,5}\\*?",
