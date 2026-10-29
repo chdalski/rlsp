@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-10-29)
 **Created:** 2026-10-29
 
 # One Representation of `false` for Every Sub-Schema Keyword
@@ -38,7 +38,7 @@ what a literal `false` reports.
 - [x] Design review of the approach
 - [x] Task 1: `false` has one representation under every sub-schema
       keyword
-- [ ] Push to `main` and confirm the full CI matrix is green
+- [x] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
