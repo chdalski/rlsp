@@ -22,7 +22,7 @@
 
 ## Project — open work and non-obvious facts
 
-- [Follow-up queue](project_followup_plans.md) — open work: schema plan order (SchemaStore bare-name matching next, then discuss 3c), rlsp-yaml follow-ups, WORKLIST→`#[ignore]`, parser bindings, CI items
+- [Follow-up queue](project_followup_plans.md) — open work: schema plan order (discuss 3c iterative loader next), rlsp-yaml follow-ups, WORKLIST→`#[ignore]`, parser bindings, CI items
 - [Deferred perf candidate + methodology](potential-performance-optimizations.md) — arena allocation for the Event queue (no profile evidence yet); baremetal flamegraph/bench/LLVM-IR methodology before any perf plan
 - [rust-toolchain.toml pins CI too](project_rust_toolchain_pin_ci_behavior.md) — the root pin overrides dtolnay's rustup default; `stable` and the pin are separate installs; bump pin channel + every dtolnay ref together; Zed crate stays on Zed's registry toolchain (1.90)
 - [Plugin update needs version bump](project_claude_plugin_update_needs_version_bump.md) — version resolution order; removing `version` or a plugin-root CLAUDE.md fails `validate --strict`
