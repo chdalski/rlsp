@@ -5022,19 +5022,37 @@ mod tests {
     #[test]
     fn parsed_catalog_ends_for_a_file_match_that_made_backtracking_explode() {
         let (sender, receiver) = std::sync::mpsc::channel();
+        // Both names end in the glob's trailing literal, so the glob runs the
+        // simulation over all of them.
+        let names = [
+            "a".repeat(10) + &"c".repeat(4080) + "b.yaml",
+            "a".repeat(4090) + "b.yaml",
+        ];
+        assert!(names.iter().all(|name| name.ends_with("b.yaml")));
         std::thread::spawn(move || {
             let v = make_catalog_json(&[(
                 "https://example.com/s.json",
                 &["a**a**a**a**a**a**a**a**a**a**a**b.yaml"],
             )]);
             let catalog = parse_schemastore_catalog(&v).expect("should parse");
-            let name = "a".repeat(4096) + ".yaml";
-            let _ = sender.send(match_schemastore(&name, &catalog));
+            let _ = sender.send(names.map(|name| match_schemastore(&name, &catalog)));
         });
         assert_eq!(
             receiver.recv_timeout(std::time::Duration::from_secs(30)),
-            Ok(None)
+            Ok([None, Some("https://example.com/s.json".to_string())])
         );
+    }
+
+    #[test]
+    fn parsed_catalog_matches_a_file_match_beyond_what_a_schemas_pattern_can_be() {
+        let glob = "a".repeat(300) + ".yaml";
+        let v = make_catalog_json(&[("https://example.com/s.json", &[&glob])]);
+        let catalog = parse_schemastore_catalog(&v).expect("should parse");
+        let url_of = |name: &str| match_schemastore(name, &catalog);
+        assert_eq!(url_of(&glob), Some("https://example.com/s.json".into()));
+        assert_eq!(url_of(&("a".repeat(299) + ".yaml")), None);
+        assert_eq!(url_of(&("a".repeat(300) + ".yml")), None);
+        assert_eq!(url_of(&("b".repeat(300) + ".yaml")), None);
     }
 
     #[test]
@@ -5046,16 +5064,23 @@ mod tests {
     #[test]
     fn match_schemastore_ends_for_a_file_match_that_made_backtracking_explode() {
         let (sender, receiver) = std::sync::mpsc::channel();
+        // Both names end in the glob's trailing literal, so the glob runs the
+        // simulation over all of them.
+        let names = [
+            "a".repeat(10) + &"c".repeat(4085) + "b",
+            "a".repeat(4095) + "b",
+        ];
+        assert!(names.iter().all(|name| name.ends_with('b')));
         std::thread::spawn(move || {
             let catalog = catalog_of(&[(
                 "https://example.com/s.json",
                 &["a**a**a**a**a**a**a**a**a**a**a**b"],
             )]);
-            let _ = sender.send(match_schemastore(&"a".repeat(4096), &catalog));
+            let _ = sender.send(names.map(|name| match_schemastore(&name, &catalog)));
         });
         assert_eq!(
             receiver.recv_timeout(std::time::Duration::from_secs(30)),
-            Ok(None)
+            Ok([None, Some("https://example.com/s.json".to_string())])
         );
     }
 

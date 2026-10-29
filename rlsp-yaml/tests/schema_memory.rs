@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
-//! Peak heap of schema parses, measured with a counting allocator.
+//! Peak heap of schema parses and of schema glob matching, measured with a
+//! counting allocator.
 //!
 //! A schema comes from a URL that a document names, and a parse reads the
 //! schema and up to 20 documents that it references with `$ref`, each up to
@@ -27,7 +28,8 @@ use std::fmt::Write as _;
 use std::sync::Mutex;
 
 use rlsp_yaml::schema::{
-    ParseContext, SchemaCache, SchemaError, SizeBudget, fetch_schema_raw, parse_schema,
+    FilePatterns, MAX_PATH_BYTES, MAX_PATTERN_BYTES, ParseContext, SchemaCache, SchemaError,
+    SizeBudget, fetch_schema_raw, match_schemastore, parse_schema, parse_schemastore_catalog,
 };
 use serde_json::Value;
 
@@ -562,4 +564,75 @@ fn parse_schema_applies_the_production_budgets() {
         "{result:?}"
     );
     assert!(peak <= PEAK_TARGET, "{} MiB", mib(peak));
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Glob matching
+// ──────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn measuring_the_heap_sees_an_allocation() {
+    let _guard = one_at_a_time();
+    let (_, peak) = measure(|| std::hint::black_box(vec![0_u8; 64]));
+    assert!(peak > 0);
+}
+
+#[test]
+fn matching_a_schemas_pattern_allocates_no_heap() {
+    let _guard = one_at_a_time();
+    // The longest pattern: MAX_PATTERN_BYTES tokens, the leading `**/` and the
+    // end state fill the stack buffers of the matcher.
+    let longest = "a".repeat(MAX_PATTERN_BYTES - 2) + "*b";
+    let patterns = FilePatterns::new(&[longest, "*.yaml".to_string(), "!skip/*.yaml".to_string()])
+        .expect("the patterns include files");
+    let long_path = "/".to_string() + &"d/".repeat(MAX_PATH_BYTES / 2 - 3) + "x.yml";
+    assert_eq!(long_path.len(), MAX_PATH_BYTES);
+    let paths = [
+        // a match of the longest pattern, by the simulation
+        (
+            "/d/".to_string() + &"a".repeat(MAX_PATTERN_BYTES - 2) + "zzb",
+            true,
+        ),
+        // a match of a short pattern
+        ("/d/x.yaml".to_string(), true),
+        // an exclusion
+        ("/d/skip/x.yaml".to_string(), false),
+        // no match, rejected by the trailing literal
+        ("/d/x.yml".to_string(), false),
+        // no match, found by the simulation
+        (
+            "/d/".to_string() + &"a".repeat(MAX_PATTERN_BYTES - 3) + "b",
+            false,
+        ),
+        // the longest path
+        (long_path, false),
+    ];
+
+    let (results, peak) = measure(|| paths.each_ref().map(|(path, _)| patterns.matches(path)));
+
+    assert_eq!(results, paths.each_ref().map(|(_, expected)| *expected));
+    assert_eq!(peak, 0);
+}
+
+#[test]
+fn matching_a_catalog_glob_beyond_a_schemas_pattern_takes_its_states_from_the_heap() {
+    let _guard = one_at_a_time();
+    let glob = "a".repeat(MAX_PATTERN_BYTES + 44) + "*b.yaml";
+    let catalog = parse_schemastore_catalog(&serde_json::json!({
+        "schemas": [{ "url": "https://example.com/s.json", "fileMatch": [glob] }]
+    }))
+    .expect("the catalog parses");
+    let matching = "a".repeat(MAX_PATTERN_BYTES + 44) + "zzb.yaml";
+    let simulated_miss = "a".repeat(MAX_PATTERN_BYTES + 43) + "b.yaml";
+    let rejected_miss = "a".repeat(MAX_PATTERN_BYTES + 44) + "zzb.yml";
+
+    let (matched, _) = measure(|| match_schemastore(&matching, &catalog));
+    let (simulated, simulated_peak) = measure(|| match_schemastore(&simulated_miss, &catalog));
+    let (rejected, rejected_peak) = measure(|| match_schemastore(&rejected_miss, &catalog));
+
+    assert_eq!(matched.as_deref(), Some("https://example.com/s.json"));
+    assert_eq!(simulated, None);
+    assert_eq!(rejected, None);
+    assert!(simulated_peak > 0, "the simulation did not run");
+    assert_eq!(rejected_peak, 0, "the trailing literal rejects first");
 }

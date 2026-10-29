@@ -41,7 +41,7 @@ to measure before and after on bare metal.
       catalogs are built in one place
 - [x] Task 2: the SchemaStore catalog holds compiled globs and is shared,
       not cloned
-- [ ] Task 3: a match allocates nothing within the stack bound and
+- [x] Task 3: a match allocates nothing within the stack bound and
       rejects early on the trailing literal
 - [ ] Push to `main` and confirm the full CI matrix is green
 
@@ -105,25 +105,25 @@ validation that reaches the SchemaStore fallback.
 
 ### Task 3: Match without allocating, and reject on the trailing literal
 
-- [ ] Matching a glob with no more states than a `FilePatterns` pattern
+- [x] Matching a glob with no more states than a `FilePatterns` pattern
       can have (`MAX_PATTERN_BYTES` plus the leading `**/` and the end
       state) allocates no heap memory; a longer catalog glob still
       matches correctly
-- [ ] A glob whose trailing run of literal bytes does not end the text
+- [x] A glob whose trailing run of literal bytes does not end the text
       is rejected before the simulation runs
-- [ ] The proptests against the backtracking reference model pass with
+- [x] The proptests against the backtracking reference model pass with
       their assertions unchanged; an added proptest with a fixed literal
       suffix exercises the case where the trailing literal does end the
       text; globs at one state below, at, and one state above the stack
       bound, and a `FilePatterns` pattern of exactly
       `MAX_PATTERN_BYTES`, are compared with the reference model for a
       match and a miss
-- [ ] The tests that pin the bounded worst case
+- [x] The tests that pin the bounded worst case
       (`matching_ends_for_a_glob_that_made_backtracking_explode`,
       `match_schemastore_ends_for_a_file_match_that_made_backtracking_explode`)
       use texts that end in the glob's trailing literal and assert that
       they do, so they still run the simulation
-- [ ] Build, tests, `cargo clippy --all-targets`, fmt, and
+- [x] Build, tests, `cargo clippy --all-targets`, fmt, and
       `cargo bench --bench hot_path --no-run` pass
 
 ## Non-Goals

@@ -351,6 +351,11 @@ pub fn kubernetes_schema_url(
 /// With [`MAX_PATH_BYTES`] it bounds one match at 256 × 4096 steps.
 pub const MAX_PATTERN_BYTES: usize = 256;
 
+/// States of the glob simulation that are kept on the stack: a `schemas`
+/// pattern compiles to at most [`MAX_PATTERN_BYTES`] tokens and the leading
+/// `**/`, and the simulation has one more state for the end of the glob.
+const STACK_STATES: usize = MAX_PATTERN_BYTES + 2;
+
 /// Most globs one `schemas` entry may list.
 pub const MAX_PATTERNS_PER_ENTRY: usize = 32;
 
@@ -484,14 +489,57 @@ impl Glob {
         }
     }
 
-    /// Track the tokens the text so far can have reached; the text matches
-    /// when the end of the glob is among them at the end of the text.
+    /// Whether the text matches: the glob ends where the text does, and the
+    /// tokens the text can have reached end at the end of the glob.
+    ///
+    /// The states of the simulation live on the stack for every glob that a
+    /// `schemas` pattern can compile to; a longer glob, which only the
+    /// `SchemaStore` catalog can bring, takes them from the heap.
     pub(super) fn is_match(&self, candidate: &str) -> bool {
         let text = candidate.as_bytes();
-        let mut reached = vec![false; self.tokens.len() + 1];
-        let mut next = vec![false; self.tokens.len() + 1];
-        mark(&mut reached, 0);
-        self.skip_empty_runs(&mut reached, text, 0);
+        if !self.ends_with_trailing_literals(text) {
+            return false;
+        }
+        let states = self.tokens.len() + 1;
+        let mut stack = ([false; STACK_STATES], [false; STACK_STATES]);
+        if let (Some(reached), Some(next)) = (stack.0.get_mut(..states), stack.1.get_mut(..states))
+        {
+            return self.simulate(text, reached, next);
+        }
+        self.simulate(text, &mut vec![false; states], &mut vec![false; states])
+    }
+
+    /// The literal tokens at the end of the glob match exactly the last bytes
+    /// of the text, whatever precedes them: a literal consumes one byte, and
+    /// only wildcards can match nothing. A necessary condition for a match,
+    /// checked in as many steps as the glob has trailing literal bytes or the
+    /// text has bytes, whichever is fewer, before the simulation that costs
+    /// glob length times text length.
+    fn ends_with_trailing_literals(&self, text: &[u8]) -> bool {
+        let mut text_end = text.iter().rev();
+        self.tokens
+            .iter()
+            .rev()
+            .map_while(|token| match token {
+                Token::Literal(literal) => Some(literal),
+                Token::Star | Token::DoubleStar { .. } => None,
+            })
+            .all(|literal| text_end.next() == Some(literal))
+    }
+
+    /// Track the tokens the text so far can have reached; the text matches
+    /// when the end of the glob is among them at the end of the text.
+    /// `reached` and `next` hold one state per token and one for the end.
+    fn simulate<'a>(
+        &self,
+        text: &[u8],
+        mut reached: &'a mut [bool],
+        mut next: &'a mut [bool],
+    ) -> bool {
+        debug_assert_eq!(reached.len(), self.tokens.len() + 1);
+        debug_assert_eq!(next.len(), reached.len());
+        mark(reached, 0);
+        self.skip_empty_runs(reached, text, 0);
         for (position, &byte) in text.iter().enumerate() {
             next.fill(false);
             for (index, token) in self.tokens.iter().enumerate() {
@@ -499,13 +547,13 @@ impl Glob {
                     continue;
                 }
                 match *token {
-                    Token::Literal(literal) if literal == byte => mark(&mut next, index + 1),
-                    Token::Star if byte != b'/' => mark(&mut next, index),
-                    Token::DoubleStar { .. } => mark(&mut next, index),
+                    Token::Literal(literal) if literal == byte => mark(next, index + 1),
+                    Token::Star if byte != b'/' => mark(next, index),
+                    Token::DoubleStar { .. } => mark(next, index),
                     Token::Literal(_) | Token::Star => {}
                 }
             }
-            self.skip_empty_runs(&mut next, text, position + 1);
+            self.skip_empty_runs(next, text, position + 1);
             std::mem::swap(&mut reached, &mut next);
             if !reached.contains(&true) {
                 return false;
@@ -759,12 +807,14 @@ mod tests {
     #[case::double_star_with_slashes_matches_the_root("/**/x.yaml", "/x.yaml")]
     #[case::directory_glob_at_the_root(".github/workflows/*.yml", "/.github/workflows/ci.yml")]
     #[case::multibyte_literal("é/*.yaml", "/dir/é/ü.yaml")]
+    #[case::double_star_slash_before_a_one_byte_name("**/c", "c")]
     fn file_patterns_match(#[case] glob: &str, #[case] path: &str) {
         assert!(file_patterns(&[glob]).matches(path), "{glob} on {path}");
     }
 
     #[rstest]
     #[case::other_extension("*.json", "/a/myfile.yaml")]
+    #[case::other_name_with_the_same_length("x.yaml", "/a/x.yml")]
     #[case::name_is_a_suffix_of_the_segment("config.yaml", "/a/my-config.yaml")]
     #[case::name_is_a_suffix_of_the_segment_after_a_double_star("**/foo.yaml", "/a/barfoo.yaml")]
     #[case::directory_is_a_suffix_of_the_segment("config/*.yaml", "/x/myconfig/a.yaml")]
@@ -936,23 +986,59 @@ mod tests {
         );
     }
 
+    /// Each path ends in the glob's trailing literal, so the simulation runs
+    /// over all of it; a path that does not is rejected before. Each path comes
+    /// with its result for a `schemas` pattern (matched anywhere) and for the
+    /// plain matcher: no path with the trailing literal of the first two globs
+    /// is missed by the plain matcher, whose `**/` may end at any byte.
     #[rstest]
-    #[case::stacked_double_stars(format!("{}x", "**/".repeat(80)))]
-    #[case::stacked_double_stars_without_slashes(format!("{}x", "**".repeat(120)))]
-    #[case::stars_between_letters(format!("{}b", "*a".repeat(120)))]
-    #[case::stars_between_slashes(format!("{}b", "*/".repeat(120)))]
-    #[case::double_stars_between_letters(format!("{}b", "a**".repeat(80)))]
-    fn matching_ends_for_a_glob_that_made_backtracking_explode(#[case] glob: String) {
-        let paths = [
-            "a/".repeat(MAX_PATH_BYTES / 2),
-            "a".repeat(MAX_PATH_BYTES),
-            "/aa".repeat(MAX_PATH_BYTES / 3),
-        ];
+    #[case::stacked_double_stars(
+        format!("{}x", "**/".repeat(80)),
+        "x",
+        vec![("a".repeat(MAX_PATH_BYTES - 1) + "x", false, true)],
+    )]
+    #[case::stacked_double_stars_without_slashes(
+        format!("{}x", "**".repeat(120)),
+        "x",
+        vec![("a".repeat(MAX_PATH_BYTES - 1) + "x", true, true)],
+    )]
+    #[case::stars_between_letters(
+        format!("{}b", "*a".repeat(120)),
+        "ab",
+        vec![
+            ("a/".repeat(MAX_PATH_BYTES / 2 - 1) + "ab", false, false),
+            ("a".repeat(MAX_PATH_BYTES - 2) + "ab", true, true),
+        ],
+    )]
+    #[case::stars_between_slashes(
+        format!("{}b", "*/".repeat(120)),
+        "/b",
+        vec![
+            ("a".repeat(MAX_PATH_BYTES - 2) + "/b", false, false),
+            ("a/".repeat(MAX_PATH_BYTES / 2 - 1) + "b", true, false),
+        ],
+    )]
+    #[case::double_stars_between_letters(
+        format!("{}b", "a**".repeat(80)),
+        "b",
+        vec![
+            ("a".repeat(79) + &"/".repeat(MAX_PATH_BYTES - 80) + "b", false, false),
+            ("a".repeat(MAX_PATH_BYTES - 1) + "b", true, true),
+        ],
+    )]
+    fn matching_ends_for_a_glob_that_made_backtracking_explode(
+        #[case] glob: String,
+        #[case] trailing_literal: &'static str,
+        #[case] paths: Vec<(String, bool, bool)>,
+    ) {
+        for (path, ..) in &paths {
+            assert!(path.ends_with(trailing_literal), "{path}");
+        }
         finishes_within_thirty_seconds(move || {
             let patterns = file_patterns(&[&glob]);
-            for path in &paths {
-                assert!(!patterns.matches(path));
-                assert!(!glob_matches(&glob, path));
+            for (path, anywhere, plain) in &paths {
+                assert_eq!(patterns.matches(path), *anywhere, "anywhere: {path}");
+                assert_eq!(glob_matches(&glob, path), *plain, "plain: {path}");
             }
         });
     }
@@ -1056,6 +1142,37 @@ mod tests {
     #[case::star_matches_a_hidden_name("*", ".hidden", true)]
     #[case::one_slash_after_a_double_star_is_swallowed("**//c", "a/c", true)]
     #[case::a_second_slash_after_a_double_star_is_not("**//c", "ac", false)]
+    #[case::trailing_literal_is_the_whole_text("*abc", "abc", true)]
+    #[case::text_shorter_than_the_trailing_literal("*abc", "bc", false)]
+    #[case::text_shorter_than_the_trailing_literal_after_a_double_star("**abc", "bc", false)]
+    #[case::last_byte_differs("*ab", "xc", false)]
+    #[case::first_byte_of_the_trailing_literal_differs("*ab", "cb", false)]
+    #[case::middle_byte_of_the_trailing_literal_differs("*abc", "xaxc", false)]
+    #[case::a_repeated_byte_needs_both_copies("*aa", "a", false)]
+    #[case::a_repeated_byte_after_a_prefix("*aa", "baa", true)]
+    #[case::a_repeated_byte_after_a_repeat("*aa", "aaa", true)]
+    #[case::star_then_literal("*b", "ab", true)]
+    #[case::star_then_literal_fails_in_the_simulation("*b", "a/b", false)]
+    #[case::trailing_literal_fits_but_the_head_fails("a*c", "xbc", false)]
+    #[case::trailing_literal_fits_and_the_head_matches("a*c", "abc", true)]
+    #[case::a_trailing_star_rejects_a_slash("a*", "a/b", false)]
+    #[case::a_trailing_star_matches_a_name("a*", "ab", true)]
+    #[case::a_trailing_double_star_matches_a_slash("a**", "a/b", true)]
+    #[case::a_double_star_slash_may_end_the_glob_on_nothing("a**/", "a", true)]
+    #[case::a_double_star_slash_may_end_the_glob_on_a_slash("a**/", "a/", true)]
+    #[case::a_double_star_slash_may_end_the_glob_on_a_name("a**/", "ax/", true)]
+    #[case::a_glob_of_only_wildcards("**/", "a/b", true)]
+    #[case::the_slash_folded_into_a_double_star_is_not_literal("a**/b", "ab", true)]
+    #[case::the_slash_folded_into_a_double_star_may_match("a**/b", "a/b", true)]
+    #[case::the_second_slash_is_literal_and_missing("a**//b", "ab", false)]
+    #[case::the_second_slash_is_literal_and_present("a**//b", "a/b", true)]
+    #[case::a_slash_in_the_trailing_literal_matches("*/c", "a/c", true)]
+    #[case::a_slash_in_the_trailing_literal_is_missing("*/c", "ac", false)]
+    #[case::multibyte_trailing_literal_matches("*é", "xé", true)]
+    #[case::multibyte_trailing_literal_misses("*é", "xe", false)]
+    #[case::multibyte_literal_with_only_the_last_byte_in_common("*é", "\u{2a9}", false)]
+    #[case::multibyte_trailing_literal_longer_than_the_text("*éé", "é", false)]
+    #[case::multibyte_trailing_literal_before_an_ascii_tail("*é.yaml", "é.yaml", true)]
     fn glob_matches_follows_the_documented_syntax(
         #[case] pattern: &str,
         #[case] text: &str,
@@ -1085,6 +1202,101 @@ mod tests {
         }
     }
 
+    /// What a `schemas` pattern without `**` matches: the glob matches the
+    /// whole path or what follows one of its slashes.
+    fn anywhere_reference(glob: &str, text: &str) -> bool {
+        let starts = std::iter::once(0).chain(text.match_indices('/').map(|(i, _)| i + 1));
+        starts
+            .into_iter()
+            .any(|start| backtracking_glob_matches(glob.as_bytes(), &text.as_bytes()[start..]))
+    }
+
+    /// Globs of `tokens` tokens: `tokens - 2` letters, a star and a letter.
+    /// `Glob::new` gives them `tokens + 1` states; the stack buffers of
+    /// `Glob::is_match` hold [`STACK_STATES`].
+    #[rstest]
+    #[case::one_state_below_the_stack_bound(STACK_STATES - 2)]
+    #[case::at_the_stack_bound(STACK_STATES - 1)]
+    #[case::one_state_above_the_stack_bound(STACK_STATES)]
+    fn glob_matches_agrees_with_the_backtracking_matcher_around_the_stack_bound(
+        #[case] tokens: usize,
+    ) {
+        let glob = "a".repeat(tokens - 2) + "*b";
+        let texts = [
+            ("a".repeat(tokens - 2) + "b", true),
+            ("a".repeat(tokens - 2) + "zzb", true),
+            ("a".repeat(tokens - 3) + "b", false),
+            ("a".repeat(tokens - 2) + "/b", false),
+            ("a".repeat(tokens - 2) + "c", false),
+        ];
+        for (text, expected) in &texts {
+            assert_eq!(
+                backtracking_glob_matches(glob.as_bytes(), text.as_bytes()),
+                *expected,
+                "the reference on {text}"
+            );
+            assert_eq!(
+                glob_matches(&glob, text),
+                *expected,
+                "{tokens} tokens on {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn one_glob_gives_the_same_results_on_every_call() {
+        let glob = Glob::new("a*b");
+        for _ in 0..3 {
+            assert!(glob.is_match("axxb"));
+            assert!(!glob.is_match("axxc"));
+            assert!(!glob.is_match("a/b"));
+            assert!(glob.is_match("ab"));
+        }
+    }
+
+    /// A pattern of `MAX_PATTERN_BYTES` bytes has `MAX_PATTERN_BYTES` tokens
+    /// at most, one more with the leading `**/`, and one more state: exactly
+    /// the stack buffers of `Glob::is_match`.
+    #[rstest]
+    #[case::letters_and_a_star(
+        "a".repeat(MAX_PATTERN_BYTES - 2) + "*b",
+        vec![
+            "/d/".to_string() + &"a".repeat(MAX_PATTERN_BYTES - 2) + "zzb",
+            "a".repeat(MAX_PATTERN_BYTES - 2) + "b",
+        ],
+        vec![
+            "/d/".to_string() + &"a".repeat(MAX_PATTERN_BYTES - 3) + "b",
+            "/d/".to_string() + &"a".repeat(MAX_PATTERN_BYTES - 2) + "/b",
+            "/d/".to_string() + &"a".repeat(MAX_PATTERN_BYTES - 2) + "c",
+        ],
+    )]
+    #[case::multibyte_letters(
+        "\u{e9}".repeat(MAX_PATTERN_BYTES / 2),
+        vec!["/d/".to_string() + &"\u{e9}".repeat(MAX_PATTERN_BYTES / 2)],
+        vec!["/d/".to_string() + &"\u{e9}".repeat(MAX_PATTERN_BYTES / 2 - 1) + "\u{e8}"],
+    )]
+    fn file_patterns_at_the_pattern_limit_agree_with_the_backtracking_matcher(
+        #[case] pattern: String,
+        #[case] matching: Vec<String>,
+        #[case] missing: Vec<String>,
+    ) {
+        assert_eq!(pattern.len(), MAX_PATTERN_BYTES);
+        let patterns = file_patterns(&[&pattern]);
+        let excluding = file_patterns(&["**", &format!("!{pattern}")]);
+        for (paths, expected) in [(&matching, true), (&missing, false)] {
+            for path in paths {
+                assert!(path.len() <= MAX_PATH_BYTES);
+                assert_eq!(
+                    anywhere_reference(&pattern, path),
+                    expected,
+                    "the reference"
+                );
+                assert_eq!(patterns.matches(path), expected, "{path}");
+                assert_eq!(excluding.matches(path), !expected, "excluding {path}");
+            }
+        }
+    }
+
     mod glob_properties {
         use proptest::prelude::*;
 
@@ -1103,6 +1315,25 @@ mod tests {
                 pattern in "[ab\u{e9}*/!.]{0,9}",
                 text in "[ab\u{e9}/!.]{0,12}",
             ) {
+                prop_assert_eq!(
+                    glob_matches(&pattern, &text),
+                    backtracking_glob_matches(pattern.as_bytes(), text.as_bytes()),
+                    "{} on {}", pattern, text
+                );
+            }
+
+            /// With a literal suffix that ends the text too, the matcher still
+            /// agrees with the backtracking matcher: the suffix never skips
+            /// the simulation, and a `/` folded into a `**/` before it is not
+            /// part of it.
+            #[test]
+            fn glob_matches_agrees_with_the_backtracking_matcher_when_a_literal_ends_the_text(
+                body in "[ab*/]{0,6}",
+                suffix in prop::sample::select(vec![".y", "b", "/b", "\u{e9}", "a.yaml"]),
+                text_body in "[ab/.\u{e9}]{0,12}",
+            ) {
+                let pattern = format!("{body}{suffix}");
+                let text = format!("{text_body}{suffix}");
                 prop_assert_eq!(
                     glob_matches(&pattern, &text),
                     backtracking_glob_matches(pattern.as_bytes(), text.as_bytes()),
@@ -1155,15 +1386,9 @@ mod tests {
             ) {
                 let glob = pattern.strip_prefix('/').unwrap_or(&pattern);
                 prop_assume!(!glob.is_empty());
-                let starts = std::iter::once(0).chain(
-                    text.match_indices('/').map(|(i, _)| i + 1),
-                );
-                let expected = starts.into_iter().any(|start| {
-                    backtracking_glob_matches(glob.as_bytes(), &text.as_bytes()[start..])
-                });
                 prop_assert_eq!(
                     file_patterns(&[&pattern]).matches(&text),
-                    expected,
+                    anywhere_reference(glob, &text),
                     "{} on {}", pattern, text
                 );
             }
