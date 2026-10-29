@@ -9,6 +9,7 @@
     reason = "bench fixture compiled into multiple binaries; each uses a subset"
 )]
 
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use rlsp_yaml::schema::{JsonSchema, ParsedSchema, SchemaType};
@@ -233,13 +234,39 @@ fn schemastore_url(index: usize) -> String {
     format!("https://json.schemastore.org/svc{index:04}.json")
 }
 
+/// Entry that carries the one `!` pattern, next to its own `**/svc0349.yaml`
+/// pattern so that the exclusion has something to exclude.
+const SCHEMASTORE_EXCLUSION_ENTRY: usize = 349;
+
+/// Entry that carries the one pattern with a leading `/`.
+const SCHEMASTORE_ROOTED_ENTRY: usize = 351;
+
+/// Patterns that follow an entry's YAML and JSON patterns: the shapes that
+/// cost more once the catalog is matched by the upstream rules, because they
+/// have no leading `**/` to reject a path early or are not YAML-named.
+fn schemastore_extra_patterns(i: usize) -> Vec<String> {
+    let shape = match i % 5 {
+        0 => Some(format!("deploy{i:04}/*.yml")),
+        1 => Some(format!(".svc{i:04}rc")),
+        2 => Some(format!("*.svc{i:04}.toml")),
+        _ => None,
+    };
+    let exclusion = (i == SCHEMASTORE_EXCLUSION_ENTRY).then(|| format!("!legacy/svc{i:04}.yaml"));
+    let rooted = (i == SCHEMASTORE_ROOTED_ENTRY).then(|| format!("/deploy/svc{i:04}.yml"));
+    shape.into_iter().chain(exclusion).chain(rooted).collect()
+}
+
 /// A synthetic `SchemaStore` catalog in the shape the real one has.
 ///
-/// 700 entries hold 1 500 YAML patterns (three in the first 100 entries, two in
-/// the rest) and 20 non-YAML patterns (one in each of the first 20 entries). A
-/// pattern's shape follows `(entry + position) % 6`, so each shape of the real
-/// catalog is present. Every pattern names its entry, so no two entries match
-/// the same path.
+/// 700 entries hold 1 500 plain YAML patterns (three in the first 100 entries,
+/// two in the rest) and 20 JSON patterns (one in each of the first 20 entries).
+/// A plain YAML pattern's shape follows `(entry + position) % 6`, so each shape
+/// of the real catalog is present. Of every five entries, the first three add a
+/// `<dir>/*.yml` pattern, a `.<tool>rc` pattern, and a `*.toml` pattern in
+/// turn, and two entries add the one `!` pattern and the one pattern with a
+/// leading `/`.
+/// Every pattern names its entry's index, so no two entries match the same
+/// path and no generic pattern can match one of the bench paths below.
 #[must_use]
 pub fn schemastore_catalog_json() -> Value {
     let schemas: Vec<Value> = (0..SCHEMASTORE_ENTRIES)
@@ -258,6 +285,7 @@ pub fn schemastore_catalog_json() -> Value {
             if i < 20 {
                 file_match.push(format!("**/svc{i:04}.json"));
             }
+            file_match.extend(schemastore_extra_patterns(i));
             serde_json::json!({
                 "name": format!("Service {i:04}"),
                 "url": schemastore_url(i),
@@ -270,32 +298,70 @@ pub fn schemastore_catalog_json() -> Value {
     catalog
 }
 
-/// Panic unless `catalog` has the documented 700 entries with 1 500 YAML and
-/// 20 non-YAML patterns, each entry holding at least one YAML pattern.
+/// The kind of a catalog pattern, as the shape check counts them.
+fn schemastore_pattern_kind(pattern: &str) -> &'static str {
+    let extension = pattern.rsplit('.').next();
+    if pattern.starts_with('!') {
+        "exclusion"
+    } else if pattern.starts_with('/') {
+        "rooted"
+    } else if matches!(extension, Some("json" | "jsonc" | "json5")) {
+        "json"
+    } else if pattern.starts_with("deploy") && pattern.ends_with("/*.yml") {
+        "directory_yml"
+    } else if matches!(extension, Some("yaml" | "yml")) {
+        "yaml"
+    } else {
+        "other"
+    }
+}
+
+/// Panic unless `catalog` has the documented 700 entries and pattern counts,
+/// each entry holding at least one plain YAML pattern and every pattern naming
+/// its entry's index.
 #[expect(
     clippy::expect_used,
     reason = "bench setup; a malformed fixture must stop the run"
 )]
 fn assert_catalog_shape(catalog: &Value) {
-    let (mut yaml, mut other) = (0, 0);
+    let mut kinds: BTreeMap<&str, usize> = BTreeMap::new();
     let entries = catalog["schemas"].as_array().expect("schemas is an array");
     assert_eq!(entries.len(), SCHEMASTORE_ENTRIES);
-    for entry in entries {
-        let patterns = entry["fileMatch"]
+    for (i, entry) in entries.iter().enumerate() {
+        let patterns: Vec<&str> = entry["fileMatch"]
             .as_array()
-            .expect("fileMatch is an array");
-        let entry_yaml = patterns
+            .expect("fileMatch is an array")
             .iter()
-            .filter(|p| {
-                let p = p.as_str().expect("fileMatch holds strings");
-                matches!(p.rsplit('.').next(), Some("yaml" | "yml"))
-            })
-            .count();
-        assert!(entry_yaml > 0, "every entry keeps a YAML pattern");
-        yaml += entry_yaml;
-        other += patterns.len() - entry_yaml;
+            .map(|p| p.as_str().expect("fileMatch holds strings"))
+            .collect();
+        let index = format!("{i:04}");
+        assert!(
+            patterns.iter().all(|p| p.contains(&index)),
+            "every pattern names its entry"
+        );
+        let entry_kinds: Vec<&str> = patterns
+            .iter()
+            .map(|p| schemastore_pattern_kind(p))
+            .collect();
+        assert!(
+            entry_kinds.contains(&"yaml"),
+            "every entry keeps a plain YAML pattern"
+        );
+        for kind in entry_kinds {
+            *kinds.entry(kind).or_default() += 1;
+        }
     }
-    assert_eq!((yaml, other), (1_500, 20));
+    assert_eq!(
+        kinds,
+        BTreeMap::from([
+            ("directory_yml", 140),
+            ("exclusion", 1),
+            ("json", 20),
+            ("other", 280),
+            ("rooted", 1),
+            ("yaml", 1_500),
+        ])
+    );
 }
 
 /// A path that only the last fifth of the catalog matches, and the URL of the
@@ -327,9 +393,19 @@ pub fn schemastore_deep_path() -> String {
     path
 }
 
-/// A path that only a non-YAML catalog pattern matches.
+/// An absolute `.yml` path that no catalog entry matches. It ends in `.yml`,
+/// the trailing literal of the `<dir>/*.yml` patterns, so a trailing-literal
+/// check does not reject those patterns before they run. Every pattern names
+/// its entry's index and this path names none, so no rule that reads the
+/// patterns can match it.
 #[must_use]
-pub fn schemastore_non_yaml_only_path() -> String {
+pub fn schemastore_yml_no_match_path() -> String {
+    "/workspace/projects/app/config.yml".to_string()
+}
+
+/// A path that only a JSON-family catalog pattern names.
+#[must_use]
+pub fn schemastore_json_only_path() -> String {
     "/workspace/projects/app/svc0003.json".to_string()
 }
 

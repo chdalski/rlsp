@@ -176,6 +176,7 @@ fn bench_schema_glob_matching(c: &mut Criterion) {
     let (late_path, late_url) = fixtures::schemastore_late_match();
     let no_match_path = fixtures::schemastore_no_match_path();
     let deep_path = fixtures::schemastore_deep_path();
+    let yml_no_match_path = fixtures::schemastore_yml_no_match_path();
     assert_eq!(deep_path.len(), 200);
 
     // Each path must measure what its ID says; a generator change that breaks
@@ -183,10 +184,11 @@ fn bench_schema_glob_matching(c: &mut Criterion) {
     assert_eq!(match_schemastore(&late_path, &catalog), Some(late_url));
     assert_eq!(match_schemastore(&no_match_path, &catalog), None);
     assert_eq!(match_schemastore(&deep_path, &catalog), None);
+    assert_eq!(match_schemastore(&yml_no_match_path, &catalog), None);
     assert_eq!(
-        match_schemastore(&fixtures::schemastore_non_yaml_only_path(), &catalog),
+        match_schemastore(&fixtures::schemastore_json_only_path(), &catalog),
         None,
-        "non-YAML patterns must be dropped when the catalog loads"
+        "JSON-family patterns must be dropped when the catalog loads"
     );
 
     let schemas: BTreeMap<String, FilePatterns> = fixtures::workspace_schemas()
@@ -215,6 +217,7 @@ fn bench_schema_glob_matching(c: &mut Criterion) {
         ("schemastore_no_match", &no_match_path),
         ("schemastore_late_match", &late_path),
         ("schemastore_deep_path_200_bytes", &deep_path),
+        ("schemastore_yml_no_match", &yml_no_match_path),
     ] {
         group.bench_function(name, |b| {
             b.iter(|| match_schemastore(black_box(path), black_box(&catalog)));

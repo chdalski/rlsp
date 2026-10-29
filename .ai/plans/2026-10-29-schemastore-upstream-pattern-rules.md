@@ -44,7 +44,7 @@ the glob mode that nothing uses afterwards.
 - [x] Design review of the approach
 - [x] Task 1: `FilePatterns` separates its pattern rules from the
       settings bounds
-- [ ] Task 2: the benchmark catalog contains the shapes the new rules
+- [x] Task 2: the benchmark catalog contains the shapes the new rules
       make costly
 - [ ] Task 3: SchemaStore patterns follow the upstream rules
 - [ ] Task 4: the unused plain glob mode is gone
@@ -82,19 +82,19 @@ The benchmark catalog's patterns all end in literals that the trailing-
 literal check rejects at once, so it would not show what the new rules
 cost. The matcher is unchanged.
 
-- [ ] The synthetic catalog in `benches/fixtures/mod.rs` also contains
+- [x] The synthetic catalog in `benches/fixtures/mod.rs` also contains
       patterns of the shape `<dir>/*.yml`, patterns that are neither
       JSON-family nor `.yml`/`.yaml` (such as `.<tool>rc` or `*.toml`),
       one `!` pattern, and one pattern with a leading `/`, and its shape
       check covers them
-- [ ] A new benchmark in the `schema_glob_matching` group scans the
+- [x] A new benchmark in the `schema_glob_matching` group scans the
       catalog for a `.yml` path that no entry matches
-- [ ] The fixture path `schemastore_non_yaml_only_path` becomes a path
+- [x] The fixture path `schemastore_non_yaml_only_path` becomes a path
       that only JSON-family patterns name, and its name, its doc
       comment, and the assertion message that uses it say so
-- [ ] `cargo bench --bench hot_path` runs the `schema_glob_matching`
+- [x] `cargo bench --bench hot_path` runs the `schema_glob_matching`
       group to completion, its setup assertions holding
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 3: Match SchemaStore patterns by the upstream rules
 
