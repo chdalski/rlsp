@@ -4,7 +4,7 @@ description: "Open work queue: schema plan order, rlsp-yaml follow-ups, parser b
 metadata:
   type: project
   originSessionId: 1d09bc1e-8453-49ff-a3b4-6f7a66d0a9d7
-  modified: 2026-10-29T15:46:17.740Z
+  modified: 2026-10-29T16:05:37.851Z
 ---
 
 <!-- Only track open items here. Completed work lives in its plan file
@@ -37,6 +37,8 @@ metadata:
 
 - **Replace `WORKLIST.md` + `SKIP_LIST` with `#[ignore]`** (user preference, 2026-04-18; never planned): the shrink-only skip-list machinery is heavier than needed. Delete `rlsp-yaml/tests/corpus/WORKLIST.md`, remove `SKIP_LIST` and its matching logic from `tests/corpus_invariants/shared.rs` (empty since April), rewrite the top-of-file comment in `tests/corpus_invariants/main.rs` to "no known failures; fix a new one or `#[ignore]` it with a plan reference". The harness is already split into one test per invariant (2026-05-20 plan), so per-test `#[ignore]` works. If the corpus expansion above lands first, its new failures go through `#[ignore]` instead of the Surprise Failure Protocol.
 ## Open: rlsp-yaml-parser
+
+- **Comment line folded into a plain scalar (verified 2026-10-29, not yet put to the user).** `parse_events` turns `a: v\n  # d\nb: 1\n` into the scalar `"v # d"`. The same happens for `a:\n  v\n  # d`, for multi-line `v w # d`, and for `- v\n  # d`. Per YAML 1.2.2 `ns-plain-char`, a `#` preceded by whitespace (here the indentation) cannot continue a plain scalar, so `# d` is a comment and the value is `v`. This affects every server feature that reads values; the formatter would rewrite it as `a: v # d`. Found by the test-engineer during the comment-run-stack plan. It needs its own plan and a yaml-test-suite check.
 
 - create bindings for python - https://pyo3.rs and typescript (wasm)
 
