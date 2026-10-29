@@ -4,7 +4,7 @@ description: "Open work queue: schema plan order, rlsp-yaml follow-ups, parser b
 metadata:
   type: project
   originSessionId: 1d09bc1e-8453-49ff-a3b4-6f7a66d0a9d7
-  modified: 2026-10-29T15:20:00.000Z
+  modified: 2026-10-29T15:46:17.740Z
 ---
 
 <!-- Only track open items here. Completed work lives in its plan file
@@ -13,6 +13,10 @@ metadata:
 
 ## Open: rlsp-yaml
 
+- **Loader stack overflows (verified 2026-10-29 with a scratch probe; outcome put to the user, decision pending).**
+  - (a) Server crash, lossless mode: the `Event::Comment` arm of `parse_node` (`rlsp-yaml-parser/src/loader.rs`) recurses once per comment between a mapping key and its value, with no depth check. The release server binary aborts (SIGABRT, `thread 'main' has overflowed its stack`) on didOpen of `key:\n` + 20 000 × `  # c\n` + `  sub: v\n` (120 KB); 5 000 lines survive. A loader on a 2 MiB thread already crashes at 5 000 lines. Comments before a key (`consume_leading_comments` loop) and `parse_events` alone handle 1 000 000 lines fine.
+  - (b) Resolved mode (library only): `max_nesting_depth` does not bound the expanded tree. Anchor chains (`aK: &aK [[…[*aK-1]…]]`, 500 brackets each) yield depth 1501 from 4 anchors (returned OK at limit 512). 20 anchors (≈20 KB, far below `max_expanded_nodes`) overflow a release build even on an 8 MiB stack. `expand_node`, derived `Clone` (`register_anchor`, `resolve_alias`) and `Drop` all recurse over the expanded depth.
+  - Code reading only, not verified: the `in_progress` cycle check and the "Accepted risks" note look unreachable from `load()`, since `anchor_map` stores already-expanded trees registered after the node completes.
 - **Schema plan queue (one plan at a time, in this order).** Each needs its own clarification + plan. Order: 3c (iterative loader) is to be discussed with the user next, not planned yet:
   3c. Iterative loader in `rlsp-yaml-parser` (user chose 2026-10-28 to queue it): `LoadState::parse_node` in `rlsp-yaml-parser/src/loader.rs` recurses per nesting level, about 6 KiB per level in unoptimized/coverage builds (depth 100 ≈ 1 MiB, 510 ≈ 6 MiB; release ≈ 0.5 MiB at 510). A finished WIP rewrite (heap stack of open collections, byte-identical `load()` Debug output on 2644 inputs in 3 modes, debug stack ≈ 95 KiB at depth 510, release `load` ≈ 5–8% slower) is on the local-only branch `wip/iterative-loader` (adff1074). Needs its own plan: published crate, yaml-test-suite conformance for `load()`, the test-engineer's budget tests (512/513 levels per collection kind, depth balance across documents, `max_nesting_depth(0)`), and resolved-mode recursion in `register_anchor`/`expand_node` measured.
   4. Bound the thread-local `REGEX_CACHE` and run `validate_schema` off the async executor (`spawn_blocking`). The cache now lives in `src/schema/pattern.rs` (shared by validation and the path resolver). Moving validation to `spawn_blocking` spreads thread-local caches over the blocking pool, so a bounded process-wide cache may fit better.
