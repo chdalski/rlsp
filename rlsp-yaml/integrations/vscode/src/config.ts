@@ -12,7 +12,7 @@ export interface ServerSettings {
   formatBracketSpacing: boolean;
   httpProxy: string;
   colorDecorators: boolean;
-  schemas: Record<string, string>;
+  schemas: Record<string, string | string[]>;
   yamlVersion: string;
   validate: boolean;
   flowStyle: string;
@@ -22,6 +22,9 @@ export interface ServerSettings {
   formatIndentSequences: boolean;
   formatEnable: boolean;
   formatRespectEditorconfig: boolean;
+  hover: boolean;
+  completion: boolean;
+  maxItemsComputed: number;
 }
 
 export function getConfig(): ServerSettings {
@@ -43,7 +46,7 @@ export function getConfig(): ServerSettings {
     formatBracketSpacing: cfg.get('formatBracketSpacing', true),
     httpProxy: cfg.get('httpProxy', ''),
     colorDecorators: cfg.get('colorDecorators', true),
-    schemas: cfg.get<Record<string, string>>('schemas', {}),
+    schemas: cfg.get<Record<string, string | string[]>>('schemas', {}),
     yamlVersion: cfg.get<string>('yamlVersion', '1.2'),
     validate: cfg.get<boolean>('validate', true),
     flowStyle: cfg.get<string>('flowStyle', 'warning'),
@@ -53,5 +56,8 @@ export function getConfig(): ServerSettings {
     formatIndentSequences: cfg.get<boolean>('formatIndentSequences', true),
     formatEnable: cfg.get<boolean>('formatEnable', true),
     formatRespectEditorconfig: cfg.get<boolean>('formatRespectEditorconfig', true),
+    hover: cfg.get<boolean>('hover', true),
+    completion: cfg.get<boolean>('completion', true),
+    maxItemsComputed: cfg.get<number>('maxItemsComputed', 5000),
   };
 }

@@ -46,7 +46,7 @@ offer the three settings it reads but the extension leaves out
 - [x] Design review of the approach
 - [x] Task 1: the server accepts and matches `schemas` in the upstream
       forms
-- [ ] Task 2: the VS Code settings schema matches the server and offers
+- [x] Task 2: the VS Code settings schema matches the server and offers
       `hover`, `completion`, and `maxItemsComputed`
 - [ ] Push to `main` and confirm the full CI matrix is green
 
@@ -114,33 +114,33 @@ decides the width. A test in `rlsp-yaml/src/schema/association.rs`
 already reads `package.json` to check the `kubernetesVersion` pattern
 against the server.
 
-- [ ] In `package.json`, `formatPrintWidth` and `maxItemsComputed` are
+- [x] In `package.json`, `formatPrintWidth` and `maxItemsComputed` are
       non-negative integers, `hover` and `completion` are booleans with
       default `true`, and `maxItemsComputed` has default `5000`
-- [ ] In `package.json`, a `schemas` value is a glob string or an array
+- [x] In `package.json`, a `schemas` value is a glob string or an array
       of glob strings with at least one positive pattern — positive as
       in the upstream pattern rules of Task 1: not starting with `!`,
       and not empty once one leading `/` is stripped — in a form that
       the server's own JSON Schema validator can evaluate
-- [ ] `getConfig()` sends `hover`, `completion`, and `maxItemsComputed`,
+- [x] `getConfig()` sends `hover`, `completion`, and `maxItemsComputed`,
       and types `schemas` values as a string or an array of strings
-- [ ] A Rust test pins that every key the settings reader reads is
+- [x] A Rust test pins that every key the settings reader reads is
       declared in `package.json` with the matching type: boolean,
       non-negative integer, string, array of strings for `customTags`,
       object for `schemas`
-- [ ] A Rust test pins that the `schemas` value schema in `package.json`
+- [x] A Rust test pins that the `schemas` value schema in `package.json`
       and the server's pattern rules accept and reject the same samples:
       every case of Task 1's unit tests, an empty array, an array with a
       non-string element, a lone string, and an array with positive and
       `!` patterns
-- [ ] A TypeScript test pins that `getConfig()` sends every declared
+- [x] A TypeScript test pins that `getConfig()` sends every declared
       setting except `server.path` and `formatPrintWidth` with the
       manifest's default when the user sets nothing, and the existing
       tests that pin `formatPrintWidth` absent when unset pass with
       their assertions unchanged
-- [ ] The VS Code integration test of configuration defaults covers
+- [x] The VS Code integration test of configuration defaults covers
       `hover`, `completion`, and `maxItemsComputed`
-- [ ] Typecheck, lint, format, unit tests, and integration tests pass
+- [x] Typecheck, lint, format, unit tests, and integration tests pass
 
 ## Non-Goals
 
@@ -188,3 +188,9 @@ against the server.
     stays the second line of defense.
 - **The new VS Code settings take the server's defaults:** `hover` and
   `completion` `true`, `maxItemsComputed` `5000`.
+- **The manifest carries the bounds JSON Schema can express exactly:**
+  `maxItems: 32` for a `schemas` array; the per-pattern byte bound
+  (bytes after stripping) and the total of patterns across entries
+  cannot be expressed in JSON Schema and are named in the `schemas`
+  description only, so the server's Warning stays the only check for
+  them.

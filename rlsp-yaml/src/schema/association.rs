@@ -1672,14 +1672,8 @@ mod tests {
     /// validator accept the same values (the settings-sync rule).
     #[test]
     fn vscode_kubernetes_version_pattern_agrees_with_the_server() {
-        let manifest_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("integrations/vscode/package.json");
-        let manifest: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(manifest_path).expect("package.json is readable"),
-        )
-        .expect("package.json is JSON");
-        let setting =
-            &manifest["contributes"]["configuration"]["properties"]["rlsp-yaml.kubernetesVersion"];
+        let properties = crate::test_utils::vscode_manifest_properties();
+        let setting = &properties["rlsp-yaml.kubernetesVersion"];
         let pattern = setting["pattern"]
             .as_str()
             .expect("kubernetesVersion declares a pattern");

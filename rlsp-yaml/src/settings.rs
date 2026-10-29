@@ -495,6 +495,23 @@ mod tests {
             "formatEnable": false,
             "formatRespectEditorconfig": false,
         });
+        // Closes the chain from `Settings` to the manifest: a new field fails to
+        // compile in the literal below, which forces a key into this sample,
+        // which fails here until `all_keys()` lists it, which the manifest
+        // test then requires the extension to declare.
+        let mut sample_keys: Vec<&str> = json
+            .as_object()
+            .expect("the sample is an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        sample_keys.sort_unstable();
+        let mut keys = all_keys();
+        keys.sort_unstable();
+        assert_eq!(
+            sample_keys, keys,
+            "the non-default sample and all_keys() list the same settings"
+        );
         let settings: Settings = serde_json::from_value(json).unwrap();
         assert_eq!(
             settings,
@@ -1436,6 +1453,325 @@ mod tests {
             let read = read(&Value::Object(object));
             prop_assert!(read.rejections.len() <= MAX_LISTED_REJECTIONS);
             prop_assert!(read.rejections.iter().all(|r| keys.contains(&r.setting)));
+        }
+    }
+
+    /// The VS Code manifest and the settings reader agree (the settings-sync
+    /// rule): the manifest declares the settings the reader reads, with the
+    /// reader's types, and its `schemas` value schema flags what the reader
+    /// drops. The manifest is evaluated with the server's own JSON Schema
+    /// validator.
+    mod vscode_manifest {
+        use super::*;
+        use crate::schema::parse_schema;
+        use crate::schema_validation::{Completeness, validate_schema};
+        use crate::server::{Backend, YamlVersion};
+        use crate::test_utils::{vscode_manifest, vscode_manifest_properties};
+
+        const SCHEMA_URL: &str = "https://a.test/s.json";
+
+        fn declared(key: &str) -> Map<String, Value> {
+            vscode_manifest_properties()
+                .get(&format!("rlsp-yaml.{key}"))
+                .unwrap_or_else(|| panic!("the manifest declares {key}"))
+                .as_object()
+                .expect("a setting is an object")
+                .clone()
+        }
+
+        /// Whether the manifest's schema for `key` accepts `instance`.
+        fn manifest_accepts(key: &str, instance: &Value) -> bool {
+            let schema = parse_schema(&Value::Object(declared(key)))
+                .unwrap_or_else(|error| panic!("the schema of {key} parses: {error:?}"));
+            // Load from text: a parse failure would leave no document, and a
+            // run over no document accepts everything.
+            let docs = rlsp_yaml_parser::load(&instance.to_string())
+                .unwrap_or_else(|error| panic!("{instance} loads as YAML: {error:?}"));
+            assert_eq!(docs.len(), 1, "{instance}");
+            let validation = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+            assert_eq!(
+                validation.completeness,
+                Completeness::Complete,
+                "{instance}"
+            );
+            validation.diagnostics.is_empty()
+        }
+
+        /// Whether the reader takes `value` for `key` without a rejection.
+        fn reader_accepts(key: &str, value: &Value) -> bool {
+            let rejections = read(&json!({ key: value })).rejections;
+            assert!(rejections.len() <= 1, "{rejections:?}");
+            rejections.is_empty()
+        }
+
+        #[test]
+        fn manifest_declares_exactly_the_settings_the_reader_reads() {
+            let mut keys: Vec<String> = vscode_manifest_properties()
+                .keys()
+                .map(|key| {
+                    key.strip_prefix("rlsp-yaml.")
+                        .unwrap_or_else(|| panic!("{key} lacks the rlsp-yaml. prefix"))
+                        .to_string()
+                })
+                .collect();
+            // Read by the extension itself, not by the server's settings reader.
+            let server_path = keys.iter().position(|key| key == "server.path");
+            keys.remove(server_path.expect("the manifest declares server.path"));
+            keys.sort_unstable();
+            let mut read_keys: Vec<String> = all_keys().into_iter().map(str::to_string).collect();
+            read_keys.sort_unstable();
+
+            assert_eq!(keys, read_keys);
+        }
+
+        #[test]
+        fn manifest_types_match_the_reader_kind_of_each_key() {
+            for key in BOOLEAN_KEYS {
+                let setting = declared(key);
+                assert_eq!(setting["type"], "boolean", "{key}");
+                assert!(setting["default"].is_boolean(), "{key}");
+            }
+            for key in COUNT_KEYS {
+                let setting = declared(key);
+                assert_eq!(setting["type"], "integer", "{key}");
+                assert_eq!(setting["minimum"], 0, "{key}");
+                assert!(setting["default"].is_u64(), "{key}");
+            }
+            for key in TEXT_KEYS {
+                let setting = declared(key);
+                assert_eq!(setting["type"], "string", "{key}");
+                assert!(setting["default"].is_string(), "{key}");
+            }
+            let custom_tags = declared("customTags");
+            assert_eq!(custom_tags["type"], "array");
+            assert_eq!(custom_tags["items"]["type"], "string");
+            assert_eq!(custom_tags["default"], json!([]));
+            let schemas = declared("schemas");
+            assert_eq!(schemas["type"], "object");
+            assert_eq!(schemas["default"], json!({}));
+        }
+
+        #[test]
+        fn manifest_defaults_of_hover_completion_and_max_items_computed_are_the_server_defaults() {
+            let (service, _) = tower_lsp::LspService::new(Backend::new);
+            let backend = service.inner();
+
+            assert_eq!(
+                declared("hover")["default"],
+                json!(backend.get_hover_enabled())
+            );
+            assert_eq!(
+                declared("completion")["default"],
+                json!(backend.get_completion_enabled())
+            );
+            assert_eq!(
+                declared("maxItemsComputed")["default"],
+                json!(backend.get_max_items_computed())
+            );
+            assert_eq!(declared("formatPrintWidth")["default"], json!(80));
+        }
+
+        /// A sample is a type-level one: the manifest and the reader must
+        /// judge it alike. The samples leave out `null` (the reader takes it
+        /// as "not set", the manifest reports it) and the floats `80.0` and
+        /// `1e3` (the reader refuses them, but the client serialises them as
+        /// the integers `80` and `1000`). The value of a text setting is not
+        /// sampled either: the manifest restricts `flowStyle`, `duplicateKeys`,
+        /// `yamlVersion` and `kubernetesVersion` further than the reader does.
+        #[test]
+        fn manifest_and_reader_judge_type_level_samples_alike() {
+            let samples: [(&[&str], Vec<Value>); 4] = [
+                (
+                    &BOOLEAN_KEYS,
+                    vec![
+                        json!(true),
+                        json!(false),
+                        json!("true"),
+                        json!(1),
+                        json!([]),
+                        json!({}),
+                    ],
+                ),
+                (
+                    &COUNT_KEYS,
+                    vec![
+                        json!(0),
+                        json!(80),
+                        json!(-1),
+                        json!(1.5),
+                        json!("80"),
+                        json!(true),
+                        json!([]),
+                        json!({}),
+                    ],
+                ),
+                (
+                    &TEXT_KEYS,
+                    vec![json!(1), json!(true), json!([]), json!({})],
+                ),
+                (
+                    &["customTags"],
+                    vec![json!([]), json!(["!a"]), json!([1]), json!("!a"), json!({})],
+                ),
+            ];
+            for (keys, values) in samples {
+                for key in keys {
+                    for value in &values {
+                        assert_eq!(
+                            manifest_accepts(key, value),
+                            reader_accepts(key, value),
+                            "{key}: {value}"
+                        );
+                    }
+                }
+            }
+            for value in [json!(""), json!("x")] {
+                assert!(manifest_accepts("httpProxy", &value));
+                assert!(reader_accepts("httpProxy", &value));
+            }
+        }
+
+        fn many(glob: &str, count: usize) -> Value {
+            Value::Array(vec![json!(glob); count])
+        }
+
+        /// Values of one `schemas` entry that both sides accept.
+        fn accepted_entries() -> Vec<Value> {
+            vec![
+                json!("x"),
+                json!("*.yaml"),
+                json!("/x"),
+                json!("//"),
+                json!("/!x"),
+                json!(["x"]),
+                json!(["x", "!y"]),
+                json!(["!y", "x"]),
+                json!(["x", "!"]),
+                json!(["x", ""]),
+                json!(["x", "!!x"]),
+                json!(["x", "/"]),
+                json!(["**", "!/x"]),
+                json!(["/!x"]),
+                Value::Array(
+                    std::iter::once(json!("x"))
+                        .chain(std::iter::repeat_n(json!(""), 31))
+                        .collect(),
+                ),
+                // `.` in the manifest pattern would refuse these where the
+                // server accepts them; whether JavaScript agrees on `\r` and
+                // U+2028 rests on the pattern text alone.
+                json!("\n"),
+                json!("/\n"),
+                json!("/\r"),
+                json!("/ "),
+                json!("/\u{2028}"),
+                json!("/\u{2029}"),
+                json!("/é"),
+                json!("/😀"),
+                many("x", 32),
+            ]
+        }
+
+        /// Values of one `schemas` entry that both sides refuse. The limits
+        /// of 256 bytes per glob and 512 globs in total are left out: JSON
+        /// Schema cannot express them exactly (see the manifest description),
+        /// and the reader tests cover them.
+        fn rejected_entries() -> Vec<Value> {
+            let mut thirty_three_but_one = vec![json!(""); 32];
+            thirty_three_but_one.push(json!("x"));
+            vec![
+                json!(""),
+                json!("/"),
+                json!("!x"),
+                json!("!"),
+                json!("!!x"),
+                json!("!/x"),
+                json!("!/"),
+                json!([]),
+                json!(["!x", "!y"]),
+                json!([""]),
+                json!(["/"]),
+                json!(["!"]),
+                json!(["!/"]),
+                json!(["", "/", "!", "!/"]),
+                json!(["x", 5]),
+                json!([5]),
+                json!([["x"]]),
+                json!([null, "x"]),
+                json!(5),
+                json!(null),
+                json!(true),
+                json!({}),
+                many("x", 33),
+                Value::Array(thirty_three_but_one),
+            ]
+        }
+
+        #[test]
+        fn manifest_and_reader_judge_the_entries_of_schemas_alike() {
+            for (entries, expected) in [(accepted_entries(), true), (rejected_entries(), false)] {
+                for entry in entries {
+                    let value = json!({ SCHEMA_URL: entry });
+                    assert_eq!(manifest_accepts("schemas", &value), expected, "{entry}");
+                    assert_eq!(reader_accepts("schemas", &value), expected, "{entry}");
+                    assert_eq!(
+                        read(&json!({ "schemas": value })).settings.schemas.len(),
+                        usize::from(expected),
+                        "{entry}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn manifest_and_reader_judge_whole_schemas_objects_alike() {
+            let overlapping = json!({
+                "https://a.test/s.json": "*.yaml",
+                "https://b.test/s.json": ["**", "!x"],
+            });
+            assert!(manifest_accepts("schemas", &overlapping));
+            assert!(reader_accepts("schemas", &overlapping));
+            assert_eq!(
+                read(&json!({ "schemas": overlapping }))
+                    .settings
+                    .schemas
+                    .len(),
+                2
+            );
+
+            let one_faulty = json!({
+                "https://a.test/s.json": "*.yaml",
+                "https://b.test/s.json": ["!x"],
+            });
+            assert!(!manifest_accepts("schemas", &one_faulty));
+            let read = read(&json!({ "schemas": one_faulty }));
+            assert_eq!(read.rejections.len(), 1);
+            assert_eq!(read.settings.schemas.len(), 1);
+        }
+
+        #[test]
+        fn manifest_and_reader_refuse_a_schemas_value_that_is_not_an_object() {
+            for value in [json!("x"), json!(5), json!(true), json!(["x"]), json!([])] {
+                assert!(!manifest_accepts("schemas", &value), "{value}");
+                assert!(!reader_accepts("schemas", &value), "{value}");
+            }
+        }
+
+        #[test]
+        fn manifest_and_reader_accept_an_empty_schema_url() {
+            let value = json!({ "": "x" });
+            assert!(manifest_accepts("schemas", &value));
+            assert!(reader_accepts("schemas", &value));
+        }
+
+        #[test]
+        fn manifest_restricts_only_the_server_path_in_untrusted_workspaces() {
+            let manifest = vscode_manifest();
+
+            assert_eq!(
+                manifest["capabilities"]["untrustedWorkspaces"]["restrictedConfigurations"],
+                json!(["rlsp-yaml.server.path"])
+            );
         }
     }
 }

@@ -53,11 +53,32 @@ suite('configuration defaults', () => {
   test('schemas defaults to empty object', () => {
     assert.deepStrictEqual(cfg().get('schemas'), {});
   });
+
+  test('hover defaults to true', () => {
+    assert.strictEqual(cfg().get('hover'), true);
+  });
+
+  test('completion defaults to true', () => {
+    assert.strictEqual(cfg().get('completion'), true);
+  });
+
+  test('maxItemsComputed defaults to 5000', () => {
+    assert.strictEqual(cfg().get('maxItemsComputed'), 5000);
+  });
 });
 
 suite('configuration type correctness', () => {
   test('customTags value is an array', () => {
     assert.strictEqual(Array.isArray(cfg().get('customTags')), true);
+  });
+
+  test('hover and completion values are booleans', () => {
+    assert.strictEqual(typeof cfg().get('hover'), 'boolean');
+    assert.strictEqual(typeof cfg().get('completion'), 'boolean');
+  });
+
+  test('maxItemsComputed value is an integer', () => {
+    assert.strictEqual(Number.isInteger(cfg().get('maxItemsComputed')), true);
   });
 
   test('schemas value is a plain object', () => {

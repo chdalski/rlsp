@@ -72,7 +72,8 @@
           "description": "Run validation on format"
         },
         "rlsp-yaml.formatPrintWidth": {
-          "type": "number",
+          "type": "integer",
+          "minimum": 0,
           "default": 80,
           "description": "Print width for formatting"
         },
@@ -139,7 +140,26 @@
         "rlsp-yaml.schemas": {
           "type": "object",
           "default": {},
-          "description": "Maps schema URLs to glob patterns for schema assignment"
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^([^!/]|/[\\s\\S])"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 32,
+                "contains": {
+                  "type": "string",
+                  "pattern": "^([^!/]|/[\\s\\S])"
+                }
+              }
+            ]
+          },
+          "description": "Maps schema URLs to the files they apply to. A value is one glob or an array of up to 32 globs. A glob starting with \"!\" excludes files. A leading \"/\" is ignored, and a glob matches at any directory level, as if it began with \"**/\". At least one glob must not start with \"!\" and must not be empty. An entry that breaks these rules, or a glob longer than 256 bytes, is ignored by the server with a warning, as are the entries beyond 512 globs in total."
         },
         "rlsp-yaml.yamlVersion": {
           "type": "string",
@@ -159,6 +179,22 @@
           "type": "boolean",
           "default": true,
           "description": "Enable the built-in YAML formatter. When false, textDocument/formatting, textDocument/rangeFormatting, and textDocument/onTypeFormatting return no edits. Diagnostics, hover, completion, and code actions remain active. See docs/configuration.md for interop notes."
+        },
+        "rlsp-yaml.hover": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable hover responses."
+        },
+        "rlsp-yaml.completion": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable completion responses."
+        },
+        "rlsp-yaml.maxItemsComputed": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 5000,
+          "description": "Maximum number of document symbols and folding ranges the server returns per document."
         },
         "rlsp-yaml.formatRespectEditorconfig": {
           "type": "boolean",
