@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-10-29)
 **Created:** 2026-10-29
 
 # Fast Schema Glob Matching
@@ -43,7 +43,7 @@ to measure before and after on bare metal.
       not cloned
 - [x] Task 3: a match allocates nothing within the stack bound and
       rejects early on the trailing literal
-- [ ] Push to `main` and confirm the full CI matrix is green
+- [x] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
