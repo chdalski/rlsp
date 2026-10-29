@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-10-29)
 **Created:** 2026-10-29
 
 # SchemaStore Patterns Follow the Upstream Rules
@@ -48,7 +48,7 @@ the glob mode that nothing uses afterwards.
       make costly
 - [x] Task 3: SchemaStore patterns follow the upstream rules
 - [x] Task 4: the unused plain glob mode is gone
-- [ ] Push to `main` and confirm the full CI matrix is green
+- [x] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
