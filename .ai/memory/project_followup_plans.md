@@ -4,7 +4,7 @@ description: "Open work queue: schema plan order, rlsp-yaml follow-ups, parser b
 metadata:
   type: project
   originSessionId: 1d09bc1e-8453-49ff-a3b4-6f7a66d0a9d7
-  modified: 2026-10-29T08:20:00.000Z
+  modified: 2026-10-29T09:25:00.000Z
 ---
 
 <!-- Only track open items here. Completed work lives in its plan file
@@ -23,6 +23,7 @@ metadata:
   8. Relative/local schemas (`$schema=./schema.json`, `file://`).
   Follow-ups surfaced during validate-kubernetes-schema-url, not yet put to the user: three existing tests in `tests/lsp_lifecycle/kubernetes_detection.rs` (`should_record_schema_association_for_kubernetes_manifest`, `should_use_configured_kubernetes_version_in_schema_url`, `should_record_kubernetes_schema_association_for_builtin_dotted_group`) start without the FakeProxy and reach raw.githubusercontent.com over the real network; new Kubernetes API groups need an entry in `BUILTIN_DOTTED_GROUPS` (association.rs) before auto-detection resolves them.
   Follow-ups from the 2026-10-28 tolerant-settings plan (reviewer/security Lows, not yet put to the user): `configuration.md` "Wrong settings" says a number "must be a non-negative whole number", yet `80.0` is rejected (say "integer without a decimal point"); `MAX_LOGGED_SETTING_CHARS` lives in `server.rs` but `settings.rs` imports it while `server.rs` imports from `settings.rs` (move the constant into `settings.rs`); `tests/lsp_lifecycle/configuration.rs` repeats the `unknownTag` match inline instead of the `has_code` helper; security Low (pre-existing): `loggable_url` (`server.rs`) cannot strip userinfo from cannot-be-a-base URLs such as a `schemas` key or modeline `user:pw@host`.
+  Follow-up from the 2026-10-29 VS Code settings-sync plan (reviewer Low, not yet put to the user): the "after Restart Server" integration test in `rlsp-yaml/integrations/vscode/src/test/integration/settings-sync.test.ts` does not assert the default `key: v` before enabling `formatSingleQuote`, so it cannot tell "reached the server" from "already in effect".
   Test consolidation candidate from the 2026-10-28 sibling-keys plan: `complete_at_in_sequence_item_suggests_missing_sibling_keys` (C-6, `src/completion.rs`) duplicates `complete_in_sequence_item_suggests_missing_sibling_keys` (`completion_drivers.rs`) with weaker assertions; kept because that plan forbade deleting tests.
   Follow-ups surfaced during share-ref-targets, not yet put to the user: schema-cache eviction across URLs (documents cache grows unbounded); negative cache for rejected/failed schemas (re-fetched + re-parsed on every edit); test consolidation proposals the test-engineer raised in Tasks 2/4/5/6 (duplicate overwrite tests, vacuous `let _ =` tests, duplicate deep-nesting fixtures); `cargo doc -p rlsp-yaml --no-deps` fails under `warnings = "deny"`: public docs link private items — `max_line_length` → `MAX_LINE_LENGTH_CAP` (pre-existing) and, since the 2026-10-28 tolerant-settings plan, `RejectedValue::Withheld` → `URL_SETTINGS` in `src/settings.rs`; CI does not run `cargo doc`.
 
