@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-10-29)
 **Created:** 2026-10-29
 
 # `schemas` in the Upstream Forms, and a VS Code Settings Schema That Matches the Server
@@ -48,7 +48,7 @@ offer the three settings it reads but the extension leaves out
       forms
 - [x] Task 2: the VS Code settings schema matches the server and offers
       `hover`, `completion`, and `maxItemsComputed`
-- [ ] Push to `main` and confirm the full CI matrix is green
+- [x] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
