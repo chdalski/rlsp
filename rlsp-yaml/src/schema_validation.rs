@@ -319,7 +319,7 @@ mod tests {
     use tower_lsp::lsp_types::{DiagnosticSeverity, NumberOrString};
 
     use super::*;
-    use crate::schema::{AdditionalProperties, JsonSchema, ParsedSchema, SchemaType};
+    use crate::schema::{JsonSchema, ParsedSchema, SchemaType};
     use crate::test_utils::parse_docs;
     use serde_json::json;
 
@@ -462,7 +462,7 @@ mod tests {
     fn should_set_correct_code_for_additional_property_violation() {
         let schema = JsonSchema {
             properties: Some([("name".to_string(), string_schema())].into()),
-            additional_properties: Some(AdditionalProperties::Denied),
+            additional_properties: Some(Box::new(JsonSchema::always_failing())),
             ..JsonSchema::default()
         };
         let docs = parse_docs("name: Alice\nextra: value");
@@ -513,7 +513,7 @@ mod tests {
     fn should_set_warning_severity_for_additional_property_violation() {
         let schema = JsonSchema {
             properties: Some([("name".to_string(), string_schema())].into()),
-            additional_properties: Some(AdditionalProperties::Denied),
+            additional_properties: Some(Box::new(JsonSchema::always_failing())),
             ..JsonSchema::default()
         };
         let docs = parse_docs("name: Alice\nextra: value");

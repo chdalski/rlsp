@@ -506,22 +506,103 @@ fn false_behind_a_reference_validates_like_false_written_inline(
     assert_eq!(found(&behind, text), expected);
 }
 
-// A reference is a schema, not the denial that the keyword itself spells.
 #[rstest]
-#[case::additional_properties(json!({ "additionalProperties": { "$ref": "#/definitions/No" } }), "a: 1\n",
-    &[(0, 3, NA, "Value at a is not allowed by the schema")])]
-#[case::unevaluated_properties(json!({ "unevaluatedProperties": { "$ref": "#/definitions/No" } }), "a: 1\n",
-    &[(0, 3, NA, "Value at a is not allowed by the schema")])]
-#[case::additional_items(json!({ "items": [], "additionalItems": { "$ref": "#/definitions/No" } }), "- a\n",
-    &[(0, 2, NA, "Value at [0] is not allowed by the schema")])]
-fn a_reference_to_false_for_the_denying_keywords_fails_the_value(
-    #[case] mut schema: Value,
+#[case::additional_properties(json!({ "additionalProperties": false }), "z: 1\ny: 2\n", "schemaAdditionalProperty")]
+#[case::unevaluated_properties(json!({ "unevaluatedProperties": false }), "z: 1\ny: 2\n", "schemaUnevaluatedProperty")]
+#[case::additional_items(json!({ "items": [{}], "additionalItems": false }), "- 1\n- 2\n- 3\n", "schemaAdditionalProperties")]
+fn a_reference_to_false_under_the_denying_keywords_reports_what_false_written_inline_reports(
+    #[case] inline: Value,
+    #[case] text: &str,
+    #[case] code: &str,
+) {
+    let expected = diagnostics_of(&inline, text);
+
+    let behind = diagnostics_of(&behind_a_reference(&inline), text);
+
+    assert!(!expected.is_empty());
+    assert!(expected.iter().all(|d| code_of(d) == code), "{expected:?}");
+    assert!(
+        expected
+            .iter()
+            .all(|d| d.severity == Some(DiagnosticSeverity::WARNING))
+    );
+    assert_eq!(behind, expected);
+}
+
+// A `false` that is written in place and is also the target of a reference.
+#[rstest]
+#[case::additional_properties(
+    json!({ "properties": { "p": { "$ref": "#/additionalProperties" } }, "additionalProperties": false }),
+    "p: 1\nz: 2\n",
+    &[(0, 3, NA, "Value at p is not allowed by the schema"),
+      (1, 0, "schemaAdditionalProperty", "Additional property 'z' is not allowed at <root>")]
+)]
+#[case::unevaluated_properties(
+    json!({ "properties": { "p": { "$ref": "#/unevaluatedProperties" } }, "unevaluatedProperties": false }),
+    "p: 1\nz: 2\n",
+    &[(0, 3, NA, "Value at p is not allowed by the schema"),
+      (1, 0, "schemaUnevaluatedProperty", "Unevaluated property 'z' is not allowed at <root>")]
+)]
+#[case::additional_items(
+    json!({ "items": [{ "$ref": "#/additionalItems" }], "additionalItems": false }),
+    "- 1\n- 2\n",
+    &[(0, 2, NA, "Value at [0] is not allowed by the schema"),
+      (1, 2, "schemaAdditionalProperties", "Additional item at <root>[1] is not allowed")]
+)]
+fn a_false_that_a_reference_elsewhere_points_at_still_reports_its_keyword_diagnostic(
+    #[case] schema: Value,
     #[case] text: &str,
     #[case] expected: &[Found],
 ) {
-    schema["definitions"] = json!({ "No": false });
-
     assert_found(&schema, text, expected);
+}
+
+#[rstest]
+#[case::additional_properties("additionalProperties", "z: 1\n", "schemaAdditionalProperty")]
+#[case::unevaluated_properties("unevaluatedProperties", "z: 1\n", "schemaUnevaluatedProperty")]
+#[case::additional_items("additionalItems", "- 1\n", "schemaAdditionalProperties")]
+fn a_denying_keyword_in_an_any_of_branch_fails_the_probe_without_a_diagnostic_of_its_own(
+    #[case] keyword: &str,
+    #[case] text: &str,
+    #[case] leaked: &str,
+) {
+    let branch = |type_name: &str| match keyword {
+        "additionalItems" => json!({ "type": type_name, "items": [], keyword: false }),
+        _ => json!({ "type": type_name, keyword: false }),
+    };
+    let (own, other) = if keyword == "additionalItems" {
+        ("array", "string")
+    } else {
+        ("object", "string")
+    };
+    let all_fail = json!({ "anyOf": [branch(own), json!({ "type": other })] });
+    let one_passes = json!({ "anyOf": [branch(own), json!({ "type": own })] });
+
+    for schema in [all_fail.clone(), behind_a_reference(&all_fail)] {
+        let found = found(&schema, text);
+        assert!(found.iter().all(|d| d.2 != leaked), "{found:?}");
+        assert_found(&schema, text, &[(0, 0, "schemaType", "(anyOf)")]);
+    }
+    for schema in [one_passes.clone(), behind_a_reference(&one_passes)] {
+        assert_found(&schema, text, &[]);
+    }
+}
+
+// Only `false` itself is a denial: another schema that no value satisfies is
+// applied to the value like any sub-schema.
+#[rstest]
+#[case::additional_properties(json!({ "additionalProperties": { "not": {} } }), "z: 1\n", "schemaAdditionalProperty")]
+#[case::unevaluated_properties(json!({ "unevaluatedProperties": { "not": {} } }), "z: 1\n", "schemaUnevaluatedProperty")]
+#[case::additional_items(json!({ "items": [{}], "additionalItems": { "not": {} } }), "- 1\n- 2\n", "schemaAdditionalProperties")]
+fn an_always_failing_schema_that_is_not_false_is_no_denial_under_the_denying_keywords(
+    #[case] schema: Value,
+    #[case] text: &str,
+    #[case] keyword_code: &str,
+) {
+    let found = found(&schema, text);
+
+    assert!(found.iter().all(|d| d.2 != keyword_code), "{found:?}");
+    assert!(found.iter().any(|d| d.2 == "schemaNot"), "{found:?}");
 }
 
 #[test]

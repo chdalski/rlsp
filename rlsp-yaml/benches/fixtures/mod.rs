@@ -11,7 +11,7 @@
 
 use std::fmt::Write as _;
 
-use rlsp_yaml::schema::{AdditionalProperties, JsonSchema, ParsedSchema, SchemaType};
+use rlsp_yaml::schema::{JsonSchema, ParsedSchema, SchemaType};
 use serde_json::Value;
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -164,7 +164,7 @@ fn build_object_schema(properties: usize, depth: usize, current_depth: usize) ->
         description: Some(format!("Generated object schema at depth {current_depth}")),
         properties: Some(props),
         required: Some(required),
-        additional_properties: Some(AdditionalProperties::Denied),
+        additional_properties: Some(Box::new(JsonSchema::always_failing())),
         all_of,
         ..JsonSchema::default()
     }

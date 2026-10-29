@@ -8,7 +8,7 @@ use std::collections::hash_map::Entry;
 use std::ptr;
 
 use super::pattern::{Compiled, MAX_PATTERN_LEN, WORK_PER_STEP, lookup_or_compile};
-use super::{AdditionalProperties, JsonSchema, ParsedSchema};
+use super::{JsonSchema, ParsedSchema};
 
 /// Steps the second pass of [`resolve_schema_path`] may spend on one call.
 ///
@@ -64,17 +64,16 @@ pub fn composition_branches(schema: &JsonSchema) -> impl DoubleEndedIterator<Ite
 /// entry (or entry of the Draft-04/07 tuple form of `items`) at the index when
 /// it is within the prefix, otherwise `items`, otherwise the `additionalItems`
 /// schema, as validation applies them. A node that has one of these does not
-/// try its branches; `additionalItems: false` beyond the prefix offers nothing,
-/// and only dead-ends that node, so a later sibling branch may still answer.
-/// So does the schema `false` ([`JsonSchema::always_fails`]), inline or behind a
-/// reference, wherever it stands: as the entry for a key or an item, as the
-/// schema of a pattern, or as a branch. It is never the answer, also when the
-/// path ends at it, and the entry that holds it still shadows the branches of
-/// its node. A
-/// schema that has no `properties` entry for the key, or no schema for the
-/// position, tries every composition branch with the same path, so a schema that
-/// references itself can come back to the same schema with the same rest of the
-/// path. The walk goes through each shared target once per rest of the path: a
+/// try its branches. The schema `false` ([`JsonSchema::always_fails`]), inline or
+/// behind a reference, offers nothing wherever it stands: as the entry for a key
+/// or an item (`additionalItems: false` beyond the prefix included), as the
+/// schema of a pattern, or as a branch. It only dead-ends that node, so a later
+/// sibling branch may still answer. It is never the answer, also when the path
+/// ends at it, and the entry that holds it still shadows the branches of its
+/// node. A schema that has no `properties` entry for the key, or no schema for
+/// the position, tries every composition branch with the same path, so a schema
+/// that references itself can come back to the same schema with the same rest
+/// of the path. The walk goes through each shared target once per rest of the path: a
 /// target already tried at that point cannot succeed, or the walk would have
 /// ended. It keeps an explicit stack, so the depth of a chain of references does
 /// not grow the call stack. The first pass does no pattern work and its results
@@ -200,7 +199,7 @@ impl<'a> Allowance<'a> {
             }
         }
         if matching.is_empty()
-            && let Some(AdditionalProperties::Schema(additional)) = &schema.additional_properties
+            && let Some(additional) = &schema.additional_properties
         {
             matching.push(additional);
         }
@@ -215,31 +214,17 @@ fn charge(allowance: &mut Option<&mut Allowance<'_>>, steps: usize) -> bool {
         .is_none_or(|allowance| spend(&mut allowance.left, steps))
 }
 
-/// What a schema itself says about the item at an index.
-enum ItemSchema<'a> {
-    /// The item is described by this schema.
-    Found(&'a JsonSchema),
-    /// `additionalItems: false` rules the item out.
-    Nothing,
-    /// The schema says nothing about the item, so its branches may.
-    Unspecified,
-}
-
 /// The schema `schema` has for the item at `index`, as validation applies them:
 /// the `prefixItems` entry at `index` when it is within the prefix, otherwise
-/// `items`, otherwise the `additionalItems` schema.
-fn schema_at_index(schema: &JsonSchema, index: usize) -> ItemSchema<'_> {
-    if let Some(entry) = schema.prefix_items.as_deref().and_then(|p| p.get(index)) {
-        return ItemSchema::Found(entry);
-    }
-    if let Some(items) = schema.items.as_deref() {
-        return ItemSchema::Found(items);
-    }
-    match &schema.additional_items {
-        Some(AdditionalProperties::Schema(additional)) => ItemSchema::Found(additional),
-        Some(AdditionalProperties::Denied) => ItemSchema::Nothing,
-        None => ItemSchema::Unspecified,
-    }
+/// `items`, otherwise the `additionalItems` schema. `None` when the schema says
+/// nothing about the item, so its branches may.
+fn schema_at_index(schema: &JsonSchema, index: usize) -> Option<&JsonSchema> {
+    schema
+        .prefix_items
+        .as_deref()
+        .and_then(|prefix| prefix.get(index))
+        .or(schema.items.as_deref())
+        .or(schema.additional_items.as_deref())
 }
 
 /// What the walk has left to do.
@@ -296,26 +281,22 @@ fn walk<'a>(
             // Array item descent: the schema the node itself has for the index,
             // else the composition branches.
             SchemaPathSegment::Item(index) => {
-                match schema_at_index(schema, *index) {
-                    ItemSchema::Found(item) => {
-                        if !charge(&mut allowance, 1) {
-                            return Err(GIVEN_UP);
-                        }
-                        stack.push(Step::Visit(item, rest));
+                if let Some(item) = schema_at_index(schema, *index) {
+                    if !charge(&mut allowance, 1) {
+                        return Err(GIVEN_UP);
                     }
-                    ItemSchema::Nothing => {}
-                    ItemSchema::Unspecified => {
-                        if let Some(allowance) = allowance.as_deref_mut()
-                            && !spend(&mut allowance.left, composition_branches(schema).count())
-                        {
-                            return Err(GIVEN_UP);
-                        }
-                        stack.extend(
-                            composition_branches(schema)
-                                .rev()
-                                .map(|b| Step::Visit(b, path)),
-                        );
+                    stack.push(Step::Visit(item, rest));
+                } else {
+                    if let Some(allowance) = allowance.as_deref_mut()
+                        && !spend(&mut allowance.left, composition_branches(schema).count())
+                    {
+                        return Err(GIVEN_UP);
                     }
+                    stack.extend(
+                        composition_branches(schema)
+                            .rev()
+                            .map(|b| Step::Visit(b, path)),
+                    );
                 }
                 continue;
             }
@@ -1124,7 +1105,7 @@ mod tests {
     #[test]
     fn resolve_schema_path_resolves_additional_items_true_to_an_empty_schema() {
         let schema = with_additional_items(string_integer_tuple(), JsonSchema::default());
-        let Some(AdditionalProperties::Schema(empty)) = &schema.additional_items else {
+        let Some(empty) = &schema.additional_items else {
             panic!("the tuple has an additionalItems schema");
         };
         let parsed = no_targets();
@@ -2585,6 +2566,49 @@ mod tests {
     }
 
     #[test]
+    fn resolve_schema_path_charges_a_false_additional_properties_one_step_for_queueing() {
+        let pattern = "^k";
+        let schema = any_of(vec![
+            denying_additional(JsonSchema::default()),
+            patterned(vec![(pattern, string_schema())]),
+        ]);
+        // One compile and one test of the pattern, the two branches, the `false`
+        // queued, and the string queued.
+        let price = compile_price(pattern) + use_price(pattern, 1) + 2 + 1 + 1;
+
+        assert_eq!(cheapest_allowance(&schema, &[key("k")]), Some(price));
+        assert!(type_within(&schema, &[key("k")], price - 1).is_none());
+        assert_eq!(
+            type_within(&schema, &[key("k")], price).as_deref(),
+            Some("string")
+        );
+    }
+
+    #[test]
+    fn resolve_schema_path_charges_a_false_additional_items_one_step_for_queueing() {
+        let pattern = "^k";
+        let schema = any_of(vec![
+            patterned(vec![(
+                pattern,
+                denying_additional_items(tuple_of(vec![string_schema()])),
+            )]),
+            patterned(vec![(pattern, array_of(integer_schema()))]),
+        ]);
+        let path = [key("k"), SchemaPathSegment::Item(3)];
+        // One compile and a test of the pattern for each branch, the two
+        // branches, and the four schemas queued: both pattern schemas, the
+        // `false`, and the integer.
+        let price = compile_price(pattern) + 2 * use_price(pattern, 1) + 2 + 4;
+
+        assert_eq!(cheapest_allowance(&schema, &path), Some(price));
+        assert!(type_within(&schema, &path, price - 1).is_none());
+        assert_eq!(
+            type_within(&schema, &path, price).as_deref(),
+            Some("integer")
+        );
+    }
+
+    #[test]
     fn resolve_schema_path_charges_an_over_long_pattern_one_step_and_no_compile() {
         let long = "a".repeat(MAX_PATTERN_LEN + 1);
         let schema = with_additional(
@@ -2961,7 +2985,7 @@ mod tests {
     fn a_pattern_that_is_false_is_matched_within_the_allowance_like_any_other() {
         let schema = JsonSchema {
             pattern_properties: Some(vec![("^a".to_string(), JsonSchema::always_failing())]),
-            additional_properties: Some(AdditionalProperties::Schema(Box::new(string_schema()))),
+            additional_properties: Some(Box::new(string_schema())),
             ..JsonSchema::default()
         };
 

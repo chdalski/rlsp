@@ -5,7 +5,7 @@ use rlsp_yaml_parser::node::Node;
 use tower_lsp::lsp_types::DiagnosticSeverity;
 
 use crate::lsp_util::span_to_lsp;
-use crate::schema::{AdditionalProperties, JsonSchema};
+use crate::schema::JsonSchema;
 
 use super::context::Ctx;
 use super::support::{
@@ -85,22 +85,19 @@ pub(super) fn validate_sequence(
         for (i, item) in seq.iter().enumerate().skip(prefix_len) {
             let mut item_path = path.to_vec();
             item_path.push(format!("[{i}]"));
-            match additional_items {
-                AdditionalProperties::Denied => {
-                    let range = span_to_lsp(node_loc(item), ctx.idx);
-                    ctx.diagnostics.push(make_diagnostic(
-                        range,
-                        DiagnosticSeverity::WARNING,
-                        "schemaAdditionalProperties",
-                        format!(
-                            "Additional item at {}[{i}] is not allowed",
-                            format_path(path)
-                        ),
-                    ));
-                }
-                AdditionalProperties::Schema(extra_schema) => {
-                    validate_node(item, extra_schema, &item_path, ctx, depth + 1);
-                }
+            if ctx.parsed.resolve(additional_items).always_fails {
+                let range = span_to_lsp(node_loc(item), ctx.idx);
+                ctx.diagnostics.push(make_diagnostic(
+                    range,
+                    DiagnosticSeverity::WARNING,
+                    "schemaAdditionalProperties",
+                    format!(
+                        "Additional item at {}[{i}] is not allowed",
+                        format_path(path)
+                    ),
+                ));
+            } else {
+                validate_node(item, additional_items, &item_path, ctx, depth + 1);
             }
         }
     }
@@ -248,7 +245,7 @@ mod tests {
     use tower_lsp::lsp_types::{DiagnosticSeverity, Position};
 
     use crate::schema::parse_schema;
-    use crate::schema::{AdditionalProperties, JsonSchema, ParsedSchema, SchemaType};
+    use crate::schema::{JsonSchema, ParsedSchema, SchemaType};
     use crate::server::YamlVersion;
     use crate::test_utils::parse_docs;
     use rlsp_yaml_parser::node::Node;
@@ -624,7 +621,7 @@ mod tests {
 
     fn tuple_schema_with_additional_items(
         prefix: Vec<JsonSchema>,
-        additional_items: Option<AdditionalProperties>,
+        additional_items: Option<Box<JsonSchema>>,
     ) -> JsonSchema {
         JsonSchema {
             prefix_items: Some(prefix),
@@ -637,7 +634,7 @@ mod tests {
     fn should_produce_warning_for_extra_items_when_additional_items_false() {
         let schema = tuple_schema_with_additional_items(
             vec![string_schema()],
-            Some(AdditionalProperties::Denied),
+            Some(Box::new(JsonSchema::always_failing())),
         );
         let text = "- hello\n- extra";
         let docs = parse_docs(text);
@@ -658,7 +655,7 @@ mod tests {
      {
         let schema = tuple_schema_with_additional_items(
             vec![string_schema(), integer_schema()],
-            Some(AdditionalProperties::Denied),
+            Some(Box::new(JsonSchema::always_failing())),
         );
         let text = "- hello\n- 42";
         let docs = parse_docs(text);
@@ -671,7 +668,7 @@ mod tests {
     fn should_produce_no_diagnostics_for_items_within_prefix_with_additional_items_false() {
         let schema = tuple_schema_with_additional_items(
             vec![string_schema(), integer_schema()],
-            Some(AdditionalProperties::Denied),
+            Some(Box::new(JsonSchema::always_failing())),
         );
         let text = "- hello";
         let docs = parse_docs(text);
@@ -684,7 +681,7 @@ mod tests {
     fn should_produce_one_warning_per_extra_item_when_additional_items_false() {
         let schema = tuple_schema_with_additional_items(
             vec![string_schema()],
-            Some(AdditionalProperties::Denied),
+            Some(Box::new(JsonSchema::always_failing())),
         );
         let text = "- hello\n- extra1\n- extra2";
         let docs = parse_docs(text);
@@ -702,7 +699,7 @@ mod tests {
     fn should_validate_extra_items_against_additional_items_schema_when_valid() {
         let schema = tuple_schema_with_additional_items(
             vec![string_schema()],
-            Some(AdditionalProperties::Schema(Box::new(integer_schema()))),
+            Some(Box::new(integer_schema())),
         );
         let text = "- hello\n- 42";
         let docs = parse_docs(text);
@@ -715,7 +712,7 @@ mod tests {
     fn should_produce_type_diagnostic_when_extra_item_fails_additional_items_schema() {
         let schema = tuple_schema_with_additional_items(
             vec![string_schema()],
-            Some(AdditionalProperties::Schema(Box::new(integer_schema()))),
+            Some(Box::new(integer_schema())),
         );
         let text = "- hello\n- world";
         let docs = parse_docs(text);

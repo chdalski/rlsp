@@ -6,8 +6,8 @@ use rstest::rstest;
 
 use super::support::test_fixtures::integer_schema;
 use super::*;
+use crate::schema::SchemaType;
 use crate::schema::test_support::{on_a_small_stack, reference_to, with_targets};
-use crate::schema::{AdditionalProperties, SchemaType};
 use crate::test_utils::parse_docs;
 
 fn diagnostics_of(schema: &ParsedSchema, text: &str) -> Vec<Diagnostic> {
@@ -19,6 +19,28 @@ fn outcome_of(schema: &ParsedSchema, text: &str) -> (Vec<Diagnostic>, usize) {
     let budget = Budget::new(usize::MAX);
     let result = validate_documents(&parse_docs(text), schema, true, YamlVersion::V1_2, &budget);
     (result.diagnostics, budget.spent())
+}
+
+fn additional_properties_of(c: JsonSchema) -> JsonSchema {
+    JsonSchema {
+        additional_properties: Some(Box::new(c)),
+        ..JsonSchema::default()
+    }
+}
+
+fn unevaluated_properties_of(c: JsonSchema) -> JsonSchema {
+    JsonSchema {
+        unevaluated_properties: Some(Box::new(c)),
+        ..JsonSchema::default()
+    }
+}
+
+fn additional_items_of(c: JsonSchema) -> JsonSchema {
+    JsonSchema {
+        prefix_items: Some(vec![]),
+        additional_items: Some(Box::new(c)),
+        ..JsonSchema::default()
+    }
 }
 
 fn object() -> SchemaType {
@@ -41,13 +63,7 @@ fn object() -> SchemaType {
     |c| JsonSchema { pattern_properties: Some(vec![("^a".to_string(), c)]), ..JsonSchema::default() },
     "a: x"
 )]
-#[case::additional_properties(
-    |c| JsonSchema {
-        additional_properties: Some(AdditionalProperties::Schema(Box::new(c))),
-        ..JsonSchema::default()
-    },
-    "a: x"
-)]
+#[case::additional_properties(additional_properties_of, "a: x")]
 #[case::property_names(
     |c| JsonSchema { property_names: Some(Box::new(c)), ..JsonSchema::default() },
     "a: 1"
@@ -56,13 +72,7 @@ fn object() -> SchemaType {
     |c| JsonSchema { dependent_schemas: Some([("a".to_string(), c)].into()), ..JsonSchema::default() },
     "a: 1"
 )]
-#[case::unevaluated_properties(
-    |c| JsonSchema {
-        unevaluated_properties: Some(AdditionalProperties::Schema(Box::new(c))),
-        ..JsonSchema::default()
-    },
-    "a: x"
-)]
+#[case::unevaluated_properties(unevaluated_properties_of, "a: x")]
 #[case::items(
     |c| JsonSchema { items: Some(Box::new(c)), ..JsonSchema::default() },
     "- x"
@@ -74,7 +84,7 @@ fn object() -> SchemaType {
 #[case::additional_items(
     |c| JsonSchema {
         prefix_items: Some(vec![JsonSchema::default()]),
-        additional_items: Some(AdditionalProperties::Schema(Box::new(c))),
+        additional_items: Some(Box::new(c)),
         ..JsonSchema::default()
     },
     "- 1\n- x"
@@ -300,7 +310,7 @@ fn unevaluated_properties_sees_properties_declared_behind_a_reference() {
     let schema = with_targets(
         JsonSchema {
             all_of: Some(vec![reference_to(0)]),
-            unevaluated_properties: Some(AdditionalProperties::Denied),
+            unevaluated_properties: Some(Box::new(JsonSchema::always_failing())),
             ..JsonSchema::default()
         },
         vec![declares_a],
@@ -477,13 +487,13 @@ fn the_evaluated_properties_scan_through_a_reference_spends_the_steps_of_the_inl
     };
     let inline = ParsedSchema::new(JsonSchema {
         all_of: Some(vec![declares_a.clone()]),
-        unevaluated_properties: Some(AdditionalProperties::Denied),
+        unevaluated_properties: Some(Box::new(JsonSchema::always_failing())),
         ..JsonSchema::default()
     });
     let shared = with_targets(
         JsonSchema {
             all_of: Some(vec![reference_to(0)]),
-            unevaluated_properties: Some(AdditionalProperties::Denied),
+            unevaluated_properties: Some(Box::new(JsonSchema::always_failing())),
             ..JsonSchema::default()
         },
         vec![declares_a],
@@ -542,24 +552,12 @@ fn nested_document(mapping: bool, levels: usize) -> String {
     |c| JsonSchema { properties: Some([("a".to_string(), c)].into()), ..JsonSchema::default() },
     true
 )]
-#[case::additional_properties(
-    |c| JsonSchema {
-        additional_properties: Some(AdditionalProperties::Schema(Box::new(c))),
-        ..JsonSchema::default()
-    },
-    true
-)]
+#[case::additional_properties(additional_properties_of, true)]
 #[case::pattern_properties(
     |c| JsonSchema { pattern_properties: Some(vec![(".*".to_string(), c)]), ..JsonSchema::default() },
     true
 )]
-#[case::unevaluated_properties(
-    |c| JsonSchema {
-        unevaluated_properties: Some(AdditionalProperties::Schema(Box::new(c))),
-        ..JsonSchema::default()
-    },
-    true
-)]
+#[case::unevaluated_properties(unevaluated_properties_of, true)]
 #[case::dependent_schemas(
     |c| JsonSchema { dependent_schemas: Some([("a".to_string(), c)].into()), ..JsonSchema::default() },
     true
@@ -587,7 +585,7 @@ fn a_schema_that_applies_itself_through_a_keyword_ends(
 fn the_evaluated_properties_scan_over_a_schema_that_composes_itself_ends() {
     let target = JsonSchema {
         all_of: Some(vec![reference_to(0)]),
-        unevaluated_properties: Some(AdditionalProperties::Denied),
+        unevaluated_properties: Some(Box::new(JsonSchema::always_failing())),
         ..JsonSchema::default()
     };
     let schema = with_targets(reference_to(0), vec![target]);
@@ -832,4 +830,112 @@ fn recursive_schema_ends_on_a_document_past_the_validation_depth_limit() {
     on_a_small_stack(move || {
         let _ = validate_schema(&docs, &recursive_schema(), true, YamlVersion::V1_2);
     });
+}
+
+// ── A reference to `false` under the denying keywords ───────────────────────
+
+/// `leaf` below `levels` properties named `a`, as a schema without targets.
+fn below_properties(levels: usize, leaf: JsonSchema) -> JsonSchema {
+    (0..levels).fold(leaf, |inner, _| JsonSchema {
+        properties: Some([("a".to_string(), inner)].into()),
+        ..JsonSchema::default()
+    })
+}
+
+/// `leaf` below `levels` mappings named `a`, as a document.
+fn below_mappings(levels: usize, leaf: &str) -> String {
+    (0..levels).fold(leaf.to_string(), |inner, _| format!("{{a: {inner}}}"))
+}
+
+/// The schema `keyword_of(false)` at the end of `levels` properties, written
+/// inline and behind a reference.
+fn denial_below_properties(
+    keyword_of: fn(JsonSchema) -> JsonSchema,
+    levels: usize,
+) -> (ParsedSchema, ParsedSchema) {
+    let inline = ParsedSchema::new(below_properties(
+        levels,
+        keyword_of(JsonSchema::always_failing()),
+    ));
+    let behind = with_targets(
+        below_properties(levels, keyword_of(reference_to(0))),
+        vec![JsonSchema::always_failing()],
+    );
+    (inline, behind)
+}
+
+#[rstest]
+#[case::additional_properties(additional_properties_of, "{z: 1}")]
+#[case::unevaluated_properties(unevaluated_properties_of, "{z: 1}")]
+#[case::additional_items(additional_items_of, "[1]")]
+fn a_reference_to_false_under_a_denying_keyword_reports_at_the_depth_limit_like_false_written_inline(
+    #[case] keyword_of: fn(JsonSchema) -> JsonSchema,
+    #[case] leaf: &str,
+) {
+    for (levels, reported) in [
+        (support::MAX_VALIDATION_DEPTH, 1),
+        (support::MAX_VALIDATION_DEPTH + 1, 0),
+    ] {
+        let (inline, behind) = denial_below_properties(keyword_of, levels);
+        let text = below_mappings(levels, leaf);
+
+        let expected = diagnostics_of(&inline, &text);
+        let actual = diagnostics_of(&behind, &text);
+
+        assert_eq!(expected.len(), reported, "inline, {levels} levels");
+        assert_eq!(actual, expected, "{levels} levels");
+    }
+}
+
+#[rstest]
+#[case::additional_properties(additional_properties_of, "{z: 1}")]
+#[case::unevaluated_properties(unevaluated_properties_of, "{z: 1}")]
+#[case::additional_items(additional_items_of, "[1]")]
+fn a_reference_to_false_under_a_denying_keyword_in_an_any_of_branch_at_the_depth_limit_fails_the_probe(
+    #[case] keyword_of: fn(JsonSchema) -> JsonSchema,
+    #[case] leaf: &str,
+) {
+    let any_of = |denial: JsonSchema| JsonSchema {
+        any_of: Some(vec![
+            keyword_of(denial),
+            JsonSchema {
+                schema_type: Some(SchemaType::Single("string".to_string())),
+                ..JsonSchema::default()
+            },
+        ]),
+        ..JsonSchema::default()
+    };
+    let levels = support::MAX_VALIDATION_DEPTH - 1;
+    let inline = ParsedSchema::new(below_properties(
+        levels,
+        any_of(JsonSchema::always_failing()),
+    ));
+    let behind = with_targets(
+        below_properties(levels, any_of(reference_to(0))),
+        vec![JsonSchema::always_failing()],
+    );
+    let text = below_mappings(levels, leaf);
+
+    let expected = diagnostics_of(&inline, &text);
+    let actual = diagnostics_of(&behind, &text);
+
+    assert_eq!(expected.len(), 1, "{expected:?}");
+    assert_eq!(actual, expected);
+}
+
+#[rstest]
+#[case::additional_properties(additional_properties_of, "z: 1\ny: 2\n")]
+#[case::unevaluated_properties(unevaluated_properties_of, "z: 1\ny: 2\n")]
+#[case::additional_items(additional_items_of, "- 1\n- 2\n")]
+fn a_reference_to_false_under_a_denying_keyword_spends_the_steps_of_false_written_inline(
+    #[case] keyword_of: fn(JsonSchema) -> JsonSchema,
+    #[case] text: &str,
+) {
+    let (inline, behind) = denial_below_properties(keyword_of, 0);
+
+    let expected = outcome_of(&inline, text);
+    let actual = outcome_of(&behind, text);
+
+    assert!(!expected.0.is_empty());
+    assert_eq!(actual, expected);
 }

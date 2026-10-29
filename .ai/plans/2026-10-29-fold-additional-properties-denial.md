@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-10-29
 
 # One Representation of `false` for Every Sub-Schema Keyword
@@ -36,7 +36,7 @@ what a literal `false` reports.
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: `false` has one representation under every sub-schema
+- [x] Task 1: `false` has one representation under every sub-schema
       keyword
 - [ ] Push to `main` and confirm the full CI matrix is green
 
@@ -52,20 +52,20 @@ it has today, except that the resolver spends one step of its second
 pass's allowance on it; a `$ref` to `false` under the three keywords
 reports what a literal `false` reports.
 
-- [ ] `rlsp_yaml::schema` has no `AdditionalProperties` type, and
+- [x] `rlsp_yaml::schema` has no `AdditionalProperties` type, and
       `false` under `additionalProperties`, `additionalItems`, and
       `unevaluatedProperties` parses to the always-failing schema, as
       under every other sub-schema keyword
-- [ ] For each of the three keywords, a test pins that a `$ref` to
+- [x] For each of the three keywords, a test pins that a `$ref` to
       `false` yields the same diagnostics (code, message, range, and
       severity) as a literal `false`, and a test pins that a literal
       `false` whose location is the target of a `$ref` elsewhere in the
       schema yields its keyword diagnostic
-- [ ] For each of the three keywords, tests pin that a `$ref` to `false`
+- [x] For each of the three keywords, tests pin that a `$ref` to `false`
       behaves like a literal `false` at the validation depth limit,
       inside an `anyOf` branch, and in the validation budget steps it
       spends
-- [ ] The tests that pin today's literal-`false` behavior pass with
+- [x] The tests that pin today's literal-`false` behavior pass with
       their assertions unchanged — only how they build the schema
       changes: `the_inline_denials_keep_their_diagnostic_and_wording`,
       the `additionalProperties`, `additionalItems`, and
@@ -76,25 +76,25 @@ reports what a literal `false` reports.
       and `schema_validation/budget_tests.rs`, and the resolver, hover,
       and completion tests at `additionalProperties: false` and
       `additionalItems: false`
-- [ ] The generic `false` parse tests cover the three keywords, and the
+- [x] The generic `false` parse tests cover the three keywords, and the
       tests that pinned only the removed type or the replaced
       `schemaNotAllowed` for a `$ref` to `false` under them
       (`inline_false_for_the_denying_keywords_stays_denied`,
       `a_reference_to_false_for_the_denying_keywords_is_a_schema`,
       `a_reference_to_false_for_the_denying_keywords_fails_the_value`)
       are gone
-- [ ] The doc comments of `JsonSchema` and of the three fields tell a
+- [x] The doc comments of `JsonSchema` and of the three fields tell a
       library reader how to recognize `false` in them
-- [ ] No code, comment, or doc refers to the removed
+- [x] No code, comment, or doc refers to the removed
       `AdditionalProperties` type or to a separate denial
       representation of `false` under the three keywords
-- [ ] `rlsp-yaml/docs/feature-log.md` has an entry that tells the
+- [x] `rlsp-yaml/docs/feature-log.md` has an entry that tells the
       reader that a `$ref` to `false` under the three keywords now
       reports the keyword's diagnostic
-- [ ] The commit is marked breaking, and its `BREAKING CHANGE:` footer
+- [x] The commit is marked breaking, and its `BREAKING CHANGE:` footer
       tells library users that `AdditionalProperties` is removed and
       how to recognize `false` in the three fields
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ## Non-Goals
 

@@ -119,15 +119,6 @@ pub enum SchemaType {
     Multiple(Vec<String>),
 }
 
-/// Whether `additionalProperties` is `false` or a sub-schema.
-#[derive(Debug, Clone)]
-pub enum AdditionalProperties {
-    /// `additionalProperties: false` — no undeclared properties are allowed.
-    Denied,
-    /// `additionalProperties` is a sub-schema that additional properties must match.
-    Schema(Box<JsonSchema>),
-}
-
 /// Index of a shared schema in the target table of a [`ParsedSchema`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TargetId(usize);
@@ -215,7 +206,11 @@ impl ParsedSchema {
 /// completion, and hover support.
 ///
 /// A schema that reads only some of the fields reads the boolean schema
-/// `false` as `true`: see [`JsonSchema::always_fails`].
+/// `false` as `true`: see [`JsonSchema::always_fails`]. The boolean schema
+/// `false` has this one representation under every sub-schema keyword,
+/// including `additionalProperties`, `additionalItems`, and
+/// `unevaluatedProperties`; resolve a sub-schema with [`ParsedSchema::resolve`]
+/// before testing it, because a `$ref` to `false` is a reference node.
 #[derive(Debug, Clone, Default)]
 pub struct JsonSchema {
     /// Set on the boolean schema `false`, which no value satisfies. All other
@@ -264,10 +259,14 @@ pub struct JsonSchema {
     pub min_contains: Option<u64>,
     /// Whether all array items must be unique (`uniqueItems` keyword).
     pub unique_items: Option<bool>,
-    /// Schema or denial for properties not listed in `properties`.
-    pub additional_properties: Option<AdditionalProperties>,
-    /// Schema or denial for items beyond `items`/`prefixItems` (`additionalItems`).
-    pub additional_items: Option<AdditionalProperties>,
+    /// Schema for properties not listed in `properties`. `false` is the
+    /// schema with [`JsonSchema::always_fails`] set: no undeclared property
+    /// is allowed.
+    pub additional_properties: Option<Box<Self>>,
+    /// Schema for items beyond `items`/`prefixItems` (`additionalItems`).
+    /// `false` is the schema with [`JsonSchema::always_fails`] set: no
+    /// further item is allowed.
+    pub additional_items: Option<Box<Self>>,
     /// Minimum number of object properties.
     pub min_properties: Option<u64>,
     /// Maximum number of object properties.
@@ -324,8 +323,10 @@ pub struct JsonSchema {
     pub dependent_schemas: Option<HashMap<String, Self>>,
     /// Whether the schema is deprecated.
     pub deprecated: Option<bool>,
-    /// Schema or denial for unevaluated properties (`unevaluatedProperties`).
-    pub unevaluated_properties: Option<AdditionalProperties>,
+    /// Schema for unevaluated properties (`unevaluatedProperties`). `false` is
+    /// the schema with [`JsonSchema::always_fails`] set: no unevaluated
+    /// property is allowed.
+    pub unevaluated_properties: Option<Box<Self>>,
     /// Sub-schema for unevaluated array items (`unevaluatedItems`).
     pub unevaluated_items: Option<Box<Self>>,
 }
@@ -358,7 +359,7 @@ pub(crate) mod test_support {
     use std::fmt::Debug;
 
     use super::path::SchemaPathSegment;
-    use super::{AdditionalProperties, JsonSchema, ParsedSchema, SchemaRef, SchemaType, TargetId};
+    use super::{JsonSchema, ParsedSchema, SchemaRef, SchemaType, TargetId};
 
     /// The path segment for the mapping key `name`. An array item is always
     /// written as [`SchemaPathSegment::Item`], so a key spelled `[]` stays a key.
@@ -576,7 +577,7 @@ pub(crate) mod test_support {
     /// `schema` with the `additionalItems` schema `additional`.
     pub fn with_additional_items(schema: JsonSchema, additional: JsonSchema) -> JsonSchema {
         JsonSchema {
-            additional_items: Some(AdditionalProperties::Schema(Box::new(additional))),
+            additional_items: Some(Box::new(additional)),
             ..schema
         }
     }
@@ -584,7 +585,7 @@ pub(crate) mod test_support {
     /// `schema` with `additionalItems: false`.
     pub fn denying_additional_items(schema: JsonSchema) -> JsonSchema {
         JsonSchema {
-            additional_items: Some(AdditionalProperties::Denied),
+            additional_items: Some(Box::new(JsonSchema::always_failing())),
             ..schema
         }
     }
@@ -605,7 +606,7 @@ pub(crate) mod test_support {
     /// `schema` with `additionalProperties` set to the schema `additional`.
     pub fn with_additional(schema: JsonSchema, additional: JsonSchema) -> JsonSchema {
         JsonSchema {
-            additional_properties: Some(AdditionalProperties::Schema(Box::new(additional))),
+            additional_properties: Some(Box::new(additional)),
             ..schema
         }
     }
@@ -613,7 +614,7 @@ pub(crate) mod test_support {
     /// `schema` with `additionalProperties: false`.
     pub fn denying_additional(schema: JsonSchema) -> JsonSchema {
         JsonSchema {
-            additional_properties: Some(AdditionalProperties::Denied),
+            additional_properties: Some(Box::new(JsonSchema::always_failing())),
             ..schema
         }
     }
@@ -2622,8 +2623,10 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
 
         // additionalItems — only relevant in Draft-04/07 tuple mode (array-form items, not prefixItems)
         if reads_additional_items(obj) {
-            schema.additional_items =
-                self.parse_additional_properties(obj.get("additionalItems"), scope);
+            schema.additional_items = obj
+                .get("additionalItems")
+                .and_then(|v| self.parse_node(v, scope))
+                .map(Box::new);
         }
 
         schema.contains = obj
@@ -2676,8 +2679,10 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
         schema: &mut JsonSchema,
     ) {
         // unevaluatedProperties / unevaluatedItems (Draft 2019-09)
-        schema.unevaluated_properties =
-            self.parse_additional_properties(obj.get("unevaluatedProperties"), scope);
+        schema.unevaluated_properties = obj
+            .get("unevaluatedProperties")
+            .and_then(|v| self.parse_node(v, scope))
+            .map(Box::new);
         schema.unevaluated_items = obj
             .get("unevaluatedItems")
             .and_then(|v| self.parse_node(v, scope))
@@ -2714,8 +2719,10 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
         self.parse_array_fields(obj, scope, &mut schema);
 
         // additionalProperties
-        schema.additional_properties =
-            self.parse_additional_properties(obj.get("additionalProperties"), scope);
+        schema.additional_properties = obj
+            .get("additionalProperties")
+            .and_then(|v| self.parse_node(v, scope))
+            .map(Box::new);
 
         // propertyNames
         schema.property_names = obj
@@ -2810,25 +2817,6 @@ impl<'r, 'c> SchemaParser<'r, 'c> {
             Some(dep_sch)
         };
         (dep_req, dep_sch)
-    }
-
-    fn parse_additional_properties(
-        &mut self,
-        value: Option<&Value>,
-        scope: &Scope,
-    ) -> Option<AdditionalProperties> {
-        match value? {
-            Value::Bool(false) => Some(AdditionalProperties::Denied),
-            // true = allow anything = same as absent; everything else try as schema
-            v @ (Value::Bool(true)
-            | Value::Null
-            | Value::Number(_)
-            | Value::String(_)
-            | Value::Array(_)
-            | Value::Object(_)) => self
-                .parse_node(v, scope)
-                .map(|s| AdditionalProperties::Schema(Box::new(s))),
-        }
     }
 
     fn parse_schema_array(
@@ -3058,20 +3046,20 @@ mod tests {
     fn should_parse_additional_properties_false() {
         let v = json!({"type": "object", "additionalProperties": false});
         let s = parse_schema(&v).expect("should parse").root;
-        assert!(matches!(
-            s.additional_properties,
-            Some(AdditionalProperties::Denied)
-        ));
+        assert!(
+            s.additional_properties
+                .as_deref()
+                .is_some_and(|denied| denied.always_fails)
+        );
     }
 
     #[test]
     fn should_parse_additional_properties_as_schema() {
         let v = json!({"type": "object", "additionalProperties": {"type": "string"}});
         let s = parse_schema(&v).expect("should parse").root;
-        assert!(matches!(
-            s.additional_properties,
-            Some(AdditionalProperties::Schema(_))
-        ));
+        let additional = s.additional_properties.as_deref().expect("a schema");
+        assert!(!additional.always_fails);
+        assert_eq!(schema_type_str(additional), Some("string"));
     }
 
     #[test]
@@ -3088,10 +3076,11 @@ mod tests {
         let v = json!({"items": [{"type": "string"}], "additionalItems": false});
         let s = parse_schema(&v).expect("should parse").root;
         assert!(s.prefix_items.is_some());
-        assert!(matches!(
-            s.additional_items,
-            Some(AdditionalProperties::Denied)
-        ));
+        assert!(
+            s.additional_items
+                .as_deref()
+                .is_some_and(|denied| denied.always_fails)
+        );
     }
 
     // Test P-2
@@ -3099,10 +3088,9 @@ mod tests {
     fn should_parse_additional_items_schema() {
         let v = json!({"items": [{"type": "string"}], "additionalItems": {"type": "integer"}});
         let s = parse_schema(&v).expect("should parse").root;
-        assert!(matches!(
-            s.additional_items,
-            Some(AdditionalProperties::Schema(_))
-        ));
+        let additional = s.additional_items.as_deref().expect("a schema");
+        assert!(!additional.always_fails);
+        assert_eq!(schema_type_str(additional), Some("integer"));
     }
 
     // Test P-3
@@ -3718,19 +3706,6 @@ mod tests {
 
     // ── Boolean `false` ──────────────────────────────────────────────────────
 
-    /// The keywords whose `false` is kept in a place of its own; for the three
-    /// others it is a denial (`AdditionalProperties::Denied`).
-    fn false_keywords() -> impl Iterator<Item = &'static str> {
-        SUBSCHEMA_KEYWORDS.iter().copied().filter(|keyword| {
-            ![
-                "additionalItems",
-                "additionalProperties",
-                "unevaluatedProperties",
-            ]
-            .contains(keyword)
-        })
-    }
-
     /// The sub-schema that [`wrap`] put under `keyword` of `schema`, as parsed.
     fn schema_under<'a>(keyword: &str, schema: &'a JsonSchema) -> &'a JsonSchema {
         let found = match keyword {
@@ -3751,6 +3726,9 @@ mod tests {
             "if" => schema.if_schema.as_deref(),
             "then" => schema.then_schema.as_deref(),
             "else" => schema.else_schema.as_deref(),
+            "additionalProperties" => schema.additional_properties.as_deref(),
+            "additionalItems" => schema.additional_items.as_deref(),
+            "unevaluatedProperties" => schema.unevaluated_properties.as_deref(),
             "unevaluatedItems" => schema.unevaluated_items.as_deref(),
             "allOf" => schema.all_of.as_ref().and_then(|items| items.first()),
             "anyOf" => schema.any_of.as_ref().and_then(|items| items.first()),
@@ -3766,7 +3744,7 @@ mod tests {
 
     #[test]
     fn false_parses_to_the_always_failing_schema_under_every_subschema_keyword() {
-        for keyword in false_keywords() {
+        for keyword in SUBSCHEMA_KEYWORDS {
             let parsed = parse_schema(&wrap(keyword, &json!(false))).expect("parses");
 
             let child = schema_under(keyword, parsed.resolved_root());
@@ -3779,7 +3757,7 @@ mod tests {
 
     #[test]
     fn true_parses_to_a_schema_that_does_not_fail_under_every_subschema_keyword() {
-        for keyword in false_keywords() {
+        for keyword in SUBSCHEMA_KEYWORDS {
             let parsed = parse_schema(&wrap(keyword, &json!(true))).expect("parses");
 
             let child = schema_under(keyword, parsed.resolved_root());
@@ -3790,7 +3768,7 @@ mod tests {
 
     #[test]
     fn false_behind_a_reference_resolves_to_the_always_failing_schema() {
-        for keyword in false_keywords() {
+        for keyword in SUBSCHEMA_KEYWORDS {
             let mut value = wrap(keyword, &json!({ "$ref": "#/definitions/No" }));
             value["definitions"] = json!({ "No": false });
 
@@ -3833,45 +3811,6 @@ mod tests {
             let not = parsed.resolved_root().not.as_deref().expect("not");
             assert!(parsed.resolve(not).always_fails, "{reference}");
         }
-    }
-
-    #[rstest]
-    #[case::additional_properties("additionalProperties")]
-    #[case::unevaluated_properties("unevaluatedProperties")]
-    #[case::additional_items("additionalItems")]
-    fn inline_false_for_the_denying_keywords_stays_denied(#[case] keyword: &str) {
-        let parsed = parse_schema(&wrap(keyword, &json!(false))).expect("parses");
-        let root = parsed.resolved_root();
-
-        let denial = match keyword {
-            "additionalProperties" => &root.additional_properties,
-            "unevaluatedProperties" => &root.unevaluated_properties,
-            _ => &root.additional_items,
-        };
-
-        assert!(matches!(denial, Some(AdditionalProperties::Denied)));
-        assert_eq!(node_count(&parsed), 1);
-    }
-
-    #[rstest]
-    #[case::additional_properties("additionalProperties")]
-    #[case::unevaluated_properties("unevaluatedProperties")]
-    #[case::additional_items("additionalItems")]
-    fn a_reference_to_false_for_the_denying_keywords_is_a_schema(#[case] keyword: &str) {
-        let mut value = wrap(keyword, &json!({ "$ref": "#/definitions/No" }));
-        value["definitions"] = json!({ "No": false });
-
-        let parsed = parse_schema(&value).expect("parses");
-
-        let root = parsed.resolved_root();
-        let Some(AdditionalProperties::Schema(schema)) = (match keyword {
-            "additionalProperties" => &root.additional_properties,
-            "unevaluatedProperties" => &root.unevaluated_properties,
-            _ => &root.additional_items,
-        }) else {
-            panic!("a schema is expected for {keyword}");
-        };
-        assert!(parsed.resolve(schema).always_fails);
     }
 
     #[rstest]
@@ -4798,13 +4737,12 @@ mod tests {
         // additionalProperties: true — boolean true is a permissive schema
         let v = json!({"type": "object", "additionalProperties": true});
         let s = parse_schema(&v).expect("should parse").root;
-        // true is a permissive boolean schema → AdditionalProperties::Schema(empty)
+        // true is a permissive boolean schema → an empty schema
         assert!(
-            matches!(
-                s.additional_properties,
-                Some(AdditionalProperties::Schema(_))
-            ),
-            "additionalProperties: true should yield Schema variant"
+            s.additional_properties
+                .as_deref()
+                .is_some_and(|permissive| !permissive.always_fails),
+            "additionalProperties: true should yield an empty schema"
         );
     }
 
@@ -7612,7 +7550,7 @@ mod tests {
     // `false` is a node like `true`, in the same places.
     #[test]
     fn false_charges_like_true() {
-        for keyword in false_keywords() {
+        for keyword in SUBSCHEMA_KEYWORDS {
             assert_eq!(
                 charges_of(&wrap(keyword, &json!(false))),
                 charges_of(&wrap(keyword, &json!(true))),

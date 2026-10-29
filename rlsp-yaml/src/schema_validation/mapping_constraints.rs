@@ -7,8 +7,8 @@ use rlsp_yaml_parser::node::Node;
 use tower_lsp::lsp_types::DiagnosticSeverity;
 
 use crate::lsp_util::span_to_lsp;
+use crate::schema::JsonSchema;
 use crate::schema::pattern::MAX_PATTERN_LEN;
-use crate::schema::{AdditionalProperties, JsonSchema};
 
 use super::context::{Ctx, node_weight};
 use super::support::{
@@ -40,26 +40,25 @@ pub(super) fn validate_unevaluated_properties(
                 continue;
             }
         }
-        match &schema.unevaluated_properties {
-            Some(AdditionalProperties::Denied) => {
-                let range = span_to_lsp(node_loc(k), ctx.idx);
-                ctx.diagnostics.push(make_diagnostic(
-                    range,
-                    DiagnosticSeverity::WARNING,
-                    "schemaUnevaluatedProperty",
-                    format!(
-                        "Unevaluated property '{}' is not allowed at {}",
-                        key_str,
-                        format_path(path)
-                    ),
-                ));
-            }
-            Some(AdditionalProperties::Schema(extra_schema)) => {
-                let mut child_path = path.to_vec();
-                child_path.push(key_str.clone());
-                validate_node(v, extra_schema, &child_path, ctx, depth + 1);
-            }
-            None => {}
+        let Some(extra_schema) = &schema.unevaluated_properties else {
+            continue;
+        };
+        if ctx.parsed.resolve(extra_schema).always_fails {
+            let range = span_to_lsp(node_loc(k), ctx.idx);
+            ctx.diagnostics.push(make_diagnostic(
+                range,
+                DiagnosticSeverity::WARNING,
+                "schemaUnevaluatedProperty",
+                format!(
+                    "Unevaluated property '{}' is not allowed at {}",
+                    key_str,
+                    format_path(path)
+                ),
+            ));
+        } else {
+            let mut child_path = path.to_vec();
+            child_path.push(key_str.clone());
+            validate_node(v, extra_schema, &child_path, ctx, depth + 1);
         }
     }
 }
@@ -186,8 +185,8 @@ pub(super) fn validate_mapping(
             // unknown, so the key is not reported as additional.
             if !is_known && !matched_by_pattern && !ctx.budget.is_exhausted() {
                 // Check additionalProperties
-                match &schema.additional_properties {
-                    Some(AdditionalProperties::Denied) => {
+                if let Some(extra_schema) = &schema.additional_properties {
+                    if ctx.parsed.resolve(extra_schema).always_fails {
                         let range = span_to_lsp(node_loc(k), ctx.idx);
                         ctx.diagnostics.push(make_diagnostic(
                             range,
@@ -199,13 +198,11 @@ pub(super) fn validate_mapping(
                                 format_path(path)
                             ),
                         ));
-                    }
-                    Some(AdditionalProperties::Schema(extra_schema)) => {
+                    } else {
                         let mut child_path = path.to_vec();
                         child_path.push(key_str.clone());
                         validate_node(v, extra_schema, &child_path, ctx, depth + 1);
                     }
-                    None => {}
                 }
             }
         }
@@ -361,7 +358,7 @@ mod tests {
     use rstest::rstest;
     use tower_lsp::lsp_types::{DiagnosticSeverity, Position, Range};
 
-    use crate::schema::{AdditionalProperties, JsonSchema, ParsedSchema, SchemaType};
+    use crate::schema::{JsonSchema, ParsedSchema, SchemaType};
     use crate::server::YamlVersion;
     use crate::test_utils::parse_docs;
     use serde_json::json;
@@ -565,7 +562,7 @@ mod tests {
         let schema = JsonSchema {
             schema_type: Some(SchemaType::Single("object".to_string())),
             properties: Some([("name".to_string(), string_schema())].into()),
-            additional_properties: Some(AdditionalProperties::Denied),
+            additional_properties: Some(Box::new(JsonSchema::always_failing())),
             ..JsonSchema::default()
         };
         let text = "name: Alice\nextra: value";
@@ -583,7 +580,7 @@ mod tests {
         let schema = JsonSchema {
             schema_type: Some(SchemaType::Single("object".to_string())),
             properties: Some([("name".to_string(), string_schema())].into()),
-            additional_properties: Some(AdditionalProperties::Denied),
+            additional_properties: Some(Box::new(JsonSchema::always_failing())),
             ..JsonSchema::default()
         };
         let docs = parse_docs("name: Alice");
@@ -597,7 +594,7 @@ mod tests {
         let schema = JsonSchema {
             schema_type: Some(SchemaType::Single("object".to_string())),
             properties: Some([("name".to_string(), string_schema())].into()),
-            additional_properties: Some(AdditionalProperties::Denied),
+            additional_properties: Some(Box::new(JsonSchema::always_failing())),
             ..JsonSchema::default()
         };
         let text = "name: Alice\nextra1: a\nextra2: b";
@@ -617,7 +614,7 @@ mod tests {
         let schema = JsonSchema {
             schema_type: Some(SchemaType::Single("object".to_string())),
             properties: Some([("name".to_string(), string_schema())].into()),
-            additional_properties: Some(AdditionalProperties::Schema(Box::new(integer_schema()))),
+            additional_properties: Some(Box::new(integer_schema())),
             ..JsonSchema::default()
         };
         let text = "name: Alice\nextra: not-an-int";
@@ -667,7 +664,7 @@ mod tests {
         let schema = JsonSchema {
             schema_type: Some(SchemaType::Single("object".to_string())),
             pattern_properties: Some(vec![("^str_".to_string(), string_schema())]),
-            additional_properties: Some(AdditionalProperties::Denied),
+            additional_properties: Some(Box::new(JsonSchema::always_failing())),
             ..JsonSchema::default()
         };
         let text = "str_name: hello";
@@ -687,7 +684,7 @@ mod tests {
         let schema = JsonSchema {
             schema_type: Some(SchemaType::Single("object".to_string())),
             pattern_properties: Some(vec![("^str_".to_string(), string_schema())]),
-            additional_properties: Some(AdditionalProperties::Denied),
+            additional_properties: Some(Box::new(JsonSchema::always_failing())),
             ..JsonSchema::default()
         };
         // "other" doesn't match "^str_" and there are no properties
@@ -748,7 +745,7 @@ mod tests {
         let schema = JsonSchema {
             schema_type: Some(SchemaType::Single("object".to_string())),
             pattern_properties: Some(vec![(long_pattern, string_schema())]),
-            additional_properties: Some(AdditionalProperties::Denied),
+            additional_properties: Some(Box::new(JsonSchema::always_failing())),
             ..JsonSchema::default()
         };
         // The pattern is too long — emits a PatternLimit warning.
@@ -1269,7 +1266,7 @@ mod tests {
         // "extra" key is not allowed; range should span the "extra" key node.
         let schema = JsonSchema {
             properties: Some([("name".to_string(), string_schema())].into()),
-            additional_properties: Some(AdditionalProperties::Denied),
+            additional_properties: Some(Box::new(JsonSchema::always_failing())),
             ..JsonSchema::default()
         };
         let docs = parse_docs("name: Alice\nextra: value");
@@ -1520,7 +1517,7 @@ mod tests {
     fn dependent_schemas_keeps_key_ranges_of_denied_additional_properties() {
         let dep = JsonSchema {
             properties: Some([("name".to_string(), string_schema())].into()),
-            additional_properties: Some(AdditionalProperties::Denied),
+            additional_properties: Some(Box::new(JsonSchema::always_failing())),
             ..JsonSchema::default()
         };
         let result = codes_and_ranges(dependent_name_schema(dep), "name: Alice\nextra: 1");
@@ -1553,7 +1550,7 @@ mod tests {
                 "name",
                 string_schema(),
             )])]),
-            unevaluated_properties: Some(AdditionalProperties::Denied),
+            unevaluated_properties: Some(Box::new(JsonSchema::always_failing())),
             ..JsonSchema::default()
         };
         let docs = parse_docs("name: hello");
@@ -1571,7 +1568,7 @@ mod tests {
                     .into_iter()
                     .collect(),
             ),
-            unevaluated_properties: Some(AdditionalProperties::Denied),
+            unevaluated_properties: Some(Box::new(JsonSchema::always_failing())),
             ..JsonSchema::default()
         };
         let docs = parse_docs("name: hello\nextra: world");
@@ -1590,7 +1587,7 @@ mod tests {
                     .into_iter()
                     .collect(),
             ),
-            unevaluated_properties: Some(AdditionalProperties::Schema(Box::new(integer_schema()))),
+            unevaluated_properties: Some(Box::new(integer_schema())),
             ..JsonSchema::default()
         };
         // "extra" is unevaluated and not an integer — diagnostic
@@ -1613,7 +1610,7 @@ mod tests {
                 "extra",
                 string_schema(),
             )]))),
-            unevaluated_properties: Some(AdditionalProperties::Denied),
+            unevaluated_properties: Some(Box::new(JsonSchema::always_failing())),
             ..JsonSchema::default()
         };
         // "extra" is in then_schema — evaluated, no diagnostic
@@ -1644,7 +1641,7 @@ mod tests {
     fn diagnostic_range_additional_property_indented_key() {
         let inner_schema = JsonSchema {
             properties: Some([("name".to_string(), string_schema())].into()),
-            additional_properties: Some(AdditionalProperties::Denied),
+            additional_properties: Some(Box::new(JsonSchema::always_failing())),
             ..JsonSchema::default()
         };
         let schema = object_schema_with_props(vec![("spec", inner_schema)]);

@@ -9,7 +9,7 @@ use super::support::{
 };
 use super::*;
 use crate::schema::pattern::compile_attempts;
-use crate::schema::test_support::no_targets;
+use crate::schema::test_support::{behind_a_reference, no_targets};
 use crate::schema::{SchemaType, parse_schema};
 use crate::test_utils::parse_docs;
 
@@ -1397,6 +1397,30 @@ fn diagnostics_are_capped_per_run(
 
     assert_eq!(result.diagnostics.len(), reported);
     assert_eq!(result.completeness, completeness);
+}
+
+#[rstest]
+#[case::below_the_limit(MAX_DIAGNOSTICS - 1)]
+#[case::at_the_limit(MAX_DIAGNOSTICS)]
+#[case::above_the_limit(MAX_DIAGNOSTICS + 1)]
+fn a_reference_to_false_under_additional_properties_is_capped_like_false_written_inline(
+    #[case] keys: usize,
+) {
+    let inline = json!({"additionalProperties": false});
+    let run_of = |schema: &serde_json::Value| {
+        validate_schema(
+            &parse_docs(&numbered_keys(keys)),
+            &parse_schema(schema).expect("valid schema"),
+            true,
+            YamlVersion::V1_2,
+        )
+    };
+
+    let expected = run_of(&inline);
+    let actual = run_of(&behind_a_reference(&inline));
+
+    assert_eq!(actual.diagnostics, expected.diagnostics);
+    assert_eq!(actual.completeness, expected.completeness);
 }
 
 #[test]
