@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-10-29
 
 # VS Code Settings Reach the Server, and `vscode-languageclient` 11
@@ -38,7 +38,7 @@ a restart.
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: the server keeps the extension's settings
+- [x] Task 1: the server keeps the extension's settings
 - [ ] Task 2: the dependency updates of PR #94 are on `main`
 - [ ] Task 3: the settings listener lives exactly as long as its client
 - [ ] Push to `main`, confirm the full CI matrix is green, and confirm
@@ -53,24 +53,24 @@ from `initializationOptions` and from the extension's own listener are
 the only settings the server receives. Runs on the current
 dependencies.
 
-- [ ] The client options have no `synchronize` block, and a comment at
+- [x] The client options have no `synchronize` block, and a comment at
       the extension's settings listener says why the extension sends the
       flat settings itself
-- [ ] A unit test in `src/client.test.ts` pins that the client options
+- [x] A unit test in `src/client.test.ts` pins that the client options
       have no `synchronize`, that the settings the client sends at
       initialize are the flat `getConfig()` result, that a change of an
       `rlsp-yaml` setting sends exactly one
       `workspace/didChangeConfiguration` whose `settings` is the flat
       object with no `rlsp-yaml` key, and that a change of another
       section sends nothing
-- [ ] An integration test changes `rlsp-yaml.formatSingleQuote` in a
+- [x] An integration test changes `rlsp-yaml.formatSingleQuote` in a
       running editor, pins that the server then formats `key: "v"` as
       `key: 'v'`, and restores the setting; run against the code before
       this task it fails, and after it passes
-- [ ] `rlsp-yaml/docs/feature-log.md` has an entry that tells the reader
+- [x] `rlsp-yaml/docs/feature-log.md` has an entry that tells the reader
       that the VS Code extension's settings now stay in effect after
       startup and after a change
-- [ ] Typecheck, lint, format, unit tests, and integration tests pass
+- [x] Typecheck, lint, format, unit tests, and integration tests pass
 
 ### Task 2: Land the dependency updates of PR #94
 

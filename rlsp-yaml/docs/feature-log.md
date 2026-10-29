@@ -31,6 +31,13 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### VS Code Settings Stay in Effect After Startup and After a Change [completed]
+
+**Date:** 2026-10-29
+**Description:** In VS Code, the `rlsp-yaml` settings could silently lose their effect right after startup and after every change: the server fell back to the defaults, so options such as `formatSingleQuote` or `customTags` did nothing. The settings now stay in effect.
+**Complexity:** Low
+**Tier:** 1
+
 ### A Wrongly Typed Setting No Longer Resets the Others [completed]
 
 **Date:** 2026-10-28

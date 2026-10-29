@@ -50,11 +50,12 @@ suite('activation failure (no binary)', () => {
 // Mutually exclusive with the suite above via the same existsSync(binaryPath)
 // guard (inverted): exactly one of the two activation tests actually runs in
 // a given test-host invocation, depending on whether the real server binary
-// was built beforehand. This is the only place in the suite that drives a
-// successful activation -- vscode.extensions.getExtension(id).activate()
-// caches its result for the host's lifetime, so a second successful
-// activate() elsewhere would just observe the cached result rather than
-// re-running startClient().
+// was built beforehand. vscode.extensions.getExtension(id).activate() caches
+// its result for the host's lifetime, so only the first successful activate()
+// in the host runs startClient(); suites that call it later (settings-sync)
+// just observe the cached result. Which suite comes first depends on the
+// order mocha loads the files, so this test asserts only what holds either
+// way.
 suite('activation success (binary present)', () => {
   test('activate() resolves and starts the client when the server binary is present', async function () {
     const ext = vscode.extensions.getExtension(EXTENSION_ID);

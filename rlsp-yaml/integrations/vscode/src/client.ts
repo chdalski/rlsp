@@ -19,15 +19,15 @@ export function createLanguageClient(
 
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ language: 'yaml' }],
-    synchronize: {
-      configurationSection: 'rlsp-yaml',
-    },
     initializationOptions: getConfig(),
     outputChannel,
   };
 
   const client = new LanguageClient('rlsp-yaml', 'rlsp-yaml', serverOptions, clientOptions);
 
+  // The extension sends the flat settings object itself. The client library's
+  // `synchronize.configurationSection` would send them nested under
+  // `rlsp-yaml`, which the server reads as all defaults and so overrides these.
   workspace.onDidChangeConfiguration((event) => {
     if (event.affectsConfiguration('rlsp-yaml')) {
       void client.sendNotification('workspace/didChangeConfiguration', {
