@@ -39,7 +39,7 @@ to measure before and after on bare metal.
 - [x] Design review of the approach
 - [x] Task 1: a benchmark measures schema glob matching, and test
       catalogs are built in one place
-- [ ] Task 2: the SchemaStore catalog holds compiled globs and is shared,
+- [x] Task 2: the SchemaStore catalog holds compiled globs and is shared,
       not cloned
 - [ ] Task 3: a match allocates nothing within the stack bound and
       rejects early on the trailing literal
@@ -82,25 +82,25 @@ becomes opaque. `rlsp-yaml/src/server.rs`
 `Mutex<Option<SchemaStoreCatalog>>` and clones it out for every
 validation that reaches the SchemaStore fallback.
 
-- [ ] A `SchemaStoreCatalog` holds each YAML `fileMatch` pattern
+- [x] A `SchemaStoreCatalog` holds each YAML `fileMatch` pattern
       compiled once, when it is parsed; `rlsp_yaml::schema` exposes no
       SchemaStore entry type and no catalog field, and
       `parse_schemastore_catalog` and `match_schemastore` keep their
       signatures
-- [ ] No production code compiles a glob per match; `glob_matches`
+- [x] No production code compiles a glob per match; `glob_matches`
       remains only as a test helper
-- [ ] The server keeps one shared catalog and does not clone it per
+- [x] The server keeps one shared catalog and does not clone it per
       validation
-- [ ] The matching tests in `association.rs` and `schema.rs`, the
+- [x] The matching tests in `association.rs` and `schema.rs`, the
       proptests against the backtracking reference model included, pass
       with their assertions unchanged; the catalog parse tests that
       compared stored pattern strings check the same patterns through
       matching
-- [ ] The commit is marked breaking, and its `BREAKING CHANGE:` footer
+- [x] The commit is marked breaking, and its `BREAKING CHANGE:` footer
       tells library users that `SchemaStoreEntry` and the catalog's
       `entries` field are removed and that `parse_schemastore_catalog`
       builds a catalog
-- [ ] Build, tests, `cargo clippy --all-targets`, fmt, and
+- [x] Build, tests, `cargo clippy --all-targets`, fmt, and
       `cargo bench --bench hot_path --no-run` pass
 
 ### Task 3: Match without allocating, and reject on the trailing literal

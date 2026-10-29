@@ -239,7 +239,7 @@ pub struct Backend {
     diagnostics: Mutex<HashMap<Url, Vec<Diagnostic>>>,
     settings: Mutex<Settings>,
     /// Lazily-fetched `SchemaStore` catalog, cached for the session.
-    schemastore_catalog: Mutex<Option<SchemaStoreCatalog>>,
+    schemastore_catalog: Mutex<Option<Arc<SchemaStoreCatalog>>>,
 }
 
 impl Backend {
@@ -349,13 +349,13 @@ impl Backend {
     ///
     /// Pattern: check cache under lock → drop lock → fetch if miss →
     /// re-acquire lock → insert. No lock is held across the blocking fetch.
-    async fn get_or_fetch_schemastore_catalog(&self) -> Option<SchemaStoreCatalog> {
+    async fn get_or_fetch_schemastore_catalog(&self) -> Option<Arc<SchemaStoreCatalog>> {
         // Check cache without holding the lock across spawn_blocking.
         let cached = self
             .schemastore_catalog
             .lock()
             .ok()
-            .and_then(|guard| guard.clone());
+            .and_then(|guard| guard.as_ref().map(Arc::clone));
 
         if cached.is_some() {
             return cached;
@@ -370,10 +370,13 @@ impl Backend {
 
         match fetched {
             Ok(Ok(catalog)) => {
-                if let Ok(mut guard) = self.schemastore_catalog.lock() {
-                    *guard = Some(catalog.clone());
+                let catalog = Arc::new(catalog);
+                // Concurrent misses both fetch; the first to finish wins, so
+                // every caller shares one catalog.
+                match self.schemastore_catalog.lock() {
+                    Ok(mut guard) => Some(Arc::clone(guard.get_or_insert(catalog))),
+                    Err(_) => Some(catalog),
                 }
-                Some(catalog)
             }
             Ok(Err(e)) => {
                 self.client
@@ -1889,6 +1892,26 @@ mod tests {
                 .get("https://example.com/schema.json")
                 .is_some_and(|patterns| patterns.matches("/docs/a.yaml"))
         );
+    }
+
+    // ---- SchemaStore catalog cache ----
+
+    #[tokio::test]
+    async fn get_or_fetch_schemastore_catalog_shares_the_cached_catalog() {
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
+        let backend = service.inner();
+
+        let json = serde_json::json!({"schemas": [
+            {"url": "https://example.com/s.json", "fileMatch": ["*.yaml"]}
+        ]});
+        let cached = Arc::new(crate::schema::parse_schemastore_catalog(&json).unwrap());
+        *backend.schemastore_catalog.lock().unwrap() = Some(Arc::clone(&cached));
+
+        let first = backend.get_or_fetch_schemastore_catalog().await.unwrap();
+        let second = backend.get_or_fetch_schemastore_catalog().await.unwrap();
+
+        assert!(Arc::ptr_eq(&first, &cached));
+        assert!(Arc::ptr_eq(&first, &second));
     }
 
     // ---- Kubernetes version setting ----

@@ -432,13 +432,9 @@ pub fn match_schema_by_filename(
         .map(|(url, _)| url.clone())
 }
 
-/// Return `true` if `pattern` matches `text` using simple glob rules.
-///
-/// Supported glob syntax:
-/// - `*` matches any sequence of characters that does not include `/`
-/// - `**` matches any sequence of characters including `/`
-/// - All other characters match literally
-pub(super) fn glob_matches(pattern: &str, text: &str) -> bool {
+/// Return `true` if `pattern` matches `text`; compiles `pattern` on every call.
+#[cfg(test)]
+fn glob_matches(pattern: &str, text: &str) -> bool {
     Glob::new(pattern).is_match(text)
 }
 
@@ -459,7 +455,7 @@ enum Token {
 /// costs at most the glob length times the text length however many
 /// wildcards the glob has.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Glob {
+pub(super) struct Glob {
     tokens: Vec<Token>,
 }
 
@@ -477,7 +473,12 @@ impl Glob {
     }
 
     /// A glob in which `**/` may end at any byte.
-    fn new(pattern: &str) -> Self {
+    ///
+    /// Supported glob syntax:
+    /// - `*` matches any sequence of characters that does not include `/`
+    /// - `**` matches any sequence of characters including `/`
+    /// - All other characters match literally
+    pub(super) fn new(pattern: &str) -> Self {
         Self {
             tokens: tokenize(pattern, false).collect(),
         }
@@ -485,7 +486,7 @@ impl Glob {
 
     /// Track the tokens the text so far can have reached; the text matches
     /// when the end of the glob is among them at the end of the text.
-    fn is_match(&self, candidate: &str) -> bool {
+    pub(super) fn is_match(&self, candidate: &str) -> bool {
         let text = candidate.as_bytes();
         let mut reached = vec![false; self.tokens.len() + 1];
         let mut next = vec![false; self.tokens.len() + 1];

@@ -884,19 +884,22 @@ pub(crate) mod test_support {
 }
 
 /// A single entry from the `SchemaStore` catalog.
-#[derive(Debug, Clone)]
-pub struct SchemaStoreEntry {
+#[derive(Debug)]
+struct SchemaStoreEntry {
     /// URL of the JSON Schema.
-    pub url: String,
-    /// Glob patterns for files this schema applies to.
-    pub file_match: Vec<String>,
+    url: String,
+    /// Compiled glob patterns for files this schema applies to.
+    file_match: Vec<association::Glob>,
 }
 
 /// The parsed `SchemaStore` catalog, filtered to YAML-relevant entries.
-#[derive(Debug, Clone, Default)]
+///
+/// The `fileMatch` patterns are compiled once, when the catalog is parsed, so
+/// a lookup with [`match_schemastore`] compiles nothing. Build one with
+/// [`parse_schemastore_catalog`].
+#[derive(Debug, Default)]
 pub struct SchemaStoreCatalog {
-    /// All YAML-relevant schema entries from the catalog.
-    pub entries: Vec<SchemaStoreEntry>,
+    entries: Vec<SchemaStoreEntry>,
 }
 
 /// In-memory cache of fetched schema documents and parsed schemas, both keyed
@@ -1301,8 +1304,10 @@ pub fn fetch_schemastore_catalog(proxy: Option<&str>) -> Result<SchemaStoreCatal
 /// Parse a `SchemaStore` catalog JSON value into a [`SchemaStoreCatalog`].
 ///
 /// Keeps only the entries with a non-empty `url` and at least one `fileMatch`
-/// pattern ending in `.yml` or `.yaml`, and only those patterns. Returns `None`
-/// if the value is not a JSON object with a `schemas` array.
+/// pattern ending in `.yml` or `.yaml`, and only those patterns, compiled with
+/// the glob syntax of the `schemas` setting's patterns without their implicit
+/// leading `**/`: `*` stops at `/`, `**` crosses it, anything else is literal.
+/// Returns `None` if the value is not a JSON object with a `schemas` array.
 #[must_use]
 pub fn parse_schemastore_catalog(value: &Value) -> Option<SchemaStoreCatalog> {
     let obj = value.as_object()?;
@@ -1317,18 +1322,17 @@ pub fn parse_schemastore_catalog(value: &Value) -> Option<SchemaStoreCatalog> {
                 return None;
             }
             // Retain only YAML-relevant fileMatch patterns within this entry.
-            let file_match: Vec<String> = entry_obj
+            let file_match: Vec<association::Glob> = entry_obj
                 .get("fileMatch")?
                 .as_array()?
                 .iter()
-                .filter_map(|v| v.as_str().map(String::from))
+                .filter_map(Value::as_str)
                 .filter(|p| {
-                    std::path::Path::new(p.as_str())
-                        .extension()
-                        .is_some_and(|ext| {
-                            ext.eq_ignore_ascii_case("yml") || ext.eq_ignore_ascii_case("yaml")
-                        })
+                    std::path::Path::new(p).extension().is_some_and(|ext| {
+                        ext.eq_ignore_ascii_case("yml") || ext.eq_ignore_ascii_case("yaml")
+                    })
                 })
+                .map(association::Glob::new)
                 .collect();
             // Only keep entries that have at least one YAML-relevant pattern.
             if file_match.is_empty() {
@@ -1347,10 +1351,7 @@ pub fn parse_schemastore_catalog(value: &Value) -> Option<SchemaStoreCatalog> {
 #[must_use]
 pub fn match_schemastore(filename: &str, catalog: &SchemaStoreCatalog) -> Option<String> {
     catalog.entries.iter().find_map(|entry| {
-        let matches = entry
-            .file_match
-            .iter()
-            .any(|pattern| association::glob_matches(pattern, filename));
+        let matches = entry.file_match.iter().any(|glob| glob.is_match(filename));
         if matches {
             Some(entry.url.clone())
         } else {
@@ -4809,19 +4810,24 @@ mod tests {
         json!({ "schemas": schemas_json })
     }
 
-    // SS-1: catalog with one YAML entry is parsed and kept — also checks field values
-    // Different assertion shape (checks url and file_match fields) — left standalone.
+    // SS-1: catalog with one YAML entry is parsed and kept — also checks the url and
+    // that the one pattern kept matches as written.
+    // Different assertion shape (checks url and matching) — left standalone.
     #[test]
     fn should_parse_catalog_entry_with_yaml_pattern() {
         let v = make_catalog_json(&[("https://example.com/schema.json", &["*.yaml"])]);
         let catalog = parse_schemastore_catalog(&v).expect("should parse");
         assert_eq!(catalog.entries.len(), 1);
         assert_eq!(catalog.entries[0].url, "https://example.com/schema.json");
-        assert_eq!(catalog.entries[0].file_match, vec!["*.yaml"]);
+        assert_eq!(catalog.entries[0].file_match.len(), 1);
+        let url = Some("https://example.com/schema.json".to_string());
+        assert_eq!(match_schemastore("config.yaml", &catalog), url);
+        assert_eq!(match_schemastore("config.yml", &catalog), None);
+        assert_eq!(match_schemastore("dir/config.yaml", &catalog), None);
     }
 
     // SS-3: entry with mixed YAML and JSON patterns is kept; non-YAML patterns are discarded
-    // Different assertion shape (checks file_match field value) — left standalone.
+    // Different assertion shape (checks which patterns match) — left standalone.
     #[test]
     fn should_keep_entry_with_mixed_yaml_and_json_patterns() {
         let v = make_catalog_json(&[(
@@ -4831,7 +4837,11 @@ mod tests {
         let catalog = parse_schemastore_catalog(&v).expect("should parse");
         assert_eq!(catalog.entries.len(), 1);
         // The *.json pattern is discarded; only the YAML pattern is retained.
-        assert_eq!(catalog.entries[0].file_match, vec!["docker-compose.yml"]);
+        assert_eq!(catalog.entries[0].file_match.len(), 1);
+        let url = Some("https://example.com/schema.json".to_string());
+        assert_eq!(match_schemastore("docker-compose.yml", &catalog), url);
+        assert_eq!(match_schemastore("a.json", &catalog), None);
+        assert_eq!(match_schemastore("docker-composeXyml", &catalog), None);
     }
 
     #[rstest]
@@ -4934,7 +4944,10 @@ mod tests {
                 .iter()
                 .map(|(url, file_match)| SchemaStoreEntry {
                     url: (*url).to_string(),
-                    file_match: file_match.iter().map(ToString::to_string).collect(),
+                    file_match: file_match
+                        .iter()
+                        .map(|pattern| association::Glob::new(pattern))
+                        .collect(),
                 })
                 .collect(),
         }
@@ -4962,6 +4975,65 @@ mod tests {
             match_schemastore(filename, &catalog).is_some(),
             expected,
             "{pattern} on {filename}"
+        );
+    }
+
+    // The same cases as above through `parse_schemastore_catalog`, which compiles
+    // the patterns in production; `catalog_of` bypasses it, so only these cases
+    // notice a parser that compiles with an implicit leading `**/`.
+    #[rstest]
+    #[case::bare_name_matches_the_whole_path("config.yaml", "config.yaml", true)]
+    #[case::bare_name_is_not_matched_below_a_directory("config.yaml", "/p/config.yaml", false)]
+    #[case::double_star_matches_below_a_directory("**/config.yaml", "/p/config.yaml", true)]
+    #[case::star_does_not_cross_a_directory("*.yaml", "/dir/a.yaml", false)]
+    #[case::bang_pattern_matches_the_literal_name("!x.yaml", "!x.yaml", true)]
+    #[case::bang_glob_does_not_exclude("!*.yaml", "a.yaml", false)]
+    #[case::workflow_glob("**/.github/workflows/*.yml", "/w/.github/workflows/ci.yml", true)]
+    #[case::double_star_in_the_middle("dir/**/name.yaml", "dir/a/b/name.yaml", true)]
+    #[case::multibyte_name("é.yaml", "é.yaml", true)]
+    fn parsed_catalog_reads_file_match_patterns_literally(
+        #[case] pattern: &str,
+        #[case] filename: &str,
+        #[case] expected: bool,
+    ) {
+        let v = make_catalog_json(&[("https://example.com/s.json", &[pattern])]);
+        let catalog = parse_schemastore_catalog(&v).expect("should parse");
+        assert_eq!(
+            match_schemastore(filename, &catalog).is_some(),
+            expected,
+            "{pattern} on {filename}"
+        );
+    }
+
+    #[test]
+    fn parsed_catalog_keeps_entry_order_and_every_pattern_of_an_entry() {
+        let v = make_catalog_json(&[
+            ("https://example.com/a.json", &["a.yaml", "b.yml"]),
+            ("https://example.com/b.json", &["*.yaml"]),
+        ]);
+        let catalog = parse_schemastore_catalog(&v).expect("should parse");
+        let url_of = |name| match_schemastore(name, &catalog);
+        assert_eq!(url_of("b.yml"), Some("https://example.com/a.json".into()));
+        assert_eq!(url_of("a.yaml"), Some("https://example.com/a.json".into()));
+        assert_eq!(url_of("c.yaml"), Some("https://example.com/b.json".into()));
+        assert_eq!(url_of("c.yml"), None);
+    }
+
+    #[test]
+    fn parsed_catalog_ends_for_a_file_match_that_made_backtracking_explode() {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let v = make_catalog_json(&[(
+                "https://example.com/s.json",
+                &["a**a**a**a**a**a**a**a**a**a**a**b.yaml"],
+            )]);
+            let catalog = parse_schemastore_catalog(&v).expect("should parse");
+            let name = "a".repeat(4096) + ".yaml";
+            let _ = sender.send(match_schemastore(&name, &catalog));
+        });
+        assert_eq!(
+            receiver.recv_timeout(std::time::Duration::from_secs(30)),
+            Ok(None)
         );
     }
 
