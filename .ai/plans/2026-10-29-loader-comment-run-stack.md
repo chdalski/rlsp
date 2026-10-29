@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-10-29)
 **Created:** 2026-10-29
 
 # Comment Runs Before a Value Use Bounded Stack in the Loader
@@ -36,7 +36,7 @@ comments, while every loaded document stays as it is today.
 - [x] Design review of the approach
 - [x] Task 1: tests pin where comments at a value position land
 - [x] Task 2: comment runs at a value position use bounded stack
-- [ ] Push to `main` and confirm the full CI matrix is green
+- [x] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
