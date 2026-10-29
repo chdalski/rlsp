@@ -1294,6 +1294,218 @@ mod tests {
         );
     }
 
+    // -----------------------------------------------------------------------
+    // Today's placement of comments between a mapping key and a non-collection
+    // (or flow collection) value
+    // -----------------------------------------------------------------------
+
+    /// Collects `(label, leading comments)` for every node with leading
+    /// comments, in document order. Scalars are labelled by value, aliases by
+    /// anchor name, collections by kind.
+    fn nodes_with_leading_comments(docs: &[Document<Span>]) -> Vec<(String, Vec<String>)> {
+        fn walk(node: &Node<Span>, out: &mut Vec<(String, Vec<String>)>) {
+            if !node.leading_comments().is_empty() {
+                let label = match node {
+                    Node::Scalar { value, .. } => value.clone(),
+                    Node::Alias { name, .. } => name.clone(),
+                    Node::Mapping { .. } => "mapping".to_owned(),
+                    Node::Sequence { .. } => "sequence".to_owned(),
+                };
+                out.push((label, node.leading_comments().to_vec()));
+            }
+            match node {
+                Node::Mapping { entries, .. } => {
+                    for (key, value) in entries {
+                        walk(key, out);
+                        walk(value, out);
+                    }
+                }
+                Node::Sequence { items, .. } => {
+                    for item in items {
+                        walk(item, out);
+                    }
+                }
+                Node::Scalar { .. } | Node::Alias { .. } => {}
+            }
+        }
+        let mut out = Vec::new();
+        for doc in docs {
+            walk(&doc.root, &mut out);
+        }
+        out
+    }
+
+    fn expected_placement(expected: &[(&str, &[&str])]) -> Vec<(String, Vec<String>)> {
+        expected
+            .iter()
+            .map(|(label, comments)| {
+                (
+                    (*label).to_owned(),
+                    comments.iter().map(|c| (*c).to_owned()).collect(),
+                )
+            })
+            .collect()
+    }
+
+    // Each case pins the node that receives the comments today. Comments
+    // before a scalar, empty, alias, or empty flow value go to the next key of
+    // the same mapping (or the parent collection's next entry); comments
+    // before a non-empty flow collection go to its first element.
+    #[rstest]
+    #[case::scalar_plain("a:\n  # c\n  v\nb: 1\n", &[("b", &["# c"][..])])]
+    #[case::scalar_multiple_comments(
+        "a:\n  # c1\n  # c2\n  v\nb: 1\n",
+        &[("b", &["# c1", "# c2"][..])]
+    )]
+    #[case::scalar_blank_line_between_comments(
+        "a:\n  # c1\n\n  # c2\n  v\nb: 1\n",
+        &[("b", &["# c1", "# c2"][..])]
+    )]
+    #[case::scalar_double_quoted("a:\n  # c\n  \"q\"\nb: 1\n", &[("b", &["# c"][..])])]
+    #[case::scalar_literal_block("a:\n  # c\n  |\n  lit\nb: 1\n", &[("b", &["# c"][..])])]
+    #[case::scalar_tagged("a:\n  # c\n  !!str t\nb: 1\n", &[("b", &["# c"][..])])]
+    #[case::scalar_after_anchor_on_key_line("a: &x\n  # c\n  v\nb: 1\n", &[("b", &["# c"][..])])]
+    #[case::scalar_last_entry_comment_is_dropped("a:\n  # c\n  v\n", &[])]
+    #[case::scalar_in_nested_mapping_reaches_parent_sibling(
+        "outer:\n  a:\n    # c\n    v\nz: 1\n",
+        &[("z", &["# c"][..])]
+    )]
+    #[case::scalar_in_sequence_mapping_reaches_next_item(
+        "- a:\n  # c\n  v\n- z\n",
+        &[("z", &["# c"][..])]
+    )]
+    #[case::scalar_at_document_end_does_not_leak_into_next_document(
+        "a:\n  # c\n  v\n---\nb: 1\n",
+        &[]
+    )]
+    #[case::empty_value_comment_to_next_key("a:\n  # c\nb: 1\n", &[("b", &["# c"][..])])]
+    #[case::empty_value_multiple_comments(
+        "a:\n  # c1\n  # c2\nb: 1\n",
+        &[("b", &["# c1", "# c2"][..])]
+    )]
+    #[case::empty_value_mixed_indentation(
+        "a:\n  # c1\n# c2\nb: 1\n",
+        &[("b", &["# c1", "# c2"][..])]
+    )]
+    #[case::empty_value_last_entry_comment_is_dropped("a:\n  # c\n", &[])]
+    #[case::empty_value_mapping_ends_comment_goes_to_next_sequence_item(
+        "- a:\n  # c\n- z\n",
+        &[("z", &["# c"][..])]
+    )]
+    #[case::empty_value_multiple_comments_to_next_sequence_item(
+        "- a:\n  # c1\n  # c2\n- z\n",
+        &[("z", &["# c1", "# c2"][..])]
+    )]
+    #[case::empty_value_after_other_entry_in_sequence_mapping(
+        "- a: 1\n  b:\n  # c\n- z\n",
+        &[("z", &["# c"][..])]
+    )]
+    #[case::alias_comment_to_next_key(
+        "x: &x 1\na:\n  # c\n  *x\nb: 2\n",
+        &[("b", &["# c"][..])]
+    )]
+    #[case::alias_in_nested_mapping_reaches_parent_sibling(
+        "x: &x 1\nouter:\n  a:\n    # c\n    *x\nz: 1\n",
+        &[("z", &["# c"][..])]
+    )]
+    #[case::alias_in_sequence_mapping_reaches_next_item(
+        "- &x 1\n- a:\n  # c\n  *x\n- z\n",
+        &[("z", &["# c"][..])]
+    )]
+    #[case::alias_at_document_end_no_node_receives_comment("x: &x 1\na:\n  # c\n  *x\n", &[])]
+    #[case::alias_at_document_end_does_not_leak_into_next_document(
+        "x: &x 1\na:\n  # c\n  *x\n---\nb: 1\n",
+        &[]
+    )]
+    #[case::flow_mapping_comment_goes_to_first_flow_key(
+        "a:\n  # c\n  {k: v}\nb: 1\n",
+        &[("k", &["# c"][..])]
+    )]
+    #[case::flow_mapping_multiple_comments(
+        "a:\n  # c1\n  # c2\n  {k: v}\nb: 1\n",
+        &[("k", &["# c1", "# c2"][..])]
+    )]
+    #[case::flow_sequence_comment_goes_to_first_item(
+        "a:\n  # c\n  [1, 2]\nb: 1\n",
+        &[("1", &["# c"][..])]
+    )]
+    #[case::flow_sequence_tail_comment_reaches_next_key(
+        "a:\n  # c\n  [1, 2]\n  # tail\nb: 1\n",
+        &[("1", &["# c"][..]), ("b", &["# tail"][..])]
+    )]
+    #[case::flow_mapping_in_sequence_mapping_ends_after_value(
+        "- x\n- a:\n  # c\n  {k: v}\n- z\n",
+        &[("k", &["# c"][..])]
+    )]
+    #[case::flow_sequence_in_sequence_mapping(
+        "- a:\n  # c\n  [1]\n- z\n",
+        &[("1", &["# c"][..])]
+    )]
+    #[case::empty_flow_mapping_comment_goes_to_next_key(
+        "a:\n  # c\n  {}\nb: 1\n",
+        &[("b", &["# c"][..])]
+    )]
+    #[case::empty_flow_sequence_comment_goes_to_next_key(
+        "a:\n  # c\n  []\nb: 1\n",
+        &[("b", &["# c"][..])]
+    )]
+    #[case::empty_flow_sequence_in_sequence_mapping_goes_to_next_item(
+        "- a:\n  # c\n  []\n- z\n",
+        &[("z", &["# c"][..])]
+    )]
+    #[case::same_line_comment_after_key_is_not_leading_comment(
+        "a: # same-line\n  v\nb: 1\n",
+        &[]
+    )]
+    #[case::same_line_then_own_line_comment(
+        "a: # same-line\n  # own\n  v\nb: 1\n",
+        &[("b", &["# own"][..])]
+    )]
+    fn comment_between_key_and_value_placement(
+        #[case] input: &str,
+        #[case] expected: &[(&str, &[&str])],
+    ) {
+        let docs = load(input).unwrap();
+        assert_eq!(
+            nodes_with_leading_comments(&docs),
+            expected_placement(expected),
+            "input: {input:?}"
+        );
+    }
+
+    #[rstest]
+    #[case::alias_comment_to_next_key(
+        "x: &x 1\na:\n  # c\n  *x\nb: 2\n",
+        &[("b", &["# c"][..])]
+    )]
+    #[case::alias_at_document_end_no_node_receives_comment("x: &x 1\na:\n  # c\n  *x\n", &[])]
+    fn comment_before_alias_value_resolved_mode_placement(
+        #[case] input: &str,
+        #[case] expected: &[(&str, &[&str])],
+    ) {
+        let docs = LoaderBuilder::new().resolved().build().load(input).unwrap();
+        assert_eq!(
+            nodes_with_leading_comments(&docs),
+            expected_placement(expected),
+            "input: {input:?}"
+        );
+    }
+
+    #[test]
+    fn comment_before_scalar_value_coexists_with_trailing_comment() {
+        let docs = load("a:\n  # c\n  v # tr\nb: 1\n").unwrap();
+        let Node::Mapping { entries, .. } = &docs[0].root else {
+            panic!("expected root mapping");
+        };
+        let (_, value) = &entries[0];
+        assert!(value.leading_comments().is_empty());
+        assert_eq!(value.trailing_comment(), Some("# tr"));
+        assert_eq!(
+            nodes_with_leading_comments(&docs),
+            expected_placement(&[("b", &["# c"][..])])
+        );
+    }
+
     #[test]
     fn no_comment_between_key_and_value_leaves_leading_comments_empty() {
         let docs = load("key:\n  inner: val\n").unwrap();

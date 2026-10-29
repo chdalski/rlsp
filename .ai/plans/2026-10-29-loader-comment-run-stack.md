@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-10-29
 
 # Comment Runs Before a Value Use Bounded Stack in the Loader
@@ -34,7 +34,7 @@ comments, while every loaded document stays as it is today.
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: tests pin where comments at a value position land
+- [x] Task 1: tests pin where comments at a value position land
 - [ ] Task 2: comment runs at a value position use bounded stack
 - [ ] Push to `main` and confirm the full CI matrix is green
 
@@ -47,13 +47,13 @@ and its value for the value shapes no test covers yet, so the fix in
 Task 2 shows it changes no loaded document. Production code is
 unchanged.
 
-- [ ] Tests through `load()` pin, for comments between a key and a
+- [x] Tests through `load()` pin, for comments between a key and a
       scalar value, an empty value, an alias value, and a flow
       collection value, which node receives them as leading comments,
       including the case where the mapping ends after the value and the
       comments go to the parent collection's next entry
-- [ ] The new tests pass against the code as it is before this plan
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] The new tests pass against the code as it is before this plan
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 2: Load comment runs at a value position with bounded stack
 
