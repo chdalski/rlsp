@@ -39,7 +39,7 @@ a restart.
 - [x] Clarify scope with the user
 - [x] Design review of the approach
 - [x] Task 1: the server keeps the extension's settings
-- [ ] Task 2: the dependency updates of PR #94 are on `main`
+- [x] Task 2: the dependency updates of PR #94 are on `main`
 - [ ] Task 3: the settings listener lives exactly as long as its client
 - [ ] Push to `main`, confirm the full CI matrix is green, and confirm
       PR #94 is closed
@@ -77,15 +77,15 @@ dependencies.
 Bring `main` to the dependency versions of PR #94; with Task 1 in place
 the deprecated option no longer fails lint.
 
-- [ ] `package.json` and `pnpm-lock.yaml` carry
+- [x] `package.json` and `pnpm-lock.yaml` carry
       `vscode-languageclient` 11.0.0, `@vitest/coverage-v8` and `vitest`
       5.0.5, `eslint` 10.13.0, `typescript-eslint` 8.72.0, and `vite`
       8.3.5
-- [ ] The VS Code version that `vscode-languageclient` 11.0.0 requires —
+- [x] The VS Code version that `vscode-languageclient` 11.0.0 requires —
       at runtime (`REQUIRED_VSCODE_VERSION` in its `lib/node/main.js`)
       and in its `engines.vscode` — is satisfied by every version the
       extension's `engines.vscode` (`^1.140.0`) admits
-- [ ] Typecheck, lint, format, audit, unit tests, and integration tests
+- [x] Typecheck, lint, format, audit, unit tests, and integration tests
       pass
 
 ### Task 3: The settings listener lives exactly as long as its client
