@@ -346,35 +346,49 @@ pub fn kubernetes_schema_url(
 // Schema association — file pattern matching
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// Longest glob, in bytes after the leading `!` and `/` are removed.
+/// Longest glob in a `schemas` entry, in bytes after the leading `!` and `/`
+/// are removed.
 ///
-/// With [`MAX_PATH_BYTES`] it bounds one match at 256 × 4096 steps.
+/// With [`MAX_PATH_BYTES`] it bounds one match of a `schemas` entry at
+/// 256 × 4096 steps.
 pub const MAX_PATTERN_BYTES: usize = 256;
 
 /// States of the glob simulation that are kept on the stack: a `schemas`
 /// pattern compiles to at most [`MAX_PATTERN_BYTES`] tokens and the leading
 /// `**/`, and the simulation has one more state for the end of the glob.
+/// A longer glob takes its states from the heap.
 const STACK_STATES: usize = MAX_PATTERN_BYTES + 2;
 
 /// Most globs one `schemas` entry may list.
 pub const MAX_PATTERNS_PER_ENTRY: usize = 32;
 
-/// Longest document path that is matched; a longer one matches no `schemas`
-/// entry.
+/// Longest document path that [`match_schema_by_filename`] matches; a longer
+/// one matches no `schemas` entry.
 pub const MAX_PATH_BYTES: usize = 4096;
 
-/// The globs of one `schemas` entry: the files its schema applies to, minus
-/// the files it excludes.
+/// The globs of one entry: the files its schema applies to, minus the files it
+/// excludes.
 ///
 /// Follows yaml-language-server. A leading `!` marks a glob as an exclusion
 /// and is removed once, then one leading `/` is removed, and the rest matches
 /// at any directory level, as if it began with `**/`. A glob that is empty
-/// after that is ignored. The only way to obtain a value is
-/// [`FilePatterns::new`], so no value lacks a glob that includes files.
+/// after that is ignored. No value lacks a glob that includes files.
+///
+/// [`FilePatterns::new`] builds the entries of the `schemas` setting, which
+/// can come from a cloned repository, and enforces the limits for them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FilePatterns {
     include: Vec<Glob>,
     exclude: Vec<Glob>,
+}
+
+/// Split `pattern` into whether it is an exclusion and the glob that remains
+/// once one leading `!` and then one leading `/` are removed.
+fn split(pattern: &str) -> (bool, &str) {
+    let (excluded, rest) = pattern
+        .strip_prefix('!')
+        .map_or((false, pattern), |rest| (true, rest));
+    (excluded, rest.strip_prefix('/').unwrap_or(rest))
 }
 
 impl FilePatterns {
@@ -384,20 +398,32 @@ impl FilePatterns {
     ///
     /// The entry is refused as a whole rather than without the faulty glob: a
     /// dropped exclusion would apply the schema to more files than intended.
+    /// The limits are checked before any glob is compiled.
     #[must_use]
     pub fn new(patterns: &[String]) -> Option<Self> {
-        if patterns.len() > MAX_PATTERNS_PER_ENTRY {
+        let within_limits = patterns.len() <= MAX_PATTERNS_PER_ENTRY
+            && patterns
+                .iter()
+                .all(|pattern| split(pattern).1.len() <= MAX_PATTERN_BYTES);
+        if !within_limits {
             return None;
         }
+        Self::without_limits(patterns.iter().map(String::as_str))
+    }
+
+    /// Sort `patterns` into inclusions and exclusions like [`Self::new`], but
+    /// without its limits on the number and the length of the globs; `None`
+    /// when none includes files.
+    ///
+    /// For sources whose total size is bounded already, such as the
+    /// `SchemaStore` catalog. Never use it for the `schemas` setting: its
+    /// globs are untrusted, and only the limits of [`Self::new`] bound the
+    /// cost of a match.
+    #[must_use]
+    pub(crate) fn without_limits<'a>(patterns: impl IntoIterator<Item = &'a str>) -> Option<Self> {
         let (mut include, mut exclude) = (Vec::new(), Vec::new());
         for pattern in patterns {
-            let (excluded, rest) = pattern
-                .strip_prefix('!')
-                .map_or((false, pattern.as_str()), |rest| (true, rest));
-            let rest = rest.strip_prefix('/').unwrap_or(rest);
-            if rest.len() > MAX_PATTERN_BYTES {
-                return None;
-            }
+            let (excluded, rest) = split(pattern);
             if rest.is_empty() {
                 continue;
             }
@@ -413,10 +439,14 @@ impl FilePatterns {
 
     /// Whether the schema applies to the document at `path`: some inclusion
     /// matches and no exclusion does. The order of the globs does not matter.
+    ///
+    /// The cost of a match grows with the length of `path`, which this does
+    /// not limit. For a path of unknown length use
+    /// [`match_schema_by_filename`], which refuses a path longer than
+    /// [`MAX_PATH_BYTES`].
     #[must_use]
     pub fn matches(&self, path: &str) -> bool {
-        path.len() <= MAX_PATH_BYTES
-            && self.include.iter().any(|glob| glob.is_match(path))
+        self.include.iter().any(|glob| glob.is_match(path))
             && !self.exclude.iter().any(|glob| glob.is_match(path))
     }
 }
@@ -425,12 +455,16 @@ impl FilePatterns {
 /// `filename`, or `None` if no entry matches.
 ///
 /// `schemas` is ordered by URL, so the entry whose URL sorts first wins among
-/// overlapping entries. See [`FilePatterns`] for the pattern rules.
+/// overlapping entries. A `filename` longer than [`MAX_PATH_BYTES`] matches no
+/// entry. See [`FilePatterns`] for the pattern rules.
 #[must_use]
 pub fn match_schema_by_filename(
     filename: &str,
     schemas: &BTreeMap<String, FilePatterns>,
 ) -> Option<String> {
+    if filename.len() > MAX_PATH_BYTES {
+        return None;
+    }
     schemas
         .iter()
         .find(|(_, patterns)| patterns.matches(filename))
@@ -898,8 +932,70 @@ mod tests {
     #[case::only_exclusions(&["!x", "!y"])]
     #[case::only_empty_globs(&["", "/", "!", "!/"])]
     fn file_patterns_refuse_globs_that_include_no_file(#[case] globs: &[&str]) {
-        let globs: Vec<String> = globs.iter().map(ToString::to_string).collect();
+        let owned: Vec<String> = globs.iter().map(ToString::to_string).collect();
+        assert_eq!(FilePatterns::new(&owned), None);
+        assert_eq!(FilePatterns::without_limits(globs.iter().copied()), None);
+    }
+
+    #[rstest]
+    #[case::exclusion_first(&["!skip.yaml", "*.yaml"])]
+    #[case::exclusion_last(&["*.yaml", "!skip.yaml"])]
+    #[case::only_one_exclamation_mark_is_removed(&["**", "!!x"])]
+    #[case::only_one_slash_is_removed(&["//x", "!//y"])]
+    #[case::slash_then_bang_is_literal(&["/!x", "!/!y"])]
+    #[case::bare_exclamation_mark_is_ignored(&["x", "!"])]
+    #[case::bare_slash_is_ignored(&["x", "/"])]
+    #[case::empty_glob_is_ignored(&["x", "", "!/"])]
+    fn without_limits_builds_what_new_builds_within_the_limits(#[case] globs: &[&str]) {
+        let owned: Vec<String> = globs.iter().map(ToString::to_string).collect();
+        let patterns = FilePatterns::new(&owned);
+        assert!(patterns.is_some());
+        assert_eq!(
+            FilePatterns::without_limits(globs.iter().copied()),
+            patterns
+        );
+    }
+
+    #[rstest]
+    #[case::more_than_the_count_limit(vec!["x".to_string(); MAX_PATTERNS_PER_ENTRY + 1])]
+    #[case::glob_over_the_byte_limit(vec!["x".repeat(MAX_PATTERN_BYTES + 1)])]
+    #[case::exclusion_over_the_byte_limit(vec!["x".to_string(), "!".to_string() + &"y".repeat(MAX_PATTERN_BYTES + 1)])]
+    #[case::multibyte_glob_over_the_byte_limit(vec!["\u{e9}".repeat(MAX_PATTERN_BYTES / 2 + 1)])]
+    fn without_limits_accepts_what_new_refuses(#[case] globs: Vec<String>) {
         assert_eq!(FilePatterns::new(&globs), None);
+        assert!(FilePatterns::without_limits(globs.iter().map(String::as_str)).is_some());
+    }
+
+    #[test]
+    fn without_limits_matches_and_excludes_with_a_glob_over_the_byte_limit() {
+        let long = "a".repeat(MAX_PATTERN_BYTES + 44) + "*b";
+        let including = FilePatterns::without_limits([long.as_str()]).expect("includes a file");
+        let excluding =
+            FilePatterns::without_limits(["**", &format!("!{long}")]).expect("includes a file");
+        let hit = "/d/".to_string() + &"a".repeat(MAX_PATTERN_BYTES + 44) + "zzb";
+        let simulated_miss = "/d/".to_string() + &"a".repeat(MAX_PATTERN_BYTES + 43) + "b";
+        let literal_miss = "/d/".to_string() + &"a".repeat(MAX_PATTERN_BYTES + 44) + "zzc";
+        for (path, expected) in [
+            (&hit, true),
+            (&simulated_miss, false),
+            (&literal_miss, false),
+        ] {
+            assert_eq!(anywhere_reference(&long, path), expected, "the reference");
+            assert_eq!(including.matches(path), expected, "{path}");
+            assert_eq!(excluding.matches(path), !expected, "excluding {path}");
+        }
+    }
+
+    #[test]
+    fn without_limits_matches_a_hundred_thousand_globs_and_a_huge_glob() {
+        let many = vec!["x"; 100_000];
+        let patterns = FilePatterns::without_limits(many).expect("includes a file");
+        assert!(patterns.matches("/a/x"));
+        assert!(!patterns.matches("/a/y"));
+        let huge = "a**".repeat(500) + "b";
+        let patterns = FilePatterns::without_limits([huge.as_str()]).expect("includes a file");
+        assert!(patterns.matches(&("/".to_string() + &"a".repeat(500) + "b")));
+        assert!(!patterns.matches(&("/".to_string() + &"a".repeat(500) + "c")));
     }
 
     #[test]
@@ -941,9 +1037,10 @@ mod tests {
     }
 
     #[test]
-    fn file_patterns_match_a_huge_path_to_nothing_without_work() {
+    fn match_schema_by_filename_matches_a_huge_path_to_nothing_without_work() {
         let path = format!("/{}.yaml", "a".repeat(10 << 20));
-        assert!(!file_patterns(&["**"]).matches(&path));
+        let entries = schemas(&[("https://a.test/s.json", &["**"])]);
+        assert_eq!(match_schema_by_filename(&path, &entries), None);
     }
 
     #[test]
@@ -963,11 +1060,32 @@ mod tests {
     }
 
     #[test]
-    fn file_patterns_match_a_path_up_to_the_limit_and_no_longer() {
-        let patterns = file_patterns(&["*.yaml"]);
+    fn match_schema_by_filename_matches_a_path_up_to_the_limit_and_no_longer() {
+        let entries = schemas(&[
+            ("https://a.test/s.json", &["*.yaml"]),
+            ("https://b.test/s.json", &["**"]),
+        ]);
         let path = |length: usize| format!("/{}.yaml", "a".repeat(length - "/.yaml".len()));
-        assert!(patterns.matches(&path(MAX_PATH_BYTES)));
-        assert!(!patterns.matches(&path(MAX_PATH_BYTES + 1)));
+        assert_eq!(
+            match_schema_by_filename(&path(MAX_PATH_BYTES), &entries),
+            Some("https://a.test/s.json".to_string())
+        );
+        assert_eq!(
+            match_schema_by_filename(&path(MAX_PATH_BYTES + 1), &entries),
+            None
+        );
+        assert_eq!(
+            match_schema_by_filename(&path(MAX_PATH_BYTES + 1), &BTreeMap::new()),
+            None
+        );
+    }
+
+    #[test]
+    fn file_patterns_matches_applies_no_path_limit() {
+        let path = |extension: &str| format!("/{}{extension}", "a".repeat(MAX_PATH_BYTES));
+        let patterns = file_patterns(&["**", "!*.json"]);
+        assert!(patterns.matches(&path(".yaml")));
+        assert!(!patterns.matches(&path(".json")));
     }
 
     /// Run `work` on a thread and fail, instead of hanging, if it does not
@@ -1350,6 +1468,21 @@ mod tests {
                 if let Some(patterns) = FilePatterns::new(&globs) {
                     let _ = patterns.matches(&path);
                 }
+                if let Some(patterns) = FilePatterns::without_limits(globs.iter().map(String::as_str)) {
+                    let _ = patterns.matches(&path);
+                }
+            }
+
+            /// Within the limits, the limited and the unlimited constructor
+            /// build the same patterns.
+            #[test]
+            fn new_and_without_limits_agree_within_the_limits(
+                globs in prop::collection::vec("[ab\u{e9}*/!.]{0,9}", 0..4),
+            ) {
+                prop_assert_eq!(
+                    FilePatterns::new(&globs),
+                    FilePatterns::without_limits(globs.iter().map(String::as_str))
+                );
             }
 
             /// A glob and its own exclusion together match nothing.

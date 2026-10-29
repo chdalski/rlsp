@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-10-29
 
 # SchemaStore Patterns Follow the Upstream Rules
@@ -42,7 +42,7 @@ the glob mode that nothing uses afterwards.
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: `FilePatterns` separates its pattern rules from the
+- [x] Task 1: `FilePatterns` separates its pattern rules from the
       settings bounds
 - [ ] Task 2: the benchmark catalog contains the shapes the new rules
       make costly
@@ -58,22 +58,22 @@ A bound-free way to build `FilePatterns` lets the catalog reuse the
 pattern rules without the bounds that guard the user's settings.
 Behavior is unchanged.
 
-- [ ] `FilePatterns` can be built without any bound by a constructor
+- [x] `FilePatterns` can be built without any bound by a constructor
       that takes the patterns as `&str` items; `FilePatterns::new` keeps
       its count and length bounds and refuses exactly what it refuses
       today
-- [ ] The path-length bound applies in `match_schema_by_filename`, and
+- [x] The path-length bound applies in `match_schema_by_filename`, and
       `FilePatterns::matches` applies no bound
-- [ ] The `FilePatterns` tests in `association.rs`, the settings bound
+- [x] The `FilePatterns` tests in `association.rs`, the settings bound
       tests in `settings.rs`, and `tests/schema_memory.rs` pass with
       their assertions unchanged;
       `file_patterns_match_a_path_up_to_the_limit_and_no_longer` and
       `file_patterns_match_a_huge_path_to_nothing_without_work` assert
       the same results through `match_schema_by_filename`
-- [ ] No doc comment on `FilePatterns`, `MAX_PATH_BYTES`, or
+- [x] No doc comment on `FilePatterns`, `MAX_PATH_BYTES`, or
       `MAX_PATTERN_BYTES` misstates how a `FilePatterns` can be built or
       where the path bound applies
-- [ ] Build, tests, `cargo clippy --all-targets`, fmt, and
+- [x] Build, tests, `cargo clippy --all-targets`, fmt, and
       `cargo bench --bench hot_path --no-run` pass
 
 ### Task 2: Give the benchmark catalog the costly shapes
