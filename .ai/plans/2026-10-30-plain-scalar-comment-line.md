@@ -38,7 +38,7 @@ the stricter rejection reports no error for valid documents.
 - [x] Task 1: multi-line plain scalar spans end at their last content byte
 - [x] Task 2: content after a finished value is a syntax error
 - [x] Task 3: alias and flow keys after a finished entry load correctly
-- [ ] Task 4: a comment line ends a plain scalar
+- [x] Task 4: a comment line ends a plain scalar
 - [ ] Compare `rlsp-yaml-parser-v0.11.3`, `main`, and libfyaml over every
       yaml-test-suite input and every `*.yml` and `*.yaml` file under
       `/workspace`, `/usr/local/cargo/registry`, and
@@ -163,35 +163,35 @@ continuation loop ends the scalar and leaves the comment line unconsumed.
 The loader also skips comments after the root node, so a `...` after them
 still sets `explicit_end`.
 
-- [ ] Through `parse_events` and `load()`, each of these yields the value
+- [x] Through `parse_events` and `load()`, each of these yields the value
       shown and then a comment: `a: v\n  # d\nb: 1\n` (`v`),
       `a:\n  v\n  w\n  # d\nb: 1\n` (`v w`), `a: v\n\n  # d\nb: 1\n`
       (`v`), `a: v\n\t# d\nb: 1\n` (`v`), `- v\n  # d\n- z\n` (`v`),
       `v\n# d\n` (`v`)
-- [ ] `load()` of `port: 8080\n  # default\n` gives `8080` the int tag;
+- [x] `load()` of `port: 8080\n  # default\n` gives `8080` the int tag;
       `a: &x v\n  # d\n` keeps its anchor and `a: !!str v\n  # d\n` its tag
-- [ ] These inputs report a syntax error that points at the line after
+- [x] These inputs report a syntax error that points at the line after
       the comment: `key: word1\n  # xxx\n  word2\n`, `- v\n  # d\n  w\n`,
       `? k\n  # c\n  w\n: v\n`, `a: v\n  # d\n  [x]\n`, `v\n# d\nw\n`
-- [ ] `load()` sets `explicit_end` for `v\n# d\n...\n` and `v # c\n...\n`,
+- [x] `load()` sets `explicit_end` for `v\n# d\n...\n` and `v # c\n...\n`,
       and `format_yaml` keeps their `...`
-- [ ] A test over every yaml-test-suite input asserts, through
+- [x] A test over every yaml-test-suite input asserts, through
       `parse_events` and `load()`, that no plain scalar starts with `#` or
       contains a `#` after whitespace
-- [ ] Formatter fixtures in `rlsp-yaml/tests/fixtures/formatter/` pin
+- [x] Formatter fixtures in `rlsp-yaml/tests/fixtures/formatter/` pin
       `a: v\n  # d\nb: 1\n` to `a: v\n# d\nb: 1\n`, `a: v\n  # d\n` to
       `a: v\n# d\n`, and `- v\n  # d\n- z\n` to `- v\n# d\n- z\n`, each
       idempotent
-- [ ] The yaml-test-suite event and loader conformance tests pass
-- [ ] `docs/conformance/bnf-§7.md` entries [130] and [134] name the
+- [x] The yaml-test-suite event and loader conformance tests pass
+- [x] `docs/conformance/bnf-§7.md` entries [130] and [134] name the
       enforcement site and the tests that cover it
-- [ ] With `rlsp-yaml-parser/docs/feature-log.md`, a reader can tell that
+- [x] With `rlsp-yaml-parser/docs/feature-log.md`, a reader can tell that
       a comment line ends a plain scalar and that a continuation after it
       is an error
-- [ ] The comment on the wrong-indent guard in
+- [x] The comment on the wrong-indent guard in
       `rlsp-yaml-parser/src/event_iter/block/sequence.rs` matches whether
       `- v\n  # d\n  - w\n` reaches that guard
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ## Non-Goals
 

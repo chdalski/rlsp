@@ -848,3 +848,133 @@ fn comment_on_second_line_span_has_correct_line_number() {
         );
     }
 }
+
+// -----------------------------------------------------------------------
+// Group C — A comment line ends a plain scalar (YAML 1.2.2 [130], [134])
+// -----------------------------------------------------------------------
+
+fn comment_texts<'a>(events: &[Event<'a>]) -> Vec<&'a str> {
+    events
+        .iter()
+        .filter_map(|e| {
+            if let Event::Comment { text } = e {
+                Some(*text)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+// A comment line after a plain scalar is a comment, never scalar content:
+// the stream carries the scalar values, then the comments, in order.
+#[rstest]
+#[case::mapping_value("a: v\n  # d\nb: 1\n", &["a", "v", "b", "1"], &[" d"])]
+#[case::mapping_value_after_continuation("a:\n  v\n  w\n  # d\nb: 1\n", &["a", "v w", "b", "1"], &[" d"])]
+#[case::mapping_value_blank_line_before_comment("a: v\n\n  # d\nb: 1\n", &["a", "v", "b", "1"], &[" d"])]
+#[case::mapping_value_tab_before_comment("a: v\n\t# d\nb: 1\n", &["a", "v", "b", "1"], &[" d"])]
+#[case::sequence_item("- v\n  # d\n- z\n", &["v", "z"], &[" d"])]
+#[case::root_scalar("v\n# d\n", &["v"], &[" d"])]
+#[case::root_scalar_indented_comment("v\n  # d\n", &["v"], &[" d"])]
+#[case::explicit_root_scalar("---\nv\n  # d\n", &["v"], &[" d"])]
+#[case::explicit_root_scalar_comment_at_column_zero("---\nv\n# d\n", &["v"], &[" d"])]
+#[case::comment_without_space("a: v\n  #d\nb: 1\n", &["a", "v", "b", "1"], &["d"])]
+#[case::comment_without_text("a: v\n  #\nb: 1\n", &["a", "v", "b", "1"], &[""])]
+#[case::comment_at_eof_without_newline("a: v\n  # d", &["a", "v"], &[" d"])]
+#[case::empty_comment_at_eof_without_newline("a: v\n  #", &["a", "v"], &[""])]
+#[case::crlf_mapping_value("a: v\r\n  # d\r\nb: 1\r\n", &["a", "v", "b", "1"], &[" d"])]
+#[case::crlf_sequence_item("- v\r\n  # d\r\n- z\r\n", &["v", "z"], &[" d"])]
+#[case::tab_after_indent("x:\n  a: v\n  \t# d\n  b: 1\n", &["x", "a", "v", "b", "1"], &[" d"])]
+#[case::two_comment_lines("a: v\n  # d1\n  # d2\nb: 1\n", &["a", "v", "b", "1"], &[" d1", " d2"])]
+#[case::several_blank_lines("a: v\n\n\n  # d\n\nb: 1\n", &["a", "v", "b", "1"], &[" d"])]
+#[case::comment_indented_past_scalar("- v\n      # d\n- z\n", &["v", "z"], &[" d"])]
+#[case::nested_sequence("- - v\n    # d\n  - w\n", &["v", "w"], &[" d"])]
+#[case::mapping_in_sequence_item("- a: v\n    # d\n  b: 1\n", &["a", "v", "b", "1"], &[" d"])]
+#[case::sequence_under_mapping("k:\n  - v\n    # d\n  - z\n", &["k", "v", "z"], &[" d"])]
+#[case::nested_mapping("a:\n  b: v\n    # d\n  c: 1\n", &["a", "b", "v", "c", "1"], &[" d"])]
+#[case::comment_at_column_zero_inside_nested_mapping("a:\n  b: v\n# d\n  c: 1\n", &["a", "b", "v", "c", "1"], &[" d"])]
+#[case::document_end_marker("v\n  # d\n...\n", &["v"], &[" d"])]
+#[case::document_start_marker("a: v\n  # d\n---\nb: 1\n", &["a", "v", "b", "1"], &[" d"])]
+#[case::comment_mentions_marker("a: v\n  # ---\nb: 1\n", &["a", "v", "b", "1"], &[" ---"])]
+#[case::hash_without_space_in_continuation_line("a:\n  v\n  x#y\nb: 1\n", &["a", "v x#y", "b", "1"], &[])]
+#[case::nbsp_before_hash_is_content("a:\n  v\n  \u{a0}#y\nb: 1\n", &["a", "v \u{a0}#y", "b", "1"], &[])]
+fn comment_line_after_plain_scalar_is_a_comment(
+    #[case] input: &str,
+    #[case] scalars: &[&str],
+    #[case] comments: &[&str],
+) {
+    let events = event_variants(input);
+    assert_eq!(scalar_values(&events), scalars);
+    assert_eq!(comment_texts(&events), comments);
+}
+
+// Moving the comment to column 0 must not change the stream: an indented
+// comment line ends the scalar exactly like one at the left margin.
+#[rstest]
+#[case::mapping_value("a: v\n  # d\nb: 1\n", "a: v\n# d\nb: 1\n")]
+#[case::continuation("a:\n  v\n  w\n  # d\nb: 1\n", "a:\n  v\n  w\n# d\nb: 1\n")]
+#[case::blank_line("a: v\n\n  # d\nb: 1\n", "a: v\n\n# d\nb: 1\n")]
+#[case::sequence_item("- v\n  # d\n- z\n", "- v\n# d\n- z\n")]
+#[case::nested_sequence("k:\n  - v\n    # d\n  - z\n", "k:\n  - v\n# d\n  - z\n")]
+#[case::end_of_input("a: v\n  # d\n", "a: v\n# d\n")]
+fn indented_comment_line_yields_the_same_events_as_one_at_column_zero(
+    #[case] indented: &str,
+    #[case] at_margin: &str,
+) {
+    assert_eq!(event_variants(indented), event_variants(at_margin));
+}
+
+// The comment line is not consumed twice, and the scalar ends before the
+// blank lines that precede the comment.
+#[test]
+fn comment_line_after_blank_line_keeps_scalar_span_and_comment_position() {
+    let input = "a: v\n\n  # d\nb: 1\n";
+    let results: Vec<_> = parse_events(input).map(Result::unwrap).collect();
+    let scalar_span = results
+        .iter()
+        .find_map(|(e, s)| matches!(e, Event::Scalar { value, .. } if value == "v").then_some(*s));
+    let comment_span = results
+        .iter()
+        .find_map(|(e, s)| matches!(e, Event::Comment { .. }).then_some(*s));
+    let scalar_span = scalar_span.expect("scalar v");
+    let comment_span = comment_span.expect("comment");
+    assert_eq!((scalar_span.start, scalar_span.end), (3, 4));
+    assert_eq!(line_col(input, comment_span.start), (3, 2));
+}
+
+// An indented comment line after a plain scalar is validated like one at the
+// left margin: same error and message, same line, column shifted by the
+// indentation.
+#[rstest]
+#[case::nul("a: v\n  # x\0y\nb: 1\n", "a: v\n# x\0y\nb: 1\n")]
+#[case::bel("a: v\n  # x\x07y\nb: 1\n", "a: v\n# x\x07y\nb: 1\n")]
+#[case::del("a: v\n  # x\x7fy\nb: 1\n", "a: v\n# x\x7fy\nb: 1\n")]
+#[case::c1_control("a: v\n  # x\u{80}y\nb: 1\n", "a: v\n# x\u{80}y\nb: 1\n")]
+#[case::fffe("a: v\n  # x\u{fffe}y\nb: 1\n", "a: v\n# x\u{fffe}y\nb: 1\n")]
+fn invalid_character_in_indented_comment_line_is_reported_like_at_margin(
+    #[case] indented: &str,
+    #[case] at_margin: &str,
+) {
+    let indented_err = parse_events(indented).find_map(Result::err).unwrap();
+    let margin_err = parse_events(at_margin).find_map(Result::err).unwrap();
+    assert_eq!(indented_err.kind, margin_err.kind);
+    assert_eq!(indented_err.message, margin_err.message);
+    assert_eq!(indented_err.pos.line, margin_err.pos.line);
+    assert_eq!(indented_err.pos.column, margin_err.pos.column + 2);
+    assert_eq!(indented_err.pos.byte_offset, margin_err.pos.byte_offset + 2);
+}
+
+// The length limit of a standalone comment applies to an indented comment
+// line after a plain scalar, which used to be folded into the value.
+#[test]
+fn indented_comment_line_over_limit_after_plain_scalar_returns_error() {
+    let body = "x".repeat(MAX_COMMENT_LEN + 1);
+    assert!(has_error(&format!("a: v\n  #{body}\nb: 1\n")));
+    assert!(has_error(&format!("a: v\n#{body}\nb: 1\n")));
+}
+
+#[test]
+fn indented_comment_line_at_limit_after_plain_scalar_is_accepted() {
+    let body = "x".repeat(MAX_COMMENT_LEN);
+    assert!(!has_error(&format!("a: v\n  #{body}\nb: 1\n")));
+}

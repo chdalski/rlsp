@@ -12,6 +12,26 @@ with existing infrastructure.
 
 ---
 
+### Comment Line Ends a Plain Scalar [completed]
+
+**Description:** A comment line after a plain scalar is a comment, not part
+of the value. `port: 8080` followed by `  # default` loads as `8080` (int)
+instead of the string `"8080 # default"`, and the same holds for sequence
+items, explicit keys, and a root scalar, with the comment indented, after a
+blank line, or after a tab. A plain-scalar continuation after the comment
+line is a syntax error that points at the line after the comment
+(`key: word1`, `  # xxx`, `  word2`), as in libfyaml. `load()` also keeps
+`explicit_end` for `v`, `# d`, `...` and for `v # c`, `...`: a comment after
+the root node no longer hides the `...`.
+**Complexity:** Low
+**Comment:** The comment line was folded into the value before, so documents
+with an indented comment under a plain value changed their data; the events
+and the tree now match libfyaml 0.9.6. The formatter no longer duplicates the
+comment and writes it on its own line. A comment on the last continuation line
+(`a:`, `  v`, `  w # c`) and comments before a later `---` or `...` are not
+covered by this entry.
+**Tier:** 1
+
 ### Alias and Flow Keys After a Finished Entry [completed]
 
 **Description:** A block mapping key that starts with an alias or a flow

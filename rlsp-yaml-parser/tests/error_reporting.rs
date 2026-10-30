@@ -808,6 +808,21 @@ fn scalar_values(input: &str) -> Vec<String> {
 #[case::flow_key_past_quoted_seq_item("- \"q\"\n  [x]: 1\n", 2)]
 #[case::alias_key_past_entry("a: 1\n  *y : 2\n", 2)]
 #[case::flow_key_unterminated_with_quote("a: 1\n['a]': 1\n", 2)]
+#[case::map_value_plain_comment_line_then_plain("key: word1\n  # xxx\n  word2\n", 3)]
+#[case::seq_item_plain_comment_line_then_plain("- v\n  # d\n  w\n", 3)]
+#[case::explicit_key_plain_comment_line_then_plain("? k\n  # c\n  w\n: v\n", 3)]
+#[case::map_value_plain_comment_line_then_flow("a: v\n  # d\n  [x]\n", 3)]
+#[case::root_plain_comment_line_then_plain("v\n# d\nw\n", 3)]
+#[case::continuation_comment_line_then_plain("a:\n  v\n  # d\n  w\n", 4)]
+#[case::second_continuation_comment_line_then_plain("a:\n  v\n  w\n  # d\n  x\n", 5)]
+#[case::blank_comment_line_then_plain("a: v\n\n  # d\n  w\n", 4)]
+#[case::tab_comment_line_then_plain("a: v\n\t# d\n  w\n", 3)]
+#[case::crlf_comment_line_then_plain("key: word1\r\n  # xxx\r\n  word2\r\n", 3)]
+#[case::two_comment_lines_then_plain("- v\n  # d\n  # e\n  w\n", 4)]
+#[case::comment_and_blank_lines_then_plain("a: v\n  # 1\n\n  # 2\n  w\n", 5)]
+#[case::comment_line_then_key("a: v\n  # d\n  b: 1\n", 3)]
+#[case::nested_comment_line_then_plain("a:\n  b: v\n    # d\n    w\n", 4)]
+#[case::seq_item_comment_line_then_dash("- v\n  # d\n  - w\n", 3)]
 fn content_after_complete_node_is_a_syntax_error(#[case] input: &str, #[case] stray_line: usize) {
     let err = first_error(input).expect("expected a parse error");
     assert_eq!(err.kind, ErrorKind::Syntax);

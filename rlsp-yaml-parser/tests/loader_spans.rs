@@ -387,6 +387,31 @@ fn loader_single_line_plain_own_line_comment_is_leading_of_next_key() {
     assert_eq!(entries[1].0.leading_comments(), ["# d"]);
 }
 
+/// An indented comment line after a plain scalar ends it and belongs to the
+/// next key or item, exactly like one at the left margin.
+#[rstest]
+#[case::next_key_single_line("a: v\n  # d\nb: 1\n")]
+#[case::next_key_after_blank_line("a: v\n\n  # d\nb: 1\n")]
+#[case::next_key_multiline("a:\n  v\n  w\n  # d\nb: 1\n")]
+fn loader_indented_comment_line_is_leading_of_next_key(#[case] input: &str) {
+    let docs = load(input).unwrap();
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping");
+    };
+    assert_eq!(entries[0].1.trailing_comment(), None);
+    assert_eq!(entries[1].0.leading_comments(), ["# d"]);
+}
+
+#[test]
+fn loader_indented_comment_line_is_leading_of_next_item() {
+    let docs = load("- v\n  # d\n- z\n").unwrap();
+    let Node::Sequence { items, .. } = &docs[0].root else {
+        panic!("expected Sequence");
+    };
+    assert_eq!(items[0].trailing_comment(), None);
+    assert_eq!(items[1].leading_comments(), ["# d"]);
+}
+
 /// The same holds for the `loc` of a multi-line plain scalar in a flow
 /// collection.
 #[rstest]

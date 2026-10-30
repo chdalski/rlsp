@@ -191,7 +191,9 @@ impl<'input> EventIter<'input> {
             // already implies `dash_indent > col` for a `Sequence` top, so
             // `dash_indent != parent_col` may be unreachable in practice;
             // kept as a guard in case future `opens_new` changes weaken that
-            // invariant.
+            // invariant.  `- v\n  # d\n  - w\n` does not reach it either: the
+            // comment line ends the plain scalar `v`, and the stray `- w` fails
+            // earlier with "unexpected indented content after a complete node".
             if let Some(&CollectionEntry::Sequence(parent_col, true)) = self.coll_stack.last()
                 && dash_indent != parent_col
             {
@@ -344,8 +346,8 @@ impl<'input> EventIter<'input> {
                     // multi-line scalar — the fast path cannot handle that.  A
                     // blank line does not end the scalar: look past the blank
                     // lines to the next line with content.  A comment line there
-                    // does end it (the slow path would fold the comment into the
-                    // value), so the fast path keeps those.
+                    // ends the scalar (YAML 1.2.2 [134]: a continuation must start
+                    // with `ns-plain-char`), so the fast path keeps those.
                     let has_continuation = self.lexer.peek_second_line().is_some_and(|second| {
                         let second_content = second.content.trim_start_matches([' ', '\t']);
                         if second_content.is_empty() {

@@ -334,8 +334,8 @@ BNF: `ns-plain-char(c) ::= ( ns-plain-safe(c) - c-mapping-value - c-comment ) | 
 
 - **Verdict:** Strict-conformant
 - **Spec (§7.3.3):** "Plain scalars must never contain the `: ` and ` #` character combinations."
-- **Implementation:** `ns_plain_char_block()` in `lexer/plain.rs` — `#` allowed only when NOT preceded by whitespace; `:` allowed only when followed by `ns_plain_safe_block()`; `scan_plain_line_flow()` uses same logic
-- **Tests:** `tests/yaml-test-suite/src/DBG4.yaml`; `plain.rs` unit tests `scan_plain_line_block_cases`
+- **Implementation:** `ns_plain_char_block()` in `lexer/plain.rs` — `#` allowed only when NOT preceded by whitespace; `:` allowed only when followed by `ns_plain_safe_block()`; `scan_plain_line_flow()` uses same logic but starts with `prev_was_ws = false`, because its callers in `event_iter/flow.rs` never pass a `#` that starts a comment: the whitespace/comment skip before a flow node (`ch == '#' && prev_was_ws`) consumes it as a comment, and the continuation check (`is_ns_plain_char_continuation`) excludes `#`. `scan_plain_line_block()` starts with `prev_was_ws = true`, so a `#` at offset 0 — the start of a continuation line, which follows no `ns-char` — is not content and the scan returns an empty slice: a comment line ends the plain scalar
+- **Tests:** `tests/yaml-test-suite/src/DBG4.yaml`; `plain.rs` unit tests `scan_plain_line_block_cases`; `tests/smoke/comments.rs` `comment_line_after_plain_scalar_is_a_comment`; `tests/conformance/plain_scalar_comments.rs` (no plain scalar in the suite or in the comment-line inputs holds a comment, through `parse_events()` and `load()`)
 
 ### [131] ns-plain(n,c)
 
@@ -371,8 +371,8 @@ BNF: `s-ns-plain-next-line(n,c) ::= s-flow-folded(n) ns-plain-char(c) nb-ns-plai
 
 - **Verdict:** Strict-conformant
 - **Spec (§7.3.3):** "All leading and trailing white space characters are excluded from the content. Each continuation line must therefore contain at least one non-space character."
-- **Implementation:** `collect_plain_continuations()` in `lexer/plain.rs` — blank lines accumulated as pending newlines; non-empty continuation line must have `scan_plain_line_block()` produce a non-empty result
-- **Tests:** `tests/yaml-test-suite/src/HS5T.yaml`
+- **Implementation:** `collect_plain_continuations()` in `lexer/plain.rs` — blank lines accumulated as pending newlines; non-empty continuation line must have `scan_plain_line_block()` produce a non-empty result. A comment line produces an empty result (see [130]), so the loop ends and leaves the comment line to the comment handling; content on a later line is then a syntax error (`content after a complete node`)
+- **Tests:** `tests/yaml-test-suite/src/HS5T.yaml`; `tests/error_reporting.rs` `content_after_complete_node_is_a_syntax_error` (cases `*_comment_line_then_*`); `tests/smoke/comments.rs` `indented_comment_line_yields_the_same_events_as_one_at_column_zero`
 
 ### [135] ns-plain-multi-line(n,c)
 

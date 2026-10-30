@@ -443,6 +443,12 @@ impl<'opt> LoadState<'opt> {
                         self.parse_node(&mut stream)?
                     };
 
+                    // Comments after the root node are dropped; they must not hide
+                    // the `...` that follows them from the check below.
+                    while matches!(stream.peek(), Some(Ok((Event::Comment { .. }, _)))) {
+                        let _ = stream.next();
+                    }
+
                     // Consume DocumentEnd if present and capture its explicit flag.
                     let doc_explicit_end =
                         if let Some(Ok((Event::DocumentEnd { explicit }, _))) = stream.peek() {

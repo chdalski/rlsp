@@ -413,7 +413,9 @@ fn ns_plain_char_block(prev_was_ws: bool, ch: char, next: Option<char>) -> bool 
 /// has been stripped).
 ///
 /// Returns the trimmed value slice (trailing whitespace stripped, comment
-/// stripped if preceded by whitespace).
+/// stripped if preceded by whitespace).  A `#` at offset 0 follows no
+/// `ns-char`, so it starts a comment (YAML 1.2.2 [130]) and the result is
+/// empty; that ends the continuation loop of a plain scalar ([134]).
 ///
 /// This implements `nb-ns-plain-in-line(c)` applied to the full line content
 /// starting at the first non-space character position.
@@ -422,7 +424,8 @@ pub fn scan_plain_line_block(content: &str) -> &str {
     let len = bytes.len();
     let mut pos = 0;
     let mut committed_end: usize = 0;
-    let mut prev_was_ws = false;
+    // Offset 0 follows no `ns-char` (see the doc comment above).
+    let mut prev_was_ws = true;
 
     while pos < len {
         // Use memchr2 to jump ahead to the next `:` or `#` — the only
@@ -641,6 +644,14 @@ mod tests {
     #[case::hash_after_space_terminates("foo # comment", "foo")]
     #[case::hash_without_preceding_space_is_content("a#b", "a#b")]
     #[case::url_with_colon_slash_slash_is_content("http://example.com", "http://example.com")]
+    #[case::hash_at_start_returns_empty("#", "")]
+    #[case::hash_then_text_at_start_returns_empty("#x", "")]
+    #[case::hash_space_text_at_start_returns_empty("# x", "")]
+    #[case::double_hash_at_start_returns_empty("##", "")]
+    #[case::hash_at_start_with_trailing_words_returns_empty("#x y", "")]
+    #[case::trailing_hash_without_space_is_content("x#", "x#")]
+    #[case::hash_after_tab_terminates("a\t#c", "a")]
+    #[case::hash_run_after_char_is_content("a##", "a##")]
     fn scan_plain_line_block_cases(#[case] input: &str, #[case] expected: &str) {
         assert_eq!(scan_plain_line_block(input), expected);
     }
@@ -988,6 +999,8 @@ mod tests {
     #[case::returns_full_when_no_terminator("hello", "hello")]
     #[case::empty_input_returns_empty("", "")]
     #[case::hash_after_space_starts_comment("abc # comment", "abc")]
+    #[case::hash_at_start_is_content_in_flow_scan("#x", "#x")]
+    #[case::hash_space_text_at_start_is_content_in_flow_scan("# x", "# x")]
     #[case::hash_without_preceding_space_is_content("abc#def", "abc#def")]
     #[case::colon_space_terminates("key: rest", "key")]
     #[case::colon_flow_indicator_terminates("key:}rest", "key")]

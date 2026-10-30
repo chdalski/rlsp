@@ -401,6 +401,20 @@ mod tests {
         );
     }
 
+    // A comment after the root scalar must not hide the `...` that follows it
+    #[rstest]
+    #[case::comment_line_before_marker("v\n# d\n...\n")]
+    #[case::indented_comment_line_before_marker("v\n  # d\n...\n")]
+    #[case::trailing_comment_before_marker("v # c\n...\n")]
+    fn explicit_end_marker_preserved_after_root_scalar_with_comment(#[case] input: &str) {
+        let result = format_yaml(input, &default_opts());
+        assert!(
+            result.trim_end().ends_with("..."),
+            "`...` missing from output: {result:?}"
+        );
+        assert_eq!(format_yaml(&result, &default_opts()), result);
+    }
+
     // FM-4: Single document with both `---` and `...` → both preserved
     #[test]
     fn both_markers_preserved() {

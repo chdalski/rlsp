@@ -1859,3 +1859,113 @@ fn load_error_undefined_alias_expand_node_path_pos() {
     assert_eq!(pos.line, 2, "pos must be on line 2");
     assert_eq!(pos.column, 7, "pos must be at column 7");
 }
+
+// ---------------------------------------------------------------------------
+// A comment line ends a plain scalar (YAML 1.2.2 [130], [134])
+// ---------------------------------------------------------------------------
+
+fn root_mapping_pairs(input: &str) -> Vec<(String, String)> {
+    let Node::Mapping { entries, .. } = load_one(input) else {
+        panic!("expected a root mapping");
+    };
+    entries
+        .iter()
+        .map(|(k, v)| (scalar_value(k).to_owned(), scalar_value(v).to_owned()))
+        .collect()
+}
+
+#[rstest]
+#[case::mapping_value("a: v\n  # d\nb: 1\n", &[("a", "v"), ("b", "1")])]
+#[case::mapping_value_after_continuation("a:\n  v\n  w\n  # d\nb: 1\n", &[("a", "v w"), ("b", "1")])]
+#[case::mapping_value_blank_line_before_comment("a: v\n\n  # d\nb: 1\n", &[("a", "v"), ("b", "1")])]
+#[case::mapping_value_tab_before_comment("a: v\n\t# d\nb: 1\n", &[("a", "v"), ("b", "1")])]
+#[case::comment_at_end("port: 8080\n  # default\n", &[("port", "8080")])]
+fn comment_line_after_plain_value_is_not_part_of_the_value(
+    #[case] input: &str,
+    #[case] expected: &[(&str, &str)],
+) {
+    let expected: Vec<_> = expected
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+        .collect();
+    assert_eq!(root_mapping_pairs(input), expected);
+}
+
+#[rstest]
+#[case::sequence_item("- v\n  # d\n- z\n", &["v", "z"])]
+#[case::sequence_item_after_continuation("- v\n  w\n  # d\n- z\n", &["v w", "z"])]
+fn comment_line_after_plain_item_is_not_part_of_the_item(
+    #[case] input: &str,
+    #[case] expected: &[&str],
+) {
+    let Node::Sequence { items, .. } = load_one(input) else {
+        panic!("expected a root sequence");
+    };
+    let values: Vec<_> = items.iter().map(scalar_value).collect();
+    assert_eq!(values, expected);
+}
+
+#[rstest]
+#[case::root_scalar("v\n# d\n")]
+#[case::root_scalar_indented_comment("v\n  # d\n")]
+fn comment_line_after_root_plain_scalar_is_not_part_of_the_value(#[case] input: &str) {
+    assert_eq!(scalar_value(&load_one(input)), "v");
+}
+
+#[test]
+fn comment_line_after_plain_value_keeps_the_core_schema_tag() {
+    let Node::Mapping { entries, .. } = load_one("port: 8080\n  # default\n") else {
+        panic!("expected a root mapping");
+    };
+    let Node::Scalar { value, tag, .. } = &entries[0].1 else {
+        panic!("expected a scalar value");
+    };
+    assert_eq!(value, "8080");
+    assert_eq!(tag.as_deref(), Some("tag:yaml.org,2002:int"));
+}
+
+#[test]
+fn comment_line_after_anchored_plain_value_keeps_the_anchor() {
+    let Node::Mapping { entries, .. } = load_one("a: &x v\n  # d\n") else {
+        panic!("expected a root mapping");
+    };
+    assert_eq!(scalar_value(&entries[0].1), "v");
+    assert_eq!(entries[0].1.anchor(), Some("x"));
+}
+
+#[test]
+fn comment_line_after_tagged_plain_value_keeps_the_tag() {
+    let Node::Mapping { entries, .. } = load_one("a: !!str v\n  # d\n") else {
+        panic!("expected a root mapping");
+    };
+    let Node::Scalar { value, tag, .. } = &entries[0].1 else {
+        panic!("expected a scalar value");
+    };
+    assert_eq!(value, "v");
+    assert_eq!(tag.as_deref(), Some("tag:yaml.org,2002:str"));
+}
+
+#[rstest]
+#[case::comment_line_at_margin("v\n# d\n...\n", true)]
+#[case::comment_line_indented("v\n  # d\n...\n", true)]
+#[case::trailing_comment("v # c\n...\n", true)]
+#[case::mapping_comment_line_indented("a: v\n  # d\n...\n", true)]
+#[case::sequence_comment_line_indented("- v\n  # d\n...\n", true)]
+#[case::comment_line_without_end_marker("v\n# d\n", false)]
+fn explicit_end_after_root_plain_scalar_with_comment(
+    #[case] input: &str,
+    #[case] expected_end: bool,
+) {
+    let docs = load(input).expect("load failed");
+    assert_eq!(docs.len(), 1);
+    assert_eq!(docs[0].explicit_end, expected_end);
+}
+
+// `--- ` followed by a comment keeps its meaning: the comment ends the line,
+// and the scalar is the next line.
+#[rstest]
+#[case::comment_after_start_marker("--- #c\nv\n", "v")]
+#[case::tab_comment_after_start_marker("---\t#c\nv\n", "v")]
+fn comment_after_start_marker_is_still_a_comment(#[case] input: &str, #[case] expected: &str) {
+    assert_eq!(scalar_value(&load_one(input)), expected);
+}

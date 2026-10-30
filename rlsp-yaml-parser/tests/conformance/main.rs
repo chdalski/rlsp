@@ -6,6 +6,7 @@
 // Sub-modules:
 //   stream  — event-stream API (`parse_events`) conformance, 351/351
 //   loader  — loader AST (`load`) conformance (Task 2)
+//   plain_scalar_comments — no plain scalar holds a comment, both APIs
 
 #![expect(
     clippy::unwrap_used,
@@ -15,6 +16,7 @@
 )]
 
 pub mod loader;
+pub mod plain_scalar_comments;
 pub mod stream;
 
 // ---- Test-case data model ---------------------------------------------------
