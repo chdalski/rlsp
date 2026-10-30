@@ -283,3 +283,131 @@ fn span_accessor_second_line_column_zero() {
     assert_eq!(line, 2, "second key should be on line 2");
     assert_eq!(col, 0, "second key should be at column 0");
 }
+
+// ---------------------------------------------------------------------------
+// Group: Multi-line plain scalar spans
+// ---------------------------------------------------------------------------
+
+/// The first mapping value or sequence item of the root collection, with the
+/// root collection's own span; `None` when the root is not a non-empty collection.
+fn first_child_and_container_loc(
+    root: &Node<rlsp_yaml_parser::Span>,
+) -> Option<(&Node<rlsp_yaml_parser::Span>, rlsp_yaml_parser::Span)> {
+    match root {
+        Node::Mapping { entries, loc, .. } => entries.first().map(|(_, v)| (v, *loc)),
+        Node::Sequence { items, loc, .. } => items.first().map(|item| (item, *loc)),
+        Node::Scalar { .. } | Node::Alias { .. } => None,
+    }
+}
+
+/// A multi-line plain scalar's `loc` ends at its last content byte while the
+/// enclosing collection's `loc.end` still includes the trailing blank lines.
+#[rstest]
+#[case::mapping_value("a:\n  v\n  w\n", 5, 10, 11)]
+#[case::mapping_value_eof_without_newline("a:\n  v\n  w", 5, 10, 10)]
+#[case::blank_lines_before_next_key("a:\n  v\n  w\n\n\nb: 1\n", 5, 10, 18)]
+#[case::sequence_item("- v\n  w\n\n- z\n", 2, 7, 13)]
+#[case::comment_line_after_value("a:\n  v\n  w\n# d\nb: 1\n", 5, 10, 20)]
+#[case::trailing_comment_on_last_line("a:\n  v\n  w # c\nb: 1\n", 5, 10, 20)]
+fn loader_multiline_plain_scalar_loc_ends_at_last_content_byte(
+    #[case] input: &str,
+    #[case] scalar_start: u32,
+    #[case] scalar_end: u32,
+    #[case] container_end: u32,
+) {
+    let docs = load(input).unwrap();
+    let Some((child, container)) = first_child_and_container_loc(&docs[0].root) else {
+        panic!("expected a non-empty collection");
+    };
+    let Node::Scalar { loc, .. } = child else {
+        panic!("expected Scalar, got {child:?}");
+    };
+    assert_eq!(
+        (loc.start, loc.end),
+        (scalar_start, scalar_end),
+        "scalar loc"
+    );
+    assert_eq!(container.end, container_end, "collection loc.end");
+}
+
+/// A comment line after a multi-line plain scalar belongs to the next key, not
+/// to the scalar as a trailing comment.
+#[test]
+fn loader_multiline_plain_own_line_comment_is_leading_of_next_key() {
+    let docs = load("a:\n  v\n  w\n# d\nb: 1\n").unwrap();
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping");
+    };
+    assert_eq!(entries[0].1.trailing_comment(), None);
+    assert_eq!(entries[1].0.leading_comments(), ["# d"]);
+}
+
+/// Same for a sequence item: the comment line leads the next item.
+#[test]
+fn loader_multiline_plain_own_line_comment_is_leading_of_next_item() {
+    let docs = load("- v\n  w\n# d\n- z\n").unwrap();
+    let Node::Sequence { items, .. } = &docs[0].root else {
+        panic!("expected Sequence");
+    };
+    assert_eq!(items[0].trailing_comment(), None);
+    assert_eq!(items[1].leading_comments(), ["# d"]);
+}
+
+/// Regression guard for the single-line path: the comment line still leads the
+/// next key.
+#[test]
+fn loader_single_line_plain_own_line_comment_is_leading_of_next_key() {
+    let docs = load("a: v\n# d\nb: 1\n").unwrap();
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping");
+    };
+    assert_eq!(entries[1].0.leading_comments(), ["# d"]);
+}
+
+/// The same holds for the `loc` of a multi-line plain scalar in a flow
+/// collection.
+#[rstest]
+#[case::sequence_item("[a\n  b\n]\n", 1, 6)]
+#[case::sequence_item_three_lines("[a\n  b\n  c\n]\n", 1, 10)]
+#[case::sequence_item_blank_line_between("[a\n\n  b\n]\n", 1, 7)]
+#[case::sequence_item_multibyte("[é\n  ü\n]\n", 1, 8)]
+fn loader_flow_multiline_plain_scalar_loc_ends_at_last_content_byte(
+    #[case] input: &str,
+    #[case] scalar_start: u32,
+    #[case] scalar_end: u32,
+) {
+    let docs = load(input).unwrap();
+    let Some((child, _)) = first_child_and_container_loc(&docs[0].root) else {
+        panic!("expected a non-empty collection");
+    };
+    let Node::Scalar { loc, .. } = child else {
+        panic!("expected Scalar, got {child:?}");
+    };
+    assert_eq!((loc.start, loc.end), (scalar_start, scalar_end));
+}
+
+/// A multi-line plain key of a flow mapping, and the entry after a multi-line
+/// plain item of a flow sequence, keep their own spans.
+#[test]
+fn loader_flow_multiline_plain_key_and_following_entry_spans() {
+    let docs = load("{a b\n  c: d}\n").unwrap();
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping");
+    };
+    let (Node::Scalar { loc: key, .. }, Node::Scalar { loc: value, .. }) =
+        (&entries[0].0, &entries[0].1)
+    else {
+        panic!("expected scalar key and value");
+    };
+    assert_eq!((key.start, key.end), (1, 8));
+    assert_eq!((value.start, value.end), (10, 11));
+
+    let docs = load("[a\n  b, c]\n").unwrap();
+    let Node::Sequence { items, .. } = &docs[0].root else {
+        panic!("expected Sequence");
+    };
+    let Node::Scalar { loc, .. } = &items[1] else {
+        panic!("expected Scalar");
+    };
+    assert_eq!((loc.start, loc.end), (8, 9));
+}

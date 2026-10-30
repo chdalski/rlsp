@@ -1504,17 +1504,23 @@ impl<'input> EventIter<'input> {
                     if !scanned.is_empty() {
                         // Extend the most-recently-emitted scalar event with a
                         // line-fold (space) and the continuation content.
+                        // The span grows to the last content byte of the continuation.
                         if let Some((
                             Event::Scalar {
                                 value,
                                 style: ScalarStyle::Plain,
                                 ..
                             },
-                            _,
+                            span,
                         )) = events.last_mut()
                         {
                             let extended = format!("{value} {scanned}");
                             *value = Cow::Owned(extended);
+                            *span = span.with_end(abs_pos(
+                                cur_base_pos,
+                                cur_content,
+                                pos_in_line + scanned.len(),
+                            ));
                         }
                         pos_in_line += scanned.len();
                         // Update last_token_line to this line so the DK4H

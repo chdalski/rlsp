@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-10-30
 
 # A Comment Line Ends a Plain Scalar
@@ -28,7 +28,7 @@ byte so that a comment after it is not taken for a trailing comment.
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: multi-line plain scalar spans end at their last content byte
+- [x] Task 1: multi-line plain scalar spans end at their last content byte
 - [ ] Task 2: content after a finished value is a syntax error
 - [ ] Task 3: a comment line ends a plain scalar
 - [ ] Push to `main` and confirm the full CI matrix is green
@@ -47,25 +47,25 @@ readers in `rlsp-yaml/src` observe the change:
 from their end events, so their readers (`analysis/folding.rs`,
 `analysis/selection.rs`, `completion/cursor_location.rs`) see no change.
 
-- [ ] The span of a multi-line plain scalar from `parse_events` and from
+- [x] The span of a multi-line plain scalar from `parse_events` and from
       `load()` ends at the scalar's last content byte, with and without
       blank lines or a comment after it and at end of input without a
       newline; a single-line scalar's span is unchanged
-- [ ] The spans of mappings and sequences that contain or end in a
+- [x] The spans of mappings and sequences that contain or end in a
       multi-line plain scalar are unchanged, with blank lines after it
       included
-- [ ] `format_yaml` turns `a:\n  v\n  w\n# d\nb: 1\n` into
+- [x] `format_yaml` turns `a:\n  v\n  w\n# d\nb: 1\n` into
       `a: v w\n# d\nb: 1\n` and `a:\n  v\n  w\n# d\n` into
       `a: v w\n# d\n`, and formatting each result again changes nothing
-- [ ] `a:\n  v\n  w\n` and `a:\n  v\n  w` produce no semantic token for
+- [x] `a:\n  v\n  w\n` and `a:\n  v\n  w` produce no semantic token for
       the value
-- [ ] The document-symbol range and the hover range of a multi-line plain
+- [x] The document-symbol range and the hover range of a multi-line plain
       value end at its last content byte
-- [ ] No comment in `rlsp-yaml/src/editing/formatter/content_tracking.rs`
+- [x] No comment in `rlsp-yaml/src/editing/formatter/content_tracking.rs`
       says a plain scalar occupies one line
-- [ ] The block-scalar code action on a multi-line plain value leaves the
+- [x] The block-scalar code action on a multi-line plain value leaves the
       following line on its own line
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 2: Reject content after a finished value
 

@@ -1316,4 +1316,34 @@ mod tests {
             let _ = children1;
         }
     }
+
+    #[test]
+    fn multiline_plain_value_range_ends_before_blank_lines_and_next_key() {
+        let docs = parse_docs("a:\n  v\n  w\n\n\nb: 1\n");
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+
+        let a = find_symbol(&symbols, "a").expect("should have 'a' symbol");
+        let b = find_symbol(&symbols, "b").expect("should have 'b' symbol");
+        assert_eq!(a.range.end, Position::new(2, 3));
+        assert_eq!(b.range.start, Position::new(5, 0));
+        assert!(a.range.end <= b.range.start);
+    }
+
+    #[test]
+    fn multiline_plain_value_range_ends_at_last_content_byte_at_end_of_input() {
+        let docs = parse_docs("a:\n  v\n  w");
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+
+        let a = find_symbol(&symbols, "a").expect("should have 'a' symbol");
+        assert_eq!(a.range.end, Position::new(2, 3));
+    }
+
+    #[test]
+    fn multiline_plain_sequence_item_range_ends_at_last_content_byte() {
+        let docs = parse_docs("- v\n  w\n\n- z\n");
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+
+        let first = symbols.first().expect("should have first item symbol");
+        assert_eq!(first.range.end, Position::new(1, 3));
+    }
 }

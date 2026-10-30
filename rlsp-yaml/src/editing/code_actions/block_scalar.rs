@@ -171,6 +171,7 @@ fn find_block_scalar_in_node<'a>(
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
     use tower_lsp::lsp_types::Position;
 
     use crate::editing::formatter::YamlFormatOptions;
@@ -479,5 +480,21 @@ mod tests {
             actions.is_empty(),
             "expected empty Vec for already-literal scalar, got: {actions:?}"
         );
+    }
+
+    #[rstest]
+    #[case::next_key_follows(
+        "description: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n  bbbb\nother: 1\n"
+    )]
+    #[case::blank_line_follows(
+        "description: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n  bbbb\n\nother: 1\n"
+    )]
+    #[case::end_of_input_without_newline(
+        "description: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n  bbbb"
+    )]
+    fn multiline_plain_edit_range_ends_at_last_content_byte(#[case] text: &str) {
+        let actions = actions_for(text);
+        let edit = &actions[0].edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()][0];
+        assert_eq!(edit.range.end, Position::new(1, 6));
     }
 }

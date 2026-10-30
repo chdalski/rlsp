@@ -225,6 +225,19 @@ impl Span {
         }
     }
 
+    /// Return this span with its end moved to `end`.
+    #[must_use]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "YAML files <= 4 GB; u32 offset is sufficient"
+    )]
+    pub(crate) const fn with_end(self, end: Pos) -> Self {
+        Self {
+            start: self.start,
+            end: end.byte_offset as u32,
+        }
+    }
+
     /// Return `(line, column)` for the start of this span.
     ///
     /// Line is 1-based; column is 0-based codepoint count from line start.

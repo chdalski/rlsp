@@ -471,6 +471,35 @@ mod tests {
         );
     }
 
+    // ---- Group: multi-line plain scalar followed by a comment line ----
+
+    #[rstest]
+    #[case::before_next_key("a:\n  v\n  w\n# d\nb: 1\n", "a: v w\n# d\nb: 1\n")]
+    #[case::at_end_of_input("a:\n  v\n  w\n# d\n", "a: v w\n# d\n")]
+    fn comment_line_after_multiline_plain_scalar_is_stable(
+        #[case] input: &str,
+        #[case] expected: &str,
+    ) {
+        let first = format_yaml(input, &default_opts());
+        assert_eq!(first, expected);
+        assert_eq!(format_yaml(&first, &default_opts()), first);
+    }
+
+    #[rstest]
+    #[case::multiline_plain_value("a:\n  v\n  w\n", 2)]
+    #[case::multiline_plain_value_before_comment_line("a:\n  v\n  w\n# d\n", 2)]
+    #[case::single_line_value("a: v\n", 0)]
+    fn last_content_line_of_plain_scalar_is_its_last_source_line(
+        #[case] input: &str,
+        #[case] expected: usize,
+    ) {
+        let docs = rlsp_yaml_parser::load(input).expect("test input must parse");
+        assert_eq!(
+            content_tracking::last_content_line_from_ast(&docs),
+            Some(expected)
+        );
+    }
+
     // ---- Group FS: format_subtree unit tests ----
 
     fn parse_root(src: &str) -> Node<Span> {

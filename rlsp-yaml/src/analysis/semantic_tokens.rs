@@ -121,7 +121,10 @@ fn collect_node_tokens(node: &Node<Span>, out: &mut Vec<RawToken>, idx: &LineInd
                 // (that would be double-classifying the key text as STRING).
                 // For non-scalar keys (complex keys): recurse normally.
                 if let Node::Scalar { loc, .. } = key {
-                    out.push(span_to_raw(*loc, TOKEN_PROPERTY, 0, idx));
+                    // A token cannot span lines: a multi-line flow key gets none.
+                    if idx.line_column(loc.start).0 == idx.line_column(loc.end).0 {
+                        out.push(span_to_raw(*loc, TOKEN_PROPERTY, 0, idx));
+                    }
                     if let Some(span) = key.anchor_loc() {
                         out.push(span_to_raw(span, TOKEN_VARIABLE, MOD_DECLARATION, idx));
                     }
@@ -186,7 +189,7 @@ fn classify_scalar_node(
     idx: &LineIndex,
 ) -> Option<RawToken> {
     let (start_line, start_col) = idx.line_column(loc.start);
-    let (_, end_col) = idx.line_column(loc.end);
+    let (end_line, end_col) = idx.line_column(loc.end);
     let length = end_col.saturating_sub(start_col);
     if length == 0 {
         return None;
@@ -220,6 +223,12 @@ fn classify_scalar_node(
             });
         }
         ScalarStyle::Plain | ScalarStyle::Literal(_) | ScalarStyle::Folded(_) => {}
+    }
+
+    // A token cannot span lines, and the span of a multi-line plain scalar ends
+    // on its last line, so `length` above would be meaningless.
+    if end_line != start_line {
+        return None;
     }
 
     // Plain scalar — classify by content.
@@ -938,6 +947,40 @@ mod tests {
             key_tok.2, 3,
             "token length for '日本語' must be 3 (codepoints), not 9 (bytes), got {}",
             key_tok.2
+        );
+    }
+
+    #[rstest]
+    #[case::trailing_newline("a:\n  v\n  w\n")]
+    #[case::end_of_input_without_newline("a:\n  v\n  w")]
+    #[case::longer_last_line("a:\n  v\n  wxyz\n")]
+    #[case::continuation_of_inline_start("a: v\n    wxyz\n")]
+    #[case::flow_sequence_item("[a\n  b\n]\n")]
+    fn multiline_plain_value_produces_no_value_token(#[case] text: &str) {
+        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        assert!(
+            !abs.iter()
+                .any(|t| matches!(t.3, TOKEN_STRING | TOKEN_NUMBER | TOKEN_KEYWORD)),
+            "unexpected value token: {abs:?}"
+        );
+    }
+
+    #[rstest]
+    #[case::plain_key("{a b\n  c: d}\n", TOKEN_STRING)]
+    #[case::double_quoted_key("{\"a\n  b\": 1}\n", TOKEN_NUMBER)]
+    fn multiline_flow_key_produces_no_key_token(
+        #[case] text: &str,
+        #[case] expected_value_token: u32,
+    ) {
+        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        assert!(
+            !abs.iter().any(|t| t.3 == TOKEN_PROPERTY),
+            "unexpected key token: {abs:?}"
+        );
+        // The single-line value keeps its token.
+        assert!(
+            abs.iter().any(|t| t.3 == expected_value_token && t.0 == 1),
+            "missing value token: {abs:?}"
         );
     }
 }

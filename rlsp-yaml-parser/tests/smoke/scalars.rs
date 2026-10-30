@@ -131,3 +131,97 @@ fn plain_scalar_indented_span_start() {
     };
     assert_eq!(span.start, 2);
 }
+
+// A multi-line plain scalar's span ends at its last content byte; the spans of
+// the enclosing mapping/sequence end events (in event order) stay where the
+// consumed trailing blank lines put them.
+#[rstest]
+#[case::mapping_value("a:\n  v\n  w\n", 5, 10, &[11])]
+#[case::mapping_value_eof_without_newline("a:\n  v\n  w", 5, 10, &[10])]
+#[case::blank_lines_before_next_key("a:\n  v\n  w\n\n\nb: 1\n", 5, 10, &[18])]
+#[case::whitespace_only_lines_before_next_key("a:\n  v\n  w\n  \n  \nb: 1\n", 5, 10, &[22])]
+#[case::nested_mapping("x:\n  a:\n    v\n    w\n\ny: 1\n", 12, 19, &[21, 26])]
+#[case::sequence_item("- v\n  w\n\n- z\n", 2, 7, &[13])]
+#[case::sequence_item_before_comment_line("- v\n  w\n# d\n- z\n", 2, 7, &[16])]
+#[case::comment_line_after_value("a:\n  v\n  w\n# d\nb: 1\n", 5, 10, &[20])]
+#[case::trailing_comment_on_last_line("a:\n  v\n  w # c\nb: 1\n", 5, 10, &[20])]
+#[case::trailing_spaces_on_last_line("a:\n  v\n  w  \nb: 1\n", 5, 10, &[18])]
+#[case::crlf_line_breaks("a:\n  v\r\n  w\r\n\r\nb: 1\r\n", 5, 11, &[21])]
+#[case::multibyte_content("a:\n  é\n  ü\n", 5, 12, &[13])]
+#[case::blank_line_between_lines("a:\n  v\n\n  w\n\nb: 1\n", 5, 11, &[18])]
+fn multiline_plain_scalar_span_ends_at_last_content_byte(
+    #[case] input: &str,
+    #[case] scalar_start: u32,
+    #[case] scalar_end: u32,
+    #[case] collection_ends: &[u32],
+) {
+    let results: Vec<(Event<'_>, Span)> = parse_to_vec(input)
+        .into_iter()
+        .map(|r| r.unwrap_or_else(|e| unreachable!("unexpected parse error: {e}")))
+        .collect();
+
+    let multiline = results
+        .iter()
+        .find_map(|(ev, span)| {
+            if let Event::Scalar { value, .. } = ev
+                && value.contains([' ', '\n'])
+            {
+                Some(span)
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| unreachable!("expected a multi-line plain scalar"));
+    assert_eq!(
+        (multiline.start, multiline.end),
+        (scalar_start, scalar_end),
+        "scalar span"
+    );
+
+    let ends: Vec<u32> = results
+        .iter()
+        .filter(|(ev, _)| matches!(ev, Event::MappingEnd | Event::SequenceEnd))
+        .map(|(_, span)| span.end)
+        .collect();
+    assert_eq!(ends, collection_ends, "collection end spans");
+}
+
+// A single-line plain scalar keeps its span regardless of blank lines after it.
+#[test]
+fn single_line_plain_scalar_span_ignores_trailing_blank_lines() {
+    let results = parse_to_vec("a: v\n\n\nb: 1\n");
+    let Some(Ok((Event::Scalar { .. }, span))) = results.get(4) else {
+        unreachable!("expected the value of `a` as fifth event");
+    };
+    assert_eq!((span.start, span.end), (3, 4));
+}
+
+// A multi-line plain scalar inside a flow collection: the span covers the
+// first line through the last content byte of the last continuation line.
+// Expected: (start, end) of every scalar that is not a lone single-line word.
+#[rstest]
+#[case::two_lines_in_sequence("[a\n  b\n]\n", &[(1, 6)])]
+#[case::three_lines_in_sequence("[a\n  b\n  c\n]\n", &[(1, 10)])]
+#[case::blank_line_between_lines("[a\n\n  b\n]\n", &[(1, 7)])]
+#[case::multiline_mapping_key_with_value("{a b\n  c: d}\n", &[(1, 8), (10, 11)])]
+#[case::next_entry_span_unchanged("[a\n  b, c]\n", &[(1, 6), (8, 9)])]
+#[case::multibyte_continuation("[é\n  ü\n]\n", &[(1, 8)])]
+#[case::continuation_on_later_line("[a\n  b, c\n  d]\n", &[(1, 6), (8, 13)])]
+#[case::scalar_after_comma_then_continuation("[a, b\n  c\n]", &[(1, 2), (4, 9)])]
+#[case::crlf_line_breaks("[a\r\n  b\r\n]\r\n", &[(1, 7)])]
+#[case::trailing_whitespace_on_continuation("[a\n  b  \n]\n", &[(1, 6)])]
+#[case::comment_on_continuation_line("[a\n  b # c\n]\n", &[(1, 6)])]
+#[case::flow_in_block_mapping("k: [a\n  b]\nm: 1\n", &[(0, 1), (4, 9), (11, 12), (14, 15)])]
+fn flow_multiline_plain_scalar_span_ends_at_last_content_byte(
+    #[case] input: &str,
+    #[case] scalar_spans: &[(u32, u32)],
+) {
+    let spans: Vec<(u32, u32)> = parse_to_vec(input)
+        .into_iter()
+        .filter_map(|r| match r {
+            Ok((Event::Scalar { .. }, span)) => Some((span.start, span.end)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(spans, scalar_spans);
+}

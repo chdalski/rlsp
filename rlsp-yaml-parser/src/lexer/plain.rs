@@ -159,7 +159,6 @@ impl<'input> Lexer<'input> {
             self.collect_plain_continuations(first_value_ref, parent_indent, consumed_first.indent)
         };
 
-        let span_end = self.current_pos;
         Some(extra.map_or_else(
             || {
                 let end_pos = crate::pos::advance_within_line(scalar_start_pos, first_value_ref);
@@ -168,10 +167,10 @@ impl<'input> Lexer<'input> {
                     Span::from_pos(scalar_start_pos, end_pos),
                 )
             },
-            |owned| {
+            |(owned, content_end)| {
                 (
                     Cow::Owned(owned),
-                    Span::from_pos(scalar_start_pos, span_end),
+                    Span::from_pos(scalar_start_pos, content_end),
                 )
             },
         ))
@@ -179,16 +178,22 @@ impl<'input> Lexer<'input> {
 
     /// Collect continuation lines after the first line of a plain scalar.
     ///
-    /// Returns `Some(String)` if any continuation lines were found (multi-line),
-    /// or `None` if the scalar ends after the first line (single-line).
+    /// Returns the folded value and the position just after the last content
+    /// byte if any continuation lines were found (multi-line), or `None` if the
+    /// scalar ends after the first line (single-line).  The end position
+    /// excludes the line break and any blank lines consumed after the last
+    /// content line.
     fn collect_plain_continuations(
         &mut self,
         first_value_ref: &str,
         parent_indent: usize,
         scalar_indent: usize,
-    ) -> Option<String> {
+    ) -> Option<(String, Pos)> {
         let mut pending_blanks: usize = 0;
         let mut result: Option<String> = None;
+        // Start of the last continuation line and its content up to the last
+        // content byte; the scalar's end position is computed from it once.
+        let mut last_content: Option<(Pos, &'input str)> = None;
 
         while let Some(next) = self.buf.peek_next() {
             let trimmed = next.content.trim_start_matches([' ', '\t']);
@@ -263,7 +268,7 @@ impl<'input> Lexer<'input> {
                     bad_pos,
                     non_printable_error_message(bad_ch, "plain scalar"),
                 ));
-                return result;
+                return result.zip(last_content).map(content_end);
             }
 
             // If the remainder after the scanned value is a comment (`# …`),
@@ -272,6 +277,10 @@ impl<'input> Lexer<'input> {
             let has_trailing_comment = after_cont.starts_with('#');
 
             let buf = result.get_or_insert_with(|| String::from(first_value_ref));
+            // `cont_value` is a prefix of `trimmed`, itself a suffix of the line,
+            // so the line prefix up to the end of `cont_value` ends at the last
+            // content byte (trailing whitespace and comment excluded).
+            let content_len = next.content.len() - trimmed.len() + cont_value.len();
             if pending_blanks > 0 {
                 buf.extend(std::iter::repeat_n('\n', pending_blanks));
                 pending_blanks = 0;
@@ -285,14 +294,20 @@ impl<'input> Lexer<'input> {
                 unreachable!("consume cont line failed")
             };
             self.current_pos = pos_after_line(&consumed);
+            last_content = Some((consumed.pos, &consumed.content[..content_len]));
 
             if has_trailing_comment {
                 break;
             }
         }
 
-        result
+        result.zip(last_content).map(content_end)
     }
+}
+
+/// Pair the folded value with the position just after its last content byte.
+fn content_end((value, (line_pos, content)): (String, (Pos, &str))) -> (String, Pos) {
+    (value, crate::pos::advance_within_line(line_pos, content))
 }
 
 // ---------------------------------------------------------------------------
@@ -793,6 +808,15 @@ mod tests {
     #[case::indented_start_span("  hello", 0, Some("hello"), 2, 7)]
     #[case::multibyte_utf8_span("中文", 0, Some("中文"), 0, 6)]
     #[case::multibyte_with_leading_space_span("  中", 0, Some("中"), 2, 5)]
+    #[case::multiline_lf_trailing_newline_span("v\nw\n", 0, Some("v w"), 0, 3)]
+    #[case::multiline_eof_without_newline_span("v\nw", 0, Some("v w"), 0, 3)]
+    #[case::multiline_trailing_blank_lines_span("v\nw\n\n\n", 0, Some("v w"), 0, 3)]
+    #[case::multiline_trailing_spaces_span("v\nw   \n", 0, Some("v w"), 0, 3)]
+    #[case::multiline_blank_line_between_span("v\n\nw\n\n", 0, Some("v\nw"), 0, 4)]
+    #[case::multiline_multibyte_span("é\nü\n", 0, Some("é ü"), 0, 5)]
+    #[case::multiline_crlf_span("v\r\nw\r\n\r\n", 0, Some("v w"), 0, 4)]
+    #[case::multiline_trailing_comment_span("v\nw # c\n", 0, Some("v w"), 0, 3)]
+    #[case::single_line_trailing_blank_lines_span("v\n\n\n", 0, Some("v"), 0, 1)]
     fn try_consume_plain_scalar_span_cases(
         #[case] input: &str,
         #[case] parent_indent: usize,
@@ -815,6 +839,19 @@ mod tests {
             assert_eq!(span.start, expected_start as u32);
             assert_eq!(span.end, expected_end as u32);
         }
+    }
+
+    #[test]
+    fn multiline_plain_scalar_leaves_lexer_after_trailing_blank_lines() {
+        // The span stops at the last content byte, but the lexer position must
+        // stay after the consumed blank lines: container end spans derive from it.
+        let mut lex = make_lexer("  v\n  w\n\n\nnext\n");
+        let (_, span) = lex
+            .try_consume_plain_scalar(0)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(span.end, 7);
+        assert_eq!(lex.current_pos().byte_offset, 10);
+        assert_eq!(lex.peek_next_line().map(|l| l.content), Some("next"));
     }
 
     #[test]

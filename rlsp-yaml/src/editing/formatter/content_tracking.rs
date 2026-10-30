@@ -56,9 +56,14 @@ pub(super) fn last_content_line_from_ast(docs: &[Document<Span>]) -> Option<usiz
                 let line_count = value.lines().count();
                 Some(start_0 + line_count.saturating_sub(1))
             }
-            // Non-block scalars (plain, single-quoted, double-quoted) always
-            // occupy a single source line regardless of how many newlines are
-            // embedded in the decoded value.
+            // A plain scalar's span ends at its last content byte, so the span end
+            // is on the scalar's last source line even when the scalar is multi-line.
+            Node::Scalar {
+                style: ScalarStyle::Plain,
+                loc,
+                ..
+            } => Some(idx.line_column(loc.end).0.saturating_sub(1) as usize),
+            // Quoted scalars and aliases: the start line of the span.
             Node::Scalar { loc, .. } | Node::Alias { loc, .. } => {
                 Some(idx.line_column(loc.start).0.saturating_sub(1) as usize)
             }

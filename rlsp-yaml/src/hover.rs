@@ -2638,4 +2638,18 @@ mod tests {
 
         assert!(hover_text(&schema, "x: 1\n", pos(0, 0)).contains("Shown"));
     }
+
+    #[test]
+    fn hover_on_last_line_of_multiline_plain_value_shows_the_value() {
+        let docs = parse_docs("a:\n  v\n  w\n\nb: 1\n");
+        let hover = hover_at(&docs, pos(2, 2), None).expect("should return hover");
+        assert!(hover_content(&hover).contains("v w"));
+    }
+
+    #[test]
+    fn hover_on_blank_line_after_multiline_plain_value_does_not_show_the_value() {
+        let docs = parse_docs("a:\n  v\n  w\n\nb: 1\n");
+        let hover = hover_at(&docs, pos(3, 0), None);
+        assert!(hover.is_none_or(|h| !hover_content(&h).contains("v w")));
+    }
 }
