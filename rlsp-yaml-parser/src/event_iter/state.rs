@@ -33,6 +33,20 @@ pub enum MappingPhase {
     Key,
     /// The next node is a value (second half of a pair).
     Value,
+    /// An explicit key (`?`) is complete and the next token must be its `:`
+    /// value indicator, the next key (empty value), or a dedent.  Unlike
+    /// [`Self::Value`], the line after the key cannot carry value content: an
+    /// implicit key's value may start on the next line, an explicit key's
+    /// value may not.
+    AfterExplicitKey,
+}
+
+impl MappingPhase {
+    /// Whether the mapping has a key and is waiting for the node that follows
+    /// it (or for the next key, which then gets an empty value).
+    pub const fn awaits_value(self) -> bool {
+        matches!(self, Self::Value | Self::AfterExplicitKey)
+    }
 }
 
 /// An entry on the collection stack, tracking open block sequences and mappings.

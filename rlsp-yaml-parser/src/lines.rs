@@ -230,6 +230,47 @@ impl<'input> LineBuffer<'input> {
         scan_line(self.remaining, self.remaining_pos).map(|(line, _)| line)
     }
 
+    /// Peek at the first line that has content among the lines after the next
+    /// one, without consuming anything.
+    ///
+    /// Blank lines (only spaces and tabs) are skipped.  Returns `None` when
+    /// there is no next line or every line after it is blank.  The scan stops
+    /// at the first line with content, so a run of blank lines is walked once
+    /// per call.
+    #[must_use]
+    pub(crate) fn peek_first_content_line_after_next(&self) -> Option<Line<'input>> {
+        let is_content =
+            |line: &Line<'input>| !line.content.trim_start_matches([' ', '\t']).is_empty();
+        self.peek_next()?;
+        // Lines queued ahead of `remaining`: the rest of the prepend queue and
+        // the primed `next` line, unless `next` is itself the line peeked first.
+        let primed_after_prepend = if self.prepend.is_empty() {
+            None
+        } else {
+            self.next.clone()
+        };
+        if let Some(line) = self
+            .prepend
+            .iter()
+            .skip(1)
+            .cloned()
+            .chain(primed_after_prepend)
+            .find(is_content)
+        {
+            return Some(line);
+        }
+        let mut rest = self.remaining;
+        let mut pos = self.remaining_pos;
+        while let Some((line, after)) = scan_line(rest, pos) {
+            if is_content(&line) {
+                return Some(line);
+            }
+            pos = pos_after_line(&line);
+            rest = after;
+        }
+        None
+    }
+
     /// Advance: return the currently primed next line and prime the following
     /// one from the remaining input.  Returns `None` when no lines remain.
     ///
@@ -1004,6 +1045,108 @@ mod tests {
         assert_eq!(lines.first().map(|l| l.content), Some("  a"));
         assert_eq!(lines.get(1).map(|l| l.content), Some(""));
         assert_eq!(lines.get(2).map(|l| l.content), Some("  b"));
+    }
+
+    // -----------------------------------------------------------------------
+    // peek_first_content_line_after_next
+    // -----------------------------------------------------------------------
+
+    fn synthetic_line(content: &'static str) -> Line<'static> {
+        Line {
+            content,
+            offset: 0,
+            indent: content.len() - content.trim_start_matches(' ').len(),
+            break_type: BreakType::Lf,
+            pos: Pos::ORIGIN,
+        }
+    }
+
+    fn first_content_after_next(buf: &LineBuffer<'_>) -> Option<String> {
+        buf.peek_first_content_line_after_next()
+            .map(|line| line.content.to_owned())
+    }
+
+    // Without prepended lines the next line is the first one; the answer comes
+    // from `remaining`, past the blank lines.
+    #[rstest]
+    #[case::directly_after_next("a\nb\n", Some("b"))]
+    #[case::after_empty_line("a\n\nb\n", Some("b"))]
+    #[case::after_whitespace_and_tab_only_lines("a\n  \n\t\n \t \nb\n", Some("b"))]
+    #[case::keeps_indent_of_content_line("a\n\n  b\n", Some("  b"))]
+    #[case::all_following_lines_blank("a\n\n  \n", None)]
+    #[case::no_following_line("a\n", None)]
+    #[case::next_line_is_last_without_newline("a", None)]
+    fn first_content_line_after_next_from_remaining(
+        #[case] input: &str,
+        #[case] expected: Option<&str>,
+    ) {
+        let buf = LineBuffer::new(input);
+        assert_eq!(first_content_after_next(&buf).as_deref(), expected);
+    }
+
+    #[test]
+    fn first_content_line_after_next_on_empty_buffer_is_none() {
+        let buf = LineBuffer::new("");
+        assert_eq!(first_content_after_next(&buf), None);
+    }
+
+    // One prepended line: the primed `next` line is the first one after it,
+    // even when it is blank the scan goes on into `remaining`.
+    #[rstest]
+    #[case::next_has_content("x\nb\n", Some("x"))]
+    #[case::next_blank_then_remaining_content("\n\nb\n", Some("b"))]
+    #[case::next_and_remaining_blank("\n\n", None)]
+    fn first_content_line_after_next_with_one_prepended_line(
+        #[case] input: &str,
+        #[case] expected: Option<&str>,
+    ) {
+        let mut buf = LineBuffer::new(input);
+        buf.prepend_line(synthetic_line("s"));
+        assert_eq!(first_content_after_next(&buf).as_deref(), expected);
+    }
+
+    // Further prepended lines come before `next` and `remaining`.
+    #[test]
+    fn first_content_line_after_next_uses_further_prepended_lines() {
+        let mut buf = LineBuffer::new("x\ny\n");
+        buf.prepend_line(synthetic_line("second"));
+        buf.prepend_line(synthetic_line("first"));
+        assert_eq!(first_content_after_next(&buf).as_deref(), Some("second"));
+    }
+
+    #[test]
+    fn first_content_line_after_next_skips_blank_prepended_lines() {
+        let mut buf = LineBuffer::new("x\ny\n");
+        buf.prepend_line(synthetic_line("  "));
+        buf.prepend_line(synthetic_line(""));
+        buf.prepend_line(synthetic_line("first"));
+        assert_eq!(first_content_after_next(&buf).as_deref(), Some("x"));
+    }
+
+    #[test]
+    fn first_content_line_after_next_with_only_blank_lines_after_prepended_line_is_none() {
+        let mut buf = LineBuffer::new("");
+        buf.prepend_line(synthetic_line("s"));
+        assert_eq!(first_content_after_next(&buf), None);
+    }
+
+    // The lookahead consumes nothing and changes no later answer.
+    #[test]
+    fn first_content_line_after_next_does_not_move_the_buffer() {
+        let mut buf = LineBuffer::new("a\n\n\nb\nc\n");
+        buf.prepend_line(synthetic_line("s"));
+        let before_next = buf.peek_next().map(|l| l.content);
+        let before_second = buf.peek_second().map(|l| l.content);
+
+        assert_eq!(first_content_after_next(&buf).as_deref(), Some("a"));
+        assert_eq!(first_content_after_next(&buf).as_deref(), Some("a"));
+
+        assert_eq!(buf.peek_next().map(|l| l.content), before_next);
+        assert_eq!(buf.peek_second().map(|l| l.content), before_second);
+        let consumed: Vec<_> = std::iter::from_fn(|| buf.consume_next())
+            .map(|l| l.content)
+            .collect();
+        assert_eq!(consumed, ["s", "a", "", "", "b", "c"]);
     }
 
     // -----------------------------------------------------------------------

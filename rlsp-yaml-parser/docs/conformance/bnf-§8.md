@@ -204,8 +204,8 @@ BNF: `l+block-sequence(n) ::= ( s-indent(n+1+m) c-l-block-seq-entry(n+1+m) )+`
 
 - **Verdict:** Strict-conformant
 - **Spec (§8.2.1):** "A block sequence is simply a series of nodes, each denoted by a leading `-` indicator. The `-` indicator must be separated from the node by white space."
-- **Implementation:** `handle_sequence_entry()` in `event_iter/block/sequence.rs` — opens a new `CollectionEntry::Sequence` when `dash_indent > parent_col`, requiring sequences to be strictly more indented than their enclosing block node
-- **Tests:** `tests/yaml-test-suite/src/JQ4R.yaml` (Spec Example 8.14. Block Sequence); `rlsp-yaml-parser/tests/smoke/sequences.rs`
+- **Implementation:** `handle_sequence_entry()` in `event_iter/block/sequence.rs` — opens a new `CollectionEntry::Sequence` when `dash_indent > parent_col`, requiring sequences to be strictly more indented than their enclosing block node; `finished_node_indent()` in `event_iter/base.rs`, checked in `step_in_document()` (`event_iter/step.rs`), rejects content indented past a `-` once its item is complete, `close_collections_at_or_above()` (`event_iter/base.rs`) marks an indented root collection complete when a line dedents out of it so a following node is rejected as a second root, and `check_node_line_position()` (`event_iter/step.rs`) applies the same rule, after closing the collections the line dedents out of, to flow, alias and property lines, which do not reach the scalar validity checks, so a line between two levels or at the `-` column is rejected as well
+- **Tests:** `tests/yaml-test-suite/src/JQ4R.yaml` (Spec Example 8.14. Block Sequence); `rlsp-yaml-parser/tests/smoke/sequences.rs`; `rlsp-yaml-parser/tests/error_reporting.rs` (Group H)
 
 ### [184] c-l-block-seq-entry(n)
 
@@ -222,8 +222,8 @@ BNF: `s-l+block-indented(n,c) ::= ( s-indent(m) ( ns-l-compact-sequence(n+1+m) |
 
 - **Verdict:** Strict-conformant
 - **Spec (§8.2.1):** "The entry node may be either completely empty, be a nested block node or use a compact in-line notation."
-- **Implementation:** `consume_sequence_dash()` and `handle_sequence_entry()` in `event_iter/block/sequence.rs` — inline compact mapping/sequence dispatched via subsequent `step_in_document()` calls; empty scalar emitted when no inline content and next line is not more indented
-- **Tests:** `tests/yaml-test-suite/src/W42U.yaml`
+- **Implementation:** `consume_sequence_dash()` and `handle_sequence_entry()` in `event_iter/block/sequence.rs` — inline compact mapping/sequence dispatched via subsequent `step_in_document()` calls; empty scalar emitted when no inline content and next line is not more indented; an entry holds one node, so `finished_node_indent()` in `event_iter/base.rs` (checked in `step_in_document()`) rejects further indented content after a complete item (`- "q"` followed by `  w`); `check_node_line_position()` does the same for flow, alias and property lines at or below the item's collection (`- "q"` followed by `[x]` or ` &x w`)
+- **Tests:** `tests/yaml-test-suite/src/W42U.yaml`; `rlsp-yaml-parser/tests/error_reporting.rs` (Group H)
 
 ### [186] ns-l-compact-sequence(n)
 
@@ -276,8 +276,8 @@ BNF: `l-block-map-explicit-value(n) ::= s-indent(n) c-mapping-value s-l+block-in
 
 - **Verdict:** Strict-conformant
 - **Spec (§8.2.2):** "If the `?` indicator is specified, the optional value node must be specified on a separate line, denoted by the `:` indicator."
-- **Implementation:** `consume_explicit_value_line()` in `event_iter/block/mapping.rs` — a line that is solely a `:` value indicator advances the mapping to Value phase; inline value content prepended as a synthetic line
-- **Tests:** `tests/yaml-test-suite/src/5WE3.yaml`
+- **Implementation:** `consume_explicit_value_line()` in `event_iter/block/mapping.rs` — a line that is solely a `:` value indicator advances the mapping from `AfterExplicitKey` to Value phase; inline value content prepended as a synthetic line. While the mapping is in `AfterExplicitKey` phase (explicit key complete, `:` not yet seen), `finished_node_indent()` in `event_iter/base.rs` makes `step_in_document()` reject any line indented past the mapping, since the value cannot start on the key's continuation line, and `check_node_line_position()` and the scalar validity check reject a node line at the mapping's column that is not `:`, `?` or a key (`? "a"` followed by `[x]`)
+- **Tests:** `tests/yaml-test-suite/src/5WE3.yaml`; `rlsp-yaml-parser/tests/error_reporting.rs` (Group H)
 
 ### [192] ns-l-block-map-implicit-entry(n)
 
@@ -294,8 +294,8 @@ BNF: `ns-s-block-map-implicit-key ::= c-s-implicit-json-key(BLOCK-KEY) | ns-s-im
 
 - **Verdict:** Strict-conformant
 - **Spec (§8.2.2):** "Such keys are subject to the same restrictions; they are limited to a single line and must not span more than 1024 Unicode characters."
-- **Implementation:** The 1024-char check in `consume_mapping_entry()` in `event_iter/block/mapping.rs` — covers both plain YAML-key and quoted JSON-key forms via the same guard
-- **Tests:** `rlsp-yaml-parser/tests/implicit_key_length.rs` (groups A–N and H5–H8, 48 cases)
+- **Implementation:** The 1024-char check in `consume_mapping_entry()` in `event_iter/block/mapping.rs` — covers both plain YAML-key and quoted JSON-key forms via the same guard. A quoted key may be followed only by optional whitespace before the `:`: `consume_mapping_entry()` returns `QuotedKeyError` for any other tail (`'k' x: v`)
+- **Tests:** `rlsp-yaml-parser/tests/implicit_key_length.rs` (groups A–N and H5–H8, 48 cases); `rlsp-yaml-parser/tests/error_reporting.rs` (Group H)
 
 ### [194] c-l-block-map-implicit-value(n)
 
@@ -303,8 +303,8 @@ BNF: `c-l-block-map-implicit-value(n) ::= c-mapping-value ( s-l+block-node(n,BLO
 
 - **Verdict:** Strict-conformant
 - **Spec (§8.2.2):** "In block mappings the value must never be adjacent to the `:`, as this greatly reduces readability and is not required for JSON compatibility."
-- **Implementation:** Value content after `: ` / `:\t` in `event_iter/block/mapping.rs` prepended as a synthetic inline line; absent value content produces empty scalar via `e-node` path
-- **Tests:** `tests/yaml-test-suite/src/S3PD.yaml` (Spec Example 8.18. Implicit Block Mapping Entries)
+- **Implementation:** Value content after `: ` / `:\t` in `event_iter/block/mapping.rs` prepended as a synthetic inline line; absent value content produces empty scalar via `e-node` path; once the value is complete, `finished_node_indent()` in `event_iter/base.rs` (checked in `step_in_document()`) rejects further indented content (`a: "q"` followed by `  [x]`); `check_node_line_position()` rejects a flow, alias or property line that is not a key at the mapping's column or between its levels (`a: "q"` followed by `[x]`)
+- **Tests:** `tests/yaml-test-suite/src/S3PD.yaml` (Spec Example 8.18. Implicit Block Mapping Entries); `rlsp-yaml-parser/tests/error_reporting.rs` (Group H)
 
 ### [195] ns-l-compact-mapping(n)
 
@@ -330,8 +330,8 @@ BNF: `s-l+flow-in-block(n) ::= s-separate(n+1,FLOW-OUT) ns-flow-node(n+1,FLOW-OU
 
 - **Verdict:** Strict-conformant
 - **Spec (§8.3):** "YAML allows flow nodes to be embedded inside block collections (but not vice-versa). Flow nodes must be indented by at least one more space than the parent block collection."
-- **Implementation:** Flow nodes dispatched from `step_in_document()` in `event_iter/step.rs` when first character is a flow indicator; indentation relative to parent enforced by `close_collections_at_or_above()` in `event_iter/flow.rs`
-- **Tests:** `tests/yaml-test-suite/src/735Y.yaml` (`"flow in block"` case)
+- **Implementation:** Flow nodes dispatched from `step_in_document()` in `event_iter/step.rs` when first character is a flow indicator; indentation relative to parent enforced by `close_collections_at_or_above()` in `event_iter/base.rs`. Only `s-l-comments` may follow the node on its line: `handle_flow_collection()` in `event_iter/flow.rs` rejects any tail other than a comment or the `:` of an implicit key after the outermost closing bracket (`- [x] [y]`, `a: [x] y`), and the alias arm in `event_iter/step.rs` does the same after an alias (`a: *b w`). Where a flow, alias or property line may start is checked by `check_node_line_position()` in `event_iter/step.rs` (between levels, at a sequence's column, past a complete node)
+- **Tests:** `tests/yaml-test-suite/src/735Y.yaml` (`"flow in block"` case); `rlsp-yaml-parser/tests/error_reporting.rs` (Group H)
 
 ### [198] s-l+block-in-block(n,c)
 
@@ -366,5 +366,5 @@ BNF: `seq-space(n,BLOCK-OUT) ::= l+block-sequence(n-1)` / `seq-space(n,BLOCK-IN)
 
 - **Verdict:** Strict-conformant
 - **Spec (§8.3):** "Since people perceive the `-` indicator as indentation, nested block sequences may be indented by one less space to compensate, except, of course, if nested inside another block sequence (BLOCK-OUT context versus BLOCK-IN context)."
-- **Implementation:** Implemented implicitly in `event_iter/block/sequence.rs` — when `MappingPhase::Value`, `dash_indent >= col` accepted (n-1 case); when `CollectionEntry::Sequence`, only `dash_indent > parent_col` opens a new sequence (n case)
+- **Implementation:** Implemented implicitly in `event_iter/block/sequence.rs` — when `MappingPhase::Value`, `dash_indent >= col` accepted; in `AfterExplicitKey` phase (explicit key complete, `:` not yet seen) and after a mapping value that is already complete, `handle_sequence_entry()` rejects the entry instead (n-1 case); when `CollectionEntry::Sequence`, only `dash_indent > parent_col` opens a new sequence (n case)
 - **Tests:** `tests/yaml-test-suite/src/57H4.yaml`; `rlsp-yaml-parser/tests/smoke/sequences.rs`

@@ -40,7 +40,12 @@ impl<'input> EventIter<'input> {
     /// After each close, if the new top of the stack is a mapping in Value
     /// phase, flips it to Key phase — the closed collection was that
     /// mapping's value.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "match-on-event-type; splitting would obscure flow"
+    )]
     pub(crate) fn close_collections_at_or_above(&mut self, threshold: usize, pos: Pos) {
+        let had_collections = !self.coll_stack.is_empty();
         while let Some(&top) = self.coll_stack.last() {
             if top.indent() >= threshold {
                 self.coll_stack.pop();
@@ -69,7 +74,11 @@ impl<'input> EventIter<'input> {
                         }
                         Event::SequenceEnd
                     }
-                    CollectionEntry::Mapping(_, MappingPhase::Value, _) => {
+                    CollectionEntry::Mapping(
+                        _,
+                        MappingPhase::Value | MappingPhase::AfterExplicitKey,
+                        _,
+                    ) => {
                         // Mapping closed via dedent while waiting for a value —
                         // emit empty value scalar first (consumes any pending
                         // anchor/tag that was on a standalone property line).
@@ -135,15 +144,16 @@ impl<'input> EventIter<'input> {
                 // - Sequence: mark current item as completed.
                 match self.coll_stack.last_mut() {
                     Some(CollectionEntry::Mapping(parent_col, phase, has_had_value)) => {
-                        if *phase == MappingPhase::Value {
+                        if phase.awaits_value() {
                             *phase = MappingPhase::Key;
                         } else if *phase == MappingPhase::Key
                             && self.complex_key_inline == Some(*parent_col)
                         {
                             // The closed collection was the key of this mapping
                             // (e.g. `? {a: b}\n: val` or `?\n- a\n: val`).
-                            // Transition to Value phase and clear the flag.
-                            *phase = MappingPhase::Value;
+                            // Transition to the explicit-key-complete phase and
+                            // clear the flag.
+                            *phase = MappingPhase::AfterExplicitKey;
                             *has_had_value = true;
                             self.complex_key_inline = None;
                         }
@@ -156,6 +166,12 @@ impl<'input> EventIter<'input> {
             } else {
                 break;
             }
+        }
+        // Closing the last open collection completes the root node, whatever
+        // column it started at: an indented root collection ends where a line
+        // dedents out of it, and further content is a second root node.
+        if had_collections && self.coll_stack.is_empty() {
+            self.root_node_emitted = true;
         }
     }
 
@@ -193,7 +209,11 @@ impl<'input> EventIter<'input> {
                     }
                     Event::SequenceEnd
                 }
-                CollectionEntry::Mapping(_, MappingPhase::Value, _) => {
+                CollectionEntry::Mapping(
+                    _,
+                    MappingPhase::Value | MappingPhase::AfterExplicitKey,
+                    _,
+                ) => {
                     // Mapping closed while waiting for a value — emit empty value.
                     // Consume any pending anchor/tag so standalone properties
                     // at end of doc are properly attached to the empty value.
@@ -254,18 +274,18 @@ impl<'input> EventIter<'input> {
             // After closing any collection, update the parent mapping phase:
             // - Value phase → Key phase: the closed collection was the value.
             // - Key phase with complex_key_inline: the closed collection was
-            //   the key (e.g. `? {a: b}` or `?\n- a\n`); advance to Value
-            //   phase and clear the flag so the pending `:` (or close) emits
-            //   the empty value correctly.
+            //   the key (e.g. `? {a: b}` or `?\n- a\n`); advance to the
+            //   explicit-key-complete phase and clear the flag so the pending
+            //   `:` (or close) emits the empty value correctly.
             if let Some(CollectionEntry::Mapping(parent_col, phase, has_had_value)) =
                 self.coll_stack.last_mut()
             {
-                if *phase == MappingPhase::Value {
+                if phase.awaits_value() {
                     *phase = MappingPhase::Key;
                 } else if *phase == MappingPhase::Key
                     && self.complex_key_inline == Some(*parent_col)
                 {
-                    *phase = MappingPhase::Value;
+                    *phase = MappingPhase::AfterExplicitKey;
                     *has_had_value = true;
                     self.complex_key_inline = None;
                 }
@@ -360,6 +380,9 @@ impl<'input> EventIter<'input> {
                 else {
                     return Ok(None);
                 };
+                if let Some((tail, tail_pos)) = self.lexer.pending_multiline_tail.take() {
+                    check_block_quoted_tail(tail, tail_pos)?;
+                }
                 let pa = self.pending_anchor.take();
                 let pt = self.pending_tag.take();
                 let tag_loc = pt.as_ref().map(PendingTag::loc);
@@ -391,31 +414,8 @@ impl<'input> EventIter<'input> {
                 else {
                     return Ok(None);
                 };
-                // In block context, after a double-quoted scalar closes, the only
-                // valid trailing content is optional whitespace followed by an
-                // optional comment (with mandatory preceding whitespace before `#`).
-                // Non-comment, non-whitespace content is an error.
                 if let Some((tail, tail_pos)) = self.lexer.pending_multiline_tail.take() {
-                    let first_non_ws = tail.trim_start_matches([' ', '\t']);
-                    if !first_non_ws.is_empty() {
-                        let ws_len = tail.len() - first_non_ws.len();
-                        if first_non_ws.starts_with('#') && ws_len == 0 {
-                            // `#` immediately after closing quote — not a comment.
-                            return Err(Error::syntax(
-                                tail_pos,
-                                "comment requires at least one space before '#'".into(),
-                            ));
-                        } else if !first_non_ws.starts_with('#') {
-                            // Non-comment content after quoted scalar.
-                            return Err(Error::syntax(
-                                tail_pos,
-                                "unexpected content after quoted scalar".into(),
-                            ));
-                        }
-                        // Valid comment: discard (the comment event is not emitted
-                        // in block context here; it will be picked up by drain_trailing_comment
-                        // in the normal flow).
-                    }
+                    check_block_quoted_tail(tail, tail_pos)?;
                 }
                 let pa = self.pending_anchor.take();
                 let pt = self.pending_tag.take();
@@ -483,6 +483,33 @@ impl<'input> EventIter<'input> {
         }
     }
 
+    /// Returns the indent above which a line can no longer belong to the
+    /// innermost open block collection because its current node is complete.
+    ///
+    /// - Sequence whose current item is complete: content indented past the
+    ///   `-` can only be a new node, and an item holds exactly one.
+    /// - Mapping in `Key` phase that already had a value: the previous value is
+    ///   complete.  Deeper content is valid only as explicit-key content.
+    /// - Mapping in `AfterExplicitKey` phase: an explicit key's value starts at
+    ///   its `:` indicator, never on a more indented line.
+    ///
+    /// Plain-scalar continuation lines are consumed with the scalar, so a line
+    /// that reaches the dispatcher past this indent is stray content.
+    pub(crate) fn finished_node_indent(&self) -> Option<usize> {
+        match self.coll_stack.last() {
+            Some(&CollectionEntry::Mapping(col, MappingPhase::Key, true))
+                if !self.explicit_key_pending =>
+            {
+                Some(col)
+            }
+            Some(
+                &(CollectionEntry::Sequence(col, true)
+                | CollectionEntry::Mapping(col, MappingPhase::AfterExplicitKey, _)),
+            ) => Some(col),
+            _ => None,
+        }
+    }
+
     /// Returns the minimum column at which a standalone block-node property
     /// (anchor or tag on its own line) is valid in the current context.
     ///
@@ -493,13 +520,44 @@ impl<'input> EventIter<'input> {
     pub(crate) fn min_standalone_property_indent(&self) -> usize {
         match self.coll_stack.last() {
             Some(
-                CollectionEntry::Mapping(n, MappingPhase::Value, _)
+                CollectionEntry::Mapping(
+                    n,
+                    MappingPhase::Value | MappingPhase::AfterExplicitKey,
+                    _,
+                )
                 | CollectionEntry::Sequence(n, _),
             ) => n + 1,
             Some(CollectionEntry::Mapping(n, MappingPhase::Key, _)) => *n,
             None => 0,
         }
     }
+}
+
+/// Check the content after the closing quote of a quoted scalar in block
+/// context.
+///
+/// The only valid trailing content is optional whitespace followed by an
+/// optional comment, with mandatory whitespace before the `#`.  A comment is
+/// not emitted here; `drain_trailing_comment` picks it up in the normal flow.
+fn check_block_quoted_tail(tail: &str, tail_pos: Pos) -> Result<(), Error> {
+    let first_non_ws = tail.trim_start_matches([' ', '\t']);
+    if first_non_ws.is_empty() {
+        return Ok(());
+    }
+    if !first_non_ws.starts_with('#') {
+        return Err(Error::syntax(
+            tail_pos,
+            "unexpected content after quoted scalar".into(),
+        ));
+    }
+    if first_non_ws.len() == tail.len() {
+        // `#` immediately after the closing quote is not a comment.
+        return Err(Error::syntax(
+            tail_pos,
+            "comment requires at least one space before '#'".into(),
+        ));
+    }
+    Ok(())
 }
 
 impl<'input> Iterator for EventIter<'input> {

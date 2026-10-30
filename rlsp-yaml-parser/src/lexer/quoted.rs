@@ -33,6 +33,9 @@ impl<'input> Lexer<'input> {
         &mut self,
         parent_indent: usize,
     ) -> Result<Option<(Cow<'input, str>, Span)>, Error> {
+        // A tail left by an earlier scalar that no caller took (an implicit
+        // key) must not be mistaken for this scalar's tail.
+        self.pending_multiline_tail = None;
         let Some(first_line) = self.buf.peek_next() else {
             return Ok(None);
         };
@@ -92,6 +95,12 @@ impl<'input> Lexer<'input> {
                 &body_start[..value.quoted_len],
             )
             .advance('\'');
+            // Store any content after the closing quote so the caller can
+            // validate it (block context) or continue with `,`, `]`, `}` (flow).
+            let tail = body_start.get(value.quoted_len + 1..).unwrap_or("");
+            if !tail.is_empty() {
+                self.pending_multiline_tail = Some((tail, end_pos));
+            }
             return Ok(Some((
                 value.into_cow(body_start),
                 Span::from_pos(open_pos, end_pos),
@@ -275,6 +284,8 @@ impl<'input> Lexer<'input> {
         &mut self,
         block_context_indent: Option<usize>,
     ) -> Result<Option<(Cow<'input, str>, Span)>, Error> {
+        // See `try_consume_single_quoted`: drop a tail no caller took.
+        self.pending_multiline_tail = None;
         let Some(first_line) = self.buf.peek_next() else {
             return Ok(None);
         };
@@ -960,6 +971,52 @@ mod tests {
             .try_consume_single_quoted(0)
             .unwrap_or_else(|e| unreachable!("unexpected error: {e}"));
         assert!(result.is_none(), "expected None for input {input:?}");
+    }
+
+    // Content after the closing `'` is handed to the caller, which validates
+    // it in block context and continues with `,`, `]`, `}` in flow context.
+    #[rstest]
+    #[case::plain_word_after_quote("'q' w", Some((" w", 3)))]
+    #[case::second_scalar_after_quote("'q' 'r'", Some((" 'r'", 3)))]
+    #[case::comment_after_quote("'q' # c", Some((" # c", 3)))]
+    #[case::flow_indicator_after_quote("'q', 'r']", Some((", 'r']", 3)))]
+    #[case::escaped_quote_then_tail("'it''s' w", Some((" w", 7)))]
+    #[case::multiline_closing_line_tail("'a\n  b' w", Some((" w", 7)))]
+    #[case::nothing_after_quote("'q'", None)]
+    fn single_quoted_stores_tail_after_closing_quote(
+        #[case] input: &str,
+        #[case] expected: Option<(&str, usize)>,
+    ) {
+        let mut lexer = make_lexer(input);
+        let _ = lexer.try_consume_single_quoted(0);
+        let tail = lexer
+            .pending_multiline_tail
+            .map(|(tail, pos)| (tail, pos.byte_offset));
+        assert_eq!(tail, expected);
+    }
+
+    // A tail that no caller took must not survive into the next scalar.
+    #[rstest]
+    #[case::single_then_single("'a' x\n'b'\n")]
+    #[case::single_then_double("'a' x\n\"b\"\n")]
+    #[case::double_then_single("\"a\" x\n'b'\n")]
+    #[case::double_then_double("\"a\" x\n\"b\"\n")]
+    fn untaken_quoted_tail_is_dropped_by_the_next_quoted_scalar(#[case] input: &str) {
+        let mut lexer = make_lexer(input);
+        let first = if input.starts_with('\'') {
+            lexer.try_consume_single_quoted(0)
+        } else {
+            lexer.try_consume_double_quoted(None)
+        };
+        assert!(matches!(first, Ok(Some(_))));
+        assert!(lexer.pending_multiline_tail.is_some());
+        let second = if input.contains("\n'") {
+            lexer.try_consume_single_quoted(0)
+        } else {
+            lexer.try_consume_double_quoted(None)
+        };
+        assert!(matches!(second, Ok(Some(_))));
+        assert!(lexer.pending_multiline_tail.is_none());
     }
 
     fn dq(input: &str) -> (Cow<'_, str>, Span) {

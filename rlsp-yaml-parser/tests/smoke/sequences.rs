@@ -304,31 +304,27 @@ fn sibling_sequences_at_same_indent() {
 
 #[test]
 fn sequence_ends_on_dedent() {
-    // Two-space-indented sequence followed by zero-indent scalar.
-    let input = "  - foo\n  - bar\nbaz\n";
-    let events = event_variants(input);
-    // SequenceStart, foo, bar, SequenceEnd must all come before Scalar(baz).
+    // Two-space-indented sequence followed by a zero-indent scalar: the sequence
+    // ends at the dedent, and the scalar would be a second root node, which is
+    // an error.
+    let results = parse_to_vec("  - foo\n  - bar\nbaz\n");
+    let seq_end_idx = results
+        .iter()
+        .position(|r| matches!(r, Ok((Event::SequenceEnd, _))));
+    let error_idx = results.iter().position(Result::is_err);
+    assert!(seq_end_idx.is_some(), "SequenceEnd must exist");
     assert!(
-        events.iter().any(|e| matches!(e, Event::SequenceEnd)),
-        "SequenceEnd must exist"
+        error_idx.is_some(),
+        "expected an error for the second root node"
     );
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == "baz")),
-        "Scalar(baz) must exist"
+        seq_end_idx < error_idx,
+        "SequenceEnd must come before the error"
     );
-    let seq_end_pos = events
-        .iter()
-        .position(|e| matches!(e, Event::SequenceEnd))
-        .unwrap_or(usize::MAX);
-    let baz_pos = events
-        .iter()
-        .position(|e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == "baz"))
-        .unwrap_or(usize::MAX);
-    assert!(
-        seq_end_pos < baz_pos,
-        "SequenceEnd must precede Scalar(baz)"
+    assert_eq!(
+        error_idx,
+        Some(results.len() - 1),
+        "the error ends the stream"
     );
 }
 

@@ -117,6 +117,24 @@ impl<'input> EventIter<'input> {
         if !self.queue.is_empty() {
             return StepResult::Continue;
         }
+        // An entry cannot follow a complete node of the mapping it would sit
+        // in: the value of an explicit key starts at its `:`, and the value
+        // of a key that already has one is complete.  (After a bare `?` and
+        // after `:` the mapping is not in these states.)
+        let after_complete_node = match self.coll_stack.last() {
+            Some(&CollectionEntry::Mapping(_, MappingPhase::AfterExplicitKey, _)) => true,
+            Some(&CollectionEntry::Mapping(col, MappingPhase::Key, true)) => {
+                dash_indent >= col && !self.explicit_key_pending
+            }
+            _ => false,
+        };
+        if after_complete_node {
+            self.state = IterState::Done;
+            return StepResult::Yield(Err(Error::syntax(
+                dash_pos,
+                "unexpected block sequence entry after a complete node".into(),
+            )));
+        }
         // YAML §8.2.1 seq-spaces rule: a block sequence used as a mapping
         // value in `block-out` context may start at the same column as its
         // parent key (seq-spaces(n, block-out) = n, not n+1).  We therefore
@@ -140,6 +158,8 @@ impl<'input> EventIter<'input> {
                 }
             }
             Some(&CollectionEntry::Mapping(col, MappingPhase::Value, _)) => dash_indent >= col,
+            // Rejected above; an entry cannot open the value of a complete key.
+            Some(&CollectionEntry::Mapping(_, MappingPhase::AfterExplicitKey, _)) => false,
         };
         if opens_new {
             // A block sequence cannot be an implicit mapping key — only flow nodes
@@ -332,16 +352,30 @@ impl<'input> EventIter<'input> {
                     // Guard 4: not a mapping-key line.
                     // Guard 5: valid plain scalar start.
                     // Guard 6: the line following the synthetic line must not be a
-                    // plain-scalar continuation.  If the second upcoming line has
-                    // indent > dash_indent and is non-blank, the slow path would
+                    // plain-scalar continuation.  If the following line is
+                    // non-blank and indented past the dash, the slow path would
                     // call `collect_plain_continuations` and fold the lines into a
-                    // multi-line scalar — the fast path cannot handle that.
-                    let next_line_indent = self.lexer.peek_second_line().map_or(0, |l| l.indent);
-                    let has_continuation = next_line_indent > dash_indent
-                        && self
-                            .lexer
-                            .peek_second_line()
-                            .is_some_and(|l| !l.content.trim_start_matches([' ', '\t']).is_empty());
+                    // multi-line scalar — the fast path cannot handle that.  A
+                    // blank line does not end the scalar: look past the blank
+                    // lines to the next line with content.  A comment line there
+                    // does end it (the slow path would fold the comment into the
+                    // value), so the fast path keeps those.
+                    let has_continuation = self.lexer.peek_second_line().is_some_and(|second| {
+                        let second_content = second.content.trim_start_matches([' ', '\t']);
+                        if second_content.is_empty() {
+                            self.lexer
+                                .peek_first_content_line_after_next()
+                                .is_some_and(|next| {
+                                    next.indent > dash_indent
+                                        && !next
+                                            .content
+                                            .trim_start_matches([' ', '\t'])
+                                            .starts_with('#')
+                                })
+                        } else {
+                            second.indent > dash_indent
+                        }
+                    });
                     let first_char = content.chars().next();
                     if !has_continuation
                         && find_value_indicator_offset(content).is_none()

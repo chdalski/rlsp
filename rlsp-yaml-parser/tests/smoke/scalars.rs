@@ -149,6 +149,14 @@ fn plain_scalar_indented_span_start() {
 #[case::crlf_line_breaks("a:\n  v\r\n  w\r\n\r\nb: 1\r\n", 5, 11, &[21])]
 #[case::multibyte_content("a:\n  é\n  ü\n", 5, 12, &[13])]
 #[case::blank_line_between_lines("a:\n  v\n\n  w\n\nb: 1\n", 5, 11, &[18])]
+#[case::sequence_item_blank_line_inside("- a\n\n  b\n", 2, 8, &[9])]
+#[case::nested_sequence_item_blank_line_inside("a:\n  - b\n\n    c\n", 7, 15, &[16, 16])]
+#[case::sequence_item_whitespace_only_line_inside("- a\n  \n  b\n", 2, 10, &[11])]
+#[case::sequence_item_crlf_blank_line_inside("- a\r\n\r\n  b\r\n", 2, 10, &[12])]
+#[case::sequence_item_two_blank_lines_inside("- a\n\n\n  b\n", 2, 9, &[10])]
+#[case::sequence_item_blank_line_inside_then_next_item("- a\n\n  b\n\n- z\n", 2, 8, &[14])]
+#[case::sequence_item_multibyte_blank_line_inside("- ä\n\n  ö\n", 2, 10, &[11])]
+#[case::sequence_item_trailing_blank_lines_consumed("- a\n\n  b\n\n\n", 2, 8, &[11])]
 fn multiline_plain_scalar_span_ends_at_last_content_byte(
     #[case] input: &str,
     #[case] scalar_start: u32,
@@ -224,4 +232,24 @@ fn flow_multiline_plain_scalar_span_ends_at_last_content_byte(
         })
         .collect();
     assert_eq!(spans, scalar_spans);
+}
+
+// A single-quoted scalar followed by a comment has the spans (scalar and any
+// comment event) the double-quoted form has.
+#[test]
+fn single_quoted_scalar_with_trailing_comment_matches_double_quoted_spans() {
+    let spans = |input: &str| -> Vec<(u32, u32)> {
+        parse_to_vec(input)
+            .into_iter()
+            .filter_map(|r| match r {
+                Ok((Event::Scalar { .. } | Event::Comment { .. }, span)) => {
+                    Some((span.start, span.end))
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    let single = spans("- 'q' # c\n");
+    assert_eq!(single, spans("- \"q\" # c\n"));
+    assert_eq!(single.first(), Some(&(2, 5)));
 }

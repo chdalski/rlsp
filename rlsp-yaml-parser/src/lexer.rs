@@ -406,6 +406,15 @@ impl<'input> Lexer<'input> {
         self.buf.peek_second()
     }
 
+    /// Peek at the first line with content (not just spaces and tabs) after
+    /// the next line, without consuming anything.
+    ///
+    /// Returns `None` if no such line remains.
+    #[must_use]
+    pub fn peek_first_content_line_after_next(&self) -> Option<Line<'input>> {
+        self.buf.peek_first_content_line_after_next()
+    }
+
     /// Prepend a synthetic line to the front of the buffer.
     ///
     /// Used to re-present inline content extracted from a sequence-entry line

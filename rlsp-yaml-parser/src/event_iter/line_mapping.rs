@@ -50,6 +50,85 @@ pub(in crate::event_iter) fn inline_contains_mapping_key(inline: &str) -> bool {
     false
 }
 
+/// True when a block line that starts with a flow collection, alias, anchor or
+/// tag is an implicit mapping key (`[x]: v`, `*a : v`, `&a k: v`); false when
+/// it is a node (`[x]`, `*a`, `&a w`) or carries only properties (`&a`,
+/// `!!str # c`), whose node follows on a later line.
+///
+/// Where the line is ambiguous it counts as a key: callers use `false` to
+/// reject the line, so a key must never be taken for a node.
+pub(in crate::event_iter) fn is_implicit_key_line(trimmed: &str) -> bool {
+    let mut rest = trimmed;
+    while rest.starts_with(['&', '!']) {
+        let token_end = rest.find([' ', '\t']).unwrap_or(rest.len());
+        rest = rest[token_end..].trim_start_matches([' ', '\t']);
+    }
+    if rest.is_empty() || rest.starts_with('#') {
+        return false;
+    }
+    let after_node = match rest.as_bytes().first() {
+        Some(b'*') => {
+            let name_end = rest.find([' ', '\t']).unwrap_or(rest.len());
+            &rest[name_end..]
+        }
+        Some(b'[' | b'{') => match flow_collection_end(rest) {
+            Some(end) => &rest[end..],
+            // Unclosed on this line: a multi-line value (a multi-line key is
+            // an error the flow handler reports).
+            None => return false,
+        },
+        _ => return find_value_indicator_offset(rest).is_some(),
+    };
+    let after_node = after_node.trim_start_matches([' ', '\t']);
+    !(after_node.is_empty() || after_node.starts_with('#'))
+}
+
+/// Byte offset just past the flow collection that opens `s`, if it closes on
+/// this line.  Quoted scalars are skipped; a quote only opens one at the start
+/// of a scalar, so `it's` inside a plain scalar does not.
+fn flow_collection_end(s: &str) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let mut depth = 0_usize;
+    let mut pos = 0;
+    let mut scalar_start = true;
+    while let Some(&byte) = bytes.get(pos) {
+        match byte {
+            b'"' | b'\'' if scalar_start => {
+                pos += 1;
+                while let Some(&inner) = bytes.get(pos) {
+                    pos += 1;
+                    if byte == b'"' && inner == b'\\' {
+                        pos += 1;
+                    } else if inner == byte {
+                        if byte == b'\'' && bytes.get(pos) == Some(&b'\'') {
+                            pos += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                scalar_start = false;
+                continue;
+            }
+            b'[' | b'{' => {
+                depth += 1;
+                scalar_start = true;
+            }
+            b']' | b'}' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(pos + 1);
+                }
+                scalar_start = false;
+            }
+            b',' | b':' | b' ' | b'\t' => scalar_start = true,
+            _ => scalar_start = false,
+        }
+        pos += 1;
+    }
+    None
+}
+
 /// Return the byte offset of the `:` value indicator within `trimmed`, or
 /// `None` if the line is not a mapping entry.
 ///
@@ -189,7 +268,8 @@ pub(in crate::event_iter) fn find_value_indicator_offset(trimmed: &str) -> Optio
 #[cfg(test)]
 mod tests {
     use super::{
-        find_value_indicator_offset, inline_contains_mapping_key, is_implicit_mapping_line,
+        find_value_indicator_offset, inline_contains_mapping_key, is_implicit_key_line,
+        is_implicit_mapping_line,
     };
     use rstest::rstest;
 
@@ -354,6 +434,37 @@ mod tests {
                 "find_value_indicator_offset must return None for: {line:?}"
             );
         }
+    }
+
+    // Group G: is_implicit_key_line
+    #[rstest]
+    #[case::flow_seq_node("[x]", false)]
+    #[case::flow_map_node("{x: 1}", false)]
+    #[case::flow_seq_node_with_comment("[x] # c", false)]
+    #[case::flow_seq_key("[x]: 2", true)]
+    #[case::flow_map_key("{x: 1}: 2", true)]
+    #[case::flow_key_space_before_colon("[x] : 2", true)]
+    #[case::flow_key_with_quoted_bracket("[\"a]\"]: 2", true)]
+    #[case::flow_key_with_apostrophe("[it's]: 2", true)]
+    #[case::flow_key_nested("[[a], b]: 2", true)]
+    #[case::flow_unclosed_is_multiline_node("[a,", false)]
+    #[case::flow_then_text_is_ambiguous_key("[x] y", true)]
+    #[case::alias_node("*y", false)]
+    #[case::alias_with_comment("*y # c", false)]
+    #[case::alias_key("*y : 2", true)]
+    #[case::alias_then_text_is_ambiguous_key("*y: 2", true)]
+    #[case::anchor_plain_node("&x w", false)]
+    #[case::anchor_key("&x b: 2", true)]
+    #[case::tag_plain_node("!!str w", false)]
+    #[case::tag_key("!!str b: 2", true)]
+    #[case::anchor_and_tag_key("&x !!str b: 2", true)]
+    #[case::anchor_flow_node("&x [a]", false)]
+    #[case::anchor_flow_key("&x [a]: 2", true)]
+    #[case::anchor_alone_is_standalone("&x", false)]
+    #[case::tag_with_comment_is_standalone("!!str # c", false)]
+    #[case::anchor_and_tag_alone_is_standalone("&x !!str", false)]
+    fn is_implicit_key_line_cases(#[case] line: &str, #[case] expected: bool) {
+        assert_eq!(is_implicit_key_line(line), expected);
     }
 
     // Group F: inline_contains_mapping_key with anchors and tags

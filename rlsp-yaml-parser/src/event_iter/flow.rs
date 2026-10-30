@@ -630,6 +630,18 @@ impl<'input> EventIter<'input> {
                             implicit_key_mapping_indent = Some(flow_col);
                         }
                     }
+                    // After the closing bracket only a comment or the `:` of an
+                    // implicit key may follow on the line; anything else would be
+                    // a second node.
+                    if !tail_trimmed.is_empty() && !tail_trimmed.starts_with([':', '#']) {
+                        let leading = tail_content.len() - tail_trimmed.len();
+                        let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line + leading);
+                        self.state = IterState::Done;
+                        return StepResult::Yield(Err(Error::syntax(
+                            err_pos,
+                            "unexpected content after flow collection".into(),
+                        )));
+                    }
                     // If the block collection stack is empty AND the tail does not
                     // start with `:` (which would indicate this flow collection is a
                     // mapping key), the flow collection is the document root node.

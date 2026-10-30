@@ -260,6 +260,14 @@ impl<'input> EventIter<'input> {
         } else {
             (std::borrow::Cow::Borrowed(key_content), ScalarStyle::Plain)
         };
+        // Content between the closing quote and the `:` (`'k' x: v`) is a second
+        // node in the key.
+        if key_is_quoted && let Some((_, tail_pos)) = self.lexer.pending_multiline_tail.take() {
+            return ConsumedMapping::QuotedKeyError(
+                tail_pos,
+                "unexpected content after quoted scalar".into(),
+            );
+        }
 
         if !value_content.is_empty() && !value_content.starts_with('#') {
             // Detect illegal inline implicit mapping: if the inline value itself
@@ -303,7 +311,8 @@ impl<'input> EventIter<'input> {
         }
     }
 
-    /// After emitting a key scalar, flip the innermost mapping to `Value` phase.
+    /// After emitting a key scalar, flip the innermost mapping to `Value` phase
+    /// (`AfterExplicitKey` when the key was an explicit `?` key).
     ///
     /// **Call-site invariant:** the top of `coll_stack` must be a
     /// `CollectionEntry::Mapping`.  This function is only called from
@@ -324,10 +333,12 @@ impl<'input> EventIter<'input> {
                 // Clear complex_key_inline only when the mapping that owns the flag
                 // (tracked by indent) advances to Value phase.  Advancing a deeper
                 // inner mapping must not clear the flag for the outer mapping.
-                if self.complex_key_inline == Some(*col) {
+                *phase = if self.complex_key_inline == Some(*col) {
                     self.complex_key_inline = None;
-                }
-                *phase = MappingPhase::Value;
+                    MappingPhase::AfterExplicitKey
+                } else {
+                    MappingPhase::Value
+                };
                 *has_had_value = true;
                 return;
             }
@@ -410,7 +421,7 @@ impl<'input> EventIter<'input> {
                     self.coll_stack.last_mut()
                 {
                     if self.complex_key_inline == Some(*col) {
-                        *phase = MappingPhase::Value;
+                        *phase = MappingPhase::AfterExplicitKey;
                         *has_had_value = true;
                         self.complex_key_inline = None;
                     } else {
@@ -474,8 +485,11 @@ impl<'input> EventIter<'input> {
             // `consume_explicit_value_line` so we don't open a spurious
             // inner mapping (E76Z: `*alias : value` where alias was the key).
             if self.is_value_indicator_line()
-                && let Some(&CollectionEntry::Mapping(val_col, MappingPhase::Value, _)) =
-                    self.coll_stack.last()
+                && let Some(&CollectionEntry::Mapping(
+                    val_col,
+                    MappingPhase::Value | MappingPhase::AfterExplicitKey,
+                    _,
+                )) = self.coll_stack.last()
                 && val_col <= effective_key_indent
             {
                 self.consume_explicit_value_line(val_col);
@@ -564,7 +578,7 @@ impl<'input> EventIter<'input> {
         // an implicit empty-key entry (e.g. `: value`) and must fall through to
         // `consume_mapping_entry`.
         let is_in_value_phase = self.coll_stack.last().is_some_and(|top| {
-            matches!(top, CollectionEntry::Mapping(col, MappingPhase::Value, _) if *col == effective_key_indent)
+            matches!(top, CollectionEntry::Mapping(col, MappingPhase::Value | MappingPhase::AfterExplicitKey, _) if *col == effective_key_indent)
         });
         let has_complex_key_inline = self.complex_key_inline == Some(effective_key_indent)
             && self.coll_stack.last().is_some_and(|top| {
@@ -660,7 +674,7 @@ impl<'input> EventIter<'input> {
         // If the mapping is in Value phase and the next line is another key
         // (not a `: value` line), the previous key had no value — emit empty.
         if self.coll_stack.last().is_some_and(|top| {
-            matches!(top, CollectionEntry::Mapping(col, MappingPhase::Value, _) if *col == effective_key_indent)
+            matches!(top, CollectionEntry::Mapping(col, MappingPhase::Value | MappingPhase::AfterExplicitKey, _) if *col == effective_key_indent)
         }) {
             let pos = self.lexer.current_pos();
             // Only consume a Standalone anchor as the null value's anchor.
@@ -811,6 +825,13 @@ impl<'input> EventIter<'input> {
         let leading_spaces = content.len() - content.trim_start_matches(' ').len();
         let trimmed = &content[leading_spaces..];
 
+        // The `:` indicator arrived: the explicit key's value may now follow.
+        if let Some(CollectionEntry::Mapping(_, phase @ MappingPhase::AfterExplicitKey, _)) =
+            self.coll_stack.last_mut()
+        {
+            *phase = MappingPhase::Value;
+        }
+
         // Advance past `:` and any whitespace.
         let after_colon = &trimmed[1..]; // skip ':'
         let value_content = after_colon.trim_start_matches([' ', '\t']);
@@ -856,22 +877,29 @@ impl<'input> EventIter<'input> {
         // A scalar was consumed — clear any pending explicit-key context.
         self.explicit_key_pending = false;
         // If the complex_key_inline flag targets the innermost mapping, the scalar
-        // IS the key and the mapping will advance to Value phase here — clear it.
+        // IS the explicit key and the mapping will advance to the
+        // explicit-key-complete phase here — clear the flag.
         // (For an outer mapping's flag surviving through inner mappings, only
         // `advance_mapping_to_value` with the correct indent clears it.)
-        if let Some(flag_col) = self.complex_key_inline
-            && self.coll_stack.last().is_some_and(|e| matches!(e, CollectionEntry::Mapping(col, MappingPhase::Key, _) if *col == flag_col)) {
-                self.complex_key_inline = None;
-            }
+        let completes_explicit_key = self.complex_key_inline.is_some_and(|flag_col| {
+            self.coll_stack.last().is_some_and(|e| matches!(e, CollectionEntry::Mapping(col, MappingPhase::Key, _) if *col == flag_col))
+        });
+        if completes_explicit_key {
+            self.complex_key_inline = None;
+        }
         // Find the innermost mapping entry on the stack.
         for entry in self.coll_stack.iter_mut().rev() {
             if let CollectionEntry::Mapping(_, phase, has_had_value) = entry {
                 *phase = match *phase {
                     MappingPhase::Key => {
                         *has_had_value = true;
-                        MappingPhase::Value
+                        if completes_explicit_key {
+                            MappingPhase::AfterExplicitKey
+                        } else {
+                            MappingPhase::Value
+                        }
                     }
-                    MappingPhase::Value => MappingPhase::Key,
+                    MappingPhase::Value | MappingPhase::AfterExplicitKey => MappingPhase::Key,
                 };
                 return;
             }

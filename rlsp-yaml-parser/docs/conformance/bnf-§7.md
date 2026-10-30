@@ -14,8 +14,8 @@ BNF: `c-ns-alias-node ::= c-alias ns-anchor-name`
 
 - **Verdict:** Strict-conformant
 - **Spec (§7.1):** "An alias node is denoted by the `*` indicator. The alias refers to the most recent preceding node having the same anchor."
-- **Implementation:** Flow context: `*` consumed, `scan_anchor_name()` called, `Event::Alias` pushed in `event_iter/flow.rs`; tag/anchor on alias rejected as errors. Block context: alias scanning via `scan_anchor_name()` in `event_iter/properties.rs`. `resolve_alias()` in `loader.rs` handles undefined-alias errors.
-- **Tests:** `rlsp-yaml-parser/tests/smoke/anchors_and_aliases.rs`; `tests/yaml-test-suite/src/3GZX.yaml` (Spec Example 7.1. Alias Nodes)
+- **Implementation:** Flow context: `*` consumed, `scan_anchor_name()` called, `Event::Alias` pushed in `event_iter/flow.rs`; tag/anchor on alias rejected as errors. Block context: alias scanning via `scan_anchor_name()` in `event_iter/properties.rs`. `resolve_alias()` in `loader.rs` handles undefined-alias errors. In block context the alias arm of `step_in_document()` (`event_iter/step.rs`) allows only a comment or the `:` of an implicit key after the alias name (`ns-anchor-char` includes `:`, so `*a: v` is an alias named `a:` followed by stray text, an error; `,` ends the name, so `*a,b` is an error)
+- **Tests:** `rlsp-yaml-parser/tests/smoke/anchors_and_aliases.rs`; `rlsp-yaml-parser/tests/error_reporting.rs` (Group H); `tests/yaml-test-suite/src/3GZX.yaml` (Spec Example 7.1. Alias Nodes)
 
 ### [105] e-scalar
 
@@ -242,8 +242,8 @@ BNF: `c-single-quoted(n,c) ::= c-single-quote nb-single-text(n,c) c-single-quote
 
 - **Verdict:** Strict-conformant
 - **Spec (§7.3.2):** "The single-quoted style is specified by surrounding `'` indicators."
-- **Implementation:** `try_consume_single_quoted()` in `lexer/quoted.rs` — opening `'` detected, body consumed, closing `'` required
-- **Tests:** `rlsp-yaml-parser/tests/smoke/quoted_scalars.rs`; `tests/yaml-test-suite/src/87E4.yaml` (Spec Example 7.8. Single Quoted Implicit Keys)
+- **Implementation:** `try_consume_single_quoted()` in `lexer/quoted.rs` — opening `'` detected, body consumed, closing `'` required; the text after the closing `'` is stored in `pending_multiline_tail` and, in block context, validated by `check_block_quoted_tail()` in `event_iter/base.rs` (only whitespace and a comment may follow, as for double-quoted scalars)
+- **Tests:** `rlsp-yaml-parser/tests/smoke/quoted_scalars.rs`; `rlsp-yaml-parser/tests/error_reporting.rs` (Group H); `tests/yaml-test-suite/src/87E4.yaml` (Spec Example 7.8. Single Quoted Implicit Keys)
 
 ### [121] nb-single-text(n,c)
 
@@ -561,8 +561,8 @@ BNF: `c-s-implicit-json-key(c) ::= c-flow-json-node(0,c) s-separate-in-line? /* 
 
 - **Verdict:** Strict-conformant
 - **Spec (§7.4.3):** "To limit the amount of lookahead required, the `:` indicator must appear at most 1024 Unicode characters beyond the start of the key."
-- **Implementation:** Quoted JSON-key start byte recorded at flow `:` detection in `event_iter/flow.rs`; shared 1024-char check covers both plain and quoted implicit keys
-- **Tests:** `rlsp-yaml-parser/tests/implicit_key_length.rs` (groups A–N and H5–H8, 48 cases)
+- **Implementation:** Quoted JSON-key start byte recorded at flow `:` detection in `event_iter/flow.rs`; shared 1024-char check covers both plain and quoted implicit keys. In block context a quoted key followed by text before the `:` is rejected by `consume_mapping_entry()` in `event_iter/block/mapping.rs` (`QuotedKeyError`)
+- **Tests:** `rlsp-yaml-parser/tests/implicit_key_length.rs` (groups A–N and H5–H8, 48 cases); `rlsp-yaml-parser/tests/error_reporting.rs` (Group H)
 
 ### [156] ns-flow-yaml-content(n,c)
 

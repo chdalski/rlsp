@@ -296,17 +296,27 @@ fn sibling_nested_mappings() {
 
 #[test]
 fn mapping_ends_on_dedent() {
-    // `  key: val` (indented) followed by `baz` at col 0 — MappingEnd before Scalar("baz")
-    let events = event_variants("  key: val\nbaz\n");
-    let mapping_end_idx = events.iter().position(|e| matches!(e, Event::MappingEnd));
-    let baz_idx = events
+    // `  key: val` (indented) followed by `baz` at col 0: the mapping ends at the
+    // dedent, and `baz` would be a second root node, which is an error.
+    let results = parse_to_vec("  key: val\nbaz\n");
+    let mapping_end_idx = results
         .iter()
-        .position(|e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == "baz"));
+        .position(|r| matches!(r, Ok((Event::MappingEnd, _))));
+    let error_idx = results.iter().position(Result::is_err);
     assert!(mapping_end_idx.is_some(), "expected MappingEnd");
-    assert!(baz_idx.is_some(), "expected Scalar(baz)");
-    if let (Some(m), Some(b)) = (mapping_end_idx, baz_idx) {
-        assert!(m < b, "MappingEnd must come before Scalar(baz)");
-    }
+    assert!(
+        error_idx.is_some(),
+        "expected an error for the second root node"
+    );
+    assert!(
+        mapping_end_idx < error_idx,
+        "MappingEnd must come before the error"
+    );
+    assert_eq!(
+        error_idx,
+        Some(results.len() - 1),
+        "the error ends the stream"
+    );
 }
 
 #[test]

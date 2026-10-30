@@ -12,6 +12,39 @@ with existing infrastructure.
 
 ---
 
+### Content After a Complete Block Node [completed]
+
+**Description:** A block sequence item, a block mapping value, or an
+explicit `?` key holds exactly one node. A flow collection, alias,
+anchored or tagged line, or other node that starts after that node is
+complete — indented past the collection, between two levels, at the `-`
+column, or at a mapping's column without being a key — is now a syntax
+error that points at the stray line. Previously such a line was read as a second node
+(`- "q"` followed by `  w` loaded as two items), silently changing the
+data. Plain-scalar continuation lines (`- v` followed by `  w` loads as
+`"v w"`) and a value on the line after a bare `-` or `key:` are not
+affected. A sequence entry after a complete mapping value or explicit key, and a
+second node on the same line after a flow collection or alias
+(`- [x] [y]`, `a: *b w`), are errors as well. A blank line inside a plain-scalar sequence item now folds
+into the item like it does for a mapping value (`- a`, a blank line,
+`  b` is one item `"a\nb"`); it used to load as two items.
+A single-quoted scalar followed by more content on the same line
+(`- 'q' w`) now reports the same error as the double-quoted form instead
+of dropping the rest of the line. A property line (`&x`, `!!str`) on its own
+line after a complete node (`a: 1`, `&x`, `b: 2`) is an error too: the
+properties of an implicit key belong on the key's own line. Content
+after an indented root collection at a smaller column (`  - a`, then `baz`
+at column 0, or `  a: 1` then `b: 2`) is a second root node and reports
+the same error as after a root collection at column 0. A quoted implicit
+key followed by more text before its `:` (`'k' x: v`) is an error instead
+of silently losing the text.
+**Complexity:** Medium
+**Comment:** Documents that relied on the old leniency now fail to load.
+The error is reported through both `parse_events()` and `load()`. Alias
+names keep the YAML 1.2 alphabet, so `*a: v` is an error because `:`
+belongs to the name; write `*a : v` (with a space) for an alias key.
+**Tier:** 1
+
 ### Literal Stream Character Validation [completed]
 
 **Description:** The parser now enforces the YAML 1.2 §5.1 two-tier character-set

@@ -6,7 +6,9 @@
 //! when the parser is in `IterState::InDocument`.
 
 use super::directive_scope::DirectiveScope;
-use super::line_mapping::{find_value_indicator_offset, inline_contains_mapping_key};
+use super::line_mapping::{
+    find_value_indicator_offset, inline_contains_mapping_key, is_implicit_key_line,
+};
 use super::properties::{scan_anchor_name, scan_tag};
 use super::state::{
     CollectionEntry, IterState, MappingPhase, PendingAnchor, PendingTag, StepResult,
@@ -265,6 +267,41 @@ impl<'input> EventIter<'input> {
             )));
         }
 
+        // ---- Content after a complete node ----
+        //
+        // A sequence item, mapping value or explicit key holds exactly one
+        // node.  Once it is complete, a line indented past its collection can
+        // only start a second node, which YAML 1.2 §8.2 does not allow.  This
+        // runs before the dispatch so that flow, alias, property and key lines
+        // are covered, not just scalars.  Synthetic lines (inline content split
+        // off a physical line) belong to the node that line started.
+        //
+        // A tab is never block indentation, so a tab-led line (only flow
+        // delimiters get past the tab check above) has `indent == 0` however
+        // far right its content sits; it cannot continue the collection either.
+        if let Some(finished_indent) = self.finished_node_indent()
+            && let Some(line) = self.lexer.peek_next_line()
+            && (line.indent > finished_indent || line.content.starts_with('\t'))
+            && !self.lexer.is_next_line_synthetic()
+        {
+            return self.stray_content_error("unexpected indented content after a complete node");
+        }
+
+        // The flow, alias and property arms below return before the dedent and
+        // validity code further down runs for scalars.  A line they start at a
+        // position where no node may begin gets the same checks first.
+        if matches!(first_byte, Some(b'[' | b'{' | b'*' | b'&' | b'!'))
+            && !self.coll_stack.is_empty()
+            && !self.lexer.is_next_line_synthetic()
+            && let Some(step) = self.check_node_line_position(
+                // A line with only properties counts as a node: the properties
+                // of an implicit key belong on the key's own line.
+                is_implicit_key_line(trimmed.trim_start_matches('\t')),
+            )
+        {
+            return step;
+        }
+
         // ---- Byte-prefix dispatch ----
         //
         // Each YAML structural indicator has a unique first non-whitespace byte.
@@ -387,6 +424,23 @@ impl<'input> EventIter<'input> {
                             self.coll_stack.last().is_some_and(|e| {
                                 matches!(e, CollectionEntry::Mapping(col, _, _) if *col == line_indent)
                             });
+                                // After an alias only a comment or the `:` of an implicit
+                                // key may follow on the line; anything else would be a
+                                // second node.
+                                if had_remaining
+                                    && !is_value_indicator
+                                    && !remaining.starts_with('#')
+                                {
+                                    self.state = IterState::Done;
+                                    return StepResult::Yield(Err(Error::syntax(
+                                        Pos {
+                                            byte_offset: rem_byte_offset,
+                                            line: star_pos.line,
+                                            column: rem_col,
+                                        },
+                                        "unexpected content after alias".into(),
+                                    )));
+                                }
                                 if is_value_indicator && !already_in_mapping_here {
                                     let (map_anchor, map_anchor_loc) = if matches!(
                                         self.pending_anchor,
@@ -896,27 +950,8 @@ impl<'input> EventIter<'input> {
 
         // ---- Dedent: close collections more deeply nested than the current line ----
 
-        if let Some(line) = self.lexer.peek_next_line() {
-            let line_indent = line.indent;
-            let close_pos = self.lexer.current_pos();
-            // Record the minimum indent across all open collections before
-            // closing. A root collection has indent 0. If the minimum indent
-            // before closure was 0 and the stack empties, the root node is
-            // complete. When a tag-inline mapping opens at a column > 0 (a
-            // pre-existing indent-tracking limitation), closing it must not
-            // prematurely mark the root as emitted.
-            let min_indent_before = self.coll_stack.iter().map(|e| e.indent()).min();
-            self.close_collections_at_or_above(line_indent.saturating_add(1), close_pos);
-            // If closing collections emptied the stack, the root node is
-            // complete — but only if the outermost collection was at indent 0
-            // (a true root collection, not a spuriously-indented inline tag).
-            if self.coll_stack.is_empty() && !self.queue.is_empty() && min_indent_before == Some(0)
-            {
-                self.root_node_emitted = true;
-            }
-            if !self.queue.is_empty() {
-                return StepResult::Continue;
-            }
+        if self.close_deeper_collections() {
+            return StepResult::Continue;
         }
 
         // ---- Block structure validity checks ----
@@ -948,6 +983,13 @@ impl<'input> EventIter<'input> {
                         "invalid content at block sequence indent level: expected '- '".into(),
                     )));
                 }
+                Some(&CollectionEntry::Mapping(map_indent, MappingPhase::AfterExplicitKey, _))
+                    if line_indent == map_indent =>
+                {
+                    return self.stray_content_error(
+                        "invalid content after explicit key: expected ':' or a mapping key",
+                    );
+                }
                 Some(&CollectionEntry::Mapping(map_indent, MappingPhase::Key, _))
                     if line_indent == map_indent =>
                 {
@@ -958,25 +1000,6 @@ impl<'input> EventIter<'input> {
                         err_pos,
                         "invalid content at block mapping indent level: expected mapping key"
                             .into(),
-                    )));
-                }
-                // Content more deeply indented than the mapping key level is only
-                // valid as an explicit-key continuation (explicit_key_pending=true)
-                // or as the very first key (has_had_value=false — the first key may
-                // be at any indent >= map_indent).  After at least one key-value pair
-                // has been processed (has_had_value=true) with no explicit-key pending,
-                // deeper content that is not a valid mapping key is an error.
-                Some(&CollectionEntry::Mapping(map_indent, MappingPhase::Key, true))
-                    if line_indent > map_indent
-                        && !self.explicit_key_pending
-                        && !self.lexer.is_next_line_synthetic() =>
-                {
-                    let err_pos = line.pos;
-                    self.state = IterState::Done;
-                    self.lexer.consume_line();
-                    return StepResult::Yield(Err(Error::syntax(
-                        err_pos,
-                        "unexpected indented content after mapping value".into(),
                     )));
                 }
                 _ => {}
@@ -1054,5 +1077,88 @@ impl<'input> EventIter<'input> {
         // Fallback: unrecognised content line — consume and loop.
         self.lexer.consume_line();
         StepResult::Continue
+    }
+
+    /// Close the collections that are more deeply nested than the next line.
+    ///
+    /// Returns `true` when closing queued events, in which case the caller
+    /// returns `Continue` so they are drained before the line is handled.
+    fn close_deeper_collections(&mut self) -> bool {
+        let Some(line) = self.lexer.peek_next_line() else {
+            return false;
+        };
+        let line_indent = line.indent;
+        let close_pos = self.lexer.current_pos();
+        self.close_collections_at_or_above(line_indent.saturating_add(1), close_pos);
+        !self.queue.is_empty()
+    }
+
+    /// Fail on the next line, which is stray content: report `message` at its
+    /// first content byte and end the stream.
+    fn stray_content_error(&mut self, message: &str) -> StepResult<'input> {
+        let err_pos = self.lexer.peek_next_line().map_or_else(
+            || self.lexer.current_pos(),
+            |line| {
+                let leading =
+                    line.content.len() - line.content.trim_start_matches([' ', '\t']).len();
+                Pos {
+                    byte_offset: line.pos.byte_offset + leading,
+                    line: line.pos.line,
+                    column: line.pos.column + leading,
+                }
+            },
+        );
+        self.state = IterState::Done;
+        self.lexer.consume_line();
+        StepResult::Yield(Err(Error::syntax(err_pos, message.into())))
+    }
+
+    /// Validate where the next line, a flow collection, alias or property line,
+    /// sits relative to the open block collections.
+    ///
+    /// Closes the collections the line dedents out of (returning `Continue`
+    /// to drain their events), then fails when no node may start there: in a
+    /// sequence or mapping whose current node is complete, at a sequence's
+    /// column, or — for a line that is not an implicit key — at a mapping's
+    /// column or after a complete explicit key.  Returns `None` when the line
+    /// is acceptable.
+    fn check_node_line_position(&mut self, is_key: bool) -> Option<StepResult<'input>> {
+        if self.close_deeper_collections() {
+            return Some(StepResult::Continue);
+        }
+        let line_indent = self.lexer.peek_next_line()?.indent;
+        let at_column = match self.coll_stack.last() {
+            Some(&CollectionEntry::Sequence(col, _)) if line_indent == col => {
+                // A key at the column of a sequence that is the value of a
+                // mapping at the same column (`k:\n- a\nb: 1`) closes the
+                // sequence; `handle_mapping_entry` does that.
+                let closes_into_mapping = is_key
+                    && self.coll_stack.iter().rev().nth(1).is_some_and(
+                        |parent| matches!(parent, CollectionEntry::Mapping(c, _, _) if *c == col),
+                    );
+                if !closes_into_mapping {
+                    return Some(self.stray_content_error(
+                        "invalid content at block sequence indent level: expected '- '",
+                    ));
+                }
+                false
+            }
+            // After `?` the line is the key's content, not an entry of the mapping.
+            Some(&CollectionEntry::Mapping(col, MappingPhase::Key, _)) => {
+                line_indent == col && !self.explicit_key_pending
+            }
+            Some(&CollectionEntry::Mapping(col, MappingPhase::AfterExplicitKey, _)) => {
+                line_indent == col
+            }
+            _ => false,
+        };
+        if at_column && !is_key {
+            return Some(self.stray_content_error(
+                "invalid content at block mapping indent level: expected mapping key",
+            ));
+        }
+        let finished_indent = self.finished_node_indent()?;
+        (line_indent > finished_indent)
+            .then(|| self.stray_content_error("unexpected indented content after a complete node"))
     }
 }

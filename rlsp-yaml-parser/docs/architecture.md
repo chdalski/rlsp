@@ -243,7 +243,32 @@ Open block collections are tracked on `coll_stack: Vec<CollectionEntry>`.
 
 - `Sequence(indent_col, has_had_item)` — an open block sequence
 - `Mapping(indent_col, MappingPhase, has_had_value)` — an open block mapping
-  with a phase flag (expecting a key or a value)
+  with a phase flag (expecting a key, a value, or — after a complete explicit
+  `?` key — the `:` indicator)
+
+A sequence item, mapping value, or explicit key holds exactly one node.
+`finished_node_indent()` reports the indent above which the innermost
+collection cannot take more content because its current node is complete;
+`step_in_document` raises a syntax error for any non-synthetic line indented
+past it, before dispatching on the line's first byte.
+
+Flow, alias, anchor and tag lines are handled by arms that return before the
+dedent and validity code for scalars runs.  `step_in_document` therefore calls
+`check_node_line_position()` for them first: it closes the collections the line
+dedents out of (`close_deeper_collections()`), then rejects the line when no
+node may start there — at a sequence's column, past a complete node, or, unless
+`is_implicit_key_line()` shows an implicit key, at a mapping's column or right
+after a complete explicit key.  `is_implicit_key_line()` counts an ambiguous line
+as a key so a valid key is never rejected.
+
+`close_collections_at_or_above` marks the root node complete when it closes the
+last open collection, whatever column that collection started at, so any further
+content is rejected by the root-node guard in `step_in_document`.
+
+`handle_sequence_entry` rejects a `-` entry when the innermost mapping is in
+`AfterExplicitKey` phase or in `Key` phase with a complete value, and the flow
+and alias handlers reject a second node after the collection or alias on the
+same line (only a comment or the `:` of an implicit key may follow).
 
 When a new line is less-indented than the top of the stack, collections are
 closed via `close_collections_at_or_above(threshold, pos)`, which pops entries
