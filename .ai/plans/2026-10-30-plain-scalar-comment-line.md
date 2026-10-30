@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-10-30)
 **Created:** 2026-10-30
 
 # A Comment Line Ends a Plain Scalar
@@ -46,7 +46,7 @@ the stricter rejection reports no error for valid documents.
       traces to a task of this plan, and each that differs from libfyaml
       is fixed in an added task or reported to the user as stated in
       Context
-- [ ] Push to `main` and confirm the full CI matrix is green
+- [x] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
