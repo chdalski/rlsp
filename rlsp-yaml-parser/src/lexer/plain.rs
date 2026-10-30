@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-use memchr::{memchr, memchr2};
+use memchr::memchr2;
 use std::borrow::Cow;
 
 use crate::error::Error;
@@ -28,10 +28,6 @@ impl<'input> Lexer<'input> {
     /// If [`Self::inline_scalar`] is set (populated by a preceding
     /// [`Self::consume_marker_line`] call for a `--- text` line), it is
     /// drained and returned immediately without consuming any new lines.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "plain scalar parsing with suffix and continuation checks; splitting would obscure the single-vs-multi-line flow"
-    )]
     pub fn try_consume_plain_scalar(
         &mut self,
         parent_indent: usize,
@@ -67,87 +63,54 @@ impl<'input> Lexer<'input> {
         // We use char_indices on the suffix — security: byte offsets only.
         let after_scalar_start = leading_spaces + first_value_len;
         if let Some(suffix) = consumed_first.content.get(after_scalar_start..) {
-            if let Some(comment_text) = extract_trailing_comment(suffix) {
-                // Compute the byte offset of `#` within the line.
-                // It is `after_scalar_start + (suffix.len() - comment_text.len() - 1)`
-                // where -1 accounts for the `#` itself.
-                let hash_byte_in_line = after_scalar_start + suffix.len() - comment_text.len() - 1;
-                let hash_col_in_line =
-                    crate::pos::column_at(consumed_first.content, hash_byte_in_line);
-                let hash_pos = Pos {
-                    byte_offset: consumed_first.pos.byte_offset + hash_byte_in_line,
-                    line: consumed_first.pos.line,
-                    column: consumed_first.pos.column + hash_col_in_line,
-                };
-                let span_end = crate::pos::advance_within_line(hash_pos.advance('#'), comment_text);
-                // Validate comment text: YAML 1.2 §8.1.1 / §5.1 — comment
-                // text must consist only of c-printable characters.
-                // The existing NUL check fires first with a specific message;
-                // find_non_c_printable is the general backstop for everything else.
-                if let Some(bad_i) = memchr(b'\0', comment_text.as_bytes()) {
-                    let bad_char_i = comment_text[..bad_i].chars().count();
-                    let bad_pos = Pos {
-                        byte_offset: hash_pos.byte_offset + 1 + bad_i,
-                        line: hash_pos.line,
-                        column: hash_pos.column + 1 + bad_char_i,
-                    };
-                    self.plain_scalar_suffix_error = Some(Error::invalid_character(
-                        bad_pos,
-                        "invalid character U+0000 in comment".to_owned(),
-                    ));
-                } else if !self.input_all_printable {
-                    if let Some((bad_i, bad_ch)) = find_non_c_printable(comment_text.as_bytes()) {
-                        let bad_char_count = comment_text[..bad_i].chars().count();
+            let suffix_start = crate::pos::advance_within_line(scalar_start_pos, first_value_ref);
+            match self.comment_in_suffix(suffix, suffix_start) {
+                Ok(Some(comment)) => self.trailing_comment = Some(comment),
+                Err(e) => self.plain_scalar_suffix_error = Some(e),
+                Ok(None) => {
+                    if let Some((bad_i, bad_ch)) = suffix
+                        .char_indices()
+                        .find(|(_, c)| matches!(*c, '\0' | '\u{FEFF}'))
+                    {
+                        // Suffix contains NUL (U+0000) or mid-stream BOM (U+FEFF).
+                        // These have specific existing error messages — keep them.
+                        let bad_col_offset = crate::pos::column_at(
+                            consumed_first.content,
+                            after_scalar_start + bad_i,
+                        );
                         let bad_pos = Pos {
-                            byte_offset: hash_pos.byte_offset + 1 + bad_i,
-                            line: hash_pos.line,
-                            column: hash_pos.column + 1 + bad_char_count,
+                            byte_offset: consumed_first.pos.byte_offset
+                                + after_scalar_start
+                                + bad_i,
+                            line: consumed_first.pos.line,
+                            column: consumed_first.pos.column + bad_col_offset,
                         };
                         self.plain_scalar_suffix_error = Some(Error::invalid_character(
                             bad_pos,
-                            non_printable_error_message(bad_ch, "comment"),
+                            format!("invalid character U+{:04X} in plain scalar", bad_ch as u32),
                         ));
-                    } else {
-                        self.trailing_comment =
-                            Some((comment_text, Span::from_pos(hash_pos, span_end)));
+                    } else if !self.input_all_printable
+                        && let Some((bad_i, bad_ch)) = find_non_c_printable(suffix.as_bytes())
+                    {
+                        // General c-printable backstop: any non-printable byte in the
+                        // suffix that follows the plain scalar value is an error.
+                        let bad_col_offset = crate::pos::column_at(
+                            consumed_first.content,
+                            after_scalar_start + bad_i,
+                        );
+                        let bad_pos = Pos {
+                            byte_offset: consumed_first.pos.byte_offset
+                                + after_scalar_start
+                                + bad_i,
+                            line: consumed_first.pos.line,
+                            column: consumed_first.pos.column + bad_col_offset,
+                        };
+                        self.plain_scalar_suffix_error = Some(Error::invalid_character(
+                            bad_pos,
+                            non_printable_error_message(bad_ch, "plain scalar"),
+                        ));
                     }
-                } else {
-                    self.trailing_comment =
-                        Some((comment_text, Span::from_pos(hash_pos, span_end)));
                 }
-            } else if let Some((bad_i, bad_ch)) = suffix
-                .char_indices()
-                .find(|(_, c)| matches!(*c, '\0' | '\u{FEFF}'))
-            {
-                // Suffix contains NUL (U+0000) or mid-stream BOM (U+FEFF).
-                // These have specific existing error messages — keep them.
-                let bad_col_offset =
-                    crate::pos::column_at(consumed_first.content, after_scalar_start + bad_i);
-                let bad_pos = Pos {
-                    byte_offset: consumed_first.pos.byte_offset + after_scalar_start + bad_i,
-                    line: consumed_first.pos.line,
-                    column: consumed_first.pos.column + bad_col_offset,
-                };
-                self.plain_scalar_suffix_error = Some(Error::invalid_character(
-                    bad_pos,
-                    format!("invalid character U+{:04X} in plain scalar", bad_ch as u32),
-                ));
-            } else if !self.input_all_printable
-                && let Some((bad_i, bad_ch)) = find_non_c_printable(suffix.as_bytes())
-            {
-                // General c-printable backstop: any non-printable byte in the
-                // suffix that follows the plain scalar value is an error.
-                let bad_col_offset =
-                    crate::pos::column_at(consumed_first.content, after_scalar_start + bad_i);
-                let bad_pos = Pos {
-                    byte_offset: consumed_first.pos.byte_offset + after_scalar_start + bad_i,
-                    line: consumed_first.pos.line,
-                    column: consumed_first.pos.column + bad_col_offset,
-                };
-                self.plain_scalar_suffix_error = Some(Error::invalid_character(
-                    bad_pos,
-                    non_printable_error_message(bad_ch, "plain scalar"),
-                ));
             }
         }
 
@@ -582,35 +545,6 @@ pub fn scan_plain_line_flow(content: &str) -> &str {
     }
 
     &content[..committed_end]
-}
-
-// ---------------------------------------------------------------------------
-// Trailing comment extraction
-// ---------------------------------------------------------------------------
-
-/// Extract a trailing comment from the content that follows a scalar value.
-///
-/// `suffix` is the slice of the line after the scalar ends (may be empty,
-/// whitespace-only, or `"  # comment"`).
-///
-/// Returns the comment body (everything after the `#`) if a comment is
-/// present (i.e. `#` is preceded by at least one whitespace), or `None`
-/// if there is no comment in this suffix.
-pub fn extract_trailing_comment(suffix: &str) -> Option<&str> {
-    let bytes = suffix.as_bytes();
-    let mut search_from = 0;
-    while let Some(rel) = memchr(b'#', bytes.get(search_from..).unwrap_or_default()) {
-        let i = search_from + rel;
-        // `#` must be preceded by whitespace (or be at position 0, which was
-        // preceded by the scalar end — treated as a boundary).
-        let preceded_by_ws = i == 0 || matches!(bytes.get(i - 1), Some(b' ' | b'\t'));
-        if preceded_by_ws {
-            // SAFETY: i + 1 is a valid char boundary because `#` is ASCII (1 byte).
-            return Some(&suffix[i + 1..]);
-        }
-        search_from = i + 1;
-    }
-    None
 }
 
 // ---------------------------------------------------------------------------

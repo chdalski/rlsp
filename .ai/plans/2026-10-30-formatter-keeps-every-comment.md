@@ -28,7 +28,7 @@ formatting it again must change nothing.
 - [x] Clarify scope with the user
 - [x] Design review of the approach
 - [x] Task 1: Indent the closing bracket of a broken flow collection
-- [ ] Task 2: One helper reads a comment from a line suffix
+- [x] Task 2: One helper reads a comment from a line suffix
 - [ ] Task 3: Two helpers assemble node comments and the collection colon
 - [ ] Task 4: Emit every comment as an event
 - [ ] Task 5: Store every comment event in the AST
@@ -74,13 +74,13 @@ The suffix logic that finds and validates a trailing comment is copied in
 needs it at more sites. Behavior is unchanged, apart from the one change named
 in the first criterion.
 
-- [ ] One function in `rlsp-yaml-parser/src/lexer/comment.rs` holds this logic
+- [x] One function in `rlsp-yaml-parser/src/lexer/comment.rs` holds this logic
       and the three sites use it; the sequence fast path now reports what the
       plain path reports, so `- v # \x01\n` is an error
-- [ ] `tests/smoke/sequences.rs`, `tests/smoke/comments.rs`,
+- [x] `tests/smoke/sequences.rs`, `tests/smoke/comments.rs`,
       `tests/error_reporting.rs`, and the tests in `lexer/plain.rs` and
       `lexer/comment.rs` pass with their assertions unchanged
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 3: Two helpers assemble node comments and the collection colon
 
@@ -274,7 +274,9 @@ these inputs change today.
 - **Comments are validated at every position, with one length limit:** a
   comment that moves to its own line must still parse, so documents with
   non-printable or over-long comments at the newly checked positions now report
-  an error. Declined: leaving those positions unchecked.
+  an error, as [75] `c-nb-comment-text` requires, also after `---` and `...`;
+  libfyaml accepts non-printable comment text and differs here. Declined: leaving
+  those positions unchecked.
 - **`--- # c` and `- # c` move one line:** the data stays the same and no
   further field is needed; `--- # yaml-language-server: $schema=x` thereby
   becomes a valid modeline line. Declined: keeping them on the marker's line.

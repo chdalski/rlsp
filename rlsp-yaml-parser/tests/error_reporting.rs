@@ -1828,3 +1828,111 @@ fn stray_token_error_points_at_its_first_byte(
     );
     assert!(input.is_char_boundary(err.pos.byte_offset));
 }
+
+// ---------------------------------------------------------------------------
+// Trailing comment validation — one rule at every position that reads a comment
+// from the rest of a line (plain scalar, sequence fast path, document marker)
+// ---------------------------------------------------------------------------
+
+// A comment holding a character outside c-printable is one error at that
+// character's position, and no Comment event carries the character, whichever
+// position the comment follows.
+#[rstest]
+#[case::mapping_value("a: v # {}\n")]
+#[case::sequence_fast_path("- v # {}\n")]
+#[case::sequence_fast_path_multibyte_prefix("- 日本 # {}\n")]
+#[case::sequence_with_anchor("- &a v # {}\n")]
+#[case::document_start_marker("--- # {}\nv\n")]
+#[case::document_end_marker("... # {}\n")]
+fn invalid_character_in_trailing_comment_is_one_error_at_its_position(
+    #[case] template: &str,
+    #[values('\0', '\x01', '\x07', '\x7f', '\u{80}', '\u{FFFE}')] bad: char,
+) {
+    let input = template.replace("{}", &bad.to_string());
+    let items: Vec<_> = parse_events(&input).collect();
+    assert_eq!(items.iter().filter(|r| r.is_err()).count(), 1, "{items:?}");
+    assert!(
+        !items
+            .iter()
+            .any(|r| matches!(r, Ok((Event::Comment { text }, _)) if text.contains(bad))),
+        "{items:?}"
+    );
+
+    let err = first_error(&input).unwrap();
+    let byte_offset = input.find(bad).unwrap();
+    assert_eq!(err.kind, ErrorKind::InvalidCharacter);
+    assert_eq!(
+        (err.pos.line, err.pos.column, err.pos.byte_offset),
+        (1, input[..byte_offset].chars().count(), byte_offset)
+    );
+    let expected_message = if bad == '\0' {
+        "invalid character U+0000 in comment".to_owned()
+    } else {
+        format!(
+            "non-printable character U+{:04X} is not allowed in comment",
+            u32::from(bad)
+        )
+    };
+    assert_eq!(err.message, expected_message);
+}
+
+// The sequence fast path stashes a valid comment for the item it belongs to; an
+// invalid one must not be emitted, nor left behind for the next item.
+#[test]
+fn invalid_trailing_comment_leaves_no_comment_for_the_next_sequence_item() {
+    let items: Vec<_> = parse_events("- a # \x01\n- b # ok\n").collect();
+    assert_eq!(items.iter().filter(|r| r.is_err()).count(), 1, "{items:?}");
+    let comments: Vec<_> = items
+        .iter()
+        .filter_map(|r| match r {
+            Ok((Event::Comment { text }, _)) => Some(*text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(comments, [" ok"]);
+}
+
+// A valid trailing comment yields one Comment event with the body after the
+// `#` and a span from the `#` through the end of the body (byte offsets).
+#[rstest]
+#[case::mapping_value("a: v # c\n", " c", 5, 8)]
+#[case::sequence_fast_path("- v # c\n", " c", 4, 7)]
+#[case::sequence_fast_path_multibyte_prefix("- 日本 # c\n", " c", 9, 12)]
+#[case::sequence_with_anchor("- &a v # c\n", " c", 7, 10)]
+#[case::document_start_marker("--- # c\nv\n", " c", 4, 7)]
+#[case::tab_before_hash("- v\t# c\n", " c", 4, 7)]
+#[case::hash_without_space_is_skipped("a: v #b # c\n", "b # c", 5, 11)]
+#[case::empty_body("- v #\n", "", 4, 5)]
+#[case::multibyte_body("a: v # 日本\n", " 日本", 5, 13)]
+fn valid_trailing_comment_has_its_body_and_span(
+    #[case] input: &str,
+    #[case] text: &str,
+    #[case] start: u32,
+    #[case] end: u32,
+) {
+    let comments: Vec<_> = parse_events(input)
+        .filter_map(|r| match r.unwrap() {
+            (Event::Comment { text }, span) => Some((text, span.start, span.end)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(comments, [(text, start, end)]);
+}
+
+// `#` that does not follow whitespace is scalar content, not a comment.
+#[rstest]
+#[case::mapping_value("a: v#b\n", "v#b")]
+#[case::sequence_fast_path("- a#b\n", "a#b")]
+fn hash_without_preceding_space_stays_in_the_scalar(#[case] input: &str, #[case] value: &str) {
+    let events: Vec<_> = parse_events(input).map(|r| r.unwrap().0).collect();
+    assert!(
+        !events.iter().any(|e| matches!(e, Event::Comment { .. })),
+        "{events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::Scalar { value: v, .. } if v == value)),
+        "{events:?}"
+    );
+}

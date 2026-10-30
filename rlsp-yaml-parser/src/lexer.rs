@@ -280,10 +280,11 @@ impl<'input> Lexer<'input> {
 
         // If the inline content is a comment (`# ...`), store it as a
         // trailing comment on the marker line rather than as a scalar.
-        if let Some(comment_text) = inline.strip_prefix('#') {
-            let comment_end =
-                crate::pos::advance_within_line(inline_start.advance('#'), comment_text);
-            self.trailing_comment = Some((comment_text, Span::from_pos(inline_start, comment_end)));
+        if inline.starts_with('#') {
+            match self.comment_in_suffix(inline, inline_start) {
+                Ok(comment) => self.trailing_comment = comment,
+                Err(e) => self.marker_inline_error = Some(e),
+            }
         } else if reject_all_inline {
             // `...` markers must not have non-comment inline content.
             self.marker_inline_error = Some(Error::syntax(

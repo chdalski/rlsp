@@ -122,8 +122,9 @@ BNF: `c-nb-comment-text ::= c-comment nb-char*`
 
 - **Verdict:** Strict-conformant
 - **Spec (§6.6):** "An explicit comment is marked by a `#` indicator. Comments must be separated from other tokens by white space characters."
-- **Implementation:** `starts_with('#')` check in `lexer/comment.rs`; text slice is everything after `#`; `reject_non_printable()` enforcement in `lexer.rs` ensures comment content is within c-printable (which is a superset of nb-char)
-- **Tests:** `rlsp-yaml-parser/tests/smoke/comments.rs`; `comment.rs` unit tests `happy_path_text`
+- **Implementation:** `try_consume_comment()` in `lexer/comment.rs` for a comment on its own line, and `comment_in_suffix()` in the same file for a comment after a node (plain scalar in a mapping value or sequence entry, `---` and `...` marker lines); the text is everything after `#`, and both reject a character outside c-printable (which is a superset of nb-char) with `InvalidCharacter`, NUL with its own message
+- **Tests:** `rlsp-yaml-parser/tests/smoke/comments.rs`; `comment.rs` unit tests `happy_path_text` and the `suffix_*` tests; `rlsp-yaml-parser/tests/error_reporting.rs` `invalid_character_in_trailing_comment_is_one_error_at_its_position`
+- **Deviation from libfyaml:** libfyaml accepts non-printable characters in comments; see `design-decisions.md`
 - **Note:** Previously Lenient — a literal BOM in a comment body was retained verbatim. Fixed together with [1] in commit `666e2f2`.
 
 ### [76] b-comment
@@ -141,7 +142,7 @@ BNF: `s-b-comment ::= ( s-separate-in-line c-nb-comment-text? )? b-comment`
 
 - **Verdict:** Strict-conformant
 - **Spec (§6.6):** "Comments must be separated from other tokens by white space characters."
-- **Implementation:** `handle_plain_scalar_inline()` in `lexer.rs` — trailing comment after inline plain scalar on marker lines requires `#` preceded by implicit whitespace; `parse_yaml_directive()` in `event_iter/directives.rs` — trailing content after YAML version checked for empty or `#` prefix
+- **Implementation:** `handle_plain_scalar_inline()` in `lexer.rs` — trailing comment after inline plain scalar on marker lines requires `#` preceded by implicit whitespace; `comment_in_suffix()` in `lexer/comment.rs` — the `#` of a trailing comment must open the suffix or follow a space or tab, and the same function reads the comment after a plain scalar and after `---` / `...`; `parse_yaml_directive()` in `event_iter/directives.rs` — trailing content after YAML version checked for empty or `#` prefix
 - **Tests:** `rlsp-yaml-parser/tests/smoke/comments.rs`; `rlsp-yaml-parser/tests/smoke/directives.rs`
 - **Rationale:** Audit B initially flagged a lenient case at `lexer.rs:354-381` (`handle_plain_scalar_inline`), but investigation showed the plain-scanner's behavior — treating `#` without preceding whitespace as part of the scalar — is correct per spec. The `hash_without_preceding_space_is_content` test confirms this.
 

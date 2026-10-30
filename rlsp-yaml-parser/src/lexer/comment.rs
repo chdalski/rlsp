@@ -4,7 +4,7 @@ use memchr::memchr;
 
 use crate::chars::{find_non_c_printable, non_printable_error_message};
 use crate::error::Error;
-use crate::pos::{Pos, Span};
+use crate::pos::{Pos, Span, advance_within_line};
 
 use super::Lexer;
 use crate::lines::pos_after_line;
@@ -86,6 +86,75 @@ impl<'input> Lexer<'input> {
 
         Ok(Some((text, span)))
     }
+
+    /// Read the comment, if any, from the rest of a line after a node.
+    ///
+    /// `suffix` is the text that follows the node on its line and
+    /// `suffix_start` is the position of its first character.  A comment
+    /// starts at the first `#` that opens the suffix or follows a space or
+    /// tab (YAML 1.2.2 [75] `c-nb-comment-text`, [77] `s-b-comment`).
+    ///
+    /// Returns `Ok(Some((text, span)))` with the body after the `#` and the
+    /// span from the `#` through the end of the text, `Ok(None)` when the
+    /// suffix holds no comment, and `Err` when the body holds a character
+    /// that is not `c-printable`.  The caller decides what to do with the
+    /// result; this function changes no lexer state.
+    pub fn comment_in_suffix(
+        &self,
+        suffix: &'input str,
+        suffix_start: Pos,
+    ) -> Result<Option<(&'input str, Span)>, Error> {
+        let Some(hash_index) = comment_hash_index(suffix) else {
+            return Ok(None);
+        };
+        // `#` is ASCII, so both slice boundaries are on a char boundary.
+        let text = &suffix[hash_index + 1..];
+        let hash_pos = advance_within_line(suffix_start, &suffix[..hash_index]);
+
+        // NUL keeps its specific message; the general c-printable check is
+        // skipped when the whole input is known to be printable.
+        let bad = memchr(b'\0', text.as_bytes())
+            .map(|i| (i, '\0'))
+            .or_else(|| {
+                if self.input_all_printable {
+                    None
+                } else {
+                    find_non_c_printable(text.as_bytes())
+                }
+            });
+        if let Some((bad_i, bad_ch)) = bad {
+            let bad_char_count = text[..bad_i].chars().count();
+            let bad_pos = Pos {
+                byte_offset: hash_pos.byte_offset + 1 + bad_i,
+                line: hash_pos.line,
+                column: hash_pos.column + 1 + bad_char_count,
+            };
+            let message = if bad_ch == '\0' {
+                "invalid character U+0000 in comment".to_owned()
+            } else {
+                non_printable_error_message(bad_ch, "comment")
+            };
+            return Err(Error::invalid_character(bad_pos, message));
+        }
+
+        let span_end = advance_within_line(hash_pos.advance('#'), text);
+        Ok(Some((text, Span::from_pos(hash_pos, span_end))))
+    }
+}
+
+/// Byte offset of the `#` that starts a comment in `suffix`: the first `#`
+/// at offset 0 (the node ended just before it) or after a space or tab.
+fn comment_hash_index(suffix: &str) -> Option<usize> {
+    let bytes = suffix.as_bytes();
+    let mut search_from = 0;
+    while let Some(rel) = memchr(b'#', bytes.get(search_from..).unwrap_or_default()) {
+        let i = search_from + rel;
+        if i == 0 || matches!(bytes.get(i - 1), Some(b' ' | b'\t')) {
+            return Some(i);
+        }
+        search_from = i + 1;
+    }
+    None
 }
 
 #[cfg(test)]
@@ -431,5 +500,164 @@ mod tests {
             unreachable!("expected Ok(Some(...))")
         };
         assert_eq!(text, "", "empty comment body must produce empty text slice");
+    }
+
+    // -----------------------------------------------------------------------
+    // Group S — comment_in_suffix
+    // -----------------------------------------------------------------------
+
+    /// Position of the first character of a suffix that starts mid-line.
+    const SUFFIX_START: Pos = Pos {
+        byte_offset: 10,
+        line: 3,
+        column: 7,
+    };
+
+    fn pos(byte_offset: usize, column: usize) -> Pos {
+        Pos {
+            byte_offset,
+            line: 3,
+            column,
+        }
+    }
+
+    #[rstest]
+    #[case::empty("")]
+    #[case::spaces("   ")]
+    #[case::tab("\t")]
+    #[case::word("abc")]
+    #[case::indented_word("  abc")]
+    #[case::hash_after_non_whitespace("a#b")]
+    #[case::trailing_hash_after_non_whitespace("x#")]
+    #[case::hash_after_quote("'#")]
+    #[case::hash_after_multibyte_char("é#x")]
+    fn suffix_without_comment_returns_none(#[case] suffix: &str) {
+        let lex = make_lexer(suffix);
+        assert_eq!(lex.comment_in_suffix(suffix, SUFFIX_START), Ok(None));
+    }
+
+    // Each case: suffix, expected body, expected `#` byte offset in the line,
+    // `#` column, end byte offset, end column.  Columns count characters,
+    // byte offsets count bytes; the suffix starts at byte 10, column 7.
+    #[rstest]
+    #[case::hash_at_offset_zero("#x", "x", 10, 7, 12, 9)]
+    #[case::after_spaces("  # c", " c", 12, 9, 15, 12)]
+    #[case::after_tab("\t# c", " c", 11, 8, 14, 11)]
+    #[case::empty_body(" #", "", 11, 8, 12, 9)]
+    #[case::hash_inside_body_is_text("  # a # b", " a # b", 12, 9, 19, 16)]
+    #[case::unspaced_hash_is_skipped("a#b # c", " c", 14, 11, 17, 14)]
+    #[case::multibyte_prefix_counts_chars("  日本 # c", " c", 19, 12, 22, 15)]
+    #[case::multibyte_after_hash_counts_chars("# 日本語", " 日本語", 10, 7, 21, 12)]
+    #[case::multibyte_before_hash_without_space_is_skipped("é#x #y", "y", 15, 11, 17, 13)]
+    #[case::tab_and_nel_are_printable("# a\tb\u{85}c", " a\tb\u{85}c", 10, 7, 18, 14)]
+    #[case::bom_in_body_is_printable("# a\u{FEFF}b", " a\u{FEFF}b", 10, 7, 17, 13)]
+    fn suffix_with_comment_returns_body_and_span(
+        #[case] suffix: &str,
+        #[case] text: &str,
+        #[case] start_byte: usize,
+        #[case] start_column: usize,
+        #[case] end_byte: usize,
+        #[case] end_column: usize,
+    ) {
+        let lex = make_lexer(suffix);
+        let Ok(Some((got_text, span))) = lex.comment_in_suffix(suffix, SUFFIX_START) else {
+            unreachable!("expected Ok(Some(...)) for {suffix:?}")
+        };
+        assert_eq!(got_text, text);
+        assert_eq!(
+            span,
+            Span::from_pos(pos(start_byte, start_column), pos(end_byte, end_column))
+        );
+    }
+
+    // Each case: suffix, expected error byte offset, error column.  Character
+    // classes match `find_non_c_printable`; NUL has its own message.
+    #[rstest]
+    #[case::nul_in_body(" # a\0b", "invalid character U+0000 in comment", 14, 11)]
+    #[case::nul_first_in_body("#\0", "invalid character U+0000 in comment", 11, 8)]
+    #[case::nul_after_multibyte(" # 日本\0", "invalid character U+0000 in comment", 19, 12)]
+    #[case::nul_wins_over_earlier_control_char(
+        "# \x01\0",
+        "invalid character U+0000 in comment",
+        13,
+        10
+    )]
+    #[case::c0_control(
+        "# a\x01",
+        "non-printable character U+0001 is not allowed in comment",
+        13,
+        10
+    )]
+    #[case::bel(
+        "# a\x07",
+        "non-printable character U+0007 is not allowed in comment",
+        13,
+        10
+    )]
+    #[case::del(
+        "# a\x7f",
+        "non-printable character U+007F is not allowed in comment",
+        13,
+        10
+    )]
+    #[case::c1_control(
+        "# a\u{80}",
+        "non-printable character U+0080 is not allowed in comment",
+        13,
+        10
+    )]
+    #[case::fffe(
+        "# a\u{FFFE}",
+        "non-printable character U+FFFE is not allowed in comment",
+        13,
+        10
+    )]
+    #[case::ffff(
+        "# a\u{FFFF}",
+        "non-printable character U+FFFF is not allowed in comment",
+        13,
+        10
+    )]
+    #[case::control_after_multibyte(
+        "  # 日本\x01",
+        "non-printable character U+0001 is not allowed in comment",
+        20,
+        13
+    )]
+    fn suffix_comment_with_invalid_character_is_an_error(
+        #[case] suffix: &str,
+        #[case] message: &str,
+        #[case] byte_offset: usize,
+        #[case] column: usize,
+    ) {
+        let lex = make_lexer(suffix);
+        let Err(err) = lex.comment_in_suffix(suffix, SUFFIX_START) else {
+            unreachable!("expected Err for {suffix:?}")
+        };
+        assert_eq!(err.kind, ErrorKind::InvalidCharacter);
+        assert_eq!(err.message, message);
+        assert_eq!(err.pos, pos(byte_offset, column));
+    }
+
+    // `input_all_printable` is the lexer's fast-path proof that no character
+    // needs checking; it skips the c-printable scan but never the NUL check.
+    #[rstest]
+    #[case::c0_control("# a\x01")]
+    #[case::del("# a\x7f")]
+    #[case::fffe("# a\u{FFFE}")]
+    fn suffix_comment_skips_c_printable_scan_when_input_is_all_printable(#[case] suffix: &str) {
+        let mut lex = make_lexer(suffix);
+        lex.input_all_printable = true;
+        assert!(matches!(
+            lex.comment_in_suffix(suffix, SUFFIX_START),
+            Ok(Some(_))
+        ));
+    }
+
+    #[test]
+    fn suffix_comment_rejects_nul_even_when_input_is_all_printable() {
+        let mut lex = make_lexer("# a\0");
+        lex.input_all_printable = true;
+        assert!(lex.comment_in_suffix("# a\0", SUFFIX_START).is_err());
     }
 }

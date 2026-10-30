@@ -137,6 +137,36 @@ sign stripping.
 
 ---
 
+## Deviations from libfyaml
+
+### [75] c-nb-comment-text — non-printable characters in comments
+
+**Productions:** `c-nb-comment-text` ([75]: `"#" nb-char*`), `nb-char`, `c-printable` ([1]).
+
+**libfyaml behavior** (`fy-tool --testsuite`, 0.9.6): accepts C0 controls, DEL, C1 controls
+and U+FFFE in a comment body at every position (`# \x01`, `a: v # \x01`, `- v # \x01`,
+`--- # \x01`, `... # \x01`). It rejects NUL, at the stream level,
+before it reaches the scanner.
+
+**Parser behavior:** rejects every character outside `c-printable` in a comment body at
+every position that reads a comment, NUL included (`InvalidCharacter`). The spec allows
+only `nb-char` in a comment, and `nb-char` is `c-printable` minus the line breaks and the
+byte order mark, so libfyaml is the wrong side. The same rule already applied to a
+comment on its own line and after a plain scalar in a mapping value; the sequence-entry
+fast path and the comments after `---` and `...` now follow it.
+
+**libfyaml issue tracker** (<https://github.com/pantoniou/libfyaml/issues>, searched for
+"non-printable", "c-printable", "control character", and "printable comment"): no issue
+about non-printable characters in comments. The one hit for "non-printable" is about
+anchor names.
+
+**User decision (2026-10-30):** keep as-is. The parser stays strict per [75]; libfyaml differs.
+
+**Enforcement site:** `Lexer::comment_in_suffix()` and `Lexer::try_consume_comment()` in
+`src/lexer/comment.rs`.
+
+---
+
 ## "Should is non-mandatory" Precedent
 
 **Established at:** Phase 1, `[83] ns-reserved-directive` (see
