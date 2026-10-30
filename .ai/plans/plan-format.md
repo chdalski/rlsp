@@ -146,6 +146,15 @@ checklist obscures status rather than revealing it.
      "the now-unused tracking mechanism is removed") rather
      than a forgotten side effect. -->
 
+<!-- agent: Do NOT write a number as a criterion when the
+     developer cannot reproduce the environment it applies to,
+     such as throughput on bare metal while agents run in a
+     container, not even as an expectation. Such a number
+     stalls the task for reasons unrelated to the code.
+     Criteria for this work are what the developer can verify:
+     build, tests, the code change itself. The user measures
+     afterwards. Numbers the developer can measure stay hard. -->
+
 <!-- agent: Do NOT use fixed numeric thresholds (line
      counts, file sizes, ratios) as hard acceptance
      criteria that mechanically dictate code structure.
@@ -196,6 +205,19 @@ criterion that lists facts — the token's format, which
 processes see it, which commands print it — puts every one
 of them on the page whether its readers need it or not.
 
+A cleanup or refactoring plan gets one task per
+simplification, each with its own commit and review. A task
+that bundles several topics mixes them in one diff, and the
+reader can no longer judge each change on its own. Criteria
+shared by all tasks stand once in Context.
+
+A behavior-preserving refactor keeps what the code produces:
+files, written rows, responses, and anything else visible
+from outside. Internally the code may work differently, for
+example load a template once instead of twice. Do not pin an
+internal sequence as a criterion only because the code does
+it that way today.
+
 A behavior-preserving refactor task names the tests that
 pin the behavior it preserves and carries the criterion
 that they pass with their assertions unchanged — only
@@ -221,8 +243,9 @@ revisiting settled decisions or unknowingly
 contradicting them. Record the decision and its reason —
 not who made it or when: a decision binds because it is
 in the approved plan. A choice made while implementing
-belongs here only if a later task or a resuming session
-must honor it; otherwise the commit message records it.
+belongs here only if a resuming session must honor it;
+otherwise the commit message records it. A hint for one
+later task goes into Task Notes.
 
 ```markdown
 - **Auth method:** JWT tokens — the existing API already
@@ -258,6 +281,19 @@ Only list items that someone working on this plan might
 otherwise assume are included. Do not list unrelated
 work — a Non-Goals section full of obvious exclusions
 is noise.
+
+### Task Notes
+
+Added after approval, and only then: one line per open task
+on how to implement it safely, usually what a gate demands
+of a later task. The notes count as acceptance criteria for
+that task. A note never changes the task's scope or the
+plan's Goal; that takes a revision and a new approval.
+
+```markdown
+- **Task 3:** The filter value is built only through a typed
+  expression, never a formatted string
+```
 
 ## What Does Not Belong in a Plan
 
