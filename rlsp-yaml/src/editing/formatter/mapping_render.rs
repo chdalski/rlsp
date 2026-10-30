@@ -92,11 +92,9 @@ pub(super) fn flow_mapping_to_doc(
     entries: &[(Node<Span>, Node<Span>)],
     options: &YamlFormatOptions,
 ) -> Doc {
-    let (open, close) = if options.bracket_spacing {
-        ("{ ", " }")
-    } else {
-        ("{", "}")
-    };
+    // The padding only exists on one line; a broken mapping has none, so no line
+    // ends in a space and the closing brace sits at the entries' column.
+    let pad = if options.bracket_spacing { " " } else { "" };
 
     let items: Vec<Doc> = entries
         .iter()
@@ -121,10 +119,13 @@ pub(super) fn flow_mapping_to_doc(
     let inner = join(&sep, items);
 
     group(concat(vec![
-        text(open),
-        indent(concat(vec![flat_alt(text(""), line()), inner])),
-        flat_alt(text(""), line()),
-        text(close),
+        text("{"),
+        indent(concat(vec![
+            flat_alt(text(pad), line()),
+            inner,
+            flat_alt(text(pad), line()),
+            text("}"),
+        ])),
     ]))
 }
 

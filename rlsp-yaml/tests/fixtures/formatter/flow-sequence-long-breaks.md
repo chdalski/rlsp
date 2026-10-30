@@ -23,5 +23,5 @@ items: [
   alpha,
   bravo,
   charlie
-]
+  ]
 ```

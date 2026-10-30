@@ -41,3 +41,4 @@ target goes here only after the user has lowered the target.
 - Python (pyo3) and TypeScript (wasm) bindings for `rlsp-yaml-parser`; user wish.
 - `dtolnay/rust-toolchain` refs pin mutable branches; `packageManager` has no integrity hash; dependabot-followup plan.
 - `rlsp-yaml-parser/CLAUDE.md` requires `#[non_exhaustive]` on public types, but `Document`, `Node`, `NodeMeta` and others lack it; settle the rule or the types; comment plan design review.
+- Formatter fixtures `flow-mapping-long-breaks`, `flow-mapping-bracket-spacing-false-long-breaks`, `interact-bracket-spacing-print-width` and unit cases `flow_map_under_key`, `flow_map_bracket_spacing_false` pin the same layout; comment plan Task 1.

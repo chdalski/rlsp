@@ -21,5 +21,5 @@ items: [
   delta,
   echo,
   foxtrot
-]
+  ]
 ```

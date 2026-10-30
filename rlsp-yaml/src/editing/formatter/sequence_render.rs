@@ -49,9 +49,12 @@ pub(super) fn flow_sequence_to_doc(seq: &[Node<Span>], options: &YamlFormatOptio
 
     group(concat(vec![
         text("["),
-        indent(concat(vec![flat_alt(text(""), line()), inner])),
-        flat_alt(text(""), line()),
-        text("]"),
+        indent(concat(vec![
+            flat_alt(text(""), line()),
+            inner,
+            flat_alt(text(""), line()),
+            text("]"),
+        ])),
     ]))
 }
 

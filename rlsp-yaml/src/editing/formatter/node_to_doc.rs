@@ -8,8 +8,8 @@ use rlsp_yaml_parser::{ScalarStyle, Span};
 use super::mapping_render;
 use super::options::YamlFormatOptions;
 use super::scalar_render::{
-    escape_double_quoted, format_tag, is_core_schema_tag, needs_flow_quoting, needs_quoting,
-    repr_block_to_doc, requires_double_quoting, string_to_doc,
+    escape_double_quoted, flow_quoted_to_doc, format_tag, is_core_schema_tag, needs_flow_quoting,
+    needs_quoting, repr_block_to_doc, requires_double_quoting, string_to_doc,
 };
 use super::sequence_render;
 
@@ -17,11 +17,20 @@ use super::sequence_render;
 ///
 /// When `in_key` is `true`, the `single_quote` style option is suppressed for
 /// scalar strings — keys are never single-quoted by style preference alone.
+pub(super) fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> Doc {
+    render_node(node, options, in_key, false)
+}
+
+/// Render `node`; `in_flow` marks a scalar that sits directly inside a flow
+/// collection, where `,` `[` `]` `{` `}` end a plain scalar (`ns-plain-char(c)`
+/// [130] admits only `ns-plain-safe(c)` [127], which is `ns-plain-safe-in` [129]
+/// = `ns-char - c-flow-indicator` in flow context), so a scalar holding one of
+/// them is emitted quoted.
 #[expect(
     clippy::too_many_lines,
     reason = "comprehensive match over all node variants"
 )]
-pub(super) fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> Doc {
+fn render_node(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool, in_flow: bool) -> Doc {
     match node {
         Node::Scalar {
             value, style, tag, ..
@@ -122,6 +131,9 @@ pub(super) fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key
                         } else {
                             text(format!("'{}'", value.replace('\'', "''")))
                         }
+                    } else if in_flow && needs_flow_quoting(value) {
+                        // Stripping the quotes would leave a flow indicator in a plain scalar.
+                        flow_quoted_to_doc(value, options, in_key)
                     } else {
                         string_to_doc(value, options, in_key)
                     }
@@ -132,6 +144,8 @@ pub(super) fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key
                     // must be emitted as double-quoted with proper escaping.
                     if requires_double_quoting(value) {
                         text(format!("\"{}\"", escape_double_quoted(value)))
+                    } else if in_flow && needs_flow_quoting(value) {
+                        flow_quoted_to_doc(value, options, in_key)
                     } else if needs_quoting(value, options.yaml_version) {
                         // Value needs quoting (reserved keyword, special char, etc.) but
                         // was originally plain — preserve plain style so round-trip matches.
@@ -221,23 +235,12 @@ pub(super) fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key
 
 /// Emit a node for use inside a flow collection (flow sequence or flow mapping).
 ///
-/// For plain scalars that contain flow-unsafe characters, wraps in double quotes
-/// so they are not misread as separators or delimiters by a YAML parser.
+/// A scalar that contains flow indicators is quoted whatever its source
+/// style, so it is not misread as a separator or delimiter by a YAML parser.
 pub(super) fn flow_item_to_doc(
     node: &Node<Span>,
     options: &YamlFormatOptions,
     in_key: bool,
 ) -> Doc {
-    match node {
-        Node::Scalar {
-            value,
-            style: ScalarStyle::Plain,
-            ..
-        } if node.anchor().is_none() && needs_flow_quoting(value) => {
-            text(format!("\"{}\"", escape_double_quoted(value)))
-        }
-        Node::Scalar { .. } | Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => {
-            node_to_doc(node, options, in_key)
-        }
-    }
+    render_node(node, options, in_key, true)
 }

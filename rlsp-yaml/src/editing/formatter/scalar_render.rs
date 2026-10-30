@@ -49,6 +49,18 @@ pub(super) fn string_to_doc(s: &str, options: &YamlFormatOptions, in_key: bool) 
     }
 }
 
+/// Quote a flow-context scalar that holds a flow indicator (`needs_flow_quoting`).
+///
+/// Honours the `single_quote` preference like `string_to_doc`, except for keys
+/// and for values containing `'`, which are double-quoted.
+pub(super) fn flow_quoted_to_doc(s: &str, options: &YamlFormatOptions, in_key: bool) -> Doc {
+    if options.single_quote && !in_key && !s.contains('\'') {
+        text(format!("'{s}'"))
+    } else {
+        text(format!("\"{}\"", escape_double_quoted(s)))
+    }
+}
+
 /// Returns true if a plain scalar value would be ambiguous in a flow collection
 /// context — specifically if it contains characters that serve as flow delimiters
 /// (`,`, `[`, `]`, `{`, `}`).
@@ -129,6 +141,7 @@ pub(super) fn needs_quoting(s: &str, version: YamlVersion) -> bool {
                     | '\''
             )
         })
+        || s.ends_with(':')
         || s.contains(": ")
         || s.contains(" #")
         || s.starts_with("- ")
@@ -379,6 +392,8 @@ mod tests {
     #[case::numeric_123_v1_1("123", YamlVersion::V1_1)]
     #[case::numeric_123_v1_2("123", YamlVersion::V1_2)]
     #[case::numeric_3_14_v1_2("3.14", YamlVersion::V1_2)]
+    #[case::trailing_colon("a:", YamlVersion::V1_2)]
+    #[case::trailing_double_colon("a::", YamlVersion::V1_2)]
     fn needs_quoting_returns_true(#[case] word: &str, #[case] version: YamlVersion) {
         assert!(
             needs_quoting(word, version),
@@ -394,6 +409,8 @@ mod tests {
     #[case::off_v1_2("off", YamlVersion::V1_2)]
     #[case::no_v1_2("no", YamlVersion::V1_2)]
     #[case::uppercase_yes_v1_2("YES", YamlVersion::V1_2)]
+    #[case::inner_colon("a:b", YamlVersion::V1_2)]
+    #[case::url("http://x.y", YamlVersion::V1_2)]
     fn needs_quoting_returns_false(#[case] word: &str, #[case] version: YamlVersion) {
         assert!(
             !needs_quoting(word, version),

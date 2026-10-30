@@ -229,6 +229,255 @@ mod tests {
         }
     }
 
+    // ---- Group: Flow collections stay valid, stable, and data-preserving ----
+
+    // A flow collection that exceeds `print_width` breaks one item per line; its
+    // closing bracket sits at the items' column so the output loads again.
+    #[rstest]
+    #[case::flow_seq_under_top_key(
+        "items: [alpha, bravo, charlie]",
+        20,
+        true,
+        2,
+        "items: [\n  alpha,\n  bravo,\n  charlie\n  ]\n"
+    )]
+    #[case::flow_seq_under_nested_key(
+        "k:\n  items: [alpha, bravo, charlie]",
+        20,
+        true,
+        2,
+        "k:\n  items: [\n    alpha,\n    bravo,\n    charlie\n    ]\n"
+    )]
+    #[case::flow_map_under_key(
+        "meta: {alpha: one, bravo: two, charlie: three}",
+        20,
+        true,
+        2,
+        "meta: {\n  alpha: one,\n  bravo: two,\n  charlie: three\n  }\n"
+    )]
+    #[case::flow_map_under_nested_key(
+        "k:\n  meta: {alpha: one, bravo: two, charlie: three}",
+        20,
+        true,
+        2,
+        "k:\n  meta: {\n    alpha: one,\n    bravo: two,\n    charlie: three\n    }\n"
+    )]
+    #[case::flow_map_bracket_spacing_false(
+        "meta: {alpha: one, bravo: two, charlie: three}",
+        20,
+        false,
+        2,
+        "meta: {\n  alpha: one,\n  bravo: two,\n  charlie: three\n  }\n"
+    )]
+    #[case::flow_seq_in_seq_item(
+        "- [alpha, bravo, charlie]",
+        20,
+        true,
+        2,
+        "- [\n  alpha,\n  bravo,\n  charlie\n  ]\n"
+    )]
+    #[case::flow_map_in_seq_item(
+        "- {alpha: one, bravo: two, charlie: three}",
+        20,
+        true,
+        2,
+        "- {\n  alpha: one,\n  bravo: two,\n  charlie: three\n  }\n"
+    )]
+    #[case::flow_seq_as_mapping_value_in_seq_item(
+        "- key: [alpha, bravo, charlie]",
+        20,
+        true,
+        2,
+        "- key: [\n    alpha,\n    bravo,\n    charlie\n    ]\n"
+    )]
+    #[case::seq_of_seqs_item(
+        "- - [alpha, bravo, charlie]",
+        20,
+        true,
+        2,
+        "- \n  - [\n    alpha,\n    bravo,\n    charlie\n    ]\n"
+    )]
+    #[case::nested_flow_in_flow_seq(
+        "k: [[alpha, bravo], [charlie, delta]]",
+        20,
+        true,
+        2,
+        "k: [\n  [alpha, bravo],\n  [charlie, delta]\n  ]\n"
+    )]
+    #[case::flow_map_in_flow_seq(
+        "k: [{a: 1, b: 2}, {c: 3, d: 4}]",
+        12,
+        true,
+        2,
+        "k: [\n  {\n    a: 1,\n    b: 2\n    },\n  {\n    c: 3,\n    d: 4\n    }\n  ]\n"
+    )]
+    #[case::flow_seq_in_flow_map(
+        "k: {x: [alpha, bravo], y: [charlie, delta]}",
+        16,
+        true,
+        2,
+        "k: {\n  x: [\n    alpha,\n    bravo\n    ],\n  y: [\n    charlie,\n    delta\n    ]\n  }\n"
+    )]
+    #[case::single_overlong_item(
+        "k: [averyveryverylongscalarvalue]",
+        10,
+        true,
+        2,
+        "k: [\n  averyveryverylongscalarvalue\n  ]\n"
+    )]
+    #[case::anchor_and_tag_before_bracket(
+        "k: &a !t [alpha, bravo, charlie]",
+        24,
+        true,
+        2,
+        "k: &a !t [\n  alpha,\n  bravo,\n  charlie\n  ]\n"
+    )]
+    #[case::explicit_key_flow_seq(
+        "? [alpha, bravo, charlie]\n: v",
+        20,
+        true,
+        2,
+        "? [\n    alpha,\n    bravo,\n    charlie\n    ]\n: v\n"
+    )]
+    #[case::flow_seq_as_value_of_explicit_key(
+        "? k\n: [alpha, bravo, charlie]",
+        20,
+        true,
+        2,
+        "k: [\n  alpha,\n  bravo,\n  charlie\n  ]\n"
+    )]
+    #[case::tab_width_4(
+        "items: [alpha, bravo, charlie]",
+        20,
+        true,
+        4,
+        "items: [\n    alpha,\n    bravo,\n    charlie\n    ]\n"
+    )]
+    #[case::top_level_flow_seq(
+        "[alpha, bravo, charlie]",
+        10,
+        true,
+        2,
+        "[\n  alpha,\n  bravo,\n  charlie\n  ]\n"
+    )]
+    #[case::top_level_flow_map(
+        "{alpha: one, bravo: two}",
+        10,
+        true,
+        2,
+        "{\n  alpha: one,\n  bravo: two\n  }\n"
+    )]
+    #[case::flow_seq_in_deeply_nested_mapping(
+        "a:\n  b:\n    c: [alpha, bravo, charlie]",
+        20,
+        true,
+        2,
+        "a:\n  b:\n    c: [\n      alpha,\n      bravo,\n      charlie\n      ]\n"
+    )]
+    #[case::quoted_item_with_comma_keeps_quotes(
+        "- [ a, \"Up, up and away!\", b ]\n",
+        80,
+        true,
+        2,
+        "- [a, \"Up, up and away!\", b]\n"
+    )]
+    #[case::quoted_item_with_comma_keeps_quotes_when_broken(
+        "- [ a, \"Up, up and away!\", b ]\n",
+        20,
+        true,
+        2,
+        "- [\n  a,\n  \"Up, up and away!\",\n  b\n  ]\n"
+    )]
+    #[case::quoted_mapping_value_and_key_keep_quotes(
+        "a: {b: \"x, y\", \"c]d\": 1}\n",
+        80,
+        true,
+        2,
+        "a: { b: \"x, y\", \"c]d\": 1 }\n"
+    )]
+    #[case::single_quoted_item_with_comma("k: [ 'x, y' ]\n", 80, true, 2, "k: [\"x, y\"]\n")]
+    #[case::anchored_quoted_item_with_comma(
+        "k: [ &a \"x, y\" ]\n",
+        80,
+        true,
+        2,
+        "k: [&a \"x, y\"]\n"
+    )]
+    #[case::tagged_quoted_item_with_comma(
+        "k: [ !t \"x, y\" ]\n",
+        80,
+        true,
+        2,
+        "k: [!t \"x, y\"]\n"
+    )]
+    #[case::quoted_trailing_colon_item_in_flow_seq(
+        "k: [\"a:\", b]\n",
+        80,
+        true,
+        2,
+        "k: [\"a:\", b]\n"
+    )]
+    #[case::quoted_trailing_colon_value_in_flow_map(
+        "k: {x: \"a:\"}\n",
+        80,
+        true,
+        2,
+        "k: { x: \"a:\" }\n"
+    )]
+    #[case::quoted_trailing_colon_block_value("k: \"a:\"\n", 80, true, 2, "k: \"a:\"\n")]
+    #[case::quoted_trailing_colon_block_seq_item("- \"a:\"\n", 80, true, 2, "- \"a:\"\n")]
+    #[case::quoted_trailing_colon_block_key("\"a:\": 1\n", 80, true, 2, "\"a:\": 1\n")]
+    #[case::quoted_trailing_colon_flow_key("{\"a:\": 1}\n", 80, true, 2, "{ \"a:\": 1 }\n")]
+    fn flow_output_is_valid_and_stable(
+        #[case] input: &str,
+        #[case] print_width: usize,
+        #[case] bracket_spacing: bool,
+        #[case] tab_width: usize,
+        #[case] expected: &str,
+    ) {
+        let opts = YamlFormatOptions {
+            print_width,
+            tab_width,
+            bracket_spacing,
+            ..default_opts()
+        };
+        let output = format_yaml(input, &opts);
+        assert_eq!(output, expected);
+        assert!(
+            rlsp_yaml_parser::load(&output).is_ok(),
+            "output does not load: {output:?}"
+        );
+        assert_eq!(format_yaml(&output, &opts), output, "second format differs");
+
+        // Same data: both sides normalise to block style, which has no layout choices.
+        let block_opts = YamlFormatOptions {
+            format_enforce_block_style: true,
+            ..opts
+        };
+        assert_eq!(
+            format_yaml(input, &block_opts),
+            format_yaml(&output, &block_opts),
+            "output carries different data than the input"
+        );
+    }
+
+    // `single_quote` decides the quote style of a flow item that needs quotes,
+    // except for keys and for values holding `'`, which stay double-quoted.
+    #[rstest]
+    #[case::single_quoted_source("k: ['x, y']\n", "k: ['x, y']\n")]
+    #[case::double_quoted_source("k: [\"x, y\"]\n", "k: ['x, y']\n")]
+    #[case::value_with_apostrophe("k: [\"it's, ok\"]\n", "k: [\"it's, ok\"]\n")]
+    #[case::flow_key("{\"x,y\": 1}\n", "{ \"x,y\": 1 }\n")]
+    fn flow_item_with_indicator_honours_single_quote(#[case] input: &str, #[case] expected: &str) {
+        let opts = YamlFormatOptions {
+            single_quote: true,
+            ..default_opts()
+        };
+        let output = format_yaml(input, &opts);
+        assert_eq!(output, expected);
+        assert_eq!(format_yaml(&output, &opts), output, "second format differs");
+    }
+
     // ---- Group K: Anchor preservation ----
 
     // K1: Anchor on a scalar value is preserved.

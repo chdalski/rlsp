@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-10-30
 
 # The Formatter Keeps Every Comment
@@ -27,7 +27,7 @@ formatting it again must change nothing.
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: Indent the closing bracket of a broken flow collection
+- [x] Task 1: Indent the closing bracket of a broken flow collection
 - [ ] Task 2: One helper reads a comment from a line suffix
 - [ ] Task 3: Two helpers assemble node comments and the collection colon
 - [ ] Task 4: Emit every comment as an event
@@ -37,7 +37,8 @@ formatting it again must change nothing.
 - [ ] Task 8: Turn a flow collection holding a comment into block style
 - [ ] Task 9: Keep comments when removing duplicate keys
 - [ ] Task 10: Fold only own-line comments
-- [ ] Task 11: Pin that no comment is lost
+- [ ] Task 11: Keep the data when formatting
+- [ ] Task 12: Pin that no comment is lost
 - [ ] Measure every `*.yml` and `*.yaml` file under `/workspace`,
       `/usr/local/cargo/registry`, and `~/.local/share/pnpm`: for each file
       that loads, the count of `#` at a line start or after whitespace, outside
@@ -54,13 +55,17 @@ formatting it again must change nothing.
 closing bracket at the key's column. The parser and libfyaml reject that form,
 because [197] `s-l+flow-in-block(n)` indents flow content at n+1.
 
-- [ ] With `print_width: 20`, `format_yaml` of `items: [alpha, bravo, charlie]`
+- [x] With `print_width: 20`, `format_yaml` of `items: [alpha, bravo, charlie]`
       and of `k:\n  items: [alpha, bravo, charlie]` yields output that `load()`
       accepts with the same data, and a second format changes nothing; the same
       holds for a long flow mapping and a flow collection in a sequence item
-- [ ] The `flow-*-long-breaks` fixtures in `rlsp-yaml/tests/fixtures/formatter/`
+- [x] The `flow-*-long-breaks` fixtures in `rlsp-yaml/tests/fixtures/formatter/`
       expect the closing bracket at the column of the items
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] A scalar whose text needs quotes keeps them:
+      `- [ a, "Up, up and away!", b ]\n` formats to `- [a, "Up, up and away!", b]\n`,
+      and `a: {b: "x, y", "c]d": 1}\n`, `k: "a:"\n`, and `- "a:"\n` re-parse to the
+      same data
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 2: One helper reads a comment from a line suffix
 
@@ -203,13 +208,34 @@ blocks must not hide the content between them.
       comments keeps its range
 - [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
-### Task 11: Pin that no comment is lost
+### Task 11: Keep the data when formatting
+
+The check in Task 12 compares the documents before and after formatting, and
+these inputs change today. A plain or quoted scalar's value, a block scalar's
+value, a tag, an anchor, and the structure must survive `format_yaml`.
+
+- [ ] `a: |+\n  keep\n\n` and a block scalar with leading blank lines keep their
+      values through `format_yaml`, and a second format changes nothing
+- [ ] `- ! [a, b]\n` keeps its non-specific tag, and an anchor on an empty scalar
+      keeps its anchor
+- [ ] With `single_quote: true`, `a: 'here''s'\nb: "it's"\n` yields output that
+      `load()` accepts with the same values
+- [ ] `--- [alpha, bravo]\n` loads as a sequence and `--- *a\n` as an alias through
+      `parse_events` and `load()`, the same events as libfyaml 0.9.6, and
+      `--- [x] [y]\n` reports a syntax error
+- [ ] Every data difference the Task 12 check finds is fixed in this task or
+      reported to the user with the spec production; the user decides
+- [ ] `docs/conformance/` names the enforcement site of each parser change, and
+      `rlsp-yaml-parser/docs/feature-log.md` tells a reader what `--- [a]` loads as
+- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+
+### Task 12: Pin that no comment is lost
 
 - [ ] A property test checks, for every yaml-test-suite input and every file in
       `rlsp-yaml/tests/corpus/` that loads, under the options default,
       `format_enforce_block_style`, `print_width: 20`,
-      `format_indent_sequences: false`, `preserve_quotes`, and
-      `format_remove_duplicate_keys`: the multiset of
+      `format_indent_sequences: false`, `preserve_quotes`, `single_quote: true`,
+      and `format_remove_duplicate_keys`: the multiset of
       `Comment` texts from `parse_events` is the same before and after
       `format_yaml`, `load()` of the output succeeds, the documents are
       equivalent, and a second format changes nothing

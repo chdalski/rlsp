@@ -4,7 +4,7 @@
 // `tests/yaml-test-suite/src/` (workspace root, relative path `../tests/`).
 //
 // For each non-fail case in the suite:
-//   1. `format_yaml(input, &default_opts)` must produce output that parses
+//   1. `format_yaml(input, &opts)` at print widths 80 and 20 must produce output that parses
 //      cleanly (no diagnostics).
 //   2. Formatting must be idempotent: `format(format(input)) == format(input)`.
 
@@ -212,14 +212,20 @@ fn fail(msg: &str) -> ! {
 
 #[rstest]
 #[timeout(Duration::from_secs(5))]
-fn formatter_conformance(#[files("../tests/yaml-test-suite/src/*.yaml")] path: PathBuf) {
+fn formatter_conformance(
+    #[files("../tests/yaml-test-suite/src/*.yaml")] path: PathBuf,
+    #[values(80, 20)] print_width: usize,
+) {
     let cases = load_cases_from_file(&path);
     if cases.is_empty() {
         // All entries are skipped (e.g., ZYU8). Nothing to test.
         return;
     }
 
-    let opts = YamlFormatOptions::default();
+    let opts = YamlFormatOptions {
+        print_width,
+        ..YamlFormatOptions::default()
+    };
 
     for case in &cases {
         let tag = format!("{}[{}] {}", case.file, case.index, case.name);

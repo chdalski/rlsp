@@ -19,10 +19,10 @@ meta: {alpha: one, bravo: two, charlie: three, delta: four}
 ## Expected-Document
 
 ```yaml
-meta: { 
+meta: {
   alpha: one,
   bravo: two,
   charlie: three,
   delta: four
- }
+  }
 ```

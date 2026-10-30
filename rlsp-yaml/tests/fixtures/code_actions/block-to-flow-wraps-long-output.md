@@ -33,5 +33,5 @@ items: [
     long_item_ddd,
     long_item_eee,
     long_item_fff
-  ]
+    ]
 ```
