@@ -211,8 +211,7 @@ blocks must not hide the content between them.
 ### Task 11: Keep the data when formatting
 
 The check in Task 12 compares the documents before and after formatting, and
-these inputs change today. A plain or quoted scalar's value, a block scalar's
-value, a tag, an anchor, and the structure must survive `format_yaml`.
+these inputs change today.
 
 - [ ] `a: |+\n  keep\n\n` and a block scalar with leading blank lines keep their
       values through `format_yaml`, and a second format changes nothing
@@ -223,8 +222,7 @@ value, a tag, an anchor, and the structure must survive `format_yaml`.
 - [ ] `--- [alpha, bravo]\n` loads as a sequence and `--- *a\n` as an alias through
       `parse_events` and `load()`, the same events as libfyaml 0.9.6, and
       `--- [x] [y]\n` reports a syntax error
-- [ ] Every data difference the Task 12 check finds is fixed in this task or
-      reported to the user with the spec production; the user decides
+- [ ] `.ai/backlog.md` no longer lists `--- *a` and `--- [x] [y]`
 - [ ] `docs/conformance/` names the enforcement site of each parser change, and
       `rlsp-yaml-parser/docs/feature-log.md` tells a reader what `--- [a]` loads as
 - [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
@@ -243,6 +241,8 @@ value, a tag, an anchor, and the structure must survive `format_yaml`.
       and separately an own-line `# cN` inserted before, each line outside a
       block or multi-line quoted scalar, whenever the variant's documents are
       equivalent to the original's
+- [ ] Every data difference the check finds is fixed in this task, with its spec
+      production named in the handoff: the check passes on every input that loads
 - [ ] Only inputs for which `load()` fails are skipped: `format_yaml` returns
       those unchanged. They are a pinned list in the test that may only shrink,
       and each has its deviation on `.ai/backlog.md`
@@ -254,8 +254,8 @@ value, a tag, an anchor, and the structure must survive `format_yaml`.
 
 - Deriving blank lines from the AST; blank lines can still be lost after a line
   whose spelling changes (separate plan after this one)
-- Fixing the parser deviations on `.ai/backlog.md`; the comments of a document
-  that loads with such a deviation are still kept
+- Fixing the other parser deviations on `.ai/backlog.md`; the comments of a
+  document that loads with such a deviation are still kept
 - Keeping `--- # c` or `- # c` on the marker's line
 
 ## Decisions
