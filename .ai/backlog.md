@@ -40,3 +40,4 @@ target goes here only after the user has lowered the target.
 - Replace `WORKLIST.md` and `SKIP_LIST` with `#[ignore]` (`tests/corpus_invariants/shared.rs`); user preference.
 - Python (pyo3) and TypeScript (wasm) bindings for `rlsp-yaml-parser`; user wish.
 - `dtolnay/rust-toolchain` refs pin mutable branches; `packageManager` has no integrity hash; dependabot-followup plan.
+- `rlsp-yaml-parser/CLAUDE.md` requires `#[non_exhaustive]` on public types, but `Document`, `Node`, `NodeMeta` and others lack it; settle the rule or the types; comment plan design review.
