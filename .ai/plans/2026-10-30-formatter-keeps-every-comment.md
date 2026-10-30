@@ -1,0 +1,261 @@
+**Repository:** root
+**Status:** NotStarted
+**Created:** 2026-10-30
+
+# The Formatter Keeps Every Comment
+
+## Goal
+
+The formatter deletes comments from real files: 136 of 883 files with
+comments lose at least one, `a: "q" # c` becomes `a: q`, and a comment-only
+file becomes empty. Every comment in a document that loads must reach the
+output of `format_yaml`, the output must re-parse to the same data, and
+formatting it again must change nothing.
+
+## Context
+
+- Comments are lost in three layers: the lexer and event iterator drop some
+  without an event, the loader discards some events, and
+  `rlsp-yaml/src/editing/formatter/comment_preservation.rs` re-matches lines
+  by text and drops a comment when a line's spelling changes.
+- `Event::Comment` documents one event per physical line
+  (`rlsp-yaml-parser/src/event.rs`), so a comment without an event is a parser
+  bug. The relevant productions are `s-l-comments`, `s-b-comment`, and
+  `c-nb-comment-text` in <https://yaml.org/spec/1.2.2/>.
+
+## Steps
+
+- [x] Clarify scope with the user
+- [x] Design review of the approach
+- [ ] Task 1: Indent the closing bracket of a broken flow collection
+- [ ] Task 2: One helper reads a comment from a line suffix
+- [ ] Task 3: Two helpers assemble node comments and the collection colon
+- [ ] Task 4: Emit every comment as an event
+- [ ] Task 5: Store every comment event in the AST
+- [ ] Task 6: Print document-level comments and reduce the text matching
+- [ ] Task 7: Print comments at every node position
+- [ ] Task 8: Turn a flow collection holding a comment into block style
+- [ ] Task 9: Keep comments when removing duplicate keys
+- [ ] Task 10: Fold only own-line comments
+- [ ] Task 11: Pin that no comment is lost
+- [ ] Measure every `*.yml` and `*.yaml` file under `/workspace`,
+      `/usr/local/cargo/registry`, and `~/.local/share/pnpm`: for each file
+      that loads, the count of `#` at a line start or after whitespace, outside
+      scalar spans, equals its count of `Comment` events, and the multiset of
+      `Comment` texts of `format_yaml`'s output equals the input's; the number
+      of files that fail is 0
+- [ ] Push to `main` and confirm the full CI matrix is green
+
+## Tasks
+
+### Task 1: Indent the closing bracket of a broken flow collection
+
+`format_yaml` breaks a long flow collection under a block parent with its
+closing bracket at the key's column. The parser and libfyaml reject that form,
+because [197] `s-l+flow-in-block(n)` indents flow content at n+1.
+
+- [ ] With `print_width: 20`, `format_yaml` of `items: [alpha, bravo, charlie]`
+      and of `k:\n  items: [alpha, bravo, charlie]` yields output that `load()`
+      accepts with the same data, and a second format changes nothing; the same
+      holds for a long flow mapping and a flow collection in a sequence item
+- [ ] The `flow-*-long-breaks` fixtures in `rlsp-yaml/tests/fixtures/formatter/`
+      expect the closing bracket at the column of the items
+- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+
+### Task 2: One helper reads a comment from a line suffix
+
+The suffix logic that finds and validates a trailing comment is copied in
+`lexer/plain.rs`, `event_iter/block/sequence.rs`, and `lexer.rs`, and Task 4
+needs it at more sites. Behavior is unchanged, apart from the one change named
+in the first criterion.
+
+- [ ] One function in `rlsp-yaml-parser/src/lexer/comment.rs` holds this logic
+      and the three sites use it; the sequence fast path now reports what the
+      plain path reports, so `- v # \x01\n` is an error
+- [ ] `tests/smoke/sequences.rs`, `tests/smoke/comments.rs`,
+      `tests/error_reporting.rs`, and the tests in `lexer/plain.rs` and
+      `lexer/comment.rs` pass with their assertions unchanged
+- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+
+### Task 3: Two helpers assemble node comments and the collection colon
+
+`mapping_render.rs` and `sequence_render.rs` repeat the assembly of a node's
+leading and trailing comments and of the collection colon, and Task 7 changes
+all of those sites. Behavior is unchanged.
+
+- [ ] One helper assembles a node's comments and one the collection colon, and
+      the render functions use them
+- [ ] The `comment-*.md` fixtures and the anchor tests in
+      `rlsp-yaml/src/editing/formatter.rs` pass with their assertions unchanged
+- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+
+### Task 4: Emit every comment as an event
+
+- [ ] `parse_events` emits a `Comment` event, in source order, for the comment
+      in each of: `a: "q" # c\n`, `a: 'q' # c\n`, `- "q" # c\n`, `k: # c\n`,
+      `- # c\n  a: 1\n`, `? # c\n: v\n`, `? k\n: # c\n  v\n`, `a: &x # c\n  b: 1\n`,
+      `a: !t # c\n  b: 1\n`, `a: | # c\n  t\n`, `a: > # c\n  t\n`,
+      `a:\n  v\n  w # c\n`, `--- v # c\n`, `%YAML 1.2 # c\n---\na: 1\n`,
+      `%TAG ! tag:x: # c\n---\na: 1\n`, `a: 1\n... # c\n`
+- [ ] `semantic_tokens` returns one comment token with the right line, start,
+      and length for the comment of each input above
+- [ ] A test over every yaml-test-suite input asserts that every `#` at a line
+      start or after whitespace, outside a scalar's span, starts a `Comment`
+      event's span
+- [ ] `a: "q" # \x01\n` and the same character at each position above report an
+      error; a comment over `MAX_COMMENT_LEN` reports an error after a value
+      as it does on its own line
+- [ ] Values, spans, and errors of comment-free inputs are unchanged: the
+      yaml-test-suite event and loader conformance tests pass
+- [ ] `docs/conformance/` names the enforcement sites for the affected
+      productions, and `rlsp-yaml-parser/docs/feature-log.md` tells a reader
+      that comments are now validated at these positions
+- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+
+### Task 5: Store every comment event in the AST
+
+- [ ] `Document` has `prefix_comments` (before `---` or implicit content),
+      `comments` (after `---`, before the root), `end_comments` (after the
+      root, before `...`, `---`, or the end of input), and
+      `after_end_comments` (after the last `...`)
+- [ ] Through `load()`, each comment of the Task 4 inputs and of
+      `---\n# c\na: 1\n`, `# c\n---\na: 1\n`, `a: v\n# d\n---\nb: 1\n`,
+      `v # c\n---\nw\n`, `a: 1\n# d\n...\n# e\n---\nb: 2\n`, `a: 1\n...\n# e\n`
+      is in exactly one place of the AST, and a test pins which
+- [ ] A comment on a key's line or a block scalar's header line is that node's
+      `trailing_comment`, and the doc comments on `Document` and `NodeMeta`
+      describe all of these places
+- [ ] No test relies on a fabricated comment span, and the single-line filter in
+      `loader/stream.rs` is gone
+- [ ] `rlsp-yaml-parser/docs/architecture.md` (comment attachment and the
+      `Document` fields) and the "Comment Preservation" entry in
+      `rlsp-yaml-parser/docs/feature-log.md` describe the four places, and
+      neither says that prefix comments are discarded
+- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+
+### Task 6: Print document-level comments and reduce the text matching
+
+- [ ] `format_yaml` keeps each comment of these inputs in the position shown:
+      `---\n# c\na: 1\n` (unchanged), `# c\n---\na: 1\n` (unchanged),
+      `a: v\n# d\n---\nb: 1\n` (unchanged), `v # c\n---\nw\n` to
+      `v  # c\n---\nw\n`, `a: 1\n# d\n...\n# e\n---\nb: 2\n` (unchanged),
+      `--- # c\na: 1\n` to `---\n# c\na: 1\n`,
+      `%YAML 1.2 # c\n---\na: 1\n` to `# c\n---\na: 1\n`,
+      `a: 1\n... # c\n` to `a: 1\n...\n# c\n`, `# only\n` (unchanged)
+- [ ] `name: "P"\non: x\n` with a comment above each key keeps both comments,
+      and `a: |\n  t\n  # d\n` keeps one `# d`
+- [ ] `# h\n\na: 1\n` keeps its blank line
+- [ ] `comment_preservation.rs` only restores blank lines: no code in it
+      creates or removes a comment line, and its name and doc comment say so
+- [ ] The comment about comments at `tests/formatter_conformance.rs`, the doc
+      comment on `format_yaml`, the mentions of `attach_comments` in
+      `scalar_render.rs`, and the "Comments" bullet in
+      `rlsp-yaml/docs/configuration.md` match the new behavior
+- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+
+### Task 7: Print comments at every node position
+
+A comment stays on its line when the output has that line and a slot on it;
+otherwise it moves to its own line above the node's line.
+
+- [ ] `format_yaml` yields, and a fixture pins with its idempotence:
+      `a: "q" # c\nb: 1\n` to `a: q  # c\nb: 1\n`,
+      `- "1.32" # msrv\n` to `- "1.32"  # msrv\n`,
+      `k: # c\nb: 1\n` to `k:  # c\nb: 1\n`, `k: # c\n  sub: 1\n` to
+      `k:  # c\n  sub: 1\n`, `k: # c\n  v\n` to `k: v  # c\n`,
+      `k: # c\n  v # d\n` to `# c\nk: v  # d\n`, `a: | # c\n  t\n` to
+      `a: |  # c\n  t\n`, `- # c\n  a: 1\n` to `# c\n- a: 1\n`,
+      `? k # c\n: v\n` to `k: v  # c\n`, `? k # c\n: v # d\n` to
+      `# c\nk: v  # d\n`, `a: &x # c\n  b: 1\n` to `a: &x  # c\n  b: 1\n`,
+      `: v # c\n` to `: v  # c\n`, `a:\n  v\n  w # c\n` to `a: v w  # c\n`,
+      `a: v\n\n  w # c\n` to `a: "v\nw"  # c\n`
+- [ ] The block-scalar code action on `a: v # c\n` yields text with one `# c`,
+      outside the literal value
+- [ ] With `rlsp-yaml/docs/feature-log.md`, a reader can tell where a comment
+      moves and why
+- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+
+### Task 8: Turn a flow collection holding a comment into block style
+
+- [ ] `format_yaml` of `a: [\n  # c\n  1\n  ]\n` and of
+      `a: {\n  # c\n  b: 1\n  }\n` yields block style with the comment, and the
+      output re-parses to the same data
+- [ ] `a: [1] # c\n` stays a flow sequence with its comment
+- [ ] `block_to_flow` keeps its documented behavior of omitting comments
+- [ ] `rlsp-yaml/docs/feature-log.md` tells a reader why such a collection
+      changes style
+- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+
+### Task 9: Keep comments when removing duplicate keys
+
+- [ ] With `format_remove_duplicate_keys`, the comments of a removed entry,
+      nested ones included, become leading comments of the next surviving key,
+      or of the last surviving key when none follows: `a: 1 # x\nb: 2\na: 3\n`
+      yields `# x\nb: 2\na: 3\n`
+- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+
+### Task 10: Fold only own-line comments
+
+Task 4 turns more trailing comments into events, and the folding of comment
+blocks must not hide the content between them.
+
+- [ ] `a: 1 # x\nb: 2 # y\n` has no comment folding range, and a run of own-line
+      comments keeps its range
+- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+
+### Task 11: Pin that no comment is lost
+
+- [ ] A property test checks, for every yaml-test-suite input and every file in
+      `rlsp-yaml/tests/corpus/` that loads, under the options default,
+      `format_enforce_block_style`, `print_width: 20`,
+      `format_indent_sequences: false`, `preserve_quotes`, and
+      `format_remove_duplicate_keys`: the multiset of
+      `Comment` texts from `parse_events` is the same before and after
+      `format_yaml`, `load()` of the output succeeds, the documents are
+      equivalent, and a second format changes nothing
+- [ ] The same check runs on variants of those inputs with ` # cN` appended to,
+      and separately an own-line `# cN` inserted before, each line outside a
+      block or multi-line quoted scalar, whenever the variant's documents are
+      equivalent to the original's
+- [ ] Only inputs for which `load()` fails are skipped: `format_yaml` returns
+      those unchanged. They are a pinned list in the test that may only shrink,
+      and each has its deviation on `.ai/backlog.md`
+- [ ] `rlsp-yaml/tests/corpus/comment-positions.yaml` contains every comment
+      position of Tasks 4 to 7
+- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+
+## Non-Goals
+
+- Deriving blank lines from the AST; blank lines can still be lost after a line
+  whose spelling changes (separate plan after this one)
+- Fixing the parser deviations on `.ai/backlog.md`; the comments of a document
+  that loads with such a deviation are still kept
+- Keeping `--- # c` or `- # c` on the marker's line
+
+## Decisions
+
+- **Every comment travels through the parser and the AST:** the parser emits
+  each comment as an event, the loader stores each one in the AST with new
+  `Document` fields, and `attach_comments` keeps only blank-line restoration.
+  Declined: keeping the text matching.
+- **A long flow collection's closing bracket is indented under its key:** the
+  formatter's output is what is wrong. Declined: relaxing the parser.
+- **A flow collection that holds a comment becomes block style:** no comment
+  logic in the flow renderers. Declined: flow rendering with comments inside.
+- **Comments of entries removed by `format_remove_duplicate_keys` move to the
+  next surviving key:** the Goal holds for every option. Declined: dropping
+  them with the key.
+- **Comments are validated at every position, with one length limit:** a
+  comment that moves to its own line must still parse, so documents with
+  non-printable or over-long comments at the newly checked positions now report
+  an error. Declined: leaving those positions unchecked.
+- **`--- # c` and `- # c` move one line:** the data stays the same and no
+  further field is needed; `--- # yaml-language-server: $schema=x` thereby
+  becomes a valid modeline line. Declined: keeping them on the marker's line.
+- **`# h\n\na: 1\n` keeps its blank line,** as blank lines do everywhere else.
+- **No field on `Node` or `NodeMeta`:** `Node` is an exhaustive enum and
+  `NodeMeta` can be built by callers, so a new field would break them;
+  `Document` has a `pub(crate)` field, so new `pub` fields are additive.
+- **Performance:** one enum-tag compare per mapping entry on the buffered next
+  event is the only addition on the path without comments; no benchmark
+  criterion.
