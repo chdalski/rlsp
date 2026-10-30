@@ -1,6 +1,20 @@
 # Changelog
 
 
+## [0.11.4] - 2026-10-30
+
+### Bug Fixes
+
+- Load comment runs before a value on bounded stack (092b830)
+- End multi-line plain spans at last content (5937894)
+- Reject content after a finished value (65c32e0)
+- Load alias and flow keys after finished entry (685b1a4)
+- End a plain scalar at a comment line (0b75337)
+
+### Documentation
+
+- Require spec and libfyaml checks for parser changes (3b8cc3d)
+
 ## [0.11.3] - 2026-10-29
 
 ## [0.11.2] - 2026-10-11
