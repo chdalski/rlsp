@@ -1110,7 +1110,7 @@ version = "0.1.9"
 
 [[package]]
 name = "rlsp-yaml"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "criterion",
  "data-encoding",
@@ -1137,7 +1137,7 @@ dependencies = [
 
 [[package]]
 name = "rlsp-yaml-parser"
-version = "0.11.3"
+version = "0.11.4"
 dependencies = [
  "criterion",
  "memchr",

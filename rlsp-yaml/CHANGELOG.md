@@ -1,6 +1,13 @@
 # Changelog
 
 
+## [0.14.1] - 2026-10-30
+
+### Bug Fixes
+
+- End multi-line plain spans at last content (5937894)
+- End a plain scalar at a comment line (0b75337)
+
 ## [0.14.0] - 2026-10-29
 
 ### Bug Fixes
