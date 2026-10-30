@@ -15,6 +15,12 @@ invite misinterpretation:
 - Structure content to be self-documenting
 - Prefer explicit over clever
 - Comments and annotations explain "why", not "what"
+- State the rule and point to where the details live.
+  `CLAUDE.md` entries, comments and tests do not list
+  concrete values, counts, ticket numbers or dates: nobody
+  maintains them, and they go stale
+- A test that only repeats a configuration value proves
+  nothing about behavior; do not write one
 
 ## KISS — Keep It Simple
 

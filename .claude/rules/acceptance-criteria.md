@@ -54,6 +54,14 @@ cover.
    This makes the target measurable by the implementor
    without guesswork.
 
+5. **Keep numbers the implementor cannot measure out of
+   the plan.** A target bound to an environment the
+   implementor cannot reproduce, such as throughput on
+   bare metal while agents run in a container, is no
+   criterion, not even as an expectation. The user
+   measures it afterwards. Numbers the implementor can
+   measure stay hard targets.
+
 ## Why This Matters
 
 Quantitative targets are the hardest acceptance criteria

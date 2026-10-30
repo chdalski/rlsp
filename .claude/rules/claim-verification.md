@@ -3,8 +3,8 @@
 When an agent reports that work is infeasible, blocked, or
 requires major architectural changes, verify the claim
 before accepting it. Unverified technical claims are the
-most common source of premature plan closure in this
-blueprint — four documented instances show the same
+most common source of premature plan closure — four
+documented instances show the same
 pattern: work framed as impossible turns out to be a
 moderate change in the project's own codebase.
 

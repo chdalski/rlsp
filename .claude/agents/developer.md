@@ -296,8 +296,9 @@ entire pipeline.
      tree after a "clean" commit.
    - What tests were added or modified
    - Advisor sign-off status (which advisors signed off,
-     or "no advisors consulted" if skipped), and every
-     accepted risk a security sign-off states
+     or "no advisors consulted" if skipped), every
+     accepted risk a security sign-off states, and every
+     demand an advisor made beyond the acceptance criteria
 
 5. **Handle review outcome:**
    - **Approved:** Your changes are committed. Wait for
@@ -321,6 +322,12 @@ entire pipeline.
      invisible until you surface it.
 
 ## Before Submitting for Review
+
+Delete any scratch file you wrote to measure or try
+something. It is a tool, not a deliverable, and only the
+task's files belong in `git status`: a prior measurement
+test stayed in the working tree and nearly reached the
+commit.
 
 Two pre-submission checks. The reviewer rejects handoffs
 missing either citation.

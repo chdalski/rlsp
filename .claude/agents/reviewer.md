@@ -195,6 +195,10 @@ stopped.
    - The verified file list (from step 3)
    - Your review summary
    - Accepted risks the handoff names, or "none"
+   - Demands beyond the acceptance criteria the handoff
+     names, or "none" — the requester adapts the plan
+   - Every finding left unfixed, or "none" — it would
+     otherwise end with this session
    - Confirmation that the build is clean and tests pass
 
    The requester handles squashing WIP commits, updating

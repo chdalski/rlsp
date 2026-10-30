@@ -128,6 +128,14 @@ concepts before introducing them:
 - In reference docs, organize by domain concept rather than
   implementation structure
 
+## No Commit Identifiers
+
+Documentation and the files under `.claude/` never name a
+commit by its hash. A hash is not a stable reference: a
+rewrite of the history changes it, and it tells the reader
+nothing about the change. Describe the change itself, name
+the file or the plan that made it, or give the date.
+
 ## Anti-Patterns
 
 ### FAQ as Documentation

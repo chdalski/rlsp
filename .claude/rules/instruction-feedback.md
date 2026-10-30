@@ -42,29 +42,48 @@ session, and the next session pays to rediscover it.
    record the detail as a Conventions line, or the next
    regeneration erases it.
 
-Auto memory is no substitute: it is not reviewed with the
-change, and the next agent to run a command reads it from
-`CLAUDE.md`.
-
-## Blueprint Files
+## Files Under `.claude/`
 
 Do not edit files under `.claude/` — `.claude/CLAUDE.md`
 included — to fix an instruction there unless your plan
-or another rule calls for that change. They are copied
-from a blueprint the user maintains and steer every agent
-in every session: an edit made in passing changes how all
-agents work without the user deciding it, and diverges
-from the blueprint unnoticed. If a blueprint instruction
-is wrong for this project or cannot be followed as
-written, include the file, the instruction, and what
-happened in your next message to the requester. The lead
-passes these reports to the user at the next user
+or another rule calls for that change. They steer every
+agent in every session: an edit made in passing changes how
+all agents work without the user deciding it. If an
+instruction there is wrong for this project or cannot be
+followed as written, include the file, the instruction, and
+what happened in your next message to the requester. The
+lead passes these reports to the user at the next user
 checkpoint, or right away when the workflow has none.
 
 When the user corrects how the workflow itself runs — how
 plans are reviewed, how teammates are shut down, what to
 check before a commit — the lead proposes the change to
-the `.claude/` file that governs it and asks whether the
-blueprint should receive it too. A lesson kept only in
-memory holds only in sessions that recall it, and no
-review ever checks it.
+the `.claude/` file that governs it. A lesson kept only in
+the session ends with it. Write the edit like the
+neighbouring steps and change every step that encodes the
+old sequence, not only the one the correction names: a
+partial edit leaves the file contradicting itself.
+
+## Where Knowledge Goes
+
+Auto memory is switched off in `.claude/settings.json`, and
+nothing replaces it as a scratch pad. Knowledge worth keeping
+has one place each, where a review or a later session finds
+it:
+
+| What | Where |
+|---|---|
+| How the team works | A `.claude/` change the lead proposes |
+| A project fact or pitfall | `CLAUDE.md` (root or subdirectory), docs, or a code comment, per the rules above |
+| A hint for a later task of a running plan | The plan's Task Notes |
+| The state of running work | Plan checkboxes and Git, nothing else |
+| An open finding or cleanup wish | `.ai/backlog.md` |
+| Everything else | Stays in the session |
+
+The backlog holds one line per item: what, where, and where
+it came from. The lead owns the file: it adds entries without
+asking, names them in the completion report, and removes one
+when it becomes a plan or the user drops it. It is no status
+log and no home for facts. A missed plan target goes there
+only after the user has lowered the target
+(`no-silent-target-weakening.md`).

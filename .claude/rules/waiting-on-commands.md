@@ -52,6 +52,12 @@ with the same flaws.
 2. **Watch only what you did not start** — a CI pipeline, a
    deployment, a container becoming healthy. Such a loop
    must:
+   - run its probe once before it starts waiting and check
+     the result: an empty first result means the query is
+     wrong, not that the work is done. `gh run list
+     --commit` with a short SHA returns an empty list and
+     no error, and a prior loop reported CI finished at
+     once;
    - exit on every terminal state, failure included, and
      print which one it saw;
    - exit with the error when its probe fails — never

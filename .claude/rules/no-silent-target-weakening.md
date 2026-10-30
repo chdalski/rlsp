@@ -26,8 +26,10 @@ disguised versions of option (2) that bypass user consent:
 - Reframing "81 failures" as "deferred to post-migration"
 - Accepting a partial result as "good enough for the use
   case" without user approval
-- Documenting the gap in memory as a todo instead of
-  fixing it now
+- Documenting the gap in `.ai/backlog.md` or any other
+  note as a todo instead of fixing it now; a backlog entry
+  for a shortfall exists only after the user lowered the
+  target
 
 Each of these silently weakens the target the user
 approved. The user approved a plan with a specific number.
