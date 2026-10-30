@@ -39,7 +39,7 @@ the stricter rejection reports no error for valid documents.
 - [x] Task 2: content after a finished value is a syntax error
 - [x] Task 3: alias and flow keys after a finished entry load correctly
 - [x] Task 4: a comment line ends a plain scalar
-- [ ] Compare `rlsp-yaml-parser-v0.11.3`, `main`, and libfyaml over every
+- [x] Compare `rlsp-yaml-parser-v0.11.3`, `main`, and libfyaml over every
       yaml-test-suite input and every `*.yml` and `*.yaml` file under
       `/workspace`, `/usr/local/cargo/registry`, and
       `~/.local/share/pnpm`: each result that differs from the release
