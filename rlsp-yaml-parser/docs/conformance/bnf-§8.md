@@ -240,8 +240,8 @@ BNF: `l+block-mapping(n) ::= ( s-indent(n+1+m) ns-l-block-map-entry(n+1+m) )+`
 
 - **Verdict:** Strict-conformant
 - **Spec (§8.2.2):** "A Block mapping is a series of entries, each presenting a key/value pair."
-- **Implementation:** `handle_mapping_entry()` in `event_iter/block/mapping.rs` — opens a new `CollectionEntry::Mapping` when not already in a mapping at this indent
-- **Tests:** `tests/yaml-test-suite/src/TE2A.yaml` (Spec Example 8.16. Block Mappings); `rlsp-yaml-parser/tests/smoke/mappings.rs`
+- **Implementation:** `handle_mapping_entry()` in `event_iter/block/mapping.rs` — opens a new `CollectionEntry::Mapping` when not already in a mapping at this indent; a key that starts with an alias or a flow collection (`*y : v`, `[x]: v`) takes the same decision through `settle_before_key()` in `event_iter/block/mapping.rs`, called from the alias arm of `step_in_document()` and at the end of `handle_flow_collection()` (`event_iter/flow.rs`), so it joins the open mapping at its indent instead of nesting a new one
+- **Tests:** `tests/yaml-test-suite/src/TE2A.yaml` (Spec Example 8.16. Block Mappings); `rlsp-yaml-parser/tests/smoke/mappings.rs`; `rlsp-yaml-parser/tests/error_reporting.rs` (Group H)
 
 ### [188] ns-l-block-map-entry(n)
 
@@ -285,8 +285,8 @@ BNF: `ns-l-block-map-implicit-entry(n) ::= ( ns-s-block-map-implicit-key | e-nod
 
 - **Verdict:** Strict-conformant
 - **Spec (§8.2.2):** "Such keys are subject to the same restrictions; they are limited to a single line and must not span more than 1024 Unicode characters."
-- **Implementation:** `consume_mapping_entry()` in `event_iter/block/mapping.rs` — 1024-Unicode-character limit checked against `trimmed[..colon_offset]` before the key span is built; returns `ConsumedMapping::ImplicitKeyTooLongError` on violation
-- **Tests:** `rlsp-yaml-parser/tests/implicit_key_length.rs` (groups A–N and H5–H8, 48 cases)
+- **Implementation:** `consume_mapping_entry()` in `event_iter/block/mapping.rs` — 1024-Unicode-character limit checked against `trimmed[..colon_offset]` before the key span is built; returns `ConsumedMapping::ImplicitKeyTooLongError` on violation. The `e-node` alternative of the previous entry is emitted before the next key by `handle_mapping_entry()` and, for an alias or flow-collection key, by `settle_before_key()` (also closing a same-column sequence of the previous entry and giving a bare `?` its empty key); a Standalone anchor or tag before the key, as in `a: !!str` followed by `*y : v`, becomes the empty value's
+- **Tests:** `rlsp-yaml-parser/tests/implicit_key_length.rs` (groups A–N and H5–H8, 48 cases); `rlsp-yaml-parser/tests/error_reporting.rs` (Group H)
 
 ### [193] ns-s-block-map-implicit-key
 

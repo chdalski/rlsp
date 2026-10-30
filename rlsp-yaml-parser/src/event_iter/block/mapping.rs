@@ -9,6 +9,7 @@
 
 use crate::error::Error;
 use crate::event::{CollectionStyle, Event, ScalarStyle, make_meta};
+use crate::event_iter::base::InlineProperties;
 use crate::event_iter::line_mapping::{
     find_value_indicator_offset, is_implicit_mapping_line, is_tab_indented_block_indicator,
 };
@@ -367,6 +368,95 @@ impl<'input> EventIter<'input> {
         }
     }
 
+    /// YAML §8.2.1 seq-spaces close: a block sequence opened as a mapping
+    /// value in `block-out` context may reside at the *same* column as its
+    /// parent key (seq-spaces(n, block-out) = n).  When a new mapping key
+    /// appears at column `n`, such a same-indent sequence must be closed —
+    /// the standard `close_collections_at_or_above(n+1)` does not reach it
+    /// because its indent is exactly `n`, not `>= n+1`.
+    ///
+    /// Closes the sequence only when the collection immediately beneath it
+    /// (the next item down the stack) is a Mapping at the same indent —
+    /// either as a value (seq-spaces rule) or as an explicit key's content
+    /// (bare `?` with a block sequence key).  Returns `true` when it queued
+    /// the `SequenceEnd`.
+    fn close_seq_spaces_sequence(&mut self, key_indent: usize, pos: Pos) -> bool {
+        let Some(&CollectionEntry::Sequence(seq_col, _)) = self.coll_stack.last() else {
+            return false;
+        };
+        let parent_is_seq_spaces_mapping = seq_col == key_indent
+            && self.coll_stack.iter().rev().nth(1).is_some_and(
+                |e| matches!(e, CollectionEntry::Mapping(col, _, _) if *col == key_indent),
+            );
+        if !parent_is_seq_spaces_mapping {
+            return false;
+        }
+        self.coll_stack.pop();
+        self.queue.push_back((Event::SequenceEnd, zero_span(pos)));
+        // If complex_key_inline is set for the parent mapping, the sequence
+        // was the KEY (e.g. `?\n- a\n: value`).  Advance to Value phase and
+        // clear the flag.  Otherwise the sequence was the VALUE (seq-spaces
+        // rule) — advance from Value to Key phase.
+        if let Some(CollectionEntry::Mapping(col, phase, has_had_value)) =
+            self.coll_stack.last_mut()
+        {
+            if self.complex_key_inline == Some(*col) {
+                *phase = MappingPhase::AfterExplicitKey;
+                *has_had_value = true;
+                self.complex_key_inline = None;
+            } else {
+                *phase = MappingPhase::Key;
+            }
+        }
+        true
+    }
+
+    /// True when the mapping open at `key_indent` still lacks a node that the
+    /// next key at that indent ends: the value of its last key, or the content
+    /// of a bare `?`.
+    pub(in crate::event_iter) fn mapping_lacks_node_before_key(&self, key_indent: usize) -> bool {
+        matches!(
+            self.coll_stack.last(),
+            Some(&CollectionEntry::Mapping(col, phase, _))
+                if col == key_indent
+                    && (phase != MappingPhase::Key || self.complex_key_inline == Some(col))
+        )
+    }
+
+    /// Settle the open collections for an implicit key at `key_indent` that
+    /// starts with an alias or a flow collection, the way `handle_mapping_entry`
+    /// does for a plain key: close a seq-spaces sequence, and give a key that
+    /// is still missing its content or its value an empty scalar.
+    ///
+    /// Queues the events this needs.  Returns `true` when no block mapping is
+    /// open at `key_indent`, so the caller opens one; `false` when the key is
+    /// the next entry of the mapping that is.  Repeating the call after it
+    /// queued events changes nothing, so a caller may return `Continue` and
+    /// call it again.
+    pub(in crate::event_iter) fn settle_before_key(&mut self, key_indent: usize, pos: Pos) -> bool {
+        self.close_seq_spaces_sequence(key_indent, pos);
+        let mapping_phase = match self.coll_stack.last() {
+            Some(&CollectionEntry::Mapping(col, phase, _)) if col == key_indent => phase,
+            _ => return true,
+        };
+        if mapping_phase == MappingPhase::Key && self.complex_key_inline == Some(key_indent) {
+            self.emit_empty_scalar(self.lexer.current_pos(), InlineProperties::Left);
+            self.advance_mapping_to_value();
+        }
+        if matches!(
+            self.coll_stack.last(),
+            Some(CollectionEntry::Mapping(
+                _,
+                MappingPhase::Value | MappingPhase::AfterExplicitKey,
+                _
+            ))
+        ) {
+            self.emit_empty_scalar(self.lexer.current_pos(), InlineProperties::Left);
+            self.advance_mapping_to_key();
+        }
+        false
+    }
+
     /// Handle a block-mapping key entry.
     #[expect(
         clippy::too_many_lines,
@@ -391,45 +481,8 @@ impl<'input> EventIter<'input> {
             return StepResult::Continue;
         }
 
-        // YAML §8.2.1 seq-spaces close: a block sequence opened as a mapping
-        // value in `block-out` context may reside at the *same* column as its
-        // parent key (seq-spaces(n, block-out) = n).  When a new mapping key
-        // appears at column `n`, such a same-indent sequence must be closed —
-        // the standard `close_collections_at_or_above(n+1)` above does not
-        // reach it because its indent is exactly `n`, not `>= n+1`.
-        //
-        // Close the sequence only when the collection immediately beneath it
-        // (the next item down the stack) is a Mapping at the same indent —
-        // either as a value (seq-spaces rule) or as an explicit key's content
-        // (bare `?` with a block sequence key).
-        if let Some(&CollectionEntry::Sequence(seq_col, _)) = self.coll_stack.last()
-            && seq_col == effective_key_indent
-        {
-            let parent_is_seq_spaces_mapping = self.coll_stack.iter().rev().nth(1).is_some_and(
-                    |e| matches!(e, CollectionEntry::Mapping(col, _, _) if *col == effective_key_indent),
-                );
-            if parent_is_seq_spaces_mapping {
-                self.coll_stack.pop();
-                self.queue
-                    .push_back((Event::SequenceEnd, zero_span(cur_pos)));
-                // If complex_key_inline is set for the parent mapping, the
-                // sequence was the KEY (e.g. `?\n- a\n: value`).  Advance to
-                // Value phase and clear the flag.
-                // Otherwise the sequence was the VALUE (seq-spaces rule) —
-                // advance from Value to Key phase.
-                if let Some(CollectionEntry::Mapping(col, phase, has_had_value)) =
-                    self.coll_stack.last_mut()
-                {
-                    if self.complex_key_inline == Some(*col) {
-                        *phase = MappingPhase::AfterExplicitKey;
-                        *has_had_value = true;
-                        self.complex_key_inline = None;
-                    } else {
-                        *phase = MappingPhase::Key;
-                    }
-                }
-                return StepResult::Continue;
-            }
+        if self.close_seq_spaces_sequence(effective_key_indent, cur_pos) {
+            return StepResult::Continue;
         }
 
         let is_in_mapping_at_this_indent = self.coll_stack.last().is_some_and(
@@ -597,23 +650,7 @@ impl<'input> EventIter<'input> {
             // standalone) appeared before the `:` indicator — those properties
             // belong to the empty key scalar.
             if in_key_phase {
-                let pos = self.lexer.current_pos();
-                let pa = self.pending_anchor.take();
-                let pt = self.pending_tag.take();
-                let tag_loc = pt.as_ref().map(PendingTag::loc);
-                self.queue.push_back((
-                    Event::Scalar {
-                        value: std::borrow::Cow::Borrowed(""),
-                        style: ScalarStyle::Plain,
-                        meta: make_meta(
-                            pa.map(PendingAnchor::name),
-                            pa.map(PendingAnchor::loc),
-                            pt.map(PendingTag::into_cow),
-                            tag_loc,
-                        ),
-                    },
-                    zero_span(pos),
-                ));
+                self.emit_empty_scalar(self.lexer.current_pos(), InlineProperties::Taken);
                 self.advance_mapping_to_value();
                 return StepResult::Continue;
             }
@@ -650,23 +687,7 @@ impl<'input> EventIter<'input> {
         // that was part of the key content) and advance to Value phase.  The next
         // iteration will detect Value phase + new key and emit the empty value scalar.
         if has_complex_key_inline {
-            let pos = self.lexer.current_pos();
-            let pa = self.pending_anchor.take();
-            let pt = self.pending_tag.take();
-            let tag_loc = pt.as_ref().map(PendingTag::loc);
-            self.queue.push_back((
-                Event::Scalar {
-                    value: std::borrow::Cow::Borrowed(""),
-                    style: ScalarStyle::Plain,
-                    meta: make_meta(
-                        pa.map(PendingAnchor::name),
-                        pa.map(PendingAnchor::loc),
-                        pt.map(PendingTag::into_cow),
-                        tag_loc,
-                    ),
-                },
-                zero_span(pos),
-            ));
+            self.emit_empty_scalar(self.lexer.current_pos(), InlineProperties::Left);
             self.advance_mapping_to_value();
             return StepResult::Continue;
         }
@@ -676,26 +697,7 @@ impl<'input> EventIter<'input> {
         if self.coll_stack.last().is_some_and(|top| {
             matches!(top, CollectionEntry::Mapping(col, MappingPhase::Value | MappingPhase::AfterExplicitKey, _) if *col == effective_key_indent)
         }) {
-            let pos = self.lexer.current_pos();
-            // Only consume a Standalone anchor as the null value's anchor.
-            // An Inline anchor (e.g. `&anchor c: 3`) belongs to the next key
-            // scalar, not to this null value.
-            let (null_anchor, null_anchor_loc) =
-                if matches!(self.pending_anchor, Some(PendingAnchor::Standalone(_, _))) {
-                    let loc = self.pending_anchor.map(PendingAnchor::loc);
-                    let name = self.pending_anchor.take().map(PendingAnchor::name);
-                    (name, loc)
-                } else {
-                    (None, None)
-                };
-            self.queue.push_back((
-                Event::Scalar {
-                    value: std::borrow::Cow::Borrowed(""),
-                    style: ScalarStyle::Plain,
-                    meta: make_meta(null_anchor, null_anchor_loc, None, None),
-                },
-                zero_span(pos),
-            ));
+            self.emit_empty_scalar(self.lexer.current_pos(), InlineProperties::Left);
             self.advance_mapping_to_key();
             return StepResult::Continue;
         }
@@ -745,19 +747,12 @@ impl<'input> EventIter<'input> {
                 key_style,
                 key_span,
             } => {
-                let pa = self.pending_anchor.take();
-                let pt = self.pending_tag.take();
-                let tag_loc = pt.as_ref().map(PendingTag::loc);
+                let meta = self.take_node_meta(InlineProperties::Taken);
                 self.queue.push_back((
                     Event::Scalar {
                         value: key_value,
                         style: key_style,
-                        meta: make_meta(
-                            pa.map(PendingAnchor::name),
-                            pa.map(PendingAnchor::loc),
-                            pt.map(PendingTag::into_cow),
-                            tag_loc,
-                        ),
+                        meta,
                     },
                     key_span,
                 ));

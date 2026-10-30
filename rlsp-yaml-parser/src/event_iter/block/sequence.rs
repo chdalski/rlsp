@@ -10,6 +10,7 @@ use std::borrow::Cow;
 
 use crate::error::Error;
 use crate::event::{CollectionStyle, Event, ScalarStyle, make_meta};
+use crate::event_iter::base::InlineProperties;
 use crate::event_iter::line_mapping::{
     find_value_indicator_offset, is_tab_indented_block_indicator,
 };
@@ -259,22 +260,7 @@ impl<'input> EventIter<'input> {
             && (self.pending_tag.is_some() || self.pending_anchor.is_some())
         {
             let item_pos = self.lexer.current_pos();
-            let pa = self.pending_anchor.take();
-            let pt = self.pending_tag.take();
-            let tag_loc = pt.as_ref().map(PendingTag::loc);
-            self.queue.push_back((
-                Event::Scalar {
-                    value: std::borrow::Cow::Borrowed(""),
-                    style: ScalarStyle::Plain,
-                    meta: make_meta(
-                        pa.map(PendingAnchor::name),
-                        pa.map(PendingAnchor::loc),
-                        pt.map(PendingTag::into_cow),
-                        tag_loc,
-                    ),
-                },
-                zero_span(item_pos),
-            ));
+            self.emit_empty_scalar(item_pos, InlineProperties::Taken);
         }
         // Check for tab-indented block structure before consuming the dash.
         // In YAML, tabs cannot be used for block-level indentation.  When the

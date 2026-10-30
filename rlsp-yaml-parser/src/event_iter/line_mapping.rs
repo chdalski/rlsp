@@ -19,6 +19,19 @@ pub(in crate::event_iter) fn is_tab_indented_block_indicator(s: &str) -> bool {
     )
 }
 
+/// The part of `inline` that follows its leading anchor and tag tokens.
+///
+/// `&a !!map [x]: v` yields `[x]: v`: the properties belong to the node that
+/// starts there, so its first byte says what the node is.
+pub(in crate::event_iter) fn skip_properties(inline: &str) -> &str {
+    let mut rest = inline.trim_start_matches([' ', '\t']);
+    while rest.starts_with(['&', '!']) {
+        let token_end = rest.find([' ', '\t']).unwrap_or(rest.len());
+        rest = rest[token_end..].trim_start_matches([' ', '\t']);
+    }
+    rest
+}
+
 /// Like `find_value_indicator_offset`, but skips any leading anchor (`&name`)
 /// and/or tag (`!tag`) tokens before checking for a mapping key indicator.
 ///
@@ -269,7 +282,7 @@ pub(in crate::event_iter) fn find_value_indicator_offset(trimmed: &str) -> Optio
 mod tests {
     use super::{
         find_value_indicator_offset, inline_contains_mapping_key, is_implicit_key_line,
-        is_implicit_mapping_line,
+        is_implicit_mapping_line, skip_properties,
     };
     use rstest::rstest;
 
@@ -480,5 +493,21 @@ mod tests {
         #[case] expected: bool,
     ) {
         assert_eq!(inline_contains_mapping_key(input), expected);
+    }
+
+    #[rstest]
+    #[case::no_properties("[x]: v", "[x]: v")]
+    #[case::anchor("&a [x]: v", "[x]: v")]
+    #[case::tag("!!seq [x]: v", "[x]: v")]
+    #[case::anchor_and_tag("&a !!map {x: 1}: v", "{x: 1}: v")]
+    #[case::tag_and_anchor("!!map &a {x: 1}: v", "{x: 1}: v")]
+    #[case::properties_only("&a !!str", "")]
+    #[case::plain_scalar_after_property("&a plain", "plain")]
+    #[case::empty("", "")]
+    fn skip_properties_returns_the_node_after_its_properties(
+        #[case] input: &str,
+        #[case] expected: &str,
+    ) {
+        assert_eq!(skip_properties(input), expected);
     }
 }

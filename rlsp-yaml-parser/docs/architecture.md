@@ -261,9 +261,18 @@ node may start there — at a sequence's column, past a complete node, or, unles
 after a complete explicit key.  `is_implicit_key_line()` counts an ambiguous line
 as a key so a valid key is never rejected.
 
+A key that starts with an alias or a flow collection is not seen by
+`peek_mapping_entry`, so it cannot go through `handle_mapping_entry`.  The alias
+arm (once it sees the `:`) and the end of `handle_flow_collection` (once the
+closing bracket is followed by `:`) call `settle_before_key()` instead: it closes
+a sequence at the mapping's column, emits the empty scalars of a bare `?` and of
+a key without a value, and tells the caller whether a block mapping must still be
+opened at that indent.
+
 `close_collections_at_or_above` marks the root node complete when it closes the
-last open collection, whatever column that collection started at, so any further
-content is rejected by the root-node guard in `step_in_document`.
+last open collection, whatever column that collection started at; the alias arm
+of `step_in_document` does the same for an alias that is the whole root (`*a`).
+Any further content is rejected by the root-node guard in `step_in_document`.
 
 `handle_sequence_entry` rejects a `-` entry when the innermost mapping is in
 `AfterExplicitKey` phase or in `Key` phase with a complete value, and the flow

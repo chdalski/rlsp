@@ -12,6 +12,33 @@ with existing infrastructure.
 
 ---
 
+### Alias and Flow Keys After a Finished Entry [completed]
+
+**Description:** A block mapping key that starts with an alias or a flow
+collection (`*y : v`, `[x]: v`, `{x: 1}: v`) is now the next entry of the
+mapping that holds the entry before it. Previously `a: 1` followed by
+`[x]: 2` loaded the second key inside an extra nested mapping, and an alias
+key after a key without a value (`a:` followed by `*y : 2`) was taken for
+the value of `a`. The same holds after an explicit `?` key, after a
+sequence at the mapping's column (`a:` followed by `- b` and `[x]: 1`), and
+for a key left without a value (it gets an empty value, as for a plain key). A
+`!!tag` or `&anchor` on the line after a key without a value (`a: !!str`
+followed by a key) is now that empty value's, not the next key's.
+**Complexity:** Medium
+**Comment:** The key forms were accepted before; only the resulting
+events and tree change. For the forms above the events match libfyaml
+0.9.6. A `!!tag` line before an alias key that opens a mapping
+(`!!map` followed by `*y : v`) is the mapping's tag instead of an error.
+An alias that is the whole root node (`*a`) now ends the document's
+content: `*a` followed by `b: 1` is an error instead of two root nodes.
+Two anchor lines in a row (`&y` then `&k`, each alone on its line) are an
+error too instead of the second anchor silently replacing the first. An
+anchor or tag that the next property displaced (`a: &y !!str`) now stays
+on its own node instead of landing on a later, unrelated one, and a
+property line before `---` or `...` no longer carries into the next
+document.
+**Tier:** 1
+
 ### Content After a Complete Block Node [completed]
 
 **Description:** A block sequence item, a block mapping value, or an

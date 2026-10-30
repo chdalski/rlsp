@@ -76,6 +76,29 @@ fn nested_mapping_outer_span_covers_inner() {
     );
 }
 
+/// A flow or alias key after a finished entry is an entry of the same mapping:
+/// the root mapping's span covers it, and the key starts on its own line.
+#[rstest]
+#[case::flow_seq_key("a: 1\n[x]: 2\n")]
+#[case::flow_map_key("a: 1\n{x: 1}: 2\n")]
+#[case::alias_key("a: &y 1\n*y : 2\n")]
+fn flow_or_alias_key_after_entry_is_covered_by_the_root_mapping_span(#[case] input: &str) {
+    let docs = load(input).unwrap();
+    let Node::Mapping { entries, loc, .. } = &docs[0].root else {
+        panic!("expected Mapping");
+    };
+    assert_eq!(entries.len(), 2, "no nested mapping");
+    let line_index = docs[0].line_index();
+    let key_loc = match &entries[1].0 {
+        Node::Sequence { loc, .. } | Node::Mapping { loc, .. } | Node::Alias { loc, .. } => *loc,
+        Node::Scalar { .. } => panic!("expected a collection or alias key"),
+    };
+    assert_eq!(line_index.line_column(key_loc.start), (2, 0));
+    assert_eq!(line_index.line_column(loc.start), (1, 0));
+    assert!(line_index.line_column(loc.end).0 >= 2);
+    assert!(loc.end >= key_loc.end, "root span ends before the last key");
+}
+
 // ---------------------------------------------------------------------------
 // Mapping span is non-zero — flow and empty variants
 // ---------------------------------------------------------------------------

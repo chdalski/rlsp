@@ -321,8 +321,8 @@ BNF: `c-ns-properties(n,c) ::= ( c-ns-tag-property ( s-separate(n,c) c-ns-anchor
 
 - **Verdict:** Strict-conformant
 - **Spec (§6.9):** "Each node may have two optional properties, anchor and tag, in addition to its content. Either or both may be omitted."
-- **Implementation:** `pending_tag` and `pending_anchor` fields in `event_iter/` accumulate both properties in either order; both emitted before the node event
-- **Tests:** `rlsp-yaml-parser/tests/smoke/tags.rs`; `rlsp-yaml-parser/tests/smoke/anchors_and_aliases.rs`
+- **Implementation:** `pending_tag` and `pending_anchor` fields in `event_iter/` accumulate both properties in either order; both emitted before the node event. A property that the next property displaced (`a: &y !!str`) waits in the `pending_collection_*` fields; every node takes its properties through `take_node_meta()` in `event_iter/base.rs`, which takes the pending and the displaced ones and empties both, so no property outlives its node (empty nodes use `emit_empty_scalar()`). A node has at most one anchor: the anchor arm of `step_in_document()` (`event_iter/step.rs`) reports a second anchor line for a node that already has one. `clear_pending_properties()` in `event_iter/base.rs` drops the properties still pending at `---` and `...`, so they never carry into the next document
+- **Tests:** `rlsp-yaml-parser/tests/smoke/tags.rs`; `rlsp-yaml-parser/tests/smoke/anchors_and_aliases.rs`; `rlsp-yaml-parser/tests/error_reporting.rs` (Group H)
 
 ### [97] c-ns-tag-property
 

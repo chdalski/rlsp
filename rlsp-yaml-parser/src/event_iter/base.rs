@@ -7,10 +7,79 @@ use super::state::{
     CollectionEntry, IterState, MappingPhase, PendingAnchor, PendingTag, StepResult,
 };
 use crate::error::Error;
-use crate::event::{Event, ScalarStyle, make_meta};
+use crate::event::{Event, EventMeta, ScalarStyle, make_meta};
 use crate::lexer::Lexer;
 use crate::pos::{Pos, Span};
 use crate::{EventIter, zero_span};
+
+/// Whether an empty node, or a node, takes the pending Inline properties (see
+/// `take_node_meta`).
+#[derive(Clone, Copy)]
+pub enum InlineProperties {
+    Taken,
+    Left,
+}
+
+impl<'input> EventIter<'input> {
+    /// True when a node property is waiting for its node: pending, or displaced
+    /// into a collection slot by a property that followed it (`&y !!str`).
+    pub(crate) const fn has_pending_properties(&self) -> bool {
+        self.pending_anchor.is_some()
+            || self.pending_tag.is_some()
+            || self.pending_collection_anchor.is_some()
+            || self.pending_collection_tag.is_some()
+    }
+
+    /// Take the properties of the node that is about to be emitted (YAML 1.2.2
+    /// §6.9, production [96]).
+    ///
+    /// Every node takes the ones displaced into the collection slots by a
+    /// property that followed them (`a: &y !!str` followed by a value) as well
+    /// as the pending ones, or they would stay behind and land on a later,
+    /// unrelated node.  `inline` says whether it also takes the pending Inline
+    /// ones: a node that is not followed by a key takes all; an empty node
+    /// before a key leaves them to that key (`&anchor c: 3`).
+    pub(crate) fn take_node_meta(
+        &mut self,
+        inline: InlineProperties,
+    ) -> Option<Box<EventMeta<'input>>> {
+        let takes_inline = matches!(inline, InlineProperties::Taken);
+        // Both sources are always emptied, so a node given two anchors (invalid
+        // input that earlier checks let through) cannot leave one behind for the
+        // next node; the displaced one, which came first, wins.
+        let slot_anchor = self.pending_collection_anchor.take();
+        let slot_anchor_loc = self.pending_collection_anchor_loc.take();
+        let own_anchor = (takes_inline
+            || matches!(self.pending_anchor, Some(PendingAnchor::Standalone(..))))
+        .then(|| self.pending_anchor.take())
+        .flatten();
+        let anchor = slot_anchor.or_else(|| own_anchor.map(PendingAnchor::name));
+        let anchor_loc = slot_anchor_loc.or_else(|| own_anchor.map(PendingAnchor::loc));
+        let slot_tag = self.pending_collection_tag.take();
+        let slot_tag_loc = self.pending_collection_tag_loc.take();
+        let own_tag = (takes_inline
+            || matches!(self.pending_tag, Some(PendingTag::Standalone(..))))
+        .then(|| self.pending_tag.take())
+        .flatten();
+        let tag_loc = slot_tag_loc.or_else(|| own_tag.as_ref().map(PendingTag::loc));
+        let tag = slot_tag.or_else(|| own_tag.map(PendingTag::into_cow));
+        make_meta(anchor, anchor_loc, tag, tag_loc)
+    }
+
+    /// Emit an empty plain scalar at `pos` that takes the pending properties
+    /// (see `take_node_meta`).
+    pub(crate) fn emit_empty_scalar(&mut self, pos: Pos, inline: InlineProperties) {
+        let meta = self.take_node_meta(inline);
+        self.queue.push_back((
+            Event::Scalar {
+                value: std::borrow::Cow::Borrowed(""),
+                style: ScalarStyle::Plain,
+                meta,
+            },
+            zero_span(pos),
+        ));
+    }
+}
 
 impl<'input> EventIter<'input> {
     pub(crate) fn new(input: &'input str) -> Self {
@@ -40,10 +109,6 @@ impl<'input> EventIter<'input> {
     /// After each close, if the new top of the stack is a mapping in Value
     /// phase, flips it to Key phase — the closed collection was that
     /// mapping's value.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "match-on-event-type; splitting would obscure flow"
-    )]
     pub(crate) fn close_collections_at_or_above(&mut self, threshold: usize, pos: Pos) {
         let had_collections = !self.coll_stack.is_empty();
         while let Some(&top) = self.coll_stack.last() {
@@ -54,23 +119,8 @@ impl<'input> EventIter<'input> {
                         // If a standalone tag or anchor was set for a sequence item but
                         // no scalar followed before the sequence closed, emit a null
                         // scalar now (e.g. `- !!str` at end of document).
-                        if self.pending_tag.is_some() || self.pending_anchor.is_some() {
-                            let pa = self.pending_anchor.take();
-                            let pt = self.pending_tag.take();
-                            let tag_loc = pt.as_ref().map(PendingTag::loc);
-                            self.queue.push_back((
-                                Event::Scalar {
-                                    value: std::borrow::Cow::Borrowed(""),
-                                    style: ScalarStyle::Plain,
-                                    meta: make_meta(
-                                        pa.map(PendingAnchor::name),
-                                        pa.map(PendingAnchor::loc),
-                                        pt.map(PendingTag::into_cow),
-                                        tag_loc,
-                                    ),
-                                },
-                                zero_span(pos),
-                            ));
+                        if self.has_pending_properties() {
+                            self.emit_empty_scalar(pos, InlineProperties::Taken);
                         }
                         Event::SequenceEnd
                     }
@@ -82,22 +132,7 @@ impl<'input> EventIter<'input> {
                         // Mapping closed via dedent while waiting for a value —
                         // emit empty value scalar first (consumes any pending
                         // anchor/tag that was on a standalone property line).
-                        let pa = self.pending_anchor.take();
-                        let pt = self.pending_tag.take();
-                        let tag_loc = pt.as_ref().map(PendingTag::loc);
-                        self.queue.push_back((
-                            Event::Scalar {
-                                value: std::borrow::Cow::Borrowed(""),
-                                style: ScalarStyle::Plain,
-                                meta: make_meta(
-                                    pa.map(PendingAnchor::name),
-                                    pa.map(PendingAnchor::loc),
-                                    pt.map(PendingTag::into_cow),
-                                    tag_loc,
-                                ),
-                            },
-                            zero_span(pos),
-                        ));
+                        self.emit_empty_scalar(pos, InlineProperties::Taken);
                         Event::MappingEnd
                     }
                     CollectionEntry::Mapping(col, MappingPhase::Key, _) => {
@@ -106,22 +141,7 @@ impl<'input> EventIter<'input> {
                         // was emitted before the mapping closed via dedent, emit
                         // both empty scalars now so the mapping is well-formed.
                         if self.complex_key_inline == Some(col) {
-                            let pa = self.pending_anchor.take();
-                            let pt = self.pending_tag.take();
-                            let tag_loc = pt.as_ref().map(PendingTag::loc);
-                            self.queue.push_back((
-                                Event::Scalar {
-                                    value: std::borrow::Cow::Borrowed(""),
-                                    style: ScalarStyle::Plain,
-                                    meta: make_meta(
-                                        pa.map(PendingAnchor::name),
-                                        pa.map(PendingAnchor::loc),
-                                        pt.map(PendingTag::into_cow),
-                                        tag_loc,
-                                    ),
-                                },
-                                zero_span(pos),
-                            ));
+                            self.emit_empty_scalar(pos, InlineProperties::Taken);
                             self.queue.push_back((
                                 Event::Scalar {
                                     value: std::borrow::Cow::Borrowed(""),
@@ -175,6 +195,19 @@ impl<'input> EventIter<'input> {
         }
     }
 
+    /// Forget the node properties that are still pending at a document
+    /// boundary: a property line before `---` or `...` belongs to the document
+    /// it ends and never to the next one.
+    pub(crate) fn clear_pending_properties(&mut self) {
+        self.pending_anchor = None;
+        self.pending_tag = None;
+        self.pending_collection_anchor = None;
+        self.pending_collection_anchor_loc = None;
+        self.pending_collection_tag = None;
+        self.pending_collection_tag_loc = None;
+        self.property_origin_indent = None;
+    }
+
     /// Push close events for all open collections (document-end).
     ///
     /// If a mapping is in Value phase when it closes, an empty plain scalar is
@@ -189,23 +222,8 @@ impl<'input> EventIter<'input> {
                     // If a standalone tag or anchor was set for a sequence item but
                     // no scalar followed before the sequence closed at document end,
                     // emit a null scalar now (e.g. `- !!str` as the last item).
-                    if self.pending_tag.is_some() || self.pending_anchor.is_some() {
-                        let pa = self.pending_anchor.take();
-                        let pt = self.pending_tag.take();
-                        let tag_loc = pt.as_ref().map(PendingTag::loc);
-                        self.queue.push_back((
-                            Event::Scalar {
-                                value: std::borrow::Cow::Borrowed(""),
-                                style: ScalarStyle::Plain,
-                                meta: make_meta(
-                                    pa.map(PendingAnchor::name),
-                                    pa.map(PendingAnchor::loc),
-                                    pt.map(PendingTag::into_cow),
-                                    tag_loc,
-                                ),
-                            },
-                            zero_span(pos),
-                        ));
+                    if self.has_pending_properties() {
+                        self.emit_empty_scalar(pos, InlineProperties::Taken);
                     }
                     Event::SequenceEnd
                 }
@@ -217,22 +235,7 @@ impl<'input> EventIter<'input> {
                     // Mapping closed while waiting for a value — emit empty value.
                     // Consume any pending anchor/tag so standalone properties
                     // at end of doc are properly attached to the empty value.
-                    let pa = self.pending_anchor.take();
-                    let pt = self.pending_tag.take();
-                    let tag_loc = pt.as_ref().map(PendingTag::loc);
-                    self.queue.push_back((
-                        Event::Scalar {
-                            value: std::borrow::Cow::Borrowed(""),
-                            style: ScalarStyle::Plain,
-                            meta: make_meta(
-                                pa.map(PendingAnchor::name),
-                                pa.map(PendingAnchor::loc),
-                                pt.map(PendingTag::into_cow),
-                                tag_loc,
-                            ),
-                        },
-                        zero_span(pos),
-                    ));
+                    self.emit_empty_scalar(pos, InlineProperties::Taken);
                     Event::MappingEnd
                 }
                 CollectionEntry::Mapping(col, MappingPhase::Key, _) => {
@@ -241,22 +244,7 @@ impl<'input> EventIter<'input> {
                     // was emitted before the mapping closed at document end,
                     // emit both empty scalars so the mapping is well-formed.
                     if self.complex_key_inline == Some(col) {
-                        let pa = self.pending_anchor.take();
-                        let pt = self.pending_tag.take();
-                        let tag_loc = pt.as_ref().map(PendingTag::loc);
-                        self.queue.push_back((
-                            Event::Scalar {
-                                value: std::borrow::Cow::Borrowed(""),
-                                style: ScalarStyle::Plain,
-                                meta: make_meta(
-                                    pa.map(PendingAnchor::name),
-                                    pa.map(PendingAnchor::loc),
-                                    pt.map(PendingTag::into_cow),
-                                    tag_loc,
-                                ),
-                            },
-                            zero_span(pos),
-                        ));
+                        self.emit_empty_scalar(pos, InlineProperties::Taken);
                         self.queue.push_back((
                             Event::Scalar {
                                 value: std::borrow::Cow::Borrowed(""),
@@ -332,19 +320,12 @@ impl<'input> EventIter<'input> {
                     return Ok(None);
                 };
                 let (value, chomp, span) = result?;
-                let pa = self.pending_anchor.take();
-                let pt = self.pending_tag.take();
-                let tag_loc = pt.as_ref().map(PendingTag::loc);
+                let meta = self.take_node_meta(InlineProperties::Taken);
                 Ok(Some((
                     Event::Scalar {
                         value,
                         style: ScalarStyle::Literal(chomp),
-                        meta: make_meta(
-                            pa.map(PendingAnchor::name),
-                            pa.map(PendingAnchor::loc),
-                            pt.map(PendingTag::into_cow),
-                            tag_loc,
-                        ),
+                        meta,
                     },
                     span,
                 )))
@@ -357,19 +338,12 @@ impl<'input> EventIter<'input> {
                     return Ok(None);
                 };
                 let (value, chomp, span) = result?;
-                let pa = self.pending_anchor.take();
-                let pt = self.pending_tag.take();
-                let tag_loc = pt.as_ref().map(PendingTag::loc);
+                let meta = self.take_node_meta(InlineProperties::Taken);
                 Ok(Some((
                     Event::Scalar {
                         value,
                         style: ScalarStyle::Folded(chomp),
-                        meta: make_meta(
-                            pa.map(PendingAnchor::name),
-                            pa.map(PendingAnchor::loc),
-                            pt.map(PendingTag::into_cow),
-                            tag_loc,
-                        ),
+                        meta,
                     },
                     span,
                 )))
@@ -383,19 +357,12 @@ impl<'input> EventIter<'input> {
                 if let Some((tail, tail_pos)) = self.lexer.pending_multiline_tail.take() {
                     check_block_quoted_tail(tail, tail_pos)?;
                 }
-                let pa = self.pending_anchor.take();
-                let pt = self.pending_tag.take();
-                let tag_loc = pt.as_ref().map(PendingTag::loc);
+                let meta = self.take_node_meta(InlineProperties::Taken);
                 Ok(Some((
                     Event::Scalar {
                         value,
                         style: ScalarStyle::SingleQuoted,
-                        meta: make_meta(
-                            pa.map(PendingAnchor::name),
-                            pa.map(PendingAnchor::loc),
-                            pt.map(PendingTag::into_cow),
-                            tag_loc,
-                        ),
+                        meta,
                     },
                     span,
                 )))
@@ -417,19 +384,12 @@ impl<'input> EventIter<'input> {
                 if let Some((tail, tail_pos)) = self.lexer.pending_multiline_tail.take() {
                     check_block_quoted_tail(tail, tail_pos)?;
                 }
-                let pa = self.pending_anchor.take();
-                let pt = self.pending_tag.take();
-                let tag_loc = pt.as_ref().map(PendingTag::loc);
+                let meta = self.take_node_meta(InlineProperties::Taken);
                 Ok(Some((
                     Event::Scalar {
                         value,
                         style: ScalarStyle::DoubleQuoted,
-                        meta: make_meta(
-                            pa.map(PendingAnchor::name),
-                            pa.map(PendingAnchor::loc),
-                            pt.map(PendingTag::into_cow),
-                            tag_loc,
-                        ),
+                        meta,
                     },
                     span,
                 )))
@@ -446,19 +406,12 @@ impl<'input> EventIter<'input> {
                 if let Some(e) = self.lexer.plain_scalar_suffix_error.take() {
                     return Err(e);
                 }
-                let pa = self.pending_anchor.take();
-                let pt = self.pending_tag.take();
-                let tag_loc = pt.as_ref().map(PendingTag::loc);
+                let meta = self.take_node_meta(InlineProperties::Taken);
                 Ok(Some((
                     Event::Scalar {
                         value,
                         style: ScalarStyle::Plain,
-                        meta: make_meta(
-                            pa.map(PendingAnchor::name),
-                            pa.map(PendingAnchor::loc),
-                            pt.map(PendingTag::into_cow),
-                            tag_loc,
-                        ),
+                        meta,
                     },
                     span,
                 )))
@@ -508,6 +461,16 @@ impl<'input> EventIter<'input> {
             ) => Some(col),
             _ => None,
         }
+    }
+
+    /// The byte column of `byte_offset` within its line of the input: the
+    /// bytes between the previous line break (LF or a bare CR) and the offset.
+    pub(in crate::event_iter) fn column_at(&self, byte_offset: usize) -> usize {
+        let before = self.input.get(..byte_offset).unwrap_or("");
+        before.len()
+            - before
+                .rfind(['\n', '\r'])
+                .map_or(0, |line_break| line_break + 1)
     }
 
     /// Returns the minimum column at which a standalone block-node property

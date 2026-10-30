@@ -5,9 +5,10 @@
 //! Contains `step_in_document`, the main dispatcher called by `Iterator::next`
 //! when the parser is in `IterState::InDocument`.
 
+use super::base::InlineProperties;
 use super::directive_scope::DirectiveScope;
 use super::line_mapping::{
-    find_value_indicator_offset, inline_contains_mapping_key, is_implicit_key_line,
+    find_value_indicator_offset, inline_contains_mapping_key, is_implicit_key_line, skip_properties,
 };
 use super::properties::{scan_anchor_name, scan_tag};
 use super::state::{
@@ -91,23 +92,8 @@ impl<'input> EventIter<'input> {
             // If a standalone tag or anchor remains after closing all collections
             // (e.g. a bare `!` tag on its own line with no following node), emit
             // a null scalar so the property is properly attached.
-            if self.pending_tag.is_some() || self.pending_anchor.is_some() {
-                let pa = self.pending_anchor.take();
-                let pt = self.pending_tag.take();
-                let tag_loc = pt.as_ref().map(PendingTag::loc);
-                self.queue.push_back((
-                    Event::Scalar {
-                        value: std::borrow::Cow::Borrowed(""),
-                        style: crate::event::ScalarStyle::Plain,
-                        meta: make_meta(
-                            pa.map(PendingAnchor::name),
-                            pa.map(PendingAnchor::loc),
-                            pt.map(PendingTag::into_cow),
-                            tag_loc,
-                        ),
-                    },
-                    zero_span(end),
-                ));
+            if self.has_pending_properties() {
+                self.emit_empty_scalar(end, InlineProperties::Taken);
             }
             self.queue
                 .push_back((Event::DocumentEnd { explicit: false }, zero_span(end)));
@@ -143,6 +129,7 @@ impl<'input> EventIter<'input> {
         if peeked_indent == 0 && !self.lexer.has_inline_scalar() && self.lexer.is_document_end() {
             let pos = self.lexer.current_pos();
             self.close_all_collections(pos);
+            self.clear_pending_properties();
             let (marker_pos, _) = self.lexer.consume_marker_line(true);
             if let Some(e) = self.lexer.marker_inline_error.take() {
                 self.state = IterState::Done;
@@ -162,6 +149,7 @@ impl<'input> EventIter<'input> {
         if peeked_indent == 0 && !self.lexer.has_inline_scalar() && self.lexer.is_directives_end() {
             let pos = self.lexer.current_pos();
             self.close_all_collections(pos);
+            self.clear_pending_properties();
             let (marker_pos, _) = self.lexer.consume_marker_line(false);
             if let Some(e) = self.lexer.marker_inline_error.take() {
                 self.state = IterState::Done;
@@ -367,13 +355,6 @@ impl<'input> EventIter<'input> {
                             column: line_pos.column + leading,
                         };
                         // YAML 1.2 §7.1: alias nodes cannot have properties (anchor or tag).
-                        if self.pending_tag.is_some() {
-                            self.state = IterState::Done;
-                            return StepResult::Yield(Err(Error::syntax(
-                                star_pos,
-                                "alias node cannot have a tag property".into(),
-                            )));
-                        }
                         // An Inline anchor preceding `*alias` is an error — it would annotate
                         // the alias node, which is illegal.  A Standalone anchor belongs to
                         // the surrounding collection, not the alias, so it is not an error here.
@@ -410,20 +391,14 @@ impl<'input> EventIter<'input> {
                                 let rem_col = star_pos.column + 1 + name_char_count + spaces;
 
                                 // When the alias is followed by a value indicator (`: ` or `:`
-                                // at EOL), it is acting as an implicit mapping key.  If there
-                                // is no block mapping open at `line_indent` yet, open one now
-                                // (consuming any pending Standalone anchor as the mapping
-                                // anchor) and let the next iteration emit the alias as the key.
+                                // at EOL), it is acting as an implicit mapping key.
                                 // This handles `*alias : value` where the alias is the first
-                                // key of a block mapping (e.g. 26DV).
+                                // key of a block mapping (e.g. 26DV) and where it follows an
+                                // entry of one.
                                 let is_value_indicator =
                                     remaining.strip_prefix(':').is_some_and(|rest| {
                                         rest.is_empty() || rest.starts_with([' ', '\t'])
                                     });
-                                let already_in_mapping_here =
-                            self.coll_stack.last().is_some_and(|e| {
-                                matches!(e, CollectionEntry::Mapping(col, _, _) if *col == line_indent)
-                            });
                                 // After an alias only a comment or the `:` of an implicit
                                 // key may follow on the line; anything else would be a
                                 // second node.
@@ -441,7 +416,39 @@ impl<'input> EventIter<'input> {
                                         "unexpected content after alias".into(),
                                     )));
                                 }
-                                if is_value_indicator && !already_in_mapping_here {
+                                // Settle the preceding entry, then — if no block mapping is
+                                // open at this indent yet — open one (consuming any pending
+                                // Standalone anchor as the mapping anchor) and let the next
+                                // iteration emit the alias as the key.
+                                // A tag line at the column of a bare `?` is not inside
+                                // the `?` content (YAML 1.2.2 [190]/[185]: the content is
+                                // indented past the `?`), so the empty key cannot take it.
+                                let tags_empty_explicit_key = is_value_indicator
+                                    && self.complex_key_inline == Some(line_indent)
+                                    && self.mapping_lacks_node_before_key(line_indent)
+                                    && matches!(&self.pending_tag, Some(PendingTag::Standalone(_, span))
+                                        if self.column_at(span.start as usize) <= line_indent);
+                                let opens_mapping = is_value_indicator
+                                    && !tags_empty_explicit_key
+                                    && self.settle_before_key(line_indent, star_pos);
+                                if !self.queue.is_empty() {
+                                    return StepResult::Continue;
+                                }
+                                // A Standalone tag before a key is taken by the empty
+                                // value it follows (`a: !!str\n*y : 1`) or by the mapping
+                                // the key opens (`!!map\n*y : 1`); any other tag would
+                                // annotate the alias.
+                                if matches!(self.pending_tag, Some(PendingTag::Inline(..)))
+                                    || (self.pending_tag.is_some() && !opens_mapping)
+                                    || tags_empty_explicit_key
+                                {
+                                    self.state = IterState::Done;
+                                    return StepResult::Yield(Err(Error::syntax(
+                                        star_pos,
+                                        "alias node cannot have a tag property".into(),
+                                    )));
+                                }
+                                if opens_mapping {
                                     let (map_anchor, map_anchor_loc) = if matches!(
                                         self.pending_anchor,
                                         Some(PendingAnchor::Standalone(_, _))
@@ -506,6 +513,11 @@ impl<'input> EventIter<'input> {
                                     self.lexer.prepend_inline_line(synthetic);
                                 }
                                 self.tick_mapping_phase_after_scalar();
+                                // An alias outside every collection is the whole root node
+                                // (an alias key has opened its mapping above).
+                                if self.coll_stack.is_empty() {
+                                    self.root_node_emitted = true;
+                                }
                                 return StepResult::Yield(Ok((Event::Alias { name }, alias_span)));
                             }
                         }
@@ -643,8 +655,7 @@ impl<'input> EventIter<'input> {
                                     // Cleared by `handle_flow_collection` if not a key.
                                     if self.property_origin_indent.is_none()
                                         && (inline_contains_mapping_key(inline)
-                                            || inline.starts_with('[')
-                                            || inline.starts_with('{'))
+                                            || skip_properties(inline).starts_with(['[', '{']))
                                     {
                                         self.property_origin_indent = Some(line_indent);
                                     }
@@ -797,7 +808,14 @@ impl<'input> EventIter<'input> {
                                         find_value_indicator_offset(inline).is_some();
                                     !starts_with_opener && !is_mapping_key
                                 } else {
-                                    false
+                                    // Two anchor lines in a row (`&y` then `&k`, also with a
+                                    // tag line between) annotate the same node: the next
+                                    // node's content has not come yet to separate them.
+                                    !had_inline
+                                        && (matches!(
+                                            self.pending_anchor,
+                                            Some(PendingAnchor::Standalone(..))
+                                        ) || self.pending_collection_anchor.is_some())
                                 };
                                 if is_duplicate {
                                     self.state = IterState::Done;
@@ -869,8 +887,7 @@ impl<'input> EventIter<'input> {
                                     // `handle_flow_collection` once it knows if it is a key.
                                     if self.property_origin_indent.is_none()
                                         && (inline_contains_mapping_key(inline)
-                                            || inline.starts_with('[')
-                                            || inline.starts_with('{'))
+                                            || skip_properties(inline).starts_with(['[', '{']))
                                     {
                                         self.property_origin_indent = Some(line_indent);
                                     }

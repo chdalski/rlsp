@@ -37,7 +37,7 @@ the stricter rejection reports no error for valid documents.
 - [x] Design review of the approach
 - [x] Task 1: multi-line plain scalar spans end at their last content byte
 - [x] Task 2: content after a finished value is a syntax error
-- [ ] Task 3: alias and flow keys after a finished entry load correctly
+- [x] Task 3: alias and flow keys after a finished entry load correctly
 - [ ] Task 4: a comment line ends a plain scalar
 - [ ] Compare `rlsp-yaml-parser-v0.11.3`, `main`, and libfyaml over every
       yaml-test-suite input and every `*.yml` and `*.yaml` file under
@@ -132,7 +132,7 @@ content of the preceding entry, which nests a mapping: `a: 1\n[x]: 2\n`
 loads with a wrong tree, and valid forms such as
 `a:\n*y :\n  {x: 1}: v\n` report an error since Task 2.
 
-- [ ] A test pins that `parse_events` yields the same events as libfyaml
+- [x] A test pins that `parse_events` yields the same events as libfyaml
       0.9.6 for
       `a: 1\n[x]: 2\n`, `a: 1\n{x: 1}: 2\n`,
       `x: &y 1\n[x]: 2\n*y : 3\n`, `? [x]\n[y]: 1\n`,
@@ -140,11 +140,21 @@ loads with a wrong tree, and valid forms such as
       `x: &y 1\n?\n  !!str k\n*y :\n  !!str v\n`, and
       `x: &y 1\na:\n*y :\n  {x: 1}: v\n`, and `load()` builds the mapping
       those events describe
-- [ ] Every reject and keep input of Task 2 keeps its result
-- [ ] The yaml-test-suite event and loader conformance tests pass
-- [ ] `docs/conformance/` names the enforcement site for the affected
+- [x] A tag on an empty value stays on that value, as libfyaml 0.9.6 has
+      it, before a plain, alias, or flow key: `a: !!str\nb: 1\n`,
+      `a: !!str\n*z : 2\n`, `a: !!str\n[x]: 2\n`
+- [x] No anchor or tag outlives the node it belongs to: `&y\n&k\nb: 2\n` and
+      `&y\n&k\n` report an error, `- &y !!str\n- &k\n` and
+      `a: &y !!str\n  "q"\nb: &k\nc: 1\n` load, and
+      `a: &y !!str\n  [x]\nz:\n  c: 1\n` and
+      `a:\n  b: &y !!str\n[x]: 1\nz:\n  c: 1\n` yield the same events as
+      libfyaml 0.9.6; a property before `---` or `...` does not reach the
+      next document
+- [x] Every reject and keep input of Task 2 keeps its result
+- [x] The yaml-test-suite event and loader conformance tests pass
+- [x] `docs/conformance/` names the enforcement site for the affected
       productions
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 4: End a plain scalar at a comment line
 
@@ -222,6 +232,11 @@ still sets `explicit_end`.
   would turn that into a false error, so the fast path is corrected.
   Declined: exempting blank lines from the rejection.
 - **Behavior that changes besides the values:**
+  - A root alias followed by more content (`*a\nb: 1\n`), a second
+    standalone anchor on one node (`&y\n&k\nb: 2\n`), and a tag on the
+    column of a bare `?` before an alias key (`?\n!!str\n*y : 2\n`) report
+    an error; a property before `---` or `...` no longer reaches the next
+    document.
   - A value such as `8080` before a comment line resolves to its real
     type, so schema results and the YAML 1.1 validators see a different
     value.
@@ -232,4 +247,5 @@ still sets `explicit_end`.
     Non-Goals lands, as the column-0 form already is.
 - **Performance:** no new branch per line in Task 4; Task 2 adds one
   comparison per scalar line and one line scan for flow, alias, and
-  property lines; Task 3 changes only those lines; no benchmark criterion.
+  property lines; Task 3 adds a few `Option::take` calls per node; no
+  benchmark criterion.

@@ -10,6 +10,7 @@
 
 use std::borrow::Cow;
 
+use super::base::InlineProperties;
 use super::properties::{scan_anchor_name, scan_tag};
 use super::state::{
     CollectionEntry, FlowMappingPhase, IterState, MappingPhase, PendingAnchor, PendingTag,
@@ -202,18 +203,39 @@ impl<'input> EventIter<'input> {
         let mut implicit_key_mapping_indent: Option<usize> = None;
         // Current byte offset within `cur_content`.
         let mut pos_in_line: usize = leading;
+        // Standalone properties before a flow collection at the column of a
+        // mapping that lacks a node there (`a: &y\n[x]: 1`, `? &y\n[x]: 1`) belong
+        // to that empty node if the collection turns out to be a key.  Only the
+        // end of the collection shows that, so they stay pending until then.
+        // `property_origin_indent` is the mapping's column when an Inline
+        // property precedes the collection and moved it to a synthetic line.
+        let value_is_missing = self.mapping_lacks_node_before_key(
+            self.property_origin_indent.unwrap_or(first_line_indent),
+        );
+        let holds_anchor =
+            value_is_missing && matches!(self.pending_anchor, Some(PendingAnchor::Standalone(..)));
+        let holds_tag =
+            value_is_missing && matches!(self.pending_tag, Some(PendingTag::Standalone(..)));
         // Pending anchor for the next node in this flow collection.
         // Seeded from any block-context anchor that was pending when this flow
         // collection was entered (e.g. `&seq [a, b]` sets pending_anchor before
         // the `[` is dispatched to handle_flow_collection).
-        let mut pending_flow_anchor_loc: Option<Span> = self.pending_anchor.map(PendingAnchor::loc);
-        let mut pending_flow_anchor: Option<&'input str> =
-            self.pending_anchor.take().map(PendingAnchor::name);
+        let seed_anchor = if holds_anchor {
+            None
+        } else {
+            self.pending_anchor.take()
+        };
+        let mut pending_flow_anchor_loc: Option<Span> = seed_anchor.map(PendingAnchor::loc);
+        let mut pending_flow_anchor: Option<&'input str> = seed_anchor.map(PendingAnchor::name);
         // Pending tag for the next node in this flow collection.
         // Seeded from any block-context tag that was pending when this flow
         // collection was entered (e.g. `!!seq [a, b]` sets pending_tag before
         // the `[` is dispatched to handle_flow_collection).
-        let pt_seed = self.pending_tag.take();
+        let pt_seed = if holds_tag {
+            None
+        } else {
+            self.pending_tag.take()
+        };
         let mut pending_flow_tag_loc: Option<Span> = pt_seed.as_ref().map(PendingTag::loc);
         let mut pending_flow_tag: Option<std::borrow::Cow<'input, str>> =
             pt_seed.map(PendingTag::into_cow);
@@ -610,25 +632,13 @@ impl<'input> EventIter<'input> {
                                 .into(),
                         )));
                     }
-                    // If the tail starts with `:` and there is not already an
-                    // explicit-key mapping opened at this indent, this flow
-                    // collection is an implicit complex mapping key.  Record the
-                    // indent so we can prepend a MappingStart after the loop.
-                    //
-                    // Skip when `complex_key_inline` matches the flow collection's
-                    // indent — that means a `?`-opened mapping is already in place.
+                    // If the tail starts with `:`, this flow collection is an
+                    // implicit complex mapping key.  Record the indent so we can
+                    // settle the preceding entry and open a mapping, if none is
+                    // open there, after the loop.
                     if tail_trimmed.starts_with(':') {
-                        let flow_col = self.property_origin_indent.unwrap_or(first_line_indent);
-                        let already_in_explicit_key = self.complex_key_inline == Some(flow_col)
-                            && self.coll_stack.last().is_some_and(|e| {
-                                matches!(e,
-                                    CollectionEntry::Mapping(col, MappingPhase::Key, _)
-                                    if *col == flow_col
-                                )
-                            });
-                        if !already_in_explicit_key {
-                            implicit_key_mapping_indent = Some(flow_col);
-                        }
+                        implicit_key_mapping_indent =
+                            Some(self.property_origin_indent.unwrap_or(first_line_indent));
                     }
                     // After the closing bracket only a comment or the `:` of an
                     // implicit key may follow on the line; anything else would be
@@ -1743,16 +1753,20 @@ impl<'input> EventIter<'input> {
         }
 
         // When this flow collection is an implicit complex mapping key
-        // (`[flow]: value` or `{ flow }: value`), prepend a block MappingStart
-        // event before the flow collection's events and push a Mapping entry
-        // onto the collection stack so the subsequent `: value` synthetic is
-        // handled correctly.
+        // (`[flow]: value` or `{ flow }: value`), `settle_before_key` first
+        // queues what the preceding entry still needs (an empty value, the end
+        // of a same-column sequence).  If no block mapping is open at the key's
+        // indent, prepend a block MappingStart event before the flow
+        // collection's events and push a Mapping entry onto the collection
+        // stack so the subsequent `: value` synthetic is handled correctly.
         //
         // `property_origin_indent` carries the original physical line's indent
         // when an anchor or tag appeared before the `[`/`{` — use it so the
         // mapping opens at the right document column.  Always clear it here
         // (consumed if a key, unused otherwise).
-        if let Some(map_col) = implicit_key_mapping_indent {
+        if let Some(map_col) = implicit_key_mapping_indent
+            && self.settle_before_key(map_col, first_line_pos)
+        {
             let mapping_anchor = self.pending_collection_anchor.take();
             let mapping_anchor_loc = self.pending_collection_anchor_loc.take();
             let mapping_tag = self.pending_collection_tag.take();
@@ -1776,6 +1790,27 @@ impl<'input> EventIter<'input> {
                 .push(CollectionEntry::Mapping(map_col, MappingPhase::Key, false));
         }
         self.property_origin_indent = None;
+
+        // Properties that the empty node and the mapping did not take are the
+        // collection's own: the held ones (`a: &y\n[x]`, where the collection is
+        // not a key) and those displaced into the collection slots (`a: &y !!str`
+        // followed by `[x]`).
+        if let Some((Event::SequenceStart { meta, .. } | Event::MappingStart { meta, .. }, _)) =
+            events.first_mut()
+            && let Some(left) = self.take_node_meta(InlineProperties::Taken)
+        {
+            let own = meta.take().map(|own| *own);
+            *meta = make_meta(
+                left.anchor
+                    .or_else(|| own.as_ref().and_then(|own| own.anchor)),
+                left.anchor_loc
+                    .or_else(|| own.as_ref().and_then(|own| own.anchor_loc)),
+                left.tag
+                    .or_else(|| own.as_ref().and_then(|own| own.tag.clone())),
+                left.tag_loc
+                    .or_else(|| own.as_ref().and_then(|own| own.tag_loc)),
+            );
+        }
 
         // Tick the parent block mapping phase (if any) after completing a flow
         // collection that was a key or value in a block mapping.
