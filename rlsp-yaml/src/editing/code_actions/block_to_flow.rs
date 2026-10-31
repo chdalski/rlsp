@@ -203,6 +203,8 @@ pub(super) const fn node_loc(node: &Node<Span>) -> &Span {
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::super::test_helpers::apply_block_to_flow_edit;
     use crate::parser::parse_yaml;
 
@@ -289,6 +291,37 @@ mod tests {
             result.starts_with("a: { b: 1, d: { f: 1 }, g: x }\n"),
             "{result:?}"
         );
+        assert!(!result.contains('#'), "{result:?}");
+        assert!(parse_yaml(&result).diagnostics.is_empty(), "{result}");
+    }
+
+    // A flow collection that holds a comment is printed in block style by the
+    // formatter; inside the flow collection the action builds it would be
+    // invalid, so the action leaves the comments out of the collection first.
+    #[rstest]
+    #[case::flow_sequence_with_comment_inside_a_mapping(
+        "a:\n  b: [ # c\n    1]\n  d: 2\n",
+        "a: { b: [1], d: 2 }\n"
+    )]
+    #[case::flow_sequence_with_comment_inside_a_sequence(
+        "a:\n  - [ # c\n    1]\n  - 2\n",
+        "a: [[1], 2]\n"
+    )]
+    #[case::flow_mapping_with_comment_inside_a_mapping(
+        "a:\n  b: { # c\n    x: 1}\n  d: 2\n",
+        "a: { b: { x: 1 }, d: 2 }\n"
+    )]
+    #[case::flow_collection_with_comment_on_itself("a:\n  - [1] # c\n  - 2\n", "a: [[1], 2]\n")]
+    #[case::flow_collection_deeper_down(
+        "a:\n  b:\n    - { x: [ # c\n        1] }\n",
+        "a: { b: [{ x: [1] }] }\n"
+    )]
+    fn should_print_no_comment_of_a_flow_collection_inside_the_result(
+        #[case] text: &str,
+        #[case] expected: &str,
+    ) {
+        let result = apply_block_to_flow_edit(text, 0);
+        assert!(result.starts_with(expected), "{result:?}");
         assert!(!result.contains('#'), "{result:?}");
         assert!(parse_yaml(&result).diagnostics.is_empty(), "{result}");
     }

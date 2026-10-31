@@ -67,3 +67,6 @@ target goes here only after the user has lowered the target.
 - `explicit_key_to_doc` is `pub(super)` but only used in its own file; comment plan Task 7 review.
 - `- ` keeps a trailing space for null items and nested sequences; comment plan Task 7 test review.
 - Test consolidation candidates: the weak `anchor_with_trailing_comment_preserved` and the similar `comment-line-after-plain-*` fixtures; comment plan Task 7 test review.
+- `has_properties: bool` and `explicit_key: bool` in `mapping_render.rs` go against `lang-rust.md` (enums over boolean parameters); comment plan Task 8 review.
+- `? ? a\n  : 1\n: v\n` is misread by the parser (the formatter avoids the form), and `a:\n!t : 1\n` belongs to the silent data change entry; comment plan Task 8 security review.
+- The loader overflows a 2 MiB stack at about 225 nesting levels in debug builds; release builds reach the depth limit; comment plan Task 8.

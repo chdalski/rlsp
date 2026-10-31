@@ -34,7 +34,7 @@ formatting it again must change nothing.
 - [x] Task 5: Store every comment event in the AST
 - [x] Task 6: Print document-level comments and reduce the text matching
 - [x] Task 7: Print comments at every node position
-- [ ] Task 8: Turn a flow collection holding a comment into block style
+- [x] Task 8: Turn a flow collection holding a comment into block style
 - [ ] Task 9: Keep comments when removing duplicate keys
 - [ ] Task 10: Fold only own-line comments
 - [ ] Task 11: Keep the data when formatting
@@ -190,14 +190,14 @@ otherwise it moves to its own line above the node's line.
 
 ### Task 8: Turn a flow collection holding a comment into block style
 
-- [ ] `format_yaml` of `a: [\n  # c\n  1\n  ]\n` and of
+- [x] `format_yaml` of `a: [\n  # c\n  1\n  ]\n` and of
       `a: {\n  # c\n  b: 1\n  }\n` yields block style with the comment, and the
       output re-parses to the same data
-- [ ] `a: [1] # c\n` stays a flow sequence with its comment
-- [ ] `block_to_flow` keeps its documented behavior of omitting comments
-- [ ] `rlsp-yaml/docs/feature-log.md` tells a reader why such a collection
+- [x] `a: [1] # c\n` stays a flow sequence with its comment
+- [x] `block_to_flow` keeps its documented behavior of omitting comments
+- [x] `rlsp-yaml/docs/feature-log.md` tells a reader why such a collection
       changes style
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 9: Keep comments when removing duplicate keys
 
@@ -276,6 +276,11 @@ these inputs change today.
   formatter's output is what is wrong. Declined: relaxing the parser.
 - **A flow collection that holds a comment becomes block style:** no comment
   logic in the flow renderers. Declined: flow rendering with comments inside.
+- **A flow collection as a key stays flow (security review of Task 8):** the parser
+  misreads or rejects block collections in a key position, and the formatter must
+  print what the current parser loads (root `CLAUDE.md`, Crate Boundaries). Its
+  comments print above the entry. A comment behind the closing bracket of a
+  collection that turns block prints before the comments inside it.
 - **Comments of entries removed by `format_remove_duplicate_keys` move to the
   next surviving key:** the Goal holds for every option. Declined: dropping
   them with the key.
@@ -351,3 +356,14 @@ these inputs change today.
 - Task 12: `? &x\n: v\n`, `&x\n---\ny\n`, `? !!str\n? &x\n`, and, under
   `format_indent_sequences: false`, `a:\n  - !!str\nb: 1\n` are in the check's
   inputs; the last needs `a:\n- !!str\nb: 1\n` to load as libfyaml does
+- Task 11: `--- [ # c\n 1]\n` keeps its data and its comment once `--- [a]` loads as
+  a sequence
+- Task 11: `{c: }\n` prints a form that loads with the same data, and with
+  `single_quote: true`, `a: 0x1F\n` stays an integer
+- Task 11: with `format_enforce_block_style`, `x: 1\n{a: 1}: v\n` prints a form that
+  loads with the same data, and `flow_collection_key_keeps_its_comments_above_the_entry`
+  covers that option too
+- Task 12: the fuzz probe at
+  `/tmp/claude-1000/-workspace/20045551-9412-4db7-8253-65744d4ffa36/scratchpad/probe-base/src/bin/fuzz3.rs`
+  finds comment-free data changes at about 2 to 3 percent of its inputs; run it to
+  find inputs for the check

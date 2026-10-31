@@ -10,6 +10,7 @@ use crate::editing::editor_config::LineEnding;
 
 mod blank_lines;
 mod dedup;
+mod flow_comments;
 mod mapping_render;
 mod node_to_doc;
 /// YAML formatting options and their defaults.
@@ -161,18 +162,19 @@ fn render_documents(documents: Vec<Document<Span>>, options: &YamlFormatOptions)
         use_tabs: false,
     };
 
-    // Apply duplicate-key removal pre-pass when enabled.
-    let documents: Vec<Document<Span>> = if options.format_remove_duplicate_keys {
-        documents
-            .into_iter()
-            .map(|mut doc| {
+    // Pre-passes over the AST: duplicate-key removal when enabled, then the style
+    // of the flow collections that hold a comment (after the removal, which can
+    // take the comment away).
+    let documents: Vec<Document<Span>> = documents
+        .into_iter()
+        .map(|mut doc| {
+            if options.format_remove_duplicate_keys {
                 dedup::dedup_mapping_keys(&mut doc.root);
-                doc
-            })
-            .collect()
-    } else {
-        documents
-    };
+            }
+            flow_comments::block_flow_collections_holding_comments(&mut doc.root);
+            doc
+        })
+        .collect();
 
     // One entry per output line, except that a root renders as one entry.
     //
@@ -1997,6 +1999,54 @@ mod tests {
         // Several lines of a plain or quoted scalar.
         "a:\n  v\n  w # c\n",
         "a: v\n\n  w # c\n",
+        // Comments inside flow collections.
+        "a: [\n  # c\n  1\n  ]\n",
+        "a: {\n  # c\n  b: 1\n  }\n",
+        "[ # c\n 1]\n",
+        "[1,\n # c\n 2]\n",
+        "a: [1, # c\n 2]\n",
+        "a: [1 # c\n , 2]\n",
+        "a: {b: # c\n 1}\n",
+        "{ # c\n b: 1}\n",
+        "{b: 1, # c\n d: 2}\n",
+        "[\n # a\n # b\n 1, # c\n 2 # d\n]\n",
+        "- [ # c\n  1]\n- x\n",
+        "- k: [ # c\n    1]\n",
+        "- { # c\n  k: 1}\n- x\n",
+        "{a: [ # c\n 1]}\n",
+        "? [ # c\n  a, b]\n: v\n",
+        "? { # c\n  a: 1}\n: v\n",
+        // A comment on a flow collection itself, or around it, keeps it flow.
+        "# c\na: [1]\n",
+        "# c\n[1, 2]\n",
+        "[1, 2] # c\n",
+        "- [1] # c\n- [2]\n",
+        "x: 1 # c\ny: [1, 2]\n",
+        // A comment before the closing bracket is not a comment of an item.
+        "a: [1,\n # c\n ]\nb: 2\n",
+        "a: {b\n # c\n : 1}\n",
+        // Nested flow collections.
+        "a: [x, [ # c\n y], z]\n",
+        "[ # c\n [1, 2], {a: 1}]\n",
+        "[[ # c\n 1], [2]]\n",
+        "[[1] # c\n, 2]\n",
+        "{a: [1] # c\n, b: 2}\n",
+        "[[[ # c\n 1]]]\n",
+        "{a: [ {b: 1, # c\n d: 2} ], e: 3}\n",
+        // Properties, aliases, and flow-only syntax.
+        "a: &x [ # c\n 1]\n",
+        "a: !t [ # c\n 1]\n",
+        "a: &x !t { # c\n b: 1}\n",
+        "x: &y 1\na: [ # c\n *y, &z 2, *z]\n",
+        "{ # c\n a, b: , c: 1}\n",
+        "[ # c\n a: 1, b]\n",
+        "x: &a k\ny: { # c\n *a : 1}\n",
+        // Scalars that are quoted or plain for the flow context.
+        "[ # c\n \"a,b\", \"[x]\", \"{y}\", \"a: b\", \"- z\", \"#x\"]\n",
+        "[ # c\n a:b, ?x, -y, \":\", \"\", \"null\", \"123\"]\n",
+        "[ # c\n \"x\n  y\", a\n b]\n",
+        "[ # c\n [aaaa, bbbb, cccc, dddd], 1]\n",
+        "a: [1, 2]\nb: [ # c\n 3]\n",
     ];
 
     /// The option sets a comment must survive.  Each is applied to the input as
@@ -2069,6 +2119,189 @@ mod tests {
                 },
             ),
         ]
+    }
+
+    // Scalars whose quoting differs between the flow and the block context, in a
+    // flow collection that changes style because of a comment.
+    #[rstest]
+    #[case::double_quoted_with_indicators(
+        "[ # c\n \"&x\", \"*x\", \"!t\", \"@x\", \"`x\", \"%x\", \"|\", \">\", \"'\", \"? x\", \": x\", \"x #y\", \"x: y\", \"- x\", \" lead\", \"trail \"]\n"
+    )]
+    #[case::single_quoted_with_indicators(
+        "[ # c\n '&x', '*x', '!t', '@x', '%x', '|', '>', '\"', '? x', ': x', 'x #y', 'x: y', '- x', ' lead', 'trail ', 'a,b', '[x]', '{y}']\n"
+    )]
+    #[case::words_the_core_schema_reads_as_other_types(
+        "[ # c\n \"null\", \"true\", \"1e3\", \"~\", \"\", null, true, 1e3, ~, .inf]\n"
+    )]
+    #[case::plain_scalars_with_flow_safe_indicators("[ # c\n a:b, ?x, -y, a#b, x-y, :x]\n")]
+    #[case::scalars_that_fold_over_lines("[ # c\n \"x\n  y\", 'p\n  q', a\n b]\n")]
+    #[case::scalars_in_a_flow_mapping(
+        "{ # c\n \"a,b\": \"[x]\", 'k: l': '{y}', \"#k\": \"v #w\", plain: text}\n"
+    )]
+    #[case::null_and_empty_entries("{ # c\n a, b: , c: 1}\n")]
+    #[case::empty_key("{ # c\n : x, y: 1}\n")]
+    #[case::single_pair_mapping_in_a_sequence("[ # c\n a: 1, b, : d, [e]: f]\n")]
+    #[case::tagged_and_anchored_items("[ # c\n !!null \"\", !t x, &a !t y, &b z, *b]\n")]
+    #[case::tagged_and_anchored_keys_and_values(
+        "{ # c\n !!null : v, &a k: &b v, !t x: w, ? !!str z: x, *a : *b}\n"
+    )]
+    #[case::alias_keys_and_values("x: &a k\ny: &b v\nz: { # c\n *a : *b, k: *b}\n")]
+    #[case::flow_collections_as_keys("{ # c\n [a, b]: 1, [ # d\n e]: 3}\n")]
+    #[case::empty_double_quoted_key("{ # c\n \"\": 1}\n")]
+    #[case::empty_single_quoted_key("{ # c\n '': 1}\n")]
+    #[case::anchored_empty_string_key("{ # c\n &a \"\": x, y: *a}\n")]
+    #[case::anchored_empty_plain_key("{ # c\n &a : x, y: *a}\n")]
+    #[case::anchored_flow_mapping_with_an_empty_collection_as_first_key(
+        "&z { # c\n {}: 1, [] : 2}\n"
+    )]
+    #[case::anchored_flow_mapping_with_an_empty_sequence_as_first_key("&z { # c\n []: 1}\n")]
+    #[case::tagged_flow_mapping_with_a_tagged_empty_collection_as_first_key(
+        "!u { # c\n !u [] : 1}\n"
+    )]
+    #[case::anchored_flow_mapping_value_with_an_empty_collection_as_first_key(
+        "k: &z { # c\n {}: 1}\n"
+    )]
+    #[case::anchored_flow_mapping_item_with_an_empty_collection_as_first_key(
+        "- &z { # c\n {}: 1}\n"
+    )]
+    #[case::anchored_flow_sequence_at_the_root("&z [ # c\n a]\n")]
+    #[case::tagged_flow_mapping_at_the_root("!t { # c\n a: 1}\n")]
+    #[case::anchored_and_tagged_flow_sequence_at_the_root("&z !t [ # c\n a]\n")]
+    #[case::anchored_flow_sequence_as_item("- &z [ # c\n a]\n")]
+    #[case::tagged_empty_key_after_an_empty_value("{ a, !t : 1, # c\n}\n")]
+    #[case::tagged_empty_core_key_after_an_empty_value("{ # c\n a: , !!null : 1}\n")]
+    #[case::empty_key_after_an_empty_value("{ # c\n a, : x, c: 1}\n")]
+    #[case::anchored_empty_key_after_an_empty_value("{ # c\n a, &k : 1, c: *k}\n")]
+    #[case::empty_key_with_an_empty_value_after_an_empty_value("{ # c\n a, : , b: 1}\n")]
+    #[case::alias_key_after_an_empty_value("x: &p k\ny: { # c\n a, *p : 1, b}\n")]
+    #[case::alias_key_with_an_anchored_block_value("x: &a k\ny: { # c\n *a : &y [ 1 ]}\n")]
+    #[case::tagged_empty_key_with_an_anchored_block_value("{ # c\n !t : &y [ 1 ]}\n")]
+    #[case::tagged_empty_key_with_an_anchored_and_tagged_mapping_value(
+        "{ # c\n !t : &y !u { b: 1 }}\n"
+    )]
+    #[case::empty_collections_beside_the_comment("[ # c\n [], {}, [[]], {a: []}]\n")]
+    fn flow_collection_with_comment_keeps_its_data(#[case] input: &str) {
+        for (name, opts) in option_sets() {
+            let input = if opts.line_ending == LineEnding::Crlf {
+                input.replace('\n', "\r\n")
+            } else {
+                input.to_string()
+            };
+            assert_comments_kept(&input, &opts, name);
+        }
+    }
+
+    // An implicit key of the longest length the parser accepts stays one in the
+    // block style the collection changes to.
+    #[test]
+    fn flow_mapping_with_comment_keeps_a_key_of_the_longest_accepted_length() {
+        let key = "k".repeat(1024);
+        assert_comments_kept(
+            &format!("{{ # c\n {key}: 1}}\n"),
+            &default_opts(),
+            "default",
+        );
+    }
+
+    // A mapping key after the first entry has no block form the parser reads
+    // (`x: 1`, then `? a: 1`, then `: v`), and neither has a key that holds an
+    // entry written with `? ` (`? ? a`), so a flow collection key stays flow and
+    // its comments are printed above the entry.  The enforce-block-style option
+    // prints every collection in block style, these keys too, and is left out
+    // here.
+    #[rstest]
+    #[case::mapping_key_after_the_first_entry("{ x: 1, { # c\n a: 1}: v }\n")]
+    #[case::mapping_key_with_nested_comments("{ x: 1, { # c\n a: 1, b: [ # d\n 2]}: v, y: 2 }\n")]
+    #[case::mapping_key_in_a_sequence_item("- { x: 1, { # c\n a: 1}: v }\n- { y: 2 }\n")]
+    #[case::mapping_key_in_a_mapping_value("k: { x: 1, { # c\n a: 1}: v }\n")]
+    #[case::mapping_key_with_a_comment_after_the_bracket("{ x: 1, { # c\n a: 1} # d\n : v }\n")]
+    #[case::mapping_key_as_the_first_entry("{ { # c\n a: 1}: v, x: 1 }\n")]
+    #[case::mapping_key_with_properties_and_an_empty_collection_as_first_key(
+        "? &z { # c\n {}: 1}\n: v\n"
+    )]
+    #[case::mapping_key_whose_first_key_is_a_collection("{ { # c\n [a]: 1}: v, x: 1 }\n")]
+    #[case::sequence_key_after_the_first_entry("{ x: 1, [ # c\n a]: v }\n")]
+    #[case::sequence_key_holding_a_mapping_with_a_collection_key("{ [ { [ a ]: #c\n b } ]: v }\n")]
+    #[case::flow_source_sequence_key_holding_a_mapping_with_a_collection_key(
+        "? [ { [ a ]: #c\n b } ]\n: v\n"
+    )]
+    #[case::sequence_key_with_properties_holding_collection_keys(
+        "&z { # c\n &k [ {}, { {a: 1}: !u 2 } ]: v }\n"
+    )]
+    #[case::sequence_key_in_a_mapping_value("k: { [ { [ a ]: #c\n b } ]: v }\n")]
+    #[case::sequence_key_in_a_sequence_item("- { [ { [ a ]: #c\n b } ]: v }\n")]
+    #[case::mapping_key_in_a_sequence_key("{ x: 1, [ { # c\n a: 1} ]: v }\n")]
+    fn flow_collection_key_keeps_its_comments_above_the_entry(#[case] input: &str) {
+        for (name, opts) in option_sets()
+            .into_iter()
+            .filter(|(name, _)| *name != "enforce block style")
+        {
+            let input = if opts.line_ending == LineEnding::Crlf {
+                input.replace('\n', "\r\n")
+            } else {
+                input.to_string()
+            };
+            assert_comments_kept(&input, &opts, name);
+        }
+    }
+
+    // The comment after the closing bracket of a collection that changes style
+    // because of another comment has no line of its own in block style: it moves
+    // to the line of the key, or above the first entry when the key is written
+    // with `? `, where a comment after the colon reads as one of the first entry.
+    // It comes before the comments inside the collection, which differs from the
+    // order of the input, so only the comments, the data and the stability of
+    // the output are compared.
+    #[rstest]
+    #[case::sequence_value_of_an_explicit_key(
+        "{ [ a ]: [ x #c\n ] #d\n }\n",
+        "? [a]\n:\n  #d\n  - x  #c\n"
+    )]
+    #[case::mapping_value_of_an_explicit_key(
+        "{ [ a ]: { # c\n b: 1 } #d\n }\n",
+        "? [a]\n:\n  #d\n  # c\n  b: 1\n"
+    )]
+    #[case::sequence_value_of_an_implicit_key("k: [ x #c\n ] #d\n", "k:  #d\n  - x  #c\n")]
+    fn comment_after_the_bracket_of_a_flipped_value_moves_before_the_comments_inside(
+        #[case] input: &str,
+        #[case] expected: &str,
+    ) {
+        let output = format_yaml(input, &default_opts());
+        assert_eq!(output, expected);
+        assert_eq!(data_signature(&output), data_signature(input));
+        assert_eq!(format_yaml(&output, &default_opts()), output);
+        let sorted = |yaml: &str| {
+            let mut comments = comment_texts(yaml);
+            comments.sort();
+            comments
+        };
+        assert_eq!(sorted(&output), sorted(input));
+    }
+
+    // The deepest nesting the parser accepts: every level changes style because
+    // of one comment at the bottom.  The loader and the renderers recurse once
+    // per level, and a debug build overflows the 2 MiB stack of a test thread
+    // in the loader at about 225 levels, before it reaches the formatter, so the
+    // test runs on a larger stack; a release build runs this depth on 2 MiB.
+    #[rstest]
+    #[case::sequences("[", "]")]
+    #[case::mappings("{a: ", "}")]
+    fn flow_collections_nested_as_deep_as_the_parser_accepts_keep_a_comment(
+        #[case] open: &'static str,
+        #[case] close: &'static str,
+    ) {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(move || {
+                let levels = rlsp_yaml_parser::MAX_COLLECTION_DEPTH - 1;
+                let input = format!("{} # c\n 1{}\n", open.repeat(levels), close.repeat(levels));
+                let output = format_yaml(&input, &default_opts());
+                assert!(!output.contains(['[', '{']), "style did not change");
+                assert_comments_kept(&input, &default_opts(), "default");
+            })
+            .expect("the thread starts")
+            .join()
+            .expect("the formatter handles the deepest nesting the parser accepts");
     }
 
     #[test]
@@ -2219,6 +2452,136 @@ mod tests {
     #[case::comment_with_trailing_spaces_keeps_them("a: v # c  \n", "a: v  # c  \n")]
     #[case::empty_comment("a: v #\n", "a: v  #\n")]
     #[case::hoisted_empty_comment("k: #\n  v # d\n", "#\nk: v  # d\n")]
+    #[case::flow_sequence_with_comment_becomes_block(
+        "a: [\n  # c\n  1\n  ]\n",
+        "a:\n  # c\n  - 1\n"
+    )]
+    #[case::flow_mapping_with_comment_becomes_block(
+        "a: {\n  # c\n  b: 1\n  }\n",
+        "a:\n  # c\n  b: 1\n"
+    )]
+    #[case::root_flow_sequence_comment_after_bracket("[ # c\n 1]\n", "# c\n- 1\n")]
+    #[case::flow_sequence_comment_before_second_item("[1,\n # c\n 2]\n", "- 1\n# c\n- 2\n")]
+    #[case::flow_sequence_trailing_comment_of_item("a: [1, # c\n 2]\n", "a:\n  - 1  # c\n  - 2\n")]
+    #[case::flow_mapping_comment_on_key_joins_the_value("a: {b: # c\n 1}\n", "a:\n  b: 1  # c\n")]
+    #[case::root_flow_mapping_comment_before_key("{ # c\n b: 1}\n", "# c\nb: 1\n")]
+    #[case::flow_mapping_trailing_comment_of_value("{b: 1, # c\n d: 2}\n", "b: 1  # c\nd: 2\n")]
+    #[case::flow_sequence_item_with_comment_becomes_block(
+        "- [ # c\n  1]\n- x\n",
+        "# c\n- \n  - 1\n- x\n"
+    )]
+    #[case::flow_comment_on_the_collection_keeps_it_flow("a: [1] # c\n", "a: [1]  # c\n")]
+    #[case::flow_mapping_comment_on_the_collection_keeps_it_flow(
+        "a: {b: 1} # c\n",
+        "a: { b: 1 }  # c\n"
+    )]
+    #[case::flow_comment_above_the_entry_keeps_it_flow("# c\na: [1]\n", "# c\na: [1]\n")]
+    #[case::comment_before_the_closing_bracket_goes_above_the_next_entry(
+        "a: [1,\n # c\n ]\nb: 2\n",
+        "a: [1]\n# c\nb: 2\n"
+    )]
+    #[case::inner_flow_comment_makes_every_level_block(
+        "a: [x, [ # c\n y], z]\n",
+        "a:\n  - x\n  # c\n  - \n    - y\n  - z\n"
+    )]
+    #[case::sibling_flow_collections_without_comment_stay_flow(
+        "[ # c\n [1, 2], {a: 1}]\n",
+        "# c\n- [1, 2]\n- { a: 1 }\n"
+    )]
+    #[case::only_the_collection_with_a_comment_changes_style(
+        "[[ # c\n 1], [2]]\n",
+        "# c\n- \n  - 1\n- [2]\n"
+    )]
+    #[case::comment_on_inner_collection_makes_the_outer_block(
+        "[[1] # c\n, 2]\n",
+        "- [1]  # c\n- 2\n"
+    )]
+    #[case::sibling_without_comment_stays_flow(
+        "a: [1, 2]\nb: [ # c\n 3]\n",
+        "a: [1, 2]\nb:\n  # c\n  - 3\n"
+    )]
+    #[case::anchor_of_flow_collection_with_comment_stays_before_the_items(
+        "a: &x [ # c\n 1]\n",
+        "a: &x\n  # c\n  - 1\n"
+    )]
+    #[case::quoted_empty_key_is_not_the_empty_key("\"\": 1\n", "\"\": 1\n")]
+    #[case::single_quoted_empty_key_is_not_the_empty_key("'': 1\n", "'': 1\n")]
+    #[case::anchored_quoted_empty_key_keeps_its_anchor(
+        "&a \"\": x\nb: *a\n",
+        "&a \"\": x\nb: *a\n"
+    )]
+    #[case::anchored_plain_empty_key_keeps_its_anchor("&a : x\nb: *a\n", "&a : x\nb: *a\n")]
+    #[case::empty_string_key_of_flow_mapping_with_comment("{ # c\n \"\": 1}\n", "# c\n\"\": 1\n")]
+    #[case::empty_collection_as_first_key_below_properties_is_explicit(
+        "&z\n? []\n: 1\n",
+        "&z\n? []\n: 1\n"
+    )]
+    #[case::tagged_empty_collection_as_first_key_below_properties_is_explicit(
+        "&z\n? !u []\n: 1\n",
+        "&z\n? !u []\n: 1\n"
+    )]
+    #[case::empty_collection_as_later_key_below_properties_stays_implicit(
+        "&z\na: 1\n[]: 2\n",
+        "&z\na: 1\n[]: 2\n"
+    )]
+    #[case::flipped_root_mapping_with_properties_and_empty_collection_key(
+        "&z { # c\n {}: 1}\n",
+        "# c\n&z\n? {}\n: 1\n"
+    )]
+    #[case::flipped_mapping_value_with_properties_and_empty_collection_key(
+        "k: &z { # c\n {}: 1}\n",
+        "k: &z\n  # c\n  ? {}\n  : 1\n"
+    )]
+    #[case::comment_of_flipped_root_with_properties_goes_above_them(
+        "&z [ # c\n a]\n",
+        "# c\n&z\n- a\n"
+    )]
+    #[case::comment_of_flipped_root_mapping_with_a_tag_goes_above_it(
+        "!t { # c\n a: 1}\n",
+        "# c\n!t\na: 1\n"
+    )]
+    #[case::mapping_key_after_the_first_entry_stays_flow_with_comments_above_the_entry(
+        "{ x: 1, { # c\n a: 1}: v }\n",
+        "x: 1\n# c\n? { a: 1 }\n: v\n"
+    )]
+    #[case::mapping_key_after_the_first_entry_collects_every_inner_comment_in_order(
+        "{ x: 1, { # c\n a: 1, # d\n b: [ # e\n 2]}: v, y: 2 }\n",
+        "x: 1\n# c\n# d\n# e\n? { a: 1, b: [2] }\n: v\ny: 2\n"
+    )]
+    #[case::mapping_key_as_the_first_entry_stays_flow(
+        "{ { # c\n a: 1}: v, x: 1 }\n",
+        "# c\n? { a: 1 }\n: v\nx: 1\n"
+    )]
+    #[case::block_mapping_key_keeps_its_comments_where_they_are(
+        "? a: 1 # c\n  b: 2\n: v\n",
+        "? a: 1  # c\n  b: 2\n: v\n"
+    )]
+    #[case::alias_key_with_an_anchored_block_value_keeps_the_space_before_the_colon(
+        "x: &a k\n*a : &y\n  k: 1\n",
+        "x: &a k\n*a : &y\n  k: 1\n"
+    )]
+    #[case::tagged_empty_key_with_an_anchored_block_value_keeps_the_space_before_the_colon(
+        "!t : &y\n  - 1\n",
+        "!t : &y\n  - 1\n"
+    )]
+    #[case::tagged_empty_key_after_an_empty_value_is_explicit(
+        "{ a, !t : 1, # c\n}\n",
+        "a: \n? !t\n: 1  # c\n"
+    )]
+    #[case::empty_key_after_an_empty_value_is_explicit(
+        "{ # c\n a, : x, c: 1}\n",
+        "# c\na: \n?\n: x\nc: 1\n"
+    )]
+    #[case::explicit_tagged_empty_key_after_an_empty_value_stays_explicit(
+        "a:\n? !t\n: 1\nb: 2\n",
+        "a: \n? !t\n: 1\nb: 2\n"
+    )]
+    #[case::explicit_empty_key_after_an_empty_value_stays_explicit("a:\n?\n: x\n", "a: \n?\n: x\n")]
+    #[case::tagged_empty_key_after_a_value_stays_implicit("a: 1\n!t : 2\n", "a: 1\n!t : 2\n")]
+    #[case::sequence_key_with_a_comment_stays_flow_with_the_comment_above_the_entry(
+        "{ [ # c\n a ]: v }\n",
+        "# c\n? [a]\n: v\n"
+    )]
     fn comment_position_prints_exactly(#[case] input: &str, #[case] expected: &str) {
         assert_eq!(format_yaml(input, &default_opts()), expected);
         assert_comments_kept(input, &default_opts(), "default");
@@ -2244,6 +2607,16 @@ mod tests {
         YamlFormatOptions { print_width: 20, ..default_opts() },
         "k: [alpha, bravo, charlie] # c\n",
         "k: [\n  alpha,\n  bravo,\n  charlie\n  ]  # c\n"
+    )]
+    #[case::enforce_block_flow_collection_with_comment_prints_like_the_default(
+        YamlFormatOptions { format_enforce_block_style: true, ..default_opts() },
+        "a: [ # c\n 1]\nb: [2]\n",
+        "a:\n  # c\n  - 1\nb:\n  - 2\n"
+    )]
+    #[case::inner_flow_collection_without_comment_wraps_inside_the_block_parent(
+        YamlFormatOptions { print_width: 10, ..default_opts() },
+        "[ # c\n [aaaa, bbbb, cccc, dddd], 1]\n",
+        "# c\n- [\n  aaaa,\n  bbbb,\n  cccc,\n  dddd\n  ]\n- 1\n"
     )]
     #[case::crlf_header_comment(
         YamlFormatOptions { line_ending: LineEnding::Crlf, ..default_opts() },

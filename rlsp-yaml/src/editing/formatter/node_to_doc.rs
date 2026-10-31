@@ -5,7 +5,7 @@ use rlsp_yaml_parser::CollectionStyle;
 use rlsp_yaml_parser::node::Node;
 use rlsp_yaml_parser::{ScalarStyle, Span};
 
-use super::mapping_render;
+use super::mapping_render::{self, Entry, with_comments_above};
 use super::options::YamlFormatOptions;
 use super::scalar_render::{
     block_value_needs_quoting, escape_double_quoted, flow_quoted_to_doc, format_tag,
@@ -68,6 +68,22 @@ pub(super) fn renders_empty(node: &Node<Span>) -> bool {
         .as_ref()
         .is_some_and(|t| !is_core_schema_tag(t) || node.tag_loc().is_some());
     value.is_empty() && !tag_printed && node.anchor().is_none()
+}
+
+/// Whether the formatter prints no text for a scalar apart from its properties:
+/// an empty plain scalar, or an empty scalar of any style whose tag is printed
+/// in its place.  An anchor or tag may still be printed.
+pub(super) fn prints_no_text(node: &Node<Span>) -> bool {
+    let Node::Scalar {
+        value, style, tag, ..
+    } = node
+    else {
+        return false;
+    };
+    let tag_printed = tag
+        .as_ref()
+        .is_some_and(|t| !is_core_schema_tag(t) || node.tag_loc().is_some());
+    value.is_empty() && (matches!(style, ScalarStyle::Plain) || tag_printed)
 }
 
 /// Render `node`; `in_flow` marks a scalar that sits directly inside a flow
@@ -207,8 +223,9 @@ fn render_node(
                 // When the scalar is empty we still need a space between the
                 // anchor name and whatever follows (a tag or nothing).
                 if value.is_empty() {
-                    if tag_present_on_empty {
-                        // `&anchor !!tag` — space required between anchor and tag.
+                    if tag_present_on_empty || !matches!(style, ScalarStyle::Plain) {
+                        // `&anchor !!tag`, or `&anchor ""` — space required between
+                        // anchor and what follows.
                         concat(vec![text(format!("&{name} ")), doc])
                     } else {
                         // `&anchor` alone — no trailing space.
@@ -228,34 +245,43 @@ fn render_node(
             tag,
             ..
         } => {
-            let doc = mapping_render::mapping_to_doc(entries, *style, options);
+            let has_properties =
+                mapping_render::collection_properties(node.anchor(), tag.as_deref()).is_some();
+            let Entry { above, doc } =
+                mapping_render::mapping_to_parts(entries, *style, options, has_properties);
             let effective_style = if options.format_enforce_block_style {
                 CollectionStyle::Block
             } else {
                 *style
             };
-            mapping_render::prepend_collection_properties(
-                doc,
-                node.anchor(),
-                tag.as_deref(),
-                effective_style,
+            with_comments_above(
+                mapping_render::prepend_collection_properties(
+                    doc,
+                    node.anchor(),
+                    tag.as_deref(),
+                    effective_style,
+                ),
+                above,
             )
         }
 
         Node::Sequence {
             items, style, tag, ..
         } => {
-            let doc = sequence_render::sequence_to_doc(items, *style, options);
+            let Entry { above, doc } = sequence_render::sequence_to_parts(items, *style, options);
             let effective_style = if options.format_enforce_block_style {
                 CollectionStyle::Block
             } else {
                 *style
             };
-            mapping_render::prepend_collection_properties(
-                doc,
-                node.anchor(),
-                tag.as_deref(),
-                effective_style,
+            with_comments_above(
+                mapping_render::prepend_collection_properties(
+                    doc,
+                    node.anchor(),
+                    tag.as_deref(),
+                    effective_style,
+                ),
+                above,
             )
         }
 

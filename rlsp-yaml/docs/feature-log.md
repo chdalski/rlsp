@@ -31,6 +31,15 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### The Formatter Prints a Flow Collection That Holds a Comment in Block Style [completed]
+
+**Date:** 2026-10-31
+**Description:** The formatter used to delete every comment inside a flow collection (`[` `]` or `{` `}`), because a flow collection prints on one line, and a comment ends at the line break, so the line has no place for one. It keeps them now: a flow sequence or mapping with a comment inside is printed in block style, where each comment has its own line or a slot at the end of one. `a: [` with `# c` and `1` on the lines below becomes `a:` followed by `# c` above `- 1`, and `a: {` with `# c` and `b: 1` on the lines below becomes `a:` followed by `# c` above `b: 1`. The data stays the same. Every flow collection around a comment changes style, because block style cannot sit inside flow style: in `[[1], [ # c` followed by `2]]`, the outer sequence and the inner one that holds the comment are printed in block style, and `[1]` next to it stays flow. A comment after the closing bracket (`a: [1] # c`) belongs to the collection, not to its content, so that collection stays flow; when the collection changes style because of another comment, the comment after the bracket moves to the line of the key, ahead of the comments inside. A comment on its own line between the last item and the closing bracket belongs to no item either: it moves above the next entry (after the document's root when none follows), and the collection stays flow. One kind of collection is the exception: a flow collection used as a key has no block form that the parser reads in every position, so it stays flow and its comments are printed on their own lines above the entry (`{ x: 1, { # c` followed by `a: 1}: v }` becomes `x: 1`, `# c`, `? { a: 1 }`, `: v`). The "Convert block to flow style" quick fix still leaves out the comments inside the collection it converts. See [`formatEnforceBlockStyle`](configuration.md#formatenforceblockstyle) for the setting that prints every collection in block style.
+**Complexity:** Medium
+**Tier:** 1
+
+---
+
 ### The Formatter Keeps the Comment on a Key's Line, a Block Scalar's Header, and an Empty Key's Value [completed]
 
 **Date:** 2026-10-31

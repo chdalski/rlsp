@@ -19,8 +19,23 @@ pub(super) fn sequence_to_doc(
     style: CollectionStyle,
     options: &YamlFormatOptions,
 ) -> Doc {
+    let Entry { above, doc } = sequence_to_parts(seq, style, options);
+    with_comments_above(doc, above)
+}
+
+/// Convert a YAML sequence to its Doc and the comments above its first item, for
+/// a caller that puts the sequence's properties before the first item (see
+/// `mapping_render::mapping_to_parts`).
+pub(super) fn sequence_to_parts<'a>(
+    seq: &'a [Node<Span>],
+    style: CollectionStyle,
+    options: &YamlFormatOptions,
+) -> Entry<'a> {
     if seq.is_empty() {
-        return text("[]");
+        return Entry {
+            above: Vec::new(),
+            doc: text("[]"),
+        };
     }
 
     let effective_style = if options.format_enforce_block_style {
@@ -30,11 +45,11 @@ pub(super) fn sequence_to_doc(
     };
 
     match effective_style {
-        CollectionStyle::Flow => flow_sequence_to_doc(seq, options),
-        CollectionStyle::Block => {
-            let Entry { above, doc } = block_sequence_parts(seq, options);
-            with_comments_above(doc, above)
-        }
+        CollectionStyle::Flow => Entry {
+            above: Vec::new(),
+            doc: flow_sequence_to_doc(seq, options),
+        },
+        CollectionStyle::Block => block_sequence_parts(seq, options),
     }
 }
 
@@ -100,11 +115,6 @@ fn sequence_item_parts<'a>(item: &'a Node<Span>, options: &YamlFormatOptions) ->
             ..
         } if !entries.is_empty() && effective_style(*style) == CollectionStyle::Block => {
             above.extend(item.trailing_comment());
-            let Entry {
-                above: first_above,
-                doc: inner,
-            } = block_mapping_parts(entries, options);
-            above.extend(first_above);
             let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
             let prefix = match (item.anchor(), user_tag) {
                 (Some(name), Some(t)) => format!("&{name} {}", format_tag(t)),
@@ -112,6 +122,11 @@ fn sequence_item_parts<'a>(item: &'a Node<Span>, options: &YamlFormatOptions) ->
                 (None, Some(t)) => format_tag(t),
                 (None, None) => String::new(),
             };
+            let Entry {
+                above: first_above,
+                doc: inner,
+            } = block_mapping_parts(entries, options, !prefix.is_empty());
+            above.extend(first_above);
             let doc = if prefix.is_empty() {
                 // `- key: val\n  key2: val2` — first pair on the dash line, remaining
                 // pairs indented one level so they align under the first key.
