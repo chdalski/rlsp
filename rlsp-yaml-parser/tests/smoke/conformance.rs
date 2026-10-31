@@ -257,7 +257,8 @@ fn cf_q1_4gc6_single_quoted_characters() {
 
 // CF-Q2: 2LFX — "Spec Example 6.13. Reserved Directives [1.3]"
 // yaml: `%FOO  bar baz # ...\n                  # with a warning.\n---\n"foo"\n`
-// Expected scalar value: `foo`; the comment-only second line produces a Comment event.
+// Expected scalar value: `foo`; the comment on the directive line and the comment-only
+// second line each produce a Comment event.
 #[test]
 fn cf_q2_2lfx_double_quoted_after_directive() {
     let input =
@@ -267,6 +268,9 @@ fn cf_q2_2lfx_double_quoted_after_directive() {
         events,
         [
             Event::StreamStart,
+            Event::Comment {
+                text: " Should be ignored"
+            },
             Event::Comment {
                 text: " with a warning."
             },
@@ -295,7 +299,8 @@ fn cf_q2_2lfx_double_quoted_after_directive() {
 #[test]
 fn cf_q3_quoted_scalar_after_directive_and_doc_marker() {
     // 2LFX variant: `%FOO ...\n                  # with a warning.\n---\n"foo"\n`
-    // The comment-only second line produces a Comment event before DocumentStart.
+    // The comment on the directive line and the comment-only second line produce a
+    // Comment event each, before DocumentStart.
     let input =
         "%FOO  bar baz # Should be ignored\n                  # with a warning.\n---\n\"foo\"\n";
     let events = event_variants(input);
@@ -303,6 +308,9 @@ fn cf_q3_quoted_scalar_after_directive_and_doc_marker() {
         events,
         [
             Event::StreamStart,
+            Event::Comment {
+                text: " Should be ignored"
+            },
             Event::Comment {
                 text: " with a warning."
             },

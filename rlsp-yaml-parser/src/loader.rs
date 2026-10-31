@@ -44,8 +44,8 @@ use crate::schema::{CollectionKind, Schema, resolve_collection, resolve_scalar};
 use comments::{attach_leading_comments, attach_trailing_comment};
 use reloc::reloc;
 use stream::{
-    consume_leading_comments, consume_leading_doc_comments, next_from, peek_trailing_comment,
-    with_hash_prefix,
+    consume_leading_comments, consume_leading_doc_comments, drop_comments_on_line, next_from,
+    peek_trailing_comment, with_hash_prefix,
 };
 
 mod comments;
@@ -589,8 +589,24 @@ impl<'opt> LoadState<'opt> {
 
                     let mut key = self.parse_node(stream)?;
                     attach_leading_comments(&mut key, leading);
+                    if matches!(stream.peek(), Some(Ok((Event::Comment { .. }, _)))) {
+                        drop_comments_on_line(
+                            stream,
+                            node_end_line(&key, &self.line_index),
+                            &self.line_index,
+                        )?;
+                    }
 
                     let mut value = self.parse_node(stream)?;
+                    if is_block_scalar(&value)
+                        && matches!(stream.peek(), Some(Ok((Event::Comment { .. }, _))))
+                    {
+                        drop_comments_on_line(
+                            stream,
+                            node_start_line(&value, &self.line_index),
+                            &self.line_index,
+                        )?;
+                    }
 
                     // Trailing comment on the value — peek for inline comment.
                     // Block scalars (literal `|` and folded `>`) consume trailing
@@ -705,6 +721,15 @@ impl<'opt> LoadState<'opt> {
 
                     let mut item = self.parse_node(stream)?;
                     attach_leading_comments(&mut item, leading);
+                    if is_block_scalar(&item)
+                        && matches!(stream.peek(), Some(Ok((Event::Comment { .. }, _))))
+                    {
+                        drop_comments_on_line(
+                            stream,
+                            node_start_line(&item, &self.line_index),
+                            &self.line_index,
+                        )?;
+                    }
 
                     // Trailing comment on the item — peek for inline comment.
                     // Block scalars are excluded for the same reason as in the
@@ -959,6 +984,20 @@ fn span_start_to_pos(offset: u32, line_index: &LineIndex) -> Pos {
         line: line as usize,
         column: column as usize,
     }
+}
+
+/// Return the line number of a node's span start position.
+///
+/// Used to find the comment on a block scalar's header line.
+#[inline]
+fn node_start_line(node: &Node<Span>, line_index: &LineIndex) -> u32 {
+    let start_offset = match node {
+        Node::Scalar { loc, .. }
+        | Node::Mapping { loc, .. }
+        | Node::Sequence { loc, .. }
+        | Node::Alias { loc, .. } => loc.start,
+    };
+    line_index.line_column(start_offset).0
 }
 
 /// Return the line number of a node's span end position.
@@ -1478,6 +1517,26 @@ mod tests {
     #[case::same_line_then_own_line_comment(
         "a: # same-line\n  # own\n  v\nb: 1\n",
         &[("b", &["# own"][..])]
+    )]
+    #[case::literal_header_comment_is_not_leading_comment_of_next_key(
+        "a: | # same-line\n  t\nb: 1\n",
+        &[]
+    )]
+    #[case::folded_header_comment_is_not_leading_comment_of_next_key(
+        "a: > # same-line\n  t\nb: 1\n",
+        &[]
+    )]
+    #[case::block_scalar_item_header_comment_is_not_leading_comment_of_next_item(
+        "- | # same-line\n  t\n- z\n",
+        &[]
+    )]
+    #[case::empty_value_same_line_comment_is_not_leading_comment_of_next_key(
+        "a: # same-line\nb: 1\n",
+        &[]
+    )]
+    #[case::anchor_same_line_comment_is_not_leading_comment_of_nested_key(
+        "a: &x # same-line\n  k: 1\nb: 1\n",
+        &[]
     )]
     fn comment_between_key_and_value_placement(
         #[case] input: &str,

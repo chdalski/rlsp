@@ -781,6 +781,69 @@ mod tests {
         assert_eq!(comment_tok.2, expected_len, "comment length");
     }
 
+    // (d2) One comment token, at the `#`, for a comment after every kind of
+    // node or indicator (line and start are 0-based, length counts characters)
+    #[rstest]
+    #[case::double_quoted_value("a: \"q\" # c\n", 0, 7, 3)]
+    #[case::single_quoted_value("a: 'q' # c\n", 0, 7, 3)]
+    #[case::quoted_sequence_item("- \"q\" # c\n", 0, 6, 3)]
+    #[case::key_without_value("k: # c\n", 0, 3, 3)]
+    #[case::bare_dash("- # c\n  a: 1\n", 0, 2, 3)]
+    #[case::bare_question_mark("? # c\n: v\n", 0, 2, 3)]
+    #[case::bare_colon("? k\n: # c\n  v\n", 1, 2, 3)]
+    #[case::anchor("a: &x # c\n  b: 1\n", 0, 6, 3)]
+    #[case::tag("a: !t # c\n  b: 1\n", 0, 6, 3)]
+    #[case::literal_header("a: | # c\n  t\n", 0, 5, 3)]
+    #[case::folded_header("a: > # c\n  t\n", 0, 5, 3)]
+    #[case::multi_line_plain("a:\n  v\n  w # c\n", 2, 4, 3)]
+    #[case::document_start("--- v # c\n", 0, 6, 3)]
+    #[case::yaml_directive("%YAML 1.2 # c\n---\na: 1\n", 0, 10, 3)]
+    #[case::tag_directive("%TAG ! tag:x: # c\n---\na: 1\n", 0, 14, 3)]
+    #[case::document_end("a: 1\n... # c\n", 1, 4, 3)]
+    #[case::multi_line_double_quoted("a: \"x\n  y\" # c\n", 1, 5, 3)]
+    #[case::multibyte_text_before_and_in_comment("a: \"é\" # ü日\n", 0, 7, 4)]
+    fn comment_token_for_every_comment_position(
+        #[case] text: &str,
+        #[case] expected_line: u32,
+        #[case] expected_start: u32,
+        #[case] expected_len: u32,
+    ) {
+        let docs = parse_docs(text);
+        let abs = absolute(&semantic_tokens(&docs, text));
+        let comments: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_COMMENT).collect();
+        assert_eq!(
+            comments.iter().map(|t| (t.0, t.1, t.2)).collect::<Vec<_>>(),
+            [(expected_line, expected_start, expected_len)],
+            "input: {text:?}"
+        );
+    }
+
+    // (d3) No other token lies inside the comment's interval on its line
+    #[rstest]
+    #[case::double_quoted_value("a: \"q\" # c\n")]
+    #[case::quoted_sequence_item("- \"q\" # c\n")]
+    #[case::key_without_value("k: # c\n")]
+    #[case::anchor("a: &x # c\n  b: 1\n")]
+    #[case::tag("a: !t # c\n  b: 1\n")]
+    #[case::literal_header("a: | # c\n  t\n")]
+    #[case::multi_line_plain("a:\n  v\n  w # c\n")]
+    #[case::document_start("--- v # c\n")]
+    #[case::multi_line_double_quoted("a: \"x\n  y\" # c\n")]
+    fn no_token_overlaps_a_comment_token(#[case] text: &str) {
+        let docs = parse_docs(text);
+        let abs = absolute(&semantic_tokens(&docs, text));
+        let comment = abs
+            .iter()
+            .find(|t| t.3 == TOKEN_COMMENT)
+            .expect("expected a comment token");
+        for token in abs.iter().filter(|t| t.3 != TOKEN_COMMENT) {
+            let overlaps = token.0 == comment.0
+                && token.1 < comment.1 + comment.2
+                && comment.1 < token.1 + token.2;
+            assert!(!overlaps, "{token:?} overlaps {comment:?} in {text:?}");
+        }
+    }
+
     // (e) Tagged scalar: tag token at tag_loc, scalar token starts after
     #[rstest]
     #[case::int_tag("n: !!int 42\n")]

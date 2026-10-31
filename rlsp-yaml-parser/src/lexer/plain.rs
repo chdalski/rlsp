@@ -34,6 +34,7 @@ impl<'input> Lexer<'input> {
     ) -> Option<(Cow<'input, str>, Span)> {
         // Drain any inline scalar stashed by consume_marker_line (e.g. `--- text`).
         if let Some(inline) = self.inline_scalar.take() {
+            self.trailing_comment = self.inline_scalar_comment.take();
             return Some(inline);
         }
         let (leading_spaces, scalar_start_pos, first_value_len) =
@@ -204,6 +205,28 @@ impl<'input> Lexer<'input> {
                 break;
             }
 
+            // The comment on this line, if any.  A comment ends the scalar; one
+            // that is too long or non-printable is an error like a bad suffix.
+            let comment = if after_cont.is_empty() {
+                Ok(None)
+            } else {
+                let suffix = &trimmed[cont_value.len()..];
+                let suffix_start = crate::pos::advance_within_line(
+                    next.pos,
+                    &next.content[..next.content.len() - suffix.len()],
+                );
+                self.comment_in_suffix(suffix, suffix_start)
+            };
+
+            if let Err(comment_error) = comment {
+                // Consume the line so the parser advances past it.
+                let Some(consumed) = self.buf.consume_next() else {
+                    unreachable!("consume cont line failed")
+                };
+                self.current_pos = pos_after_line(&consumed);
+                self.plain_scalar_suffix_error = Some(comment_error);
+                return result.zip(last_content).map(content_end);
+            }
             // Check for non-c-printable bytes in the suffix that stopped the scan.
             // `after_cont` is a suffix of `trimmed`; compute its byte offset within
             // `next.content` by counting bytes from the end of `trimmed`.
@@ -234,10 +257,9 @@ impl<'input> Lexer<'input> {
                 return result.zip(last_content).map(content_end);
             }
 
-            // If the remainder after the scanned value is a comment (`# …`),
-            // this line has a trailing comment that terminates the plain scalar.
+            // A comment after the scanned value terminates the plain scalar.
             // Include the current line's content but do NOT continue after this.
-            let has_trailing_comment = after_cont.starts_with('#');
+            let line_comment = comment.ok().flatten();
 
             let buf = result.get_or_insert_with(|| String::from(first_value_ref));
             // `cont_value` is a prefix of `trimmed`, itself a suffix of the line,
@@ -259,7 +281,8 @@ impl<'input> Lexer<'input> {
             self.current_pos = pos_after_line(&consumed);
             last_content = Some((consumed.pos, &consumed.content[..content_len]));
 
-            if has_trailing_comment {
+            if line_comment.is_some() {
+                self.trailing_comment = line_comment;
                 break;
             }
         }

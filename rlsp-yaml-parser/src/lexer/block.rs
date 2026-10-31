@@ -74,6 +74,9 @@ impl<'input> Lexer<'input> {
         if let Some(e) = header_err {
             return Some(Err(e));
         }
+        if let Err(e) = self.keep_header_comment(after_pipe, pipe_pos.advance('|')) {
+            return Some(Err(e));
+        }
 
         // Determine content indent.
         // If explicit indicator given: content_indent = parent_indent + explicit_indent.
@@ -336,6 +339,9 @@ impl<'input> Lexer<'input> {
         if let Some(e) = header_err {
             return Some(Err(e));
         }
+        if let Err(e) = self.keep_header_comment(after_gt, gt_pos.advance('>')) {
+            return Some(Err(e));
+        }
 
         let effective_min = if parent_indent == usize::MAX {
             1_usize
@@ -532,6 +538,22 @@ impl<'input> Lexer<'input> {
         }
 
         (Ok(out), trailing_newlines)
+    }
+
+    /// Keep the comment on a block scalar's header line (`| # c`) for the
+    /// state machine to drain after the scalar.
+    ///
+    /// `after_indicator` is the rest of the header line after the `|` or `>`
+    /// and `after_indicator_pos` is the position of its first character.
+    /// Returns the error for a comment that is too long or holds a
+    /// non-printable character.
+    fn keep_header_comment(
+        &mut self,
+        after_indicator: &'input str,
+        after_indicator_pos: Pos,
+    ) -> Result<(), Error> {
+        self.trailing_comment = self.comment_in_suffix(after_indicator, after_indicator_pos)?;
+        Ok(())
     }
 }
 

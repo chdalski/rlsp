@@ -412,7 +412,7 @@ All limits defined in `src/limits.rs`. Enforcement sites:
 | `MAX_COLLECTION_DEPTH = 512` | `src/event_iter/` collection-open paths |
 | `MAX_ANCHOR_NAME_BYTES = 1024` | `src/event_iter/properties.rs` `scan_anchor_name()` |
 | `MAX_TAG_LEN = 4096` | `src/event_iter/directives.rs` tag-prefix scanner |
-| `MAX_COMMENT_LEN = 4096` | `src/event_iter/directives.rs` comment consumer |
+| `MAX_COMMENT_LEN = 4096` | `src/lexer/comment.rs` `try_consume_comment()` (comment lines, limit passed by `src/event_iter/directives.rs`) and `comment_in_suffix()` (every comment after a node or indicator) |
 | `MAX_TAG_HANDLE_BYTES = 256` | `src/event_iter/directives.rs` handle scanner |
 | `MAX_RESOLVED_TAG_LEN = 4096` | tag resolution path |
 | Loader limits | `LoaderOptions` fields; enforced in `loader.rs` |

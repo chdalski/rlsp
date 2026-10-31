@@ -23,7 +23,7 @@ BNF: `c-directives-end ::= "---"`
 
 - **Verdict:** Strict-conformant
 - **Spec (§9.1.2):** "The solution is the use of two special marker lines to control the processing of directives, one at the start of a document and one at the end. At the start of a document, lines beginning with a '%' character are assumed to be directives. The (possibly empty) list of directives is terminated by a directives end marker line."
-- **Implementation:** `step_between_docs()` in `event_iter/directives.rs` — `lexer.is_directives_end()` detects `---` at column 0; `lexer.consume_marker_line(false)` consumes the line and captures any inline scalar
+- **Implementation:** `step_between_docs()` in `event_iter/directives.rs` — `lexer.is_directives_end()` detects `---` at column 0; `lexer.consume_marker_line(false)` consumes the line and captures any inline scalar and the comment on the line: a comment after `---` follows the `DocumentStart` event, one after an inline scalar (`--- v # c`) follows the scalar's event
 - **Tests:** `tests/yaml-test-suite/src/FTA2.yaml` (single block sequence with anchor and explicit document start); `tests/yaml-test-suite/src/2LFX.yaml` (directive + `---` marker); `tests/smoke/directives.rs` (`explicit_document_start_span_covers_dashes`)
 
 ### [204] c-document-end
@@ -41,7 +41,7 @@ BNF: `l-document-suffix ::= c-document-end s-l-comments`
 
 - **Verdict:** Strict-conformant
 - **Spec (§9.1.2):** "At the end of a document, a document end marker line is used to signal the parser to begin scanning for directives again. The existence of this optional document suffix does not necessarily indicate the existence of an actual following document."
-- **Implementation:** `step_in_document()` in `event_iter/step.rs` — `...` marker detected and consumed via `consume_marker_line(true)`; trailing comments after `...` drained by `drain_trailing_comment()` before emitting `DocumentEnd { explicit: true }`
+- **Implementation:** `step_in_document()` in `event_iter/step.rs` — `...` marker detected and consumed via `consume_marker_line(true)`; the comment after `...` is read by `consume_marker_line()` with `comment_in_suffix()` and drained by `drain_trailing_comment()` after the `DocumentEnd { explicit: true }` event
 - **Tests:** `tests/yaml-test-suite/src/2LFX.yaml` (document with suffix); `tests/smoke/directives.rs` (multi-doc stream tests)
 
 ### [206] c-forbidden

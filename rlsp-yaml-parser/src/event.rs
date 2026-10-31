@@ -105,7 +105,12 @@ pub enum Event<'input> {
     /// `"nospace"`).  The associated span covers from the `#` character
     /// through the last byte of comment text (the newline is not included).
     ///
-    /// One `Comment` event is emitted per physical line.
+    /// One `Comment` event is emitted per physical line, for every comment:
+    /// on its own line, after a node (`a: "q" # c`), after an indicator or
+    /// property with no node on its line (`k: # c`, `- # c`, `&a # c`), on a
+    /// block scalar's header line, and after `---`, `...` and a directive.
+    /// It follows the event of the node it trails, and precedes the
+    /// events of the node that starts on the following lines.
     Comment {
         /// Comment body (everything after the `#`, excluding the newline).
         text: &'input str,

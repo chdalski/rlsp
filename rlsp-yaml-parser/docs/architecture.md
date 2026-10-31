@@ -155,9 +155,12 @@ type:
 
 - `inline_scalar` — scalar content that immediately follows a `---` marker on
   the same physical line (e.g. `--- value`); drained by the next plain-scalar
-  call
-- `trailing_comment` — a `# comment` found on the same line as a plain scalar;
-  drained by the state machine after it emits the scalar event
+  call, which also hands out `inline_scalar_comment`, the comment after it
+- `trailing_comment` — the `# comment` found on the line of a scalar (plain,
+  quoted tail, last plain continuation line, block scalar header) or of an
+  indicator (`k:`, `?`); drained by the state machine after it emits that
+  event. Comments after `-`, `:`, an anchor or a tag, a directive and in a flow
+  collection go straight to the event queue
 - `pending_multiline_tail` — content following the closing quote of a
   multiline quoted scalar; used by the flow parser to continue processing
   `,`, `]`, `}` that appear after the closing quote
@@ -208,7 +211,7 @@ over:
 - blank lines (silently consumed)
 - comment lines (pushed to the event queue as `Event::Comment`)
 - directive lines (`%YAML`, `%TAG`, or reserved; accumulated into
-  `self.directive_scope`)
+  `self.directive_scope`; the comment on the line is pushed as `Event::Comment`)
 
 When a `---` marker or bare document content is detected, the state transitions
 to `InDocument` and a `DocumentStart` event is emitted with the version and

@@ -4,6 +4,7 @@ use memchr::memchr;
 
 use crate::chars::{find_non_c_printable, non_printable_error_message};
 use crate::error::Error;
+use crate::limits::MAX_COMMENT_LEN;
 use crate::pos::{Pos, Span, advance_within_line};
 
 use super::Lexer;
@@ -96,9 +97,17 @@ impl<'input> Lexer<'input> {
     ///
     /// Returns `Ok(Some((text, span)))` with the body after the `#` and the
     /// span from the `#` through the end of the text, `Ok(None)` when the
-    /// suffix holds no comment, and `Err` when the body holds a character
-    /// that is not `c-printable`.  The caller decides what to do with the
-    /// result; this function changes no lexer state.
+    /// suffix holds no comment, and `Err` when the body is longer than
+    /// [`MAX_COMMENT_LEN`] or holds a character that is not `c-printable`.
+    /// The length is checked first, so a long comment is never scanned.  The
+    /// caller decides what to do with the result; this function changes no
+    /// lexer state.
+    ///
+    /// A `#` at offset 0 counts as a comment: the caller must have consumed
+    /// the whitespace that separates it from the node, or know that none is
+    /// needed.  A suffix that starts right after a quoted scalar's closing
+    /// quote or a block scalar indicator is checked for that separation before
+    /// this function is called (`take_block_quoted_tail`, `parse_block_header`).
     pub fn comment_in_suffix(
         &self,
         suffix: &'input str,
@@ -110,6 +119,13 @@ impl<'input> Lexer<'input> {
         // `#` is ASCII, so both slice boundaries are on a char boundary.
         let text = &suffix[hash_index + 1..];
         let hash_pos = advance_within_line(suffix_start, &suffix[..hash_index]);
+
+        if text.len() > MAX_COMMENT_LEN {
+            return Err(Error::syntax(
+                hash_pos,
+                format!("comment exceeds maximum allowed length ({MAX_COMMENT_LEN} bytes)"),
+            ));
+        }
 
         // NUL keeps its specific message; the general c-printable check is
         // skipped when the whole input is known to be printable.
@@ -659,5 +675,33 @@ mod tests {
         let mut lex = make_lexer("# a\0");
         lex.input_all_printable = true;
         assert!(lex.comment_in_suffix("# a\0", SUFFIX_START).is_err());
+    }
+
+    // The body length is counted in bytes after the `#`; the limit is the one
+    // `try_consume_comment` callers pass.
+    #[test]
+    fn suffix_comment_at_the_length_limit_is_accepted() {
+        let suffix = format!(" #{}", "x".repeat(MAX_COMMENT_LEN));
+        let lex = make_lexer(&suffix);
+        assert!(matches!(
+            lex.comment_in_suffix(&suffix, SUFFIX_START),
+            Ok(Some(_))
+        ));
+    }
+
+    #[rstest]
+    #[case::ascii(format!(" #{}", "x".repeat(MAX_COMMENT_LEN + 1)))]
+    #[case::multibyte_counts_bytes(format!(" #{}", "日".repeat(MAX_COMMENT_LEN / 3 + 1)))]
+    fn suffix_comment_over_the_length_limit_is_an_error_at_the_hash(#[case] suffix: String) {
+        let lex = make_lexer(&suffix);
+        let Err(err) = lex.comment_in_suffix(&suffix, SUFFIX_START) else {
+            unreachable!("expected Err for a comment over the limit")
+        };
+        assert_eq!(err.kind, ErrorKind::Syntax);
+        assert_eq!(
+            err.message,
+            format!("comment exceeds maximum allowed length ({MAX_COMMENT_LEN} bytes)")
+        );
+        assert_eq!(err.pos, pos(11, 8));
     }
 }

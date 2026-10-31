@@ -80,6 +80,12 @@ impl<'input> EventIter<'input> {
     ///   continuation logic).  Prepend the value portion (if non-empty) as a
     ///   synthetic line.
     ///
+    /// A comment that takes the place of the content after `?` or `key:` is
+    /// read with `Lexer::comment_in_suffix()` (YAML 1.2.2 [77] `s-b-comment`)
+    /// and left in `trailing_comment` for the caller to drain after the key's
+    /// event; one that is too long or non-printable is
+    /// `ConsumedMapping::CommentError`.
+    ///
     /// Returns a `ConsumedMapping` describing what was found.
     #[expect(
         clippy::too_many_lines,
@@ -124,27 +130,30 @@ impl<'input> EventIter<'input> {
                 // if nothing followed the `?` indicator.
                 let has_inline_content = !inline.is_empty() && !inline.starts_with('#');
 
+                // Offset from line start to inline key content.
+                let spaces_after_q = after_q.len() - inline.len();
+                let total_offset = leading_spaces + 1 + spaces_after_q;
+                let inline_pos = Pos {
+                    byte_offset: line_pos.byte_offset + total_offset,
+                    line: line_pos.line,
+                    column: line_pos.column + total_offset,
+                };
+
+                self.lexer.consume_line();
                 if has_inline_content {
-                    // Offset from line start to inline key content.
-                    let spaces_after_q = after_q.len() - inline.len();
-                    let total_offset = leading_spaces + 1 + spaces_after_q;
-                    let inline_col = key_indent + 1 + spaces_after_q;
-                    let inline_pos = Pos {
-                        byte_offset: line_pos.byte_offset + total_offset,
-                        line: line_pos.line,
-                        column: line_pos.column + total_offset,
-                    };
                     let synthetic = Line {
                         content: inline,
                         offset: inline_pos.byte_offset,
-                        indent: inline_col,
+                        indent: key_indent + 1 + spaces_after_q,
                         break_type: line_break_type,
                         pos: inline_pos,
                     };
-                    self.lexer.consume_line();
                     self.lexer.prepend_inline_line(synthetic);
                 } else {
-                    self.lexer.consume_line();
+                    match self.lexer.comment_in_suffix(inline, inline_pos) {
+                        Ok(comment) => self.lexer.trailing_comment = comment,
+                        Err(e) => return ConsumedMapping::CommentError(e),
+                    }
                 }
                 return ConsumedMapping::ExplicitKey;
             }
@@ -303,6 +312,11 @@ impl<'input> EventIter<'input> {
                 pos: value_pos,
             };
             self.lexer.prepend_inline_line(value_synthetic);
+        } else {
+            match self.lexer.comment_in_suffix(value_content, value_pos) {
+                Ok(comment) => self.lexer.trailing_comment = comment,
+                Err(e) => return ConsumedMapping::CommentError(e),
+            }
         }
 
         ConsumedMapping::ImplicitKey {
@@ -545,8 +559,7 @@ impl<'input> EventIter<'input> {
                 )) = self.coll_stack.last()
                 && val_col <= effective_key_indent
             {
-                self.consume_explicit_value_line(val_col);
-                return StepResult::Continue;
+                return self.explicit_value_step(val_col);
             }
             if self.collection_depth() >= MAX_COLLECTION_DEPTH {
                 self.state = IterState::Done;
@@ -676,8 +689,7 @@ impl<'input> EventIter<'input> {
                     }
                 }
             }
-            self.consume_explicit_value_line(key_indent);
-            return StepResult::Continue;
+            return self.explicit_value_step(key_indent);
         }
 
         // When `complex_key_inline` is set and the mapping is in Key phase (meaning
@@ -741,6 +753,8 @@ impl<'input> EventIter<'input> {
                 // This covers both `?\n- a` (bare `?`, key on next line) and
                 // `? - a` (inline sequence indicator after `?`).
                 self.explicit_key_pending = true;
+                // A comment after a bare `?` (`? # c`).
+                self.drain_trailing_comment();
             }
             ConsumedMapping::ImplicitKey {
                 key_value,
@@ -757,6 +771,12 @@ impl<'input> EventIter<'input> {
                     key_span,
                 ));
                 self.advance_mapping_to_value();
+                // A comment after a key without a value on its line (`k: # c`).
+                self.drain_trailing_comment();
+            }
+            ConsumedMapping::CommentError(e) => {
+                self.state = IterState::Done;
+                return StepResult::Yield(Err(e));
             }
             ConsumedMapping::QuotedKeyError(pos, message) => {
                 self.state = IterState::Done;
@@ -802,11 +822,28 @@ impl<'input> EventIter<'input> {
             || after_colon.starts_with('\r')
     }
 
+    /// Consume a `: value` line and turn a failure into the step's result.
+    fn explicit_value_step(&mut self, key_indent: usize) -> StepResult<'input> {
+        match self.consume_explicit_value_line(key_indent) {
+            Ok(()) => StepResult::Continue,
+            Err(e) => {
+                self.state = IterState::Done;
+                StepResult::Yield(Err(e))
+            }
+        }
+    }
+
     /// Consume a `: value` line (explicit value indicator).
     ///
     /// If there is inline content after `: `, prepend a synthetic line for it
     /// so the next iteration emits it as the value scalar.
-    pub(in crate::event_iter) fn consume_explicit_value_line(&mut self, key_indent: usize) {
+    ///
+    /// A comment after a bare `:` is queued as an `Event::Comment`; it is an
+    /// error when it is too long or holds a non-printable character.
+    pub(in crate::event_iter) fn consume_explicit_value_line(
+        &mut self,
+        key_indent: usize,
+    ) -> Result<(), Error> {
         // SAFETY: caller checked is_value_indicator_line() — the line exists.
         let Some(line) = self.lexer.peek_next_line() else {
             unreachable!("consume_explicit_value_line called without a pending line")
@@ -857,9 +894,18 @@ impl<'input> EventIter<'input> {
             // line may be a block node (the actual value), or if the next line
             // is another key at the same indent, the main loop emits an empty
             // scalar at that point (see the Value-phase empty-scalar guard).
+            let value_pos = Pos {
+                byte_offset: line_pos.byte_offset + leading_spaces + 1 + after_colon.len()
+                    - value_content.len(),
+                line: line_pos.line,
+                column: line_pos.column + leading_spaces + 1 + after_colon.len()
+                    - value_content.len(),
+            };
             self.lexer.consume_line();
             self.advance_mapping_to_value();
+            self.queue_suffix_comment(value_content, value_pos)?;
         }
+        Ok(())
     }
 
     /// Tick the key/value phase of the innermost open mapping after emitting a

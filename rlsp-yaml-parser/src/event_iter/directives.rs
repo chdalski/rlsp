@@ -53,7 +53,13 @@ impl<'input> EventIter<'input> {
                 let Some((content, dir_pos)) = self.lexer.try_consume_directive_line() else {
                     break;
                 };
+                // Read the comment first: its errors name the comment, where
+                // the directive's parameter checks would name a parameter.
+                let comment = self.lexer.comment_in_suffix(content, dir_pos)?;
                 self.parse_directive(content, dir_pos)?;
+                if let Some((text, span)) = comment {
+                    self.queue.push_back((Event::Comment { text }, span));
+                }
                 self.lexer.skip_blank_lines_between_docs();
             }
 
@@ -430,7 +436,9 @@ impl<'input> EventIter<'input> {
                 self.state = IterState::Done;
                 return StepResult::Yield(Err(e));
             }
-            return StepResult::Continue; // orphan `...`, no event
+            // An orphan `...` has no event of its own; its comment has.
+            self.drain_trailing_comment();
+            return StepResult::Continue;
         }
         // Per YAML 1.2 §9.2, directives require a `---` marker.  If the next
         // line is not `---` and we have already parsed directives, that is a

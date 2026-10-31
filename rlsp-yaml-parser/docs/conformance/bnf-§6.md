@@ -122,9 +122,9 @@ BNF: `c-nb-comment-text ::= c-comment nb-char*`
 
 - **Verdict:** Strict-conformant
 - **Spec (§6.6):** "An explicit comment is marked by a `#` indicator. Comments must be separated from other tokens by white space characters."
-- **Implementation:** `try_consume_comment()` in `lexer/comment.rs` for a comment on its own line, and `comment_in_suffix()` in the same file for a comment after a node (plain scalar in a mapping value or sequence entry, `---` and `...` marker lines); the text is everything after `#`, and both reject a character outside c-printable (which is a superset of nb-char) with `InvalidCharacter`, NUL with its own message
-- **Tests:** `rlsp-yaml-parser/tests/smoke/comments.rs`; `comment.rs` unit tests `happy_path_text` and the `suffix_*` tests; `rlsp-yaml-parser/tests/error_reporting.rs` `invalid_character_in_trailing_comment_is_one_error_at_its_position`
-- **Deviation from libfyaml:** libfyaml accepts non-printable characters in comments; see `design-decisions.md`
+- **Implementation:** `try_consume_comment()` in `lexer/comment.rs` for a comment on its own line, and `comment_in_suffix()` in the same file for a comment after a node or indicator. `comment_in_suffix()` is the one reader of such a comment: the plain scalar first line and continuation lines (`lexer/plain.rs`), a quoted scalar's tail (`take_block_quoted_tail()` in `event_iter/base.rs`), a block scalar header (`keep_header_comment()` in `lexer/block.rs`), the rest of the line after `-` (`consume_sequence_dash()`), `?`, `:` and a key's `:` (`consume_mapping_entry()`, `consume_explicit_value_line()` in `event_iter/block/mapping.rs`), after an anchor or tag property (the standalone-property branches in `event_iter/step.rs`), a scalar on the `---` line (`handle_plain_scalar_inline()` in `lexer.rs`), the `---` and `...` lines, a directive line (`consume_preamble_between_docs()` in `event_iter/directives.rs`) and a flow collection line (`event_iter/flow.rs`). The text is everything after `#`; every site rejects a character outside c-printable (which is a superset of nb-char) with `InvalidCharacter`, NUL with its own message, and a body longer than `MAX_COMMENT_LEN` with a syntax error
+- **Tests:** `rlsp-yaml-parser/tests/smoke/comments.rs` (Group H: one event per position, in source order, with its span); `rlsp-yaml-parser/tests/conformance/comment_events.rs` (every `#` that starts a comment in the yaml-test-suite is a `Comment` event); `comment.rs` unit tests `happy_path_text` and the `suffix_*` tests; `rlsp-yaml-parser/tests/error_reporting.rs` `invalid_character_in_a_comment_is_one_error_at_its_position` and `comment_over_the_length_limit_is_an_error_at_every_position`
+- **Deviation from libfyaml:** libfyaml accepts non-printable characters and over-long comments; see `design-decisions.md`
 - **Note:** Previously Lenient — a literal BOM in a comment body was retained verbatim. Fixed together with [1] in commit `666e2f2`.
 
 ### [76] b-comment
@@ -142,7 +142,7 @@ BNF: `s-b-comment ::= ( s-separate-in-line c-nb-comment-text? )? b-comment`
 
 - **Verdict:** Strict-conformant
 - **Spec (§6.6):** "Comments must be separated from other tokens by white space characters."
-- **Implementation:** `handle_plain_scalar_inline()` in `lexer.rs` — trailing comment after inline plain scalar on marker lines requires `#` preceded by implicit whitespace; `comment_in_suffix()` in `lexer/comment.rs` — the `#` of a trailing comment must open the suffix or follow a space or tab, and the same function reads the comment after a plain scalar and after `---` / `...`; `parse_yaml_directive()` in `event_iter/directives.rs` — trailing content after YAML version checked for empty or `#` prefix
+- **Implementation:** `comment_in_suffix()` in `lexer/comment.rs` — the `#` of a comment after a node or indicator must open the suffix or follow a space or tab; see [75] for the sites that call it. `handle_plain_scalar_inline()` in `lexer.rs` stores the comment after a scalar on the `---` line and `try_consume_plain_scalar()` hands it out after the scalar, so the `Comment` event follows the scalar's event; `take_block_quoted_tail()` in `event_iter/base.rs` rejects a `#` that directly follows the closing quote of a quoted scalar; `parse_block_header()` in `lexer/block.rs` rejects a `#` that directly follows a block scalar indicator; `parse_yaml_directive()` in `event_iter/directives.rs` — trailing content after YAML version checked for empty or `#` prefix
 - **Tests:** `rlsp-yaml-parser/tests/smoke/comments.rs`; `rlsp-yaml-parser/tests/smoke/directives.rs`
 - **Rationale:** Audit B initially flagged a lenient case at `lexer.rs:354-381` (`handle_plain_scalar_inline`), but investigation showed the plain-scanner's behavior — treating `#` without preceding whitespace as part of the scalar — is correct per spec. The `hash_without_preceding_space_is_content` test confirms this.
 
@@ -161,7 +161,7 @@ BNF: `s-l-comments ::= ( s-b-comment | <start-of-line> ) l-comment*`
 
 - **Verdict:** Strict-conformant
 - **Spec (§6.6):** "In most cases, when a line may end with a comment, YAML allows it to be followed by additional comment lines. The only exception is a comment ending a block scalar header."
-- **Implementation:** `consume_preamble_between_docs()` in `event_iter/directives.rs` — loops consuming blank and comment lines; block scalar header explicitly stops at the comment on its header line (enforced in `lexer/block.rs`)
+- **Implementation:** `consume_preamble_between_docs()` in `event_iter/directives.rs` — loops consuming blank and comment lines; `skip_and_collect_comments_in_doc()` does the same inside a document; block scalar header explicitly stops at the comment on its header line (enforced in `lexer/block.rs`)
 - **Tests:** `rlsp-yaml-parser/tests/smoke/comments.rs`
 
 ### [80] s-separate(n,c)
@@ -188,8 +188,8 @@ BNF: `l-directive ::= c-directive ( ns-yaml-directive | ns-tag-directive | ns-re
 
 - **Verdict:** Strict-conformant
 - **Spec (§6.8):** "Directives are instructions to the YAML processor. There is no way to define private directives. Directives are a presentation detail and must not be used to convey content information."
-- **Implementation:** `parse_directive()` in `event_iter/directives.rs` — dispatches on directive name; `is_directive_line()` in `lexer.rs`
-- **Tests:** `rlsp-yaml-parser/tests/smoke/directives.rs`
+- **Implementation:** `parse_directive()` in `event_iter/directives.rs` — dispatches on directive name; `is_directive_line()` in `lexer.rs`; the `s-l-comments` part: `consume_preamble_between_docs()` reads the comment on the directive line with `comment_in_suffix()` and queues it as an `Event::Comment`, for `%YAML`, `%TAG` and reserved directives alike
+- **Tests:** `rlsp-yaml-parser/tests/smoke/directives.rs`; `rlsp-yaml-parser/tests/smoke/comments.rs` (cases `yaml_directive`, `tag_directive`, `reserved_directive`)
 
 ### [83] ns-reserved-directive
 
@@ -322,7 +322,7 @@ BNF: `c-ns-properties(n,c) ::= ( c-ns-tag-property ( s-separate(n,c) c-ns-anchor
 
 - **Verdict:** Strict-conformant
 - **Spec (§6.9):** "Each node may have two optional properties, anchor and tag, in addition to its content. Either or both may be omitted."
-- **Implementation:** `pending_tag` and `pending_anchor` fields in `event_iter/` accumulate both properties in either order; both emitted before the node event. A property that the next property displaced (`a: &y !!str`) waits in the `pending_collection_*` fields; every node takes its properties through `take_node_meta()` in `event_iter/base.rs`, which takes the pending and the displaced ones and empties both, so no property outlives its node (empty nodes use `emit_empty_scalar()`). A node has at most one anchor: the anchor arm of `step_in_document()` (`event_iter/step.rs`) reports a second anchor line for a node that already has one. `clear_pending_properties()` in `event_iter/base.rs` drops the properties still pending at `---` and `...`, so they never carry into the next document
+- **Implementation:** `pending_tag` and `pending_anchor` fields in `event_iter/` accumulate both properties in either order; both emitted before the node event. A property that the next property displaced (`a: &y !!str`) waits in the `pending_collection_*` fields; every node takes its properties through `take_node_meta()` in `event_iter/base.rs`, which takes the pending and the displaced ones and empties both, so no property outlives its node (empty nodes use `emit_empty_scalar()`). A node has at most one anchor: the anchor arm of `step_in_document()` (`event_iter/step.rs`) reports a second anchor line for a node that already has one. `clear_pending_properties()` in `event_iter/base.rs` drops the properties still pending at `---` and `...`, so they never carry into the next document. A comment after a property that has no node on its line (`a: &x # c`, `!t # c`) is queued by the standalone-property branches of the tag and anchor arms of `step_in_document()` (`event_iter/step.rs`) with `queue_suffix_comment()`
 - **Tests:** `rlsp-yaml-parser/tests/smoke/tags.rs`; `rlsp-yaml-parser/tests/smoke/anchors_and_aliases.rs`; `rlsp-yaml-parser/tests/error_reporting.rs` (Group H)
 
 ### [97] c-ns-tag-property

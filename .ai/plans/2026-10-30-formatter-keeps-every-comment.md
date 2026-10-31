@@ -30,7 +30,7 @@ formatting it again must change nothing.
 - [x] Task 1: Indent the closing bracket of a broken flow collection
 - [x] Task 2: One helper reads a comment from a line suffix
 - [x] Task 3: Two helpers assemble node comments and the collection colon
-- [ ] Task 4: Emit every comment as an event
+- [x] Task 4: Emit every comment as an event
 - [ ] Task 5: Store every comment event in the AST
 - [ ] Task 6: Print document-level comments and reduce the text matching
 - [ ] Task 7: Print comments at every node position
@@ -96,26 +96,29 @@ all of those sites. Behavior is unchanged.
 
 ### Task 4: Emit every comment as an event
 
-- [ ] `parse_events` emits a `Comment` event, in source order, for the comment
+- [x] `parse_events` emits a `Comment` event, in source order, for the comment
       in each of: `a: "q" # c\n`, `a: 'q' # c\n`, `- "q" # c\n`, `k: # c\n`,
       `- # c\n  a: 1\n`, `? # c\n: v\n`, `? k\n: # c\n  v\n`, `a: &x # c\n  b: 1\n`,
       `a: !t # c\n  b: 1\n`, `a: | # c\n  t\n`, `a: > # c\n  t\n`,
       `a:\n  v\n  w # c\n`, `--- v # c\n`, `%YAML 1.2 # c\n---\na: 1\n`,
       `%TAG ! tag:x: # c\n---\na: 1\n`, `a: 1\n... # c\n`
-- [ ] `semantic_tokens` returns one comment token with the right line, start,
+- [x] `semantic_tokens` returns one comment token with the right line, start,
       and length for the comment of each input above
-- [ ] A test over every yaml-test-suite input asserts that every `#` at a line
+- [x] A test over every yaml-test-suite input asserts that every `#` at a line
       start or after whitespace, outside a scalar's span, starts a `Comment`
       event's span
-- [ ] `a: "q" # \x01\n` and the same character at each position above report an
+- [x] `a: "q" # \x01\n` and the same character at each position above report an
       error; a comment over `MAX_COMMENT_LEN` reports an error after a value
       as it does on its own line
-- [ ] Values, spans, and errors of comment-free inputs are unchanged: the
-      yaml-test-suite event and loader conformance tests pass
-- [ ] `docs/conformance/` names the enforcement sites for the affected
+- [x] Values, spans, and errors of comment-free inputs are unchanged, apart from
+      the one change named in Decisions: the yaml-test-suite event and loader
+      conformance tests pass
+- [x] `parse_events` yields nothing after the first `Err`, also when events were
+      queued before it
+- [x] `docs/conformance/` names the enforcement sites for the affected
       productions, and `rlsp-yaml-parser/docs/feature-log.md` tells a reader
       that comments are now validated at these positions
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 5: Store every comment event in the AST
 
@@ -277,6 +280,18 @@ these inputs change today.
   an error, as [75] `c-nb-comment-text` requires, also after `---` and `...`;
   libfyaml accepts non-printable comment text and differs here. Declined: leaving
   those positions unchecked.
+- **Positions after a multi-line double-quoted scalar become correct:**
+  `collect_double_quoted_continuations` passes the trimmed line with the position
+  of its untrimmed start, so a comment after the closing quote would carry a span
+  short by the line's indentation. Tokens and error positions after that quote
+  move to their real offset, also in comment-free inputs (yaml-test-suite 8UDB,
+  9BXH, 9SA2); values stay the same. Declined: keeping the wrong spans.
+- **An error ends the event stream (security review of Task 4):** a comment error
+  at `...`, `---`, or a sequence item used to leave queued events or further
+  parsing after the `Err`. `EventIter::next` now clears its queue and stops on the
+  first `Err`, for every input; the first error itself stays the same, and
+  `invalid_trailing_comment_leaves_no_comment_for_the_next_sequence_item` in
+  `tests/error_reporting.rs` expects no comment after the error.
 - **`--- # c` and `- # c` move one line:** the data stays the same and no
   further field is needed; `--- # yaml-language-server: $schema=x` thereby
   becomes a valid modeline line. Declined: keeping them on the marker's line.

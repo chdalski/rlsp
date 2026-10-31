@@ -1969,3 +1969,74 @@ fn explicit_end_after_root_plain_scalar_with_comment(
 fn comment_after_start_marker_is_still_a_comment(#[case] input: &str, #[case] expected: &str) {
     assert_eq!(scalar_value(&load_one(input)), expected);
 }
+
+// ---------------------------------------------------------------------------
+// A comment at any position changes no data (YAML 1.2.2 [75], [77])
+// ---------------------------------------------------------------------------
+
+/// Structure, values, styles, anchors and tags of `node`; no spans, no comments.
+fn data_projection(node: &Node<rlsp_yaml_parser::Span>, out: &mut Vec<String>) {
+    match node {
+        Node::Scalar {
+            value, style, tag, ..
+        } => out.push(format!("S {value:?} {style:?} {:?} {tag:?}", node.anchor())),
+        Node::Alias { name, .. } => out.push(format!("A {name}")),
+        Node::Mapping {
+            entries,
+            style,
+            tag,
+            ..
+        } => {
+            out.push(format!("M {style:?} {:?} {tag:?}", node.anchor()));
+            for (key, value) in entries {
+                data_projection(key, out);
+                data_projection(value, out);
+            }
+            out.push("/M".to_owned());
+        }
+        Node::Sequence {
+            items, style, tag, ..
+        } => {
+            out.push(format!("Q {style:?} {:?} {tag:?}", node.anchor()));
+            for item in items {
+                data_projection(item, out);
+            }
+            out.push("/Q".to_owned());
+        }
+    }
+}
+
+fn data_of(input: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for doc in load(input).expect("load failed") {
+        out.push("DOC".to_owned());
+        data_projection(&doc.root, &mut out);
+    }
+    out
+}
+
+#[rstest]
+#[case::double_quoted_value("a: \"q\" # c\nb: 1\n", "a: \"q\"\nb: 1\n")]
+#[case::single_quoted_item("- 'q' # c\n- r\n", "- 'q'\n- r\n")]
+#[case::key_without_value("k: # c\nb: 2\n", "k:\nb: 2\n")]
+#[case::value_on_next_line("k: # c\n  v\nb: 2\n", "k:\n  v\nb: 2\n")]
+#[case::bare_dash("- # c\n  a: 1\n- b\n", "-\n  a: 1\n- b\n")]
+#[case::bare_question_mark("? # c\n: v\n", "?\n: v\n")]
+#[case::bare_colon("? k\n: # c\n  v\nb: 1\n", "? k\n:\n  v\nb: 1\n")]
+#[case::anchor_before_mapping("a: &x # c\n  b: 1\nz: *x\n", "a: &x\n  b: 1\nz: *x\n")]
+#[case::anchor_on_empty_value("a: &x # c\nb: 1\n", "a: &x\nb: 1\n")]
+#[case::tag_before_mapping("a: !!map # c\n  b: 1\n", "a: !!map\n  b: 1\n")]
+#[case::literal_header("a: | # c\n  t\nb: 1\n", "a: |\n  t\nb: 1\n")]
+#[case::folded_header("a: >- # c\n  t\nb: 1\n", "a: >-\n  t\nb: 1\n")]
+#[case::multi_line_plain("a:\n  v\n  w # c\nb: 1\n", "a:\n  v\n  w\nb: 1\n")]
+#[case::document_start("--- v # c\n", "--- v\n")]
+#[case::directives(
+    "%YAML 1.2 # c\n%TAG !e! tag:x: # d\n---\na: !e!t 1\n",
+    "%YAML 1.2\n%TAG !e! tag:x:\n---\na: !e!t 1\n"
+)]
+#[case::document_end("a: 1\n... # c\n---\nb: 2\n", "a: 1\n...\n---\nb: 2\n")]
+#[case::multi_line_double_quoted("a: \"x\n  y\" # c\nb: 1\n", "a: \"x\n  y\"\nb: 1\n")]
+#[case::empty_explicit_key("? # c\n", "?\n")]
+fn comment_at_a_new_position_changes_no_data(#[case] with: &str, #[case] without: &str) {
+    assert_eq!(data_of(with), data_of(without), "input: {with:?}");
+}

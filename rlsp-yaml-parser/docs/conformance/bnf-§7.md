@@ -242,7 +242,7 @@ BNF: `c-single-quoted(n,c) ::= c-single-quote nb-single-text(n,c) c-single-quote
 
 - **Verdict:** Strict-conformant
 - **Spec (§7.3.2):** "The single-quoted style is specified by surrounding `'` indicators."
-- **Implementation:** `try_consume_single_quoted()` in `lexer/quoted.rs` — opening `'` detected, body consumed, closing `'` required; the text after the closing `'` is stored in `pending_multiline_tail` and, in block context, validated by `check_block_quoted_tail()` in `event_iter/base.rs` (only whitespace and a comment may follow, as for double-quoted scalars)
+- **Implementation:** `try_consume_single_quoted()` in `lexer/quoted.rs` — opening `'` detected, body consumed, closing `'` required; the text after the closing `'` is stored in `pending_multiline_tail` and, in block context, validated by `take_block_quoted_tail()` in `event_iter/base.rs` (only whitespace and a comment may follow, as for double-quoted scalars; the comment is read by `comment_in_suffix()` and queued as an `Event::Comment` after the scalar, see [75] in `bnf-§6.md`)
 - **Tests:** `rlsp-yaml-parser/tests/smoke/quoted_scalars.rs`; `rlsp-yaml-parser/tests/error_reporting.rs` (Group H); `tests/yaml-test-suite/src/87E4.yaml` (Spec Example 7.8. Single Quoted Implicit Keys)
 
 ### [121] nb-single-text(n,c)

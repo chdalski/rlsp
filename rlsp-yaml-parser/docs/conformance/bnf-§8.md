@@ -14,7 +14,7 @@ BNF: `c-b-block-header(t) ::= ( ( c-indentation-indicator c-chomping-indicator(t
 
 - **Verdict:** Strict-conformant
 - **Spec (§8.1.1):** "Block scalars are controlled by a few indicators given in a header preceding the content itself. This header is followed by a non-content line break with an optional comment. This is the only case where a comment must not be followed by additional comment lines."
-- **Implementation:** `parse_block_header()` in `lexer/block.rs` — parses either order of indicators, validates that only optional whitespace + comment follow, and enforces no trailing non-comment content
+- **Implementation:** `parse_block_header()` in `lexer/block.rs` — parses either order of indicators, validates that only optional whitespace + comment follow, and enforces no trailing non-comment content; `keep_header_comment()` in `lexer/block.rs` reads the comment with `comment_in_suffix()` and the state machine queues it as an `Event::Comment` after the scalar's event (a header comment over `MAX_COMMENT_LEN` or with a non-printable character is an error)
 - **Tests:** `tests/yaml-test-suite/src/P2AD.yaml` (Spec Example 8.1. Block Scalar Header); `block.rs` unit tests H-A (header parsing happy path)
 
 ### [163] c-indentation-indicator
@@ -222,7 +222,7 @@ BNF: `s-l+block-indented(n,c) ::= ( s-indent(m) ( ns-l-compact-sequence(n+1+m) |
 
 - **Verdict:** Strict-conformant
 - **Spec (§8.2.1):** "The entry node may be either completely empty, be a nested block node or use a compact in-line notation."
-- **Implementation:** `consume_sequence_dash()` and `handle_sequence_entry()` in `event_iter/block/sequence.rs` — inline compact mapping/sequence dispatched via subsequent `step_in_document()` calls; empty scalar emitted when no inline content and next line is not more indented; an entry holds one node, so `finished_node_indent()` in `event_iter/base.rs` (checked in `step_in_document()`) rejects further indented content after a complete item (`- "q"` followed by `  w`); `check_node_line_position()` does the same for flow, alias and property lines at or below the item's collection (`- "q"` followed by `[x]` or ` &x w`)
+- **Implementation:** `consume_sequence_dash()` and `handle_sequence_entry()` in `event_iter/block/sequence.rs` — a comment after a bare `-` is queued as an `Event::Comment` by `consume_sequence_dash()`; inline compact mapping/sequence dispatched via subsequent `step_in_document()` calls; empty scalar emitted when no inline content and next line is not more indented; an entry holds one node, so `finished_node_indent()` in `event_iter/base.rs` (checked in `step_in_document()`) rejects further indented content after a complete item (`- "q"` followed by `  w`); `check_node_line_position()` does the same for flow, alias and property lines at or below the item's collection (`- "q"` followed by `[x]` or ` &x w`)
 - **Tests:** `tests/yaml-test-suite/src/W42U.yaml`; `rlsp-yaml-parser/tests/error_reporting.rs` (Group H)
 
 ### [186] ns-l-compact-sequence(n)
@@ -267,7 +267,7 @@ BNF: `c-l-block-map-explicit-key(n) ::= c-mapping-key s-l+block-indented(n,BLOCK
 
 - **Verdict:** Strict-conformant
 - **Spec (§8.2.2):** "If the `?` indicator is specified, the optional value node must be specified on a separate line, denoted by the `:` indicator."
-- **Implementation:** `?` followed by whitespace or end-of-line in `event_iter/block/mapping.rs` parsed as explicit key; inline key content prepended as a synthetic line for `s-l+block-indented` handling
+- **Implementation:** `?` followed by whitespace or end-of-line in `event_iter/block/mapping.rs` parsed as explicit key; inline key content prepended as a synthetic line for `s-l+block-indented` handling; a comment after a bare `?` is read by `consume_mapping_entry()` with `comment_in_suffix()` and queued after the key indicator
 - **Tests:** `tests/yaml-test-suite/src/5WE3.yaml`
 
 ### [191] l-block-map-explicit-value(n)
@@ -276,7 +276,7 @@ BNF: `l-block-map-explicit-value(n) ::= s-indent(n) c-mapping-value s-l+block-in
 
 - **Verdict:** Strict-conformant
 - **Spec (§8.2.2):** "If the `?` indicator is specified, the optional value node must be specified on a separate line, denoted by the `:` indicator."
-- **Implementation:** `consume_explicit_value_line()` in `event_iter/block/mapping.rs` — a line that is solely a `:` value indicator advances the mapping from `AfterExplicitKey` to Value phase; inline value content prepended as a synthetic line. While the mapping is in `AfterExplicitKey` phase (explicit key complete, `:` not yet seen), `finished_node_indent()` in `event_iter/base.rs` makes `step_in_document()` reject any line indented past the mapping, since the value cannot start on the key's continuation line, and `check_node_line_position()` and the scalar validity check reject a node line at the mapping's column that is not `:`, `?` or a key (`? "a"` followed by `[x]`)
+- **Implementation:** `consume_explicit_value_line()` in `event_iter/block/mapping.rs` — a line that is solely a `:` value indicator advances the mapping from `AfterExplicitKey` to Value phase and queues the comment after it as an `Event::Comment`; inline value content prepended as a synthetic line. While the mapping is in `AfterExplicitKey` phase (explicit key complete, `:` not yet seen), `finished_node_indent()` in `event_iter/base.rs` makes `step_in_document()` reject any line indented past the mapping, since the value cannot start on the key's continuation line, and `check_node_line_position()` and the scalar validity check reject a node line at the mapping's column that is not `:`, `?` or a key (`? "a"` followed by `[x]`)
 - **Tests:** `tests/yaml-test-suite/src/5WE3.yaml`; `rlsp-yaml-parser/tests/error_reporting.rs` (Group H)
 
 ### [192] ns-l-block-map-implicit-entry(n)
@@ -303,7 +303,7 @@ BNF: `c-l-block-map-implicit-value(n) ::= c-mapping-value ( s-l+block-node(n,BLO
 
 - **Verdict:** Strict-conformant
 - **Spec (§8.2.2):** "In block mappings the value must never be adjacent to the `:`, as this greatly reduces readability and is not required for JSON compatibility."
-- **Implementation:** Value content after `: ` / `:\t` in `event_iter/block/mapping.rs` prepended as a synthetic inline line; absent value content produces empty scalar via `e-node` path; once the value is complete, `finished_node_indent()` in `event_iter/base.rs` (checked in `step_in_document()`) rejects further indented content (`a: "q"` followed by `  [x]`); `check_node_line_position()` rejects a flow, alias or property line that is not a key at the mapping's column or between its levels (`a: "q"` followed by `[x]`)
+- **Implementation:** Value content after `: ` / `:\t` in `event_iter/block/mapping.rs` prepended as a synthetic inline line; a comment instead of value content (`k: # c`) is read by `consume_mapping_entry()` with `comment_in_suffix()` and queued after the key's event; absent value content produces empty scalar via `e-node` path; once the value is complete, `finished_node_indent()` in `event_iter/base.rs` (checked in `step_in_document()`) rejects further indented content (`a: "q"` followed by `  [x]`); `check_node_line_position()` rejects a flow, alias or property line that is not a key at the mapping's column or between its levels (`a: "q"` followed by `[x]`)
 - **Tests:** `tests/yaml-test-suite/src/S3PD.yaml` (Spec Example 8.18. Implicit Block Mapping Entries); `rlsp-yaml-parser/tests/error_reporting.rs` (Group H)
 
 ### [195] ns-l-compact-mapping(n)

@@ -88,6 +88,22 @@ fn consume_leading_comments_slow(stream: &mut EventStream<'_>) -> Result<Vec<Str
     Ok(leading)
 }
 
+/// Drop the Comment events that sit on `line`: the comment on a key's own line
+/// (`k: # c`) and on a block scalar's header line (`| # c`) is not stored yet.
+pub(super) fn drop_comments_on_line(
+    stream: &mut EventStream<'_>,
+    line: u32,
+    line_index: &LineIndex,
+) -> Result<()> {
+    while let Some(Ok((Event::Comment { .. }, span))) = stream.peek() {
+        if line_index.line_column(span.start).0 != line {
+            break;
+        }
+        next_from(stream)?;
+    }
+    Ok(())
+}
+
 /// If the next event is a trailing Comment on the same line as `preceding_end_line`,
 /// consume it and return the text.  Otherwise return `None`.
 ///

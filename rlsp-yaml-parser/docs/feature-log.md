@@ -12,6 +12,33 @@ with existing infrastructure.
 
 ---
 
+### Every Comment Is an Event [completed]
+
+**Description:** `parse_events()` emits an `Event::Comment` for every comment,
+in source order, not only for comments on their own line or after a plain
+scalar. New: a comment after a quoted scalar (`a: "q" # c`), after `k:`, `-`,
+`?` and `:` with no value on the line, after an anchor or tag, on a block
+scalar's header line (`a: | # c`), on the last line of a multi-line plain
+scalar, after a scalar on the `---` line (`--- v # c`), after a directive
+(`%YAML 1.2 # c`, `%TAG ... # c`, reserved directives), and after an orphan
+`...`. Each `Comment` span starts at its `#`.
+Comments are now validated at these positions: a comment over
+`MAX_COMMENT_LEN` (4096 bytes), or one with a character outside c-printable,
+is an error everywhere, also after a plain scalar in a sequence or mapping
+value, after `---` and `...`, and inside a flow collection. Before, some of
+these were accepted unchecked, so a document with such a comment that loaded
+now fails with `InvalidCharacter` or a syntax error at the `#`; libfyaml
+accepts both (see `docs/conformance/design-decisions.md`, [75]).
+**Complexity:** Medium
+**Comment:** A comment that is dropped from the event stream cannot reach the
+tree or the formatter, so this is the first step of keeping every comment.
+`load()` still keeps the comment on a key's line and on a block scalar's
+header line out of the tree. The span of a token, and the position of an
+error, after the closing quote of a multi-line double-quoted scalar is now its
+real offset, in flow and block context (it was short by the closing line's
+indentation).
+**Tier:** 1
+
 ### Comment Line Ends a Plain Scalar [completed]
 
 **Description:** A comment line after a plain scalar is a comment, not part

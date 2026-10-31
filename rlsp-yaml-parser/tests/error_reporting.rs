@@ -15,7 +15,9 @@ use rstest::rstest;
 
 use rlsp_yaml_parser::loader::LoadError;
 use rlsp_yaml_parser::node::Node;
-use rlsp_yaml_parser::{Error, ErrorKind, Event, LoaderBuilder, load, parse_events};
+use rlsp_yaml_parser::{
+    Error, ErrorKind, Event, LoaderBuilder, MAX_COMMENT_LEN, load, parse_events,
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1889,7 +1891,8 @@ fn invalid_trailing_comment_leaves_no_comment_for_the_next_sequence_item() {
             _ => None,
         })
         .collect();
-    assert_eq!(comments, [" ok"]);
+    // The error ends the stream, so no comment follows it.
+    assert!(comments.is_empty(), "{comments:?}");
 }
 
 // A valid trailing comment yields one Comment event with the body after the
@@ -1935,4 +1938,196 @@ fn hash_without_preceding_space_stays_in_the_scalar(#[case] input: &str, #[case]
             .any(|e| matches!(e, Event::Scalar { value: v, .. } if v == value)),
         "{events:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Comment validation at every position a comment can follow: after a quoted
+// scalar, a bare indicator (`k:`, `-`, `?`, `:`), a node property, a block
+// scalar header, the last line of a multi-line plain scalar, `---`, a
+// directive and in a flow collection
+// ---------------------------------------------------------------------------
+
+// A comment holding a character outside c-printable is one error at that
+// character's position, and no Comment event carries the character.
+#[rstest]
+#[case::double_quoted_value("a: \"q\" # {}\n")]
+#[case::single_quoted_value("a: 'q' # {}\n")]
+#[case::quoted_sequence_item("- \"q\" # {}\n")]
+#[case::multi_line_double_quoted("a: \"x\n  y\" # {}\n")]
+#[case::multi_line_single_quoted("a: 'x\n  y' # {}\n")]
+#[case::key_without_value("k: # {}\n")]
+#[case::quoted_key_without_value("\"k\": # {}\n")]
+#[case::bare_dash("- # {}\n  a: 1\n")]
+#[case::bare_dash_before_next_item("- # {}\n- b\n")]
+#[case::bare_question_mark("? # {}\n: v\n")]
+#[case::bare_colon("? k\n: # {}\n  v\n")]
+#[case::anchor("a: &x # {}\n  b: 1\n")]
+#[case::tag("a: !t # {}\n  b: 1\n")]
+#[case::standalone_anchor("&a # {}\nb\n")]
+#[case::literal_header("a: | # {}\n  t\n")]
+#[case::folded_header("a: > # {}\n  t\n")]
+#[case::root_literal_header("--- |+ # {}\n t\n")]
+#[case::multi_line_plain("a:\n  v\n  w # {}\n")]
+#[case::document_start_scalar("--- v # {}\n")]
+#[case::document_start_quoted("--- \"q\" # {}\n")]
+#[case::document_start_tag("--- !t # {}\n v\n")]
+#[case::yaml_directive("%YAML 1.2 # {}\n---\na: 1\n")]
+#[case::tag_directive("%TAG ! tag:x: # {}\n---\na: 1\n")]
+#[case::reserved_directive("%FOO bar # {}\n---\na: 1\n")]
+#[case::flow_line_end("[a, # {}\n b]\n")]
+#[case::flow_after_value("a: [b] # {}\n")]
+#[case::alias_item("- *a # {}\n")]
+#[case::tab_after_colon("a:\t# {}\n")]
+#[case::literal_item("- | # {}\n  t\n")]
+#[case::literal_explicit_key("? | # {}\n  k\n: v\n")]
+#[case::header_with_indent_indicator("a: |2 # {}\n   t\n")]
+#[case::tag_and_anchor("a: !t &x # {}\n  b: 1\n")]
+#[case::explicit_key_property("? &x # {}\n  k\n: v\n")]
+#[case::crlf_line_end("a: \"q\" # {}\r\nb: 1\r\n")]
+#[case::multibyte_before("日本: \"é\" # {}\n")]
+fn invalid_character_in_a_comment_is_one_error_at_its_position(
+    #[case] template: &str,
+    #[values('\0', '\x01', '\x07', '\x7f', '\u{80}', '\u{FFFE}')] bad: char,
+) {
+    let input = template.replace("{}", &bad.to_string());
+    let items: Vec<_> = parse_events(&input).collect();
+    assert_eq!(items.iter().filter(|r| r.is_err()).count(), 1, "{items:?}");
+    assert!(items.last().is_some_and(Result::is_err), "{items:?}");
+    assert!(
+        !items
+            .iter()
+            .any(|r| matches!(r, Ok((Event::Comment { text }, _)) if text.contains(bad))),
+        "{items:?}"
+    );
+
+    let err = first_error(&input).unwrap();
+    let byte_offset = input.find(bad).unwrap();
+    let before = &input[..byte_offset];
+    let line_start = before.rfind('\n').map_or(0, |i| i + 1);
+    assert_eq!(err.kind, ErrorKind::InvalidCharacter, "input: {input:?}");
+    assert_eq!(
+        (err.pos.line, err.pos.column, err.pos.byte_offset),
+        (
+            1 + before.matches('\n').count(),
+            input[line_start..byte_offset].chars().count(),
+            byte_offset
+        ),
+        "input: {input:?}"
+    );
+}
+
+// A comment over MAX_COMMENT_LEN bytes is an error after a value as it is on
+// its own line; one at the limit is a comment.
+#[rstest]
+#[case::double_quoted_value("a: \"q\" #{}\n")]
+#[case::single_quoted_value("a: 'q' #{}\n")]
+#[case::multi_line_double_quoted("a: \"x\n  y\" #{}\n")]
+#[case::key_without_value("k: #{}\n")]
+#[case::bare_dash("- #{}\n  a: 1\n")]
+#[case::bare_question_mark("? #{}\n: v\n")]
+#[case::bare_colon("? k\n: #{}\n  v\n")]
+#[case::anchor("a: &x #{}\n  b: 1\n")]
+#[case::tag("a: !t #{}\n  b: 1\n")]
+#[case::literal_header("a: | #{}\n  t\n")]
+#[case::multi_line_plain("a:\n  v\n  w #{}\n")]
+#[case::plain_value("a: v #{}\n")]
+#[case::sequence_item("- v #{}\n")]
+#[case::document_start_scalar("--- v #{}\n")]
+#[case::document_start_marker("--- #{}\nv\n")]
+#[case::document_end_marker("a: 1\n... #{}\n")]
+#[case::yaml_directive("%YAML 1.2 #{}\n---\na: 1\n")]
+#[case::tag_directive("%TAG ! tag:x: #{}\n---\na: 1\n")]
+#[case::reserved_directive("%FOO bar #{}\n---\na: 1\n")]
+#[case::flow_line_end("[a, #{}\n b]\n")]
+#[case::standalone_line("a: 1\n#{}\n")]
+#[case::tab_after_colon("a:\t#{}\n")]
+#[case::literal_item("- | #{}\n  t\n")]
+#[case::header_with_indent_indicator("a: |2 #{}\n   t\n")]
+#[case::tag_and_anchor("a: !t &x #{}\n  b: 1\n")]
+#[case::flow_after_value("a: [b] #{}\n")]
+#[case::alias_item("- *a #{}\n")]
+fn comment_over_the_length_limit_is_an_error_at_every_position(#[case] template: &str) {
+    let at_limit = template.replace("{}", &"x".repeat(MAX_COMMENT_LEN));
+    assert!(
+        parse_events(&at_limit).all(|r| r.is_ok()),
+        "a comment of MAX_COMMENT_LEN bytes: {template:?}"
+    );
+
+    let over = template.replace("{}", &"x".repeat(MAX_COMMENT_LEN + 1));
+    let items: Vec<_> = parse_events(&over).collect();
+    assert_eq!(
+        items.iter().filter(|r| r.is_err()).count(),
+        1,
+        "{template:?}"
+    );
+    assert!(items.last().is_some_and(Result::is_err), "{items:?}");
+    assert!(
+        parse_events(&over)
+            .skip_while(Result::is_ok)
+            .nth(1)
+            .is_none()
+    );
+    let err = first_error(&over).unwrap();
+    assert_eq!(err.kind, ErrorKind::Syntax, "{template:?}");
+    assert!(
+        err.message
+            .contains("comment exceeds maximum allowed length"),
+        "{}",
+        err.message
+    );
+    // The error points at the `#`.
+    assert_eq!(err.pos.byte_offset, over.find('#').unwrap(), "{template:?}");
+}
+
+// An error in a comment leaves no comment behind for the next node.
+#[rstest]
+#[case::quoted_value("- \"a\" # \x01\n- \"b\" # ok\n")]
+#[case::key_without_value("a: # \x01\nb: # ok\n")]
+#[case::literal_header("a: | # \x01\n  t\nb: | # ok\n  u\n")]
+fn invalid_comment_leaves_no_comment_for_the_next_node(#[case] input: &str) {
+    let items: Vec<_> = parse_events(input).collect();
+    assert_eq!(items.iter().filter(|r| r.is_err()).count(), 1, "{items:?}");
+    assert!(
+        !items
+            .iter()
+            .any(|r| matches!(r, Ok((Event::Comment { text }, _)) if text.contains("ok"))),
+        "{items:?}"
+    );
+}
+
+// The error reaches `load()` as a parse error of the same kind, with no result.
+#[rstest]
+#[case::quoted_value("a: \"q\" # \x01\n")]
+#[case::empty_value("k: # \x01\n")]
+#[case::bare_dash("- # \x01\n  a: 1\n")]
+#[case::header("a: | # \x01\n  t\n")]
+#[case::directive("%YAML 1.2 # \x01\n---\na: 1\n")]
+fn invalid_comment_makes_load_fail_with_invalid_character(#[case] input: &str) {
+    match load(input) {
+        Err(LoadError::Parse { kind, .. }) => assert_eq!(kind, ErrorKind::InvalidCharacter),
+        other => unreachable!("expected a parse error, got {other:?}"),
+    }
+}
+
+// With a collection open before the line, the error is still the last item.
+#[rstest]
+#[case::document_start("--- # {}\n")]
+#[case::document_start_scalar("--- v # {}\n")]
+#[case::document_end("... # {}\n")]
+#[case::sequence_item("- v # {}\n")]
+#[case::quoted_sequence_item("- \"v\" # {}\n")]
+#[case::plain_value("b: v # {}\n")]
+fn comment_error_after_an_open_collection_ends_the_stream(
+    #[case] line: &str,
+    #[values("a: 1\n", "x:\n  - 1\n", "%YAML 1.2\n---\n", "a: &q\n", "- p\n")] prefix: &str,
+    #[values("\x01", "\0")] bad: &str,
+) {
+    let input = format!("{prefix}{}", line.replace("{}", bad));
+    let items: Vec<_> = parse_events(&input).collect();
+    assert!(items.iter().any(Result::is_err), "{input:?}: {items:?}");
+    assert!(
+        items.last().is_some_and(Result::is_err),
+        "{input:?}: {items:?}"
+    );
+    assert_eq!(items.iter().filter(|r| r.is_err()).count(), 1, "{input:?}");
 }

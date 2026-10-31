@@ -56,8 +56,10 @@ impl<'input> EventIter<'input> {
     /// Consume the leading `-` indicator from the current line and (if
     /// present) prepend a synthetic line for the inline content.
     ///
-    /// Returns `true` if inline content was found and prepended.
-    pub(crate) fn consume_sequence_dash(&mut self, dash_indent: usize) -> bool {
+    /// Returns `true` if inline content was found and prepended.  A comment
+    /// after the dash is queued as an `Event::Comment`; it is an error when it
+    /// is too long or holds a non-printable character.
+    pub(crate) fn consume_sequence_dash(&mut self, dash_indent: usize) -> Result<bool, Error> {
         // SAFETY: caller verified via peek_sequence_entry — the line exists.
         let Some(line) = self.lexer.peek_next_line() else {
             unreachable!("consume_sequence_dash called without a pending line")
@@ -75,31 +77,33 @@ impl<'input> EventIter<'input> {
         // content.  The sequence item is empty (null) — treat it as no inline.
         let had_inline = !inline.is_empty() && !inline.starts_with('#');
 
+        let leading_spaces = content.len() - after_spaces.len();
+        let spaces_after_dash = rest_of_line.len() - inline.len();
+        let offset_from_dash = 1 + spaces_after_dash;
+        let total_offset = leading_spaces + offset_from_dash;
+        let inline_pos = Pos {
+            byte_offset: line.pos.byte_offset + total_offset,
+            line: line.pos.line,
+            column: line.pos.column + total_offset,
+        };
+        let inline_col = dash_indent + offset_from_dash;
+        let break_type = line.break_type;
+
+        self.lexer.consume_line();
         if had_inline {
-            let leading_spaces = content.len() - after_spaces.len();
-            let spaces_after_dash = rest_of_line.len() - inline.len();
-            let offset_from_dash = 1 + spaces_after_dash;
-            let total_offset = leading_spaces + offset_from_dash;
-            let inline_col = dash_indent + offset_from_dash;
-            let inline_pos = Pos {
-                byte_offset: line.pos.byte_offset + total_offset,
-                line: line.pos.line,
-                column: line.pos.column + total_offset,
-            };
             let synthetic = Line {
                 content: inline,
                 offset: inline_pos.byte_offset,
                 indent: inline_col,
-                break_type: line.break_type,
+                break_type,
                 pos: inline_pos,
             };
-            self.lexer.consume_line();
             self.lexer.prepend_inline_line(synthetic);
         } else {
-            self.lexer.consume_line();
+            self.queue_suffix_comment(inline, inline_pos)?;
         }
 
-        had_inline
+        Ok(had_inline)
     }
 
     /// Handle a block-sequence dash entry (`-`).
@@ -285,7 +289,13 @@ impl<'input> EventIter<'input> {
                 }
             }
         }
-        let had_inline = self.consume_sequence_dash(dash_indent);
+        let had_inline = match self.consume_sequence_dash(dash_indent) {
+            Ok(had_inline) => had_inline,
+            Err(e) => {
+                self.state = IterState::Done;
+                return StepResult::Yield(Err(e));
+            }
+        };
         if had_inline {
             // Fast path: detect "simple plain scalar after `-`" and emit the
             // Scalar event directly, bypassing the synthetic-line prepend and

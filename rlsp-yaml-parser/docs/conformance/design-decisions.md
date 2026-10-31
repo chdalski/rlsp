@@ -139,28 +139,37 @@ sign stripping.
 
 ## Deviations from libfyaml
 
-### [75] c-nb-comment-text — non-printable characters in comments
+### [75] c-nb-comment-text — non-printable characters and length in comments
 
 **Productions:** `c-nb-comment-text` ([75]: `"#" nb-char*`), `nb-char`, `c-printable` ([1]).
 
 **libfyaml behavior** (`fy-tool --testsuite`, 0.9.6): accepts C0 controls, DEL, C1 controls
-and U+FFFE in a comment body at every position (`# \x01`, `a: v # \x01`, `- v # \x01`,
-`--- # \x01`, `... # \x01`). It rejects NUL, at the stream level,
-before it reaches the scanner.
+and U+FFFE in a comment body at every position (`# \x01`, `a: v # \x01`, `a: "q" # \x01`,
+`k: # \x01`, `- # \x01`, `a: | # \x01`, `--- # \x01`, `... # \x01`, `%YAML 1.2 # \x01`,
+`[a, # \x01`), and accepts a comment of any length (5000 bytes). It rejects NUL, at the
+stream level, before it reaches the scanner.
 
 **Parser behavior:** rejects every character outside `c-printable` in a comment body at
-every position that reads a comment, NUL included (`InvalidCharacter`). The spec allows
-only `nb-char` in a comment, and `nb-char` is `c-printable` minus the line breaks and the
-byte order mark, so libfyaml is the wrong side. The same rule already applied to a
-comment on its own line and after a plain scalar in a mapping value; the sequence-entry
-fast path and the comments after `---` and `...` now follow it.
+every position that reads a comment, NUL included (`InvalidCharacter`), and rejects a
+comment body longer than `MAX_COMMENT_LEN` bytes (a syntax error at the `#`) at every
+position. The spec allows only `nb-char` in a comment, and `nb-char` is `c-printable`
+minus the line breaks and the byte order mark, so libfyaml is the wrong side on the
+character set. The length limit is not in the spec; it is the parser's guard against
+unbounded input, which the comment on its own line and the comment after a plain scalar in
+a mapping value already had in part. A comment that the formatter moves to its own line
+must still parse, so one rule holds for all positions: after a node or indicator (a quoted
+scalar, `k:`, `-`, `?`, `:`, an anchor or tag, a block scalar header, the last line of a
+multi-line plain scalar, a scalar on the `---` line, a flow collection line), after
+`---` and `...`, and after a directive.
 
 **libfyaml issue tracker** (<https://github.com/pantoniou/libfyaml/issues>, searched for
 "non-printable", "c-printable", "control character", and "printable comment"): no issue
 about non-printable characters in comments. The one hit for "non-printable" is about
 anchor names.
 
-**User decision (2026-10-30):** keep as-is. The parser stays strict per [75]; libfyaml differs.
+**User decision (2026-10-30):** keep as-is. The parser stays strict per [75]; libfyaml
+differs. The comment plan (`2026-10-30-formatter-keeps-every-comment`) extended the same
+rule and one length limit to every position that reads a comment.
 
 **Enforcement site:** `Lexer::comment_in_suffix()` and `Lexer::try_consume_comment()` in
 `src/lexer/comment.rs`.

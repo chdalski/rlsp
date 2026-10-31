@@ -15,6 +15,7 @@
     reason = "test code"
 )]
 
+pub mod comment_events;
 pub mod loader;
 pub mod plain_scalar_comments;
 pub mod stream;

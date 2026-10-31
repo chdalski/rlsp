@@ -445,7 +445,13 @@ impl<'input> Lexer<'input> {
             self.current_pos = pos_after_line(&consumed);
 
             let line_start_pos = consumed.pos;
-            match scan_double_quoted_line(trimmed, line_start_pos, self.input_all_printable)? {
+            // `trimmed` starts after the line's leading whitespace, and so do
+            // the positions `scan_double_quoted_line` derives from its start.
+            let trimmed_start_pos = crate::pos::advance_within_line(
+                line_start_pos,
+                &consumed.content[..consumed.content.len() - trimmed.len()],
+            );
+            match scan_double_quoted_line(trimmed, trimmed_start_pos, self.input_all_printable)? {
                 DoubleQuotedLine::Closed {
                     value,
                     close_pos,

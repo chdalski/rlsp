@@ -339,20 +339,18 @@ impl<'input> EventIter<'input> {
                     pos_in_line += 1;
                 } else if ch == '#' && prev_was_ws {
                     // Emit a Comment event for this `# comment` to end of line.
-                    // No MAX_COMMENT_LEN check here — this comment is bounded by the
-                    // physical line length (itself bounded by total input size), the
-                    // same reason drain_trailing_comment does not apply the limit.
                     let hash_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
-                    // Comment text: everything after `#` (byte at pos_in_line is `#`,
-                    // ASCII 1 byte, so text starts at pos_in_line + 1).
-                    let text_start = pos_in_line + 1;
-                    // SAFETY: text_start <= cur_content.len() because we found
-                    // `#` at pos_in_line which is < cur_content.len().
-                    let comment_text: &'input str = cur_content.get(text_start..).unwrap_or("");
-                    let comment_end =
-                        crate::pos::advance_within_line(hash_pos.advance('#'), comment_text);
-                    let comment_span = Span::from_pos(hash_pos, comment_end);
-                    events.push((Event::Comment { text: comment_text }, comment_span));
+                    match self
+                        .lexer
+                        .comment_in_suffix(&cur_content[pos_in_line..], hash_pos)
+                    {
+                        Ok(Some((text, span))) => events.push((Event::Comment { text }, span)),
+                        Ok(None) => {}
+                        Err(e) => {
+                            self.state = IterState::Done;
+                            return StepResult::Yield(Err(e));
+                        }
+                    }
                     pos_in_line = cur_content.len();
                 } else {
                     break;

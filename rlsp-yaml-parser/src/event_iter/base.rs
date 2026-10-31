@@ -354,9 +354,7 @@ impl<'input> EventIter<'input> {
                 else {
                     return Ok(None);
                 };
-                if let Some((tail, tail_pos)) = self.lexer.pending_multiline_tail.take() {
-                    check_block_quoted_tail(tail, tail_pos)?;
-                }
+                self.take_block_quoted_tail()?;
                 let meta = self.take_node_meta(InlineProperties::Taken);
                 Ok(Some((
                     Event::Scalar {
@@ -381,9 +379,7 @@ impl<'input> EventIter<'input> {
                 else {
                     return Ok(None);
                 };
-                if let Some((tail, tail_pos)) = self.lexer.pending_multiline_tail.take() {
-                    check_block_quoted_tail(tail, tail_pos)?;
-                }
+                self.take_block_quoted_tail()?;
                 let meta = self.take_node_meta(InlineProperties::Taken);
                 Ok(Some((
                     Event::Scalar {
@@ -421,19 +417,63 @@ impl<'input> EventIter<'input> {
 
     /// Drain any pending trailing comment from the lexer into the event queue.
     ///
-    /// Called after emitting a scalar event.  If a trailing comment was
-    /// detected on the scalar's line (e.g. `foo # comment`), it is pushed to
-    /// `self.queue` as `Event::Comment`.
-    ///
-    /// Trailing comments are bounded by the physical line length, which is
-    /// itself bounded by the total input size.  No separate length limit is
-    /// applied here; the security constraint (`MAX_COMMENT_LEN`) applies to
-    /// standalone comment lines (scanned in [`Self::skip_and_collect_comments_in_doc`]
-    /// and [`Self::skip_and_collect_comments_between_docs`]).
+    /// Called after emitting the node an end-of-line comment belongs to
+    /// (e.g. `foo # comment`): it pushes the comment to `self.queue` as
+    /// `Event::Comment`.  The lexer validated the comment and applied
+    /// `MAX_COMMENT_LEN` when it stored it, as it does for standalone comment
+    /// lines.
     pub(crate) fn drain_trailing_comment(&mut self) {
         if let Some((text, span)) = self.lexer.trailing_comment.take() {
             self.queue.push_back((Event::Comment { text }, span));
         }
+    }
+
+    /// Queue the comment, if any, in the rest of a line that follows a node
+    /// or an indicator whose node is not on this line (`k: # c`, `- # c`,
+    /// `&a # c`).
+    ///
+    /// `suffix` is the text after the node or indicator and `suffix_start` is
+    /// the position of its first character.  Returns the error for a comment
+    /// that is too long or holds a non-printable character.
+    pub(crate) fn queue_suffix_comment(
+        &mut self,
+        suffix: &'input str,
+        suffix_start: Pos,
+    ) -> Result<(), Error> {
+        if let Some((text, span)) = self.lexer.comment_in_suffix(suffix, suffix_start)? {
+            self.queue.push_back((Event::Comment { text }, span));
+        }
+        Ok(())
+    }
+
+    /// Check the content after the closing quote of a quoted scalar in block
+    /// context and keep its comment for [`Self::drain_trailing_comment`].
+    ///
+    /// The only valid trailing content is optional whitespace followed by an
+    /// optional comment, with mandatory whitespace before the `#`.
+    fn take_block_quoted_tail(&mut self) -> Result<(), Error> {
+        let Some((tail, tail_pos)) = self.lexer.pending_multiline_tail.take() else {
+            return Ok(());
+        };
+        let first_non_ws = tail.trim_start_matches([' ', '\t']);
+        if first_non_ws.is_empty() {
+            return Ok(());
+        }
+        if !first_non_ws.starts_with('#') {
+            return Err(Error::syntax(
+                tail_pos,
+                "unexpected content after quoted scalar".into(),
+            ));
+        }
+        if first_non_ws.len() == tail.len() {
+            // `#` immediately after the closing quote is not a comment.
+            return Err(Error::syntax(
+                tail_pos,
+                "comment requires at least one space before '#'".into(),
+            ));
+        }
+        self.lexer.trailing_comment = self.lexer.comment_in_suffix(tail, tail_pos)?;
+        Ok(())
     }
 
     /// Returns the indent above which a line can no longer belong to the
@@ -496,33 +536,6 @@ impl<'input> EventIter<'input> {
     }
 }
 
-/// Check the content after the closing quote of a quoted scalar in block
-/// context.
-///
-/// The only valid trailing content is optional whitespace followed by an
-/// optional comment, with mandatory whitespace before the `#`.  A comment is
-/// not emitted here; `drain_trailing_comment` picks it up in the normal flow.
-fn check_block_quoted_tail(tail: &str, tail_pos: Pos) -> Result<(), Error> {
-    let first_non_ws = tail.trim_start_matches([' ', '\t']);
-    if first_non_ws.is_empty() {
-        return Ok(());
-    }
-    if !first_non_ws.starts_with('#') {
-        return Err(Error::syntax(
-            tail_pos,
-            "unexpected content after quoted scalar".into(),
-        ));
-    }
-    if first_non_ws.len() == tail.len() {
-        // `#` immediately after the closing quote is not a comment.
-        return Err(Error::syntax(
-            tail_pos,
-            "comment requires at least one space before '#'".into(),
-        ));
-    }
-    Ok(())
-}
-
 impl<'input> Iterator for EventIter<'input> {
     type Item = Result<(Event<'input>, Span), Error>;
 
@@ -546,7 +559,15 @@ impl<'input> Iterator for EventIter<'input> {
 
             match step {
                 StepResult::Continue => {}
-                StepResult::Yield(result) => return Some(result),
+                StepResult::Yield(result) => {
+                    // An error ends the stream: no event queued before it
+                    // follows it.
+                    if result.is_err() {
+                        self.queue.clear();
+                        self.state = IterState::Done;
+                    }
+                    return Some(result);
+                }
             }
         }
     }

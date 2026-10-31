@@ -684,6 +684,15 @@ impl<'input> EventIter<'input> {
                                                 .into(),
                                         )));
                                     }
+                                    let comment_pos = Pos {
+                                        byte_offset: inline_offset,
+                                        line: line_pos.line,
+                                        column: inline_col,
+                                    };
+                                    if let Err(e) = self.queue_suffix_comment(inline, comment_pos) {
+                                        self.state = IterState::Done;
+                                        return StepResult::Yield(Err(e));
+                                    }
                                     self.pending_tag =
                                         Some(PendingTag::Standalone(resolved_tag, tag_span));
                                     // Displacement promotion: if an inline anchor is already
@@ -917,6 +926,15 @@ impl<'input> EventIter<'input> {
                                             "node property is not indented enough for this context"
                                                 .into(),
                                         )));
+                                    }
+                                    let comment_pos = Pos {
+                                        byte_offset: inline_offset,
+                                        line: line_pos.line,
+                                        column: inline_col,
+                                    };
+                                    if let Err(e) = self.queue_suffix_comment(inline, comment_pos) {
+                                        self.state = IterState::Done;
+                                        return StepResult::Yield(Err(e));
                                     }
                                     self.pending_anchor =
                                         Some(PendingAnchor::Standalone(name, anchor_span));

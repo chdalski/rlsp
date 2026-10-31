@@ -42,12 +42,16 @@ pub struct Lexer<'input> {
     /// when the marker line has trailing content; drained by
     /// [`Self::try_consume_plain_scalar`] on the next call.
     pub(super) inline_scalar: Option<(Cow<'input, str>, Span)>,
-    /// Trailing comment found on the same line as a plain scalar.
+    /// The comment after the inline scalar on its marker line (`--- v # c`).
+    /// Moves to [`Self::trailing_comment`] when the scalar is drained, so the
+    /// comment follows the scalar's event and not the marker's.
+    pub(super) inline_scalar_comment: Option<(&'input str, Span)>,
+    /// Comment found on the line of the node or indicator just consumed.
     ///
-    /// Populated by [`Self::try_consume_plain_scalar`] and by the mapping/
-    /// sequence entry consumers when a `# comment` follows the scalar content
-    /// on the same line.  Drained by the state machine after emitting the
-    /// scalar event.
+    /// Populated by [`Self::try_consume_plain_scalar`] (first and last line),
+    /// the quoted-scalar tail check, the block scalar header, the mapping key
+    /// consumer (`k: # c`, `? # c`) and the sequence fast path.  Drained by the
+    /// state machine after emitting the event the comment belongs to.
     pub trailing_comment: Option<(&'input str, Span)>,
     /// Content that follows the closing quote of a multiline double- or
     /// single-quoted scalar (on the same line as the closing quote).
@@ -92,6 +96,7 @@ impl<'input> Lexer<'input> {
             buf: LineBuffer::new(input),
             current_pos: Pos::ORIGIN,
             inline_scalar: None,
+            inline_scalar_comment: None,
             trailing_comment: None,
             pending_multiline_tail: None,
             plain_scalar_suffix_error: None,
@@ -382,10 +387,16 @@ impl<'input> Lexer<'input> {
             ));
         } else {
             let inline_end = crate::pos::advance_within_line(inline_start, scanned);
-            self.inline_scalar = Some((
-                Cow::Borrowed(scanned),
-                Span::from_pos(inline_start, inline_end),
-            ));
+            match self.comment_in_suffix(&inline[scanned.len()..], inline_end) {
+                Ok(comment) => {
+                    self.inline_scalar_comment = comment;
+                    self.inline_scalar = Some((
+                        Cow::Borrowed(scanned),
+                        Span::from_pos(inline_start, inline_end),
+                    ));
+                }
+                Err(e) => self.marker_inline_error = Some(e),
+            }
         }
     }
 
@@ -461,6 +472,7 @@ impl<'input> Lexer<'input> {
     /// Discard the pending inline scalar without emitting it.
     pub fn drain_inline_scalar(&mut self) {
         self.inline_scalar = None;
+        self.inline_scalar_comment = None;
     }
 
     /// Inject an inline scalar for testing — simulates the state left by

@@ -455,17 +455,21 @@ fn standalone_comment_over_limit_returns_error() {
     );
 }
 
-// F-3: Trailing inline comment has no separate length cap (bounded by
-//      line length); it is accepted even when body exceeds MAX_COMMENT_LEN.
-#[test]
-fn trailing_comment_has_no_separate_length_limit() {
-    // Build a line where the trailing comment body is MAX_COMMENT_LEN + 1,
-    // but since it's trailing (not standalone), no error is expected.
-    let body = "x".repeat(MAX_COMMENT_LEN + 1);
-    let input = format!("scalar # {body}\n");
-    let results: Vec<_> = parse_events(&input).collect();
-    let has_error = results.iter().any(Result::is_err);
-    assert!(!has_error, "trailing comment should not be length-limited");
+// F-3: A trailing comment over MAX_COMMENT_LEN bytes is an error, as a
+//      standalone comment is; one at the limit is accepted.
+#[rstest]
+#[case::plain_scalar("scalar #{}\n")]
+#[case::quoted_scalar("a: \"q\" #{}\n")]
+#[case::empty_value("k: #{}\n")]
+fn trailing_comment_over_limit_returns_error(#[case] template: &str) {
+    let at_limit = template.replace("{}", &"x".repeat(MAX_COMMENT_LEN));
+    assert!(parse_events(&at_limit).all(|r| r.is_ok()), "at the limit");
+
+    let over_limit = template.replace("{}", &"x".repeat(MAX_COMMENT_LEN + 1));
+    assert!(
+        parse_events(&over_limit).any(|r| r.is_err()),
+        "expected an error for a trailing comment over MAX_COMMENT_LEN"
+    );
 }
 
 // -----------------------------------------------------------------------
@@ -977,4 +981,324 @@ fn indented_comment_line_over_limit_after_plain_scalar_returns_error() {
 fn indented_comment_line_at_limit_after_plain_scalar_is_accepted() {
     let body = "x".repeat(MAX_COMMENT_LEN);
     assert!(!has_error(&format!("a: v\n  #{body}\nb: 1\n")));
+}
+
+// -----------------------------------------------------------------------
+// Group H — A comment is an event at every position it can follow
+// (YAML 1.2.2 [75] c-nb-comment-text, [77] s-b-comment, [79] s-l-comments)
+// -----------------------------------------------------------------------
+
+/// The events of `input` as short strings, in stream order: `+MAP`/`-MAP`,
+/// `+SEQ`/`-SEQ`, `+DOC`/`-DOC` (with `---`/`...` when explicit), `=value`
+/// for a scalar, `*name` for an alias and `#text` for a comment.
+fn event_shape(input: &str) -> Vec<String> {
+    event_variants(input)
+        .into_iter()
+        .filter_map(|event| match event {
+            Event::StreamStart | Event::StreamEnd => None,
+            Event::DocumentStart { explicit, .. } => {
+                Some(format!("+DOC{}", if explicit { " ---" } else { "" }))
+            }
+            Event::DocumentEnd { explicit } => {
+                Some(format!("-DOC{}", if explicit { " ..." } else { "" }))
+            }
+            Event::MappingStart { .. } => Some("+MAP".to_owned()),
+            Event::MappingEnd => Some("-MAP".to_owned()),
+            Event::SequenceStart { .. } => Some("+SEQ".to_owned()),
+            Event::SequenceEnd => Some("-SEQ".to_owned()),
+            Event::Scalar { value, .. } => Some(format!("={value}")),
+            Event::Alias { name } => Some(format!("*{name}")),
+            Event::Comment { text } => Some(format!("#{text}")),
+        })
+        .collect()
+}
+
+#[rstest]
+#[case::double_quoted_value("a: \"q\" # c\n", &["+DOC", "+MAP", "=a", "=q", "# c", "-MAP", "-DOC"])]
+#[case::single_quoted_value("a: 'q' # c\n", &["+DOC", "+MAP", "=a", "=q", "# c", "-MAP", "-DOC"])]
+#[case::quoted_sequence_item("- \"q\" # c\n", &["+DOC", "+SEQ", "=q", "# c", "-SEQ", "-DOC"])]
+#[case::key_without_value("k: # c\n", &["+DOC", "+MAP", "=k", "# c", "=", "-MAP", "-DOC"])]
+#[case::bare_dash_before_mapping(
+    "- # c\n  a: 1\n",
+    &["+DOC", "+SEQ", "# c", "+MAP", "=a", "=1", "-MAP", "-SEQ", "-DOC"]
+)]
+#[case::bare_question_mark("? # c\n: v\n", &["+DOC", "+MAP", "# c", "=", "=v", "-MAP", "-DOC"])]
+#[case::bare_colon_of_explicit_key(
+    "? k\n: # c\n  v\n",
+    &["+DOC", "+MAP", "=k", "# c", "=v", "-MAP", "-DOC"]
+)]
+#[case::anchor_before_mapping(
+    "a: &x # c\n  b: 1\n",
+    &["+DOC", "+MAP", "=a", "# c", "+MAP", "=b", "=1", "-MAP", "-MAP", "-DOC"]
+)]
+#[case::tag_before_mapping(
+    "a: !t # c\n  b: 1\n",
+    &["+DOC", "+MAP", "=a", "# c", "+MAP", "=b", "=1", "-MAP", "-MAP", "-DOC"]
+)]
+#[case::literal_header("a: | # c\n  t\n", &["+DOC", "+MAP", "=a", "=t\n", "# c", "-MAP", "-DOC"])]
+#[case::folded_header("a: > # c\n  t\n", &["+DOC", "+MAP", "=a", "=t\n", "# c", "-MAP", "-DOC"])]
+#[case::last_line_of_multi_line_plain_scalar(
+    "a:\n  v\n  w # c\n",
+    &["+DOC", "+MAP", "=a", "=v w", "# c", "-MAP", "-DOC"]
+)]
+#[case::scalar_after_document_start("--- v # c\n", &["+DOC ---", "=v", "# c", "-DOC"])]
+#[case::yaml_directive(
+    "%YAML 1.2 # c\n---\na: 1\n",
+    &["# c", "+DOC ---", "+MAP", "=a", "=1", "-MAP", "-DOC"]
+)]
+#[case::tag_directive(
+    "%TAG ! tag:x: # c\n---\na: 1\n",
+    &["# c", "+DOC ---", "+MAP", "=a", "=1", "-MAP", "-DOC"]
+)]
+#[case::reserved_directive(
+    "%FOO bar # c\n---\na: 1\n",
+    &["# c", "+DOC ---", "+MAP", "=a", "=1", "-MAP", "-DOC"]
+)]
+#[case::document_end_marker(
+    "a: 1\n... # c\n",
+    &["+DOC", "+MAP", "=a", "=1", "-MAP", "-DOC ...", "# c"]
+)]
+#[case::orphan_document_end_marker("... # c\n", &["# c"])]
+#[case::orphan_document_end_marker_between_documents(
+    "a: 1\n...\n... # c\n--- # d\nb\n",
+    &["+DOC", "+MAP", "=a", "=1", "-MAP", "-DOC ...", "# c", "+DOC ---", "# d", "=b", "-DOC"]
+)]
+#[case::quoted_value_of_quoted_key("\"k\": \"v\" # c\n", &["+DOC", "+MAP", "=k", "=v", "# c", "-MAP", "-DOC"])]
+#[case::quoted_scalar_after_document_start("--- \"q\" # c\n", &["+DOC ---", "=q", "# c", "-DOC"])]
+#[case::block_scalar_after_document_start("--- | # c\n t\n", &["+DOC ---", "=t\n", "# c", "-DOC"])]
+#[case::tag_after_document_start(
+    "--- !t # c\n v\n",
+    &["+DOC ---", "# c", "=v", "-DOC"]
+)]
+#[case::property_line_before_scalar("&a # c\nb\n", &["+DOC", "# c", "=b", "-DOC"])]
+#[case::alias_item("- *a # c\n", &["+DOC", "+SEQ", "*a", "# c", "-SEQ", "-DOC"])]
+#[case::nested_bare_dashes(
+    "- - # c\n    x\n",
+    &["+DOC", "+SEQ", "+SEQ", "# c", "=x", "-SEQ", "-SEQ", "-DOC"]
+)]
+#[case::property_of_explicit_key("? !t # c\n: v\n", &["+DOC", "+MAP", "# c", "=", "=v", "-MAP", "-DOC"])]
+#[case::empty_comment_body("k: #\n", &["+DOC", "+MAP", "=k", "#", "=", "-MAP", "-DOC"])]
+#[case::two_comments_in_source_order(
+    "a: \"q\" # c\nb: # d\n  v # e\n",
+    &["+DOC", "+MAP", "=a", "=q", "# c", "=b", "# d", "=v", "# e", "-MAP", "-DOC"]
+)]
+#[case::flow_sequence_inside_block_value(
+    "a: [b, # c\n  d] # e\n",
+    &["+DOC", "+MAP", "=a", "+SEQ", "=b", "# c", "=d", "-SEQ", "# e", "-MAP", "-DOC"]
+)]
+fn comment_after_a_node_or_indicator_is_one_event_in_source_order(
+    #[case] input: &str,
+    #[case] expected: &[&str],
+) {
+    assert_eq!(event_shape(input), expected, "input: {input:?}");
+}
+
+// The span of each comment event starts at its `#` and ends after its text,
+// whichever position the comment follows (byte offsets).
+#[rstest]
+#[case::double_quoted_value("a: \"q\" # c\n")]
+#[case::single_quoted_value("a: 'q' # c\n")]
+#[case::quoted_sequence_item("- \"q\" # c\n")]
+#[case::key_without_value("k: # c\n")]
+#[case::bare_dash("- # c\n  a: 1\n")]
+#[case::bare_question_mark("? # c\n: v\n")]
+#[case::bare_colon("? k\n: # c\n  v\n")]
+#[case::anchor("a: &x # c\n  b: 1\n")]
+#[case::tag("a: !t # c\n  b: 1\n")]
+#[case::literal_header("a: | # c\n  t\n")]
+#[case::folded_header("a: > # c\n  t\n")]
+#[case::multi_line_plain("a:\n  v\n  w # c\n")]
+#[case::document_start("--- v # c\n")]
+#[case::yaml_directive("%YAML 1.2 # c\n---\na: 1\n")]
+#[case::tag_directive("%TAG ! tag:x: # c\n---\na: 1\n")]
+#[case::document_end("a: 1\n... # c\n")]
+#[case::orphan_document_end("... # c\n")]
+#[case::multi_line_double_quoted("a: \"x\n  y\" # c\nb: 1\n")]
+#[case::multi_line_double_quoted_multibyte("a: \"x\n  é\" # c\nb: 1\n")]
+#[case::multi_line_single_quoted("a: 'x\n  y' # c\nb: 1\n")]
+#[case::multibyte_scalar_before("a: \"é日\" # c\n")]
+#[case::tab_before_hash("a: \"q\"\t# c\n")]
+#[case::crlf("a: \"q\" # c\r\nb: 1\r\n")]
+#[case::empty_value_at_eof("k: # c")]
+#[case::document_start_at_eof("--- v # c")]
+#[case::header_at_eof("a: | # c")]
+#[case::empty_value_crlf("k: # c\r\nb: 1\r\n")]
+#[case::header_crlf("a: | # c\r\n  t\r\n")]
+#[case::directive_crlf("%YAML 1.2 # c\r\n---\r\n")]
+#[case::tab_after_dash("-\t# c\n  a: 1\n")]
+fn comment_event_span_covers_exactly_hash_and_text(#[case] input: &str) {
+    let comments: Vec<_> = parse_to_vec(input)
+        .into_iter()
+        .filter_map(|r| match r {
+            Ok((Event::Comment { text }, span)) => Some((text, span)),
+            _ => None,
+        })
+        .collect();
+    let [(text, span)] = comments.as_slice() else {
+        unreachable!("expected exactly one comment event in {input:?}: {comments:?}")
+    };
+    assert_eq!(text, &" c", "input: {input:?}");
+    assert_eq!(
+        input.get(span.start as usize..span.end as usize),
+        Some("# c"),
+        "input: {input:?}"
+    );
+}
+
+// `#` that does not follow whitespace is not a comment at these positions: it is
+// an error after a quoted scalar and content inside a plain scalar.
+#[rstest]
+#[case::after_quoted_scalar("a: \"q\"#c\n")]
+#[case::after_single_quoted_scalar("a: 'q'#c\n")]
+#[case::after_block_scalar_indicator("a: |#c\n  t\n")]
+#[case::no_break_space_is_no_separator("a: \"q\"\u{a0}# c\n")]
+fn hash_without_space_after_a_quoted_scalar_or_indicator_is_an_error(#[case] input: &str) {
+    assert!(
+        parse_events(input).any(|r| r.is_err()),
+        "expected an error for {input:?}"
+    );
+}
+
+// A `#` inside a scalar or a tag is content: no comment event.
+#[rstest]
+#[case::quoted_scalar("a: \"x # y\"\n")]
+#[case::single_quoted_scalar("a: 'x # y'\n")]
+#[case::plain_scalar_hash_after_char("a: x#y\n")]
+#[case::block_scalar_body("a: |\n  x # y\n")]
+#[case::tag_with_hash("a: !t#x v\n")]
+#[case::flow_quoted("[\"x # y\", 'z # w']\n")]
+fn hash_inside_a_scalar_is_not_a_comment(#[case] input: &str) {
+    assert!(
+        !event_shape(input).iter().any(|e| e.starts_with('#')),
+        "input: {input:?}"
+    );
+}
+
+// -----------------------------------------------------------------------
+// Group I — Positions after a multi-line double-quoted scalar
+// (the closing line's indentation is part of every position after the quote)
+// -----------------------------------------------------------------------
+
+// The span of the token after the closing quote is its real offset, in flow
+// context (the value after the key) and for a following comment.
+#[rstest]
+#[case::flow_value_after_indented_closing_line("[ \"multi\n  line\": value]\n", "value", 18, 23)]
+#[case::flow_value_after_deeper_indent("{ \"multi\n      line\": value}\n", "value", 22, 27)]
+#[case::flow_value_after_multibyte_indent_text("{ \"multi\n  é\": value}\n", "value", 16, 21)]
+fn token_after_a_multi_line_double_quoted_scalar_has_its_real_span(
+    #[case] input: &str,
+    #[case] value: &str,
+    #[case] start: u32,
+    #[case] end: u32,
+) {
+    let span = parse_to_vec(input).into_iter().find_map(|r| match r {
+        Ok((Event::Scalar { value: v, .. }, span)) if v == value => Some(span),
+        _ => None,
+    });
+    assert_eq!(
+        span.map(|s| (s.start, s.end)),
+        Some((start, end)),
+        "input: {input:?}"
+    );
+    assert_eq!(input.get(start as usize..end as usize), Some(value));
+}
+
+// The error for content after the closing quote points at that content.
+#[test]
+fn content_after_a_multi_line_double_quoted_scalar_is_reported_at_its_offset() {
+    let input = "a: \"x\n  y\" junk\n";
+    let error = parse_to_vec(input)
+        .into_iter()
+        .find_map(Result::err)
+        .map(|e| e.pos.byte_offset);
+    // The offset right after the closing quote.
+    assert_eq!(error, Some(10));
+}
+
+// -----------------------------------------------------------------------
+// Group J — `#` that is not a comment, characters a comment may hold
+// -----------------------------------------------------------------------
+
+#[rstest]
+#[case::anchor_name_holds_hash("a: &x#c v\n")]
+#[case::tag_holds_hash("!<tag:x#y> v\n")]
+#[case::tag_prefix_holds_hash("%TAG !e! tag:x.com,2000:app/#frag\n---\na: !e!t 1\n")]
+#[case::alias_name_holds_hash("a: &x v\nb: *x#c\n")]
+#[case::multi_line_double_quoted_hash_lines("a: \"x\n  # not\n  y\"\n")]
+#[case::multi_line_double_quoted_hash_inside("a: \"x\n  y # in\n  z\"\n")]
+#[case::folded_scalar_hash_lines("a: >\n  t # x\n  # y\n")]
+fn hash_in_a_name_or_a_scalar_line_is_not_a_comment(#[case] input: &str) {
+    assert!(
+        !event_shape(input).iter().any(|e| e.starts_with('#')),
+        "input: {input:?}"
+    );
+}
+
+#[rstest]
+#[case::prefix_with_hash_then_comment("%TAG ! tag:x#y # c\n---\na: 1\n", &[" c"])]
+#[case::root_quoted_with_colon_in_comment("\"q\" # a: b\n", &[" a: b"])]
+#[case::escaped_backslash_before_closing_quote("a: \"q\\\\\" # c\n", &[" c"])]
+#[case::colon_in_comment_after_item("- \"q\" # k: v\n", &[" k: v"])]
+#[case::empty_comment("a: \"q\" #\n", &[""])]
+#[case::empty_comment_at_eof("a: \"q\" #", &[""])]
+#[case::hash_without_space_inside_comment("a: \"q\" # b#c\n", &[" b#c"])]
+fn comment_text_is_the_rest_of_the_line(#[case] input: &str, #[case] expected: &[&str]) {
+    let texts = comment_texts(&event_variants(input));
+    assert_eq!(texts, expected, "input: {input:?}");
+}
+
+#[rstest]
+#[case::tab("\t")]
+#[case::nel("\u{85}")]
+#[case::line_separator("\u{2028}")]
+#[case::accented("é")]
+#[case::emoji("😀")]
+#[case::bom("\u{FEFF}")]
+fn printable_characters_are_accepted_in_a_comment_after_a_node(
+    #[case] ch: &str,
+    #[values(
+        "a: \"q\" # {}\n",
+        "k: # {}\n",
+        "--- v # {}\n",
+        "%YAML 1.2 # {}\n---\n",
+        "a: | # {}\n  t\n"
+    )]
+    template: &str,
+) {
+    let input = template.replace("{}", ch);
+    let texts = comment_texts(&event_variants(&input));
+    assert_eq!(texts, [format!(" {ch}")], "input: {input:?}");
+}
+
+// A comment is only a comment: long things that are not comments are no error.
+#[rstest]
+#[case::quoted_scalar_body(format!("a: \"#{}\"\n", "x".repeat(MAX_COMMENT_LEN + 100)))]
+#[case::plain_scalar_without_space(format!("a: x#{}\n", "y".repeat(MAX_COMMENT_LEN + 100)))]
+#[case::block_scalar_content(format!("a: |\n  # {}\n", "x".repeat(MAX_COMMENT_LEN + 100)))]
+fn long_text_that_is_not_a_comment_is_not_limited(#[case] input: String) {
+    assert!(parse_events(&input).all(|r| r.is_ok()));
+}
+
+// A comment that is too long and holds a bad character reports the length.
+#[rstest]
+#[case::quoted("a: \"q\" #{}\n")]
+#[case::empty_value("k: #{}\n")]
+#[case::header("a: | #{}\n  t\n")]
+fn length_error_comes_before_character_error(#[case] template: &str) {
+    let input = template.replace("{}", &format!("\x01{}", "x".repeat(MAX_COMMENT_LEN)));
+    let error = parse_to_vec(&input).into_iter().find_map(Result::err);
+    assert!(
+        error.is_some_and(|e| e.message.contains("comment exceeds maximum allowed length")),
+        "input: {input:?}"
+    );
+}
+
+// Linear time: a long line with one comment and many `#` stays fast.
+#[rstest]
+#[timeout(std::time::Duration::from_secs(5))]
+#[case::many_hash_after_quoted_scalar(format!("a: \"q\"{}\n", " #".repeat(100_000)))]
+#[case::huge_comment_after_quoted_scalar(format!("a: \"q\" #{}\n", "x".repeat(1_000_000)))]
+#[case::many_hash_without_space(format!("a: \"q\" #{}\n", "a#".repeat(1_000)))]
+fn long_lines_with_hashes_parse_in_linear_time(#[case] input: String) {
+    let _ = parse_events(&input).count();
 }
