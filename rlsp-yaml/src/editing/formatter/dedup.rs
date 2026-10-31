@@ -5,6 +5,8 @@ use std::collections::HashSet;
 use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::Node;
 
+use super::flow_comments::{drain_comments, leading_comments_mut};
+
 /// Extract a dedup key string for a mapping key node.
 ///
 /// Returns `Some(key)` for scalar and alias keys, `None` for complex keys
@@ -20,7 +22,10 @@ pub(super) fn dedup_key_str(key: &Node<Span>) -> Option<String> {
 /// Remove duplicate mapping keys from the AST, keeping the last occurrence.
 ///
 /// Iterates each `Node::Mapping` in reverse, tracking seen key strings.
-/// Earlier duplicate entries are removed; the last occurrence is kept.
+/// Earlier duplicate entries are removed; the last occurrence is kept.  The
+/// comments of a removed entry, nested ones included, become leading comments of
+/// the next entry that stays, ahead of its own.  The last occurrence of a key
+/// stays and follows every earlier one, so such an entry always exists.
 /// Recurses into values of remaining entries and into sequence items.
 ///
 /// Key extraction rules:
@@ -49,13 +54,21 @@ pub(super) fn dedup_mapping_keys(node: &mut Node<Span>) {
                 .rev()
                 .collect();
 
-            // Drain all entries and retain only those flagged for keeping.
+            // Keep the flagged entries; the comments of the others wait in
+            // `moved` for the next entry that stays.
+            let mut moved: Vec<String> = Vec::new();
             let old = std::mem::take(entries);
-            *entries = old
-                .into_iter()
-                .zip(keep)
-                .filter_map(|(entry, k)| if k { Some(entry) } else { None })
-                .collect();
+            for (mut entry, keep_entry) in old.into_iter().zip(keep) {
+                if keep_entry {
+                    if !moved.is_empty() {
+                        leading_comments_mut(&mut entry.0).splice(0..0, std::mem::take(&mut moved));
+                    }
+                    entries.push(entry);
+                } else {
+                    drain_comments(&mut entry.0, &mut moved);
+                    drain_comments(&mut entry.1, &mut moved);
+                }
+            }
 
             // Recurse into remaining values.
             for (_, value) in entries.iter_mut() {
@@ -73,6 +86,9 @@ pub(super) fn dedup_mapping_keys(node: &mut Node<Span>) {
 
 #[cfg(test)]
 mod tests {
+    use rlsp_yaml_parser::Event;
+    use rstest::rstest;
+
     use super::super::{YamlFormatOptions, format_yaml};
 
     fn default_opts() -> YamlFormatOptions {
@@ -333,6 +349,81 @@ mod tests {
             result.contains("# keep this"),
             "leading comment should be preserved: {result:?}"
         );
+    }
+
+    // ---- Group K (dedup): Comments of removed entries move ----
+
+    /// The comment texts of `yaml`, as the parser reports them, sorted.
+    fn sorted_comments(yaml: &str) -> Vec<String> {
+        let mut comments: Vec<String> = rlsp_yaml_parser::parse_events(yaml)
+            .filter_map(|event| match event {
+                Ok((Event::Comment { text }, _)) => Some(text.to_string()),
+                _ => None,
+            })
+            .collect();
+        comments.sort_unstable();
+        comments
+    }
+
+    // K1: every comment of the input reaches the output, wherever it is placed.
+    #[rstest]
+    #[case::trailing_comment("a: 1 # x\nb: 2\na: 3\n")]
+    #[case::three_occurrences("a: 1 # x\na: 2 # y\na: 3 # z\nb: 0\n")]
+    #[case::removed_entries_apart("a: 1 # x\nb: 1\na: 2 # y\nb: 2 # z\na: 3\n")]
+    #[case::nested_value("a: # k\n  # lead v\n  b: 1 # t\n  # tail\nc: 2\na: 3\n")]
+    #[case::sequence_value("a:\n  - x # i1\n  - # i2\n    y: 1 # i3\nb: 1\na: 2\n")]
+    #[case::duplicates_inside_removed_value("a:\n  x: 1 # c1\n  x: 2 # c2\nb: 1\na: 3\n")]
+    #[case::nested_mapping("o:\n  a: 1 # x\n  a: 2\np: 3\n")]
+    #[case::sequence_item("- a: 1 # x\n  a: 2\n- b: 1 # y\n  b: 2\n")]
+    #[case::root_flow_mapping("{a: 1, # c\n b: 2, a: 3}\n")]
+    #[case::flow_key_survivor("a: 1 # x\n? [b, # in\n  c]\n: v\na: 2\n")]
+    #[case::alias_key("? *r # kc\n: 1 # vc\n? *r\n: 2\n")]
+    fn removed_entry_comments_reach_output(#[case] input: &str) {
+        let result = format_yaml(input, &dedup_opts());
+        assert_eq!(
+            sorted_comments(&result),
+            sorted_comments(input),
+            "comments changed: {result:?}"
+        );
+    }
+
+    // K3: the output of K1 changes nothing under a second format.
+    #[rstest]
+    #[case::trailing_comment("a: 1 # x\nb: 2\na: 3\n")]
+    #[case::removed_entries_apart("a: 1 # x\nb: 1\na: 2 # y\nb: 2 # z\na: 3\n")]
+    #[case::nested_value("a: # k\n  # lead v\n  b: 1 # t\n  # tail\nc: 2\na: 3\n")]
+    #[case::sequence_item("- a: 1 # x\n  a: 2\n- b: 1 # y\n  b: 2\n")]
+    #[case::root_flow_mapping("{a: 1, # c\n b: 2, a: 3}\n")]
+    #[case::flow_key_survivor("a: 1 # x\n? [b, # in\n  c]\n: v\na: 2\n")]
+    #[case::alias_key("? *r # kc\n: 1 # vc\n? *r\n: 2\n")]
+    fn output_with_moved_comments_is_stable(#[case] input: &str) {
+        let first = format_yaml(input, &dedup_opts());
+        assert_eq!(
+            format_yaml(&first, &dedup_opts()),
+            first,
+            "not stable: {first:?}"
+        );
+    }
+
+    // K4: the comment of a removed entry prints above the key that stays.
+    #[test]
+    fn dedup_removed_entry_comment_lands_above_survivor() {
+        let result = format_yaml("key: 1  # this gets removed\nkey: 2\n", &dedup_opts());
+        assert_eq!(result, "# this gets removed\nkey: 2\n");
+    }
+
+    // K5: without the option nothing is removed, so no comment moves.
+    #[test]
+    fn dedup_disabled_keeps_comments_in_place() {
+        let result = format_yaml("a: 1 # x\nb: 2\na: 3\n", &default_opts());
+        assert_eq!(result, "a: 1  # x\nb: 2\na: 3\n");
+    }
+
+    // K6: without a duplicate nothing is removed, so no comment moves.
+    #[test]
+    fn dedup_without_duplicates_does_not_move_comments() {
+        let result = format_yaml("a: 1 # x\nb: 2 # y\n", &dedup_opts());
+        assert_eq!(result, "a: 1  # x\nb: 2  # y\n");
     }
 
     // ---- Group I (dedup): Multiple documents ----

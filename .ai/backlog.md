@@ -70,3 +70,6 @@ target goes here only after the user has lowered the target.
 - `has_properties: bool` and `explicit_key: bool` in `mapping_render.rs` go against `lang-rust.md` (enums over boolean parameters); comment plan Task 8 review.
 - `? ? a\n  : 1\n: v\n` is misread by the parser (the formatter avoids the form), and `a:\n!t : 1\n` belongs to the silent data change entry; comment plan Task 8 security review.
 - The loader overflows a 2 MiB stack at about 225 nesting levels in debug builds; release builds reach the depth limit; comment plan Task 8.
+- `? b\n` prints `b: ` with a trailing space, as `- ` does for nested sequences; comment plan Task 9 review.
+- Blank-line restoration loses every following blank line after an entry that `format_remove_duplicate_keys` removed; comment plan Task 9 test review.
+- Test consolidation candidates in `dedup.rs`: the misleadingly named `dedup_removed_entry_with_trailing_comment_no_crash`, and groups C and F into one `rstest` table; comment plan Task 9 test review.

@@ -164,7 +164,7 @@ fn render_documents(documents: Vec<Document<Span>>, options: &YamlFormatOptions)
 
     // Pre-passes over the AST: duplicate-key removal when enabled, then the style
     // of the flow collections that hold a comment (after the removal, which can
-    // take the comment away).
+    // move a comment into a flow collection).
     let documents: Vec<Document<Span>> = documents
         .into_iter()
         .map(|mut doc| {

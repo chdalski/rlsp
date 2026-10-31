@@ -31,6 +31,15 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### The Formatter Keeps the Comments of a Duplicate Key It Removes [completed]
+
+**Date:** 2026-10-31
+**Description:** With [`formatRemoveDuplicateKeys`](configuration.md#formatremoveduplicatekeys) on, the formatter used to delete the comments of every entry it removed, nested comments included. It keeps them now: they move to their own lines above the next key that stays, ahead of that key's own comments (`a: 1 # x`, `b: 2`, `a: 3` becomes `# x`, `b: 2`, `a: 3`). The last occurrence of a key stays and follows every earlier one, so such a key always exists. A flow mapping that receives a comment this way is printed in block style, like any flow collection that holds a comment. The data stays the same.
+**Complexity:** Low
+**Tier:** 1
+
+---
+
 ### The Formatter Prints a Flow Collection That Holds a Comment in Block Style [completed]
 
 **Date:** 2026-10-31

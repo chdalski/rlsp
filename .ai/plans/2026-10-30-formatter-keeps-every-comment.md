@@ -35,7 +35,7 @@ formatting it again must change nothing.
 - [x] Task 6: Print document-level comments and reduce the text matching
 - [x] Task 7: Print comments at every node position
 - [x] Task 8: Turn a flow collection holding a comment into block style
-- [ ] Task 9: Keep comments when removing duplicate keys
+- [x] Task 9: Keep comments when removing duplicate keys
 - [ ] Task 10: Fold only own-line comments
 - [ ] Task 11: Keep the data when formatting
 - [ ] Task 12: Pin that no comment is lost
@@ -201,11 +201,11 @@ otherwise it moves to its own line above the node's line.
 
 ### Task 9: Keep comments when removing duplicate keys
 
-- [ ] With `format_remove_duplicate_keys`, the comments of a removed entry,
+- [x] With `format_remove_duplicate_keys`, the comments of a removed entry,
       nested ones included, become leading comments of the next surviving key,
       or of the last surviving key when none follows: `a: 1 # x\nb: 2\na: 3\n`
       yields `# x\nb: 2\na: 3\n`
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 10: Fold only own-line comments
 
@@ -367,3 +367,5 @@ these inputs change today.
   `/tmp/claude-1000/-workspace/20045551-9412-4db7-8253-65744d4ffa36/scratchpad/probe-base/src/bin/fuzz3.rs`
   finds comment-free data changes at about 2 to 3 percent of its inputs; run it to
   find inputs for the check
+- Task 12: with `format_remove_duplicate_keys`, `a: &x 1\nb: *x\na: 2\n` keeps the
+  value of `b`

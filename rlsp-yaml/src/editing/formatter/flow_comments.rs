@@ -77,29 +77,37 @@ fn resolve_key(key: &mut Node<Span>) -> bool {
 
 /// Append `comments` to the leading comments of a collection.
 fn add_leading_comments(node: &mut Node<Span>, comments: Vec<String>) {
-    if comments.is_empty() {
-        return;
+    if !comments.is_empty() {
+        leading_comments_mut(node).extend(comments);
     }
-    if let Node::Mapping { meta, .. } | Node::Sequence { meta, .. } = node {
-        meta.get_or_insert_with(|| {
-            Box::new(NodeMeta {
-                anchor: None,
-                anchor_loc: None,
-                tag_loc: None,
-                leading_comments: None,
-                trailing_comment: None,
+}
+
+/// The leading comments of `node`, created empty when it has none.
+pub(super) fn leading_comments_mut(node: &mut Node<Span>) -> &mut Vec<String> {
+    match node {
+        Node::Scalar { meta, .. } | Node::Mapping { meta, .. } | Node::Sequence { meta, .. } => {
+            meta.get_or_insert_with(|| {
+                Box::new(NodeMeta {
+                    anchor: None,
+                    anchor_loc: None,
+                    tag_loc: None,
+                    leading_comments: None,
+                    trailing_comment: None,
+                })
             })
-        })
-        .leading_comments
-        .get_or_insert_with(Vec::new)
-        .extend(comments);
+            .leading_comments
+            .get_or_insert_with(Vec::new)
+        }
+        Node::Alias {
+            leading_comments, ..
+        } => leading_comments.get_or_insert_with(Vec::new),
     }
 }
 
 /// Take the comments of `node` and of the nodes inside it, in the order they
 /// read in the source: a node's leading comments, the nodes inside it, its
 /// trailing comment.
-fn drain_comments(node: &mut Node<Span>, out: &mut Vec<String>) {
+pub(super) fn drain_comments(node: &mut Node<Span>, out: &mut Vec<String>) {
     out.extend(take_leading_comments(node));
     drain_inner_comments(node, out);
     out.extend(take_trailing_comment(node));

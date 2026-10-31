@@ -403,6 +403,8 @@ Controls the severity of `duplicateKey` diagnostics, which are emitted when a ma
 
 When `true`, the formatter removes duplicate mapping keys during formatting. Only the last occurrence of each key is kept, which matches the YAML specification behavior (later definitions shadow earlier ones).
 
+The comments of a removed entry are kept: they move to their own lines above the next key that stays.
+
 When `false` (the default), duplicate keys are preserved as-is during formatting.
 
 ```json
