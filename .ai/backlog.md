@@ -73,3 +73,4 @@ target goes here only after the user has lowered the target.
 - `? b\n` prints `b: ` with a trailing space, as `- ` does for nested sequences; comment plan Task 9 review.
 - Blank-line restoration loses every following blank line after an entry that `format_remove_duplicate_keys` removed; comment plan Task 9 test review.
 - Test consolidation candidates in `dedup.rs`: the misleadingly named `dedup_removed_entry_with_trailing_comment_no_crash`, and groups C and F into one `rstest` table; comment plan Task 9 test review.
+- Test consolidation candidates in `analysis/folding.rs`: the guarded, redundant `should_fold_consecutive_comment_block`, `should_return_empty_for_comment_only_document` (no document loads), and `should_not_fold_single_comment_line` and `should_fold_comment_block_at_end_of_file` into the new table; comment plan Task 10 test review.

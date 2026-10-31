@@ -36,7 +36,7 @@ formatting it again must change nothing.
 - [x] Task 7: Print comments at every node position
 - [x] Task 8: Turn a flow collection holding a comment into block style
 - [x] Task 9: Keep comments when removing duplicate keys
-- [ ] Task 10: Fold only own-line comments
+- [x] Task 10: Fold only own-line comments
 - [ ] Task 11: Keep the data when formatting
 - [ ] Task 12: Pin that no comment is lost
 - [ ] Measure every `*.yml` and `*.yaml` file under `/workspace`,
@@ -212,9 +212,9 @@ otherwise it moves to its own line above the node's line.
 Task 4 turns more trailing comments into events, and the folding of comment
 blocks must not hide the content between them.
 
-- [ ] `a: 1 # x\nb: 2 # y\n` has no comment folding range, and a run of own-line
+- [x] `a: 1 # x\nb: 2 # y\n` has no comment folding range, and a run of own-line
       comments keeps its range
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 11: Keep the data when formatting
 

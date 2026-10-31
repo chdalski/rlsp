@@ -121,16 +121,34 @@ fn collect_node_folds(node: &Node<Span>, ranges: &mut Vec<FoldingRange>, idx: &L
     }
 }
 
-/// Group contiguous `Event::Comment` spans (≥2 consecutive lines) into folds.
+/// Whether only blanks (or a leading BOM) precede the comment starting at
+/// `comment_start` on its line.
+///
+/// A trailing comment sits behind content and would, in a run of consecutive
+/// lines, hide the content between its comments if it took part in a fold.
+fn is_own_line_comment(yaml: &str, comment_start: u32) -> bool {
+    yaml.get(..comment_start as usize).is_some_and(|before| {
+        before
+            .rsplit(['\n', '\r'])
+            .next()
+            .is_some_and(|line_prefix| {
+                line_prefix
+                    .chars()
+                    .all(|c| matches!(c, ' ' | '\t' | '\u{FEFF}'))
+            })
+    })
+}
+
+/// Group contiguous own-line `Event::Comment` spans (≥2 consecutive lines)
+/// into folds.
 fn collect_comment_folds(yaml: &str, ranges: &mut Vec<FoldingRange>) {
     let idx = LineIndex::new(yaml);
     let comment_lines: Vec<u32> = rlsp_yaml_parser::parse_events(yaml)
-        .filter_map(|result| {
-            if let Ok((Event::Comment { .. }, span)) = result {
+        .filter_map(|result| match result {
+            Ok((Event::Comment { .. }, span)) if is_own_line_comment(yaml, span.start) => {
                 Some(idx.line_column(span.start).0) // 1-based
-            } else {
-                None
             }
+            _ => None,
         })
         .collect();
 
@@ -464,5 +482,65 @@ mod tests {
             result.is_empty(),
             "single-line flow mapping should produce no fold, got: {result:?}"
         );
+    }
+
+    fn comment_folds(yaml: &str) -> Vec<(u32, u32)> {
+        let docs = load_docs(yaml);
+        let comment_ranges: Vec<FoldingRange> = folding_ranges(&docs, yaml)
+            .into_iter()
+            .filter(|r| r.kind == Some(FoldingRangeKind::Comment))
+            .collect();
+        ranges_as_tuples(&comment_ranges)
+    }
+
+    // Only comments on a line of their own take part in a comment fold: a
+    // trailing comment sits behind content, so a run of them would hide the
+    // content between them.
+    #[rstest]
+    // ---- Core ----
+    #[case::trailing_on_consecutive_lines("a: 1 # x\nb: 2 # y\n", &[])]
+    #[case::trailing_on_three_lines("a: 1 # x\nb: 2 # y\nc: 3 # z\n", &[])]
+    #[case::own_line_run_inside_mapping_indented("k:\n  # a\n  # b\n  v: 1\n", &[(1, 2)])]
+    // ---- Mixed runs ----
+    #[case::trailing_then_own_line_run("a: 1 # x\n# y\n# z\nb: 2\n", &[(1, 2)])]
+    #[case::own_line_run_then_trailing("# a\n# b\nk: 1 # t\n", &[(0, 1)])]
+    #[case::own_line_then_trailing_single("# a\nk: 1 # t\n", &[])]
+    #[case::trailing_between_own_line_comments_breaks_run("# a\nk: 1 # t\n# b\n", &[])]
+    #[case::trailing_splits_run_in_two("# a\n# b\nk: 1 # t\n# c\n# d\n", &[(0, 1), (3, 4)])]
+    #[case::blank_line_separates_runs("# a\n\n# b\nk: v\n", &[])]
+    // ---- Whitespace and characters ----
+    #[case::tab_indented_own_line_run("a: 1\n\t# t1\n  # t2\n", &[(1, 2)])]
+    #[case::tab_before_trailing_comments("a:\t# x\nb:\t# y\n", &[])]
+    #[case::non_ascii_before_trailing_comments("ключ: 1 # x\nключ2: 2 # y\n", &[])]
+    #[case::non_ascii_trailing_then_own_line_run("ключ: 1 # x\n# y\n# z\nb: 2\n", &[(1, 2)])]
+    #[case::non_ascii_own_line_run("k:\n  # привет\n  # мир\n  v: 1\n", &[(1, 2)])]
+    #[case::bom_before_first_own_line_run("\u{FEFF}# a\n# b\nk: v\n", &[(0, 1)])]
+    #[case::crlf_own_line_run("# a\r\n# b\r\nk: v\r\n", &[(0, 1)])]
+    #[case::crlf_trailing("a: 1 # x\r\nb: 2 # y\r\n", &[])]
+    #[case::crlf_trailing_then_own("a: 1 # x\r\n# y\r\n# z\r\nb: 2\r\n", &[(1, 2)])]
+    #[case::bare_cr_own_line_run("# a\r# b\rk: v\r", &[(0, 1)])]
+    #[case::own_line_run_at_eof_without_newline("k: v\n# a\n# b", &[(1, 2)])]
+    // ---- Document structure ----
+    #[case::after_document_start_own_line_run("---\n# a\n# b\nk: v\n", &[(1, 2)])]
+    #[case::document_start_trailing_then_single_own("--- # a\n# b\nk: v\n", &[])]
+    #[case::document_start_trailing_then_own_run("--- # a\n# b\n# c\nk: v\n", &[(1, 2)])]
+    #[case::directive_and_marker_trailing("%YAML 1.2 # d\n--- # e\nk: v\n", &[])]
+    #[case::multi_doc_runs_per_document("# a\n# b\nx: 1\n---\n# c\n# d\ny: 2\n", &[(0, 1), (4, 5)])]
+    #[case::multi_doc_trailing_only("x: 1 # t\n---\ny: 2 # u\n", &[])]
+    #[case::after_document_end_marker("a: 1\n...\n# c1\n# c2\n---\nb: 2\n", &[(2, 3)])]
+    // ---- Collection and scalar contexts ----
+    #[case::trailing_in_block_sequence("- a # x\n- b # y\n", &[])]
+    #[case::indicator_trailing_then_own("- # c\n  # d\n  v\n", &[])]
+    #[case::key_trailing_then_own_run("k: # a\n  # b\n  # c\n  v: 1\n", &[(1, 2)])]
+    #[case::trailing_in_multiline_flow("k: [a, # c1\n  b] # c2\n", &[])]
+    #[case::flow_own_line_run("k: [\n  a, # t\n  # o1\n  # o2\n  b\n  ]\n", &[(2, 3)])]
+    #[case::block_scalar_hash_lines_are_content("k: |\n  # a\n  # b\n", &[])]
+    #[case::block_scalar_header_trailing("k: |  # hdr\n  text\n# own\n", &[])]
+    #[case::own_line_run_after_block_scalar("k: |\n  text\n# a\n# b\n", &[(2, 3)])]
+    fn comment_folds_cover_only_own_line_comments(
+        #[case] text: &str,
+        #[case] expected: &[(u32, u32)],
+    ) {
+        assert_eq!(comment_folds(text), expected);
     }
 }

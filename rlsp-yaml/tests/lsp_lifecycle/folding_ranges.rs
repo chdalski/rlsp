@@ -60,3 +60,57 @@ async fn should_return_empty_folding_ranges_for_unknown_document() {
         "foldingRange result should be null or empty for unknown document"
     );
 }
+
+async fn comment_fold_lines(text: &str) -> Vec<(u64, u64)> {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/comment-folding.yaml";
+    send(&mut service, did_open_notification(uri, text)).await;
+
+    let resp = send(&mut service, folding_range_request(2, uri)).await;
+    let resp = resp.expect("foldingRange should return a response");
+    let result = resp.result().expect("foldingRange should have a result");
+    result
+        .as_array()
+        .map(|ranges| {
+            ranges
+                .iter()
+                .filter(|range| range["kind"] == "comment")
+                .map(|range| {
+                    (
+                        range["startLine"].as_u64().expect("startLine is a number"),
+                        range["endLine"].as_u64().expect("endLine is a number"),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[tokio::test]
+async fn should_not_return_comment_fold_for_trailing_comments() {
+    let folds = comment_fold_lines("a: 1 # x\nb: 2 # y\n").await;
+
+    assert!(
+        folds.is_empty(),
+        "trailing comments must not form a comment fold, got: {folds:?}"
+    );
+}
+
+#[tokio::test]
+async fn should_return_comment_fold_for_own_line_comment_run() {
+    let folds = comment_fold_lines("# a\n# b\nk: v\n").await;
+
+    assert_eq!(folds, [(0, 1)]);
+}
+
+#[tokio::test]
+async fn should_return_comment_fold_for_own_line_run_after_trailing_comment() {
+    let folds = comment_fold_lines("a: 1 # x\n# y\n# z\nb: 2\n").await;
+
+    assert_eq!(folds, [(1, 2)]);
+}
