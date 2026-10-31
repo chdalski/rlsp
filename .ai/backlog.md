@@ -20,7 +20,7 @@ target goes here only after the user has lowered the target.
 - Inline `--- v` path: `--- v\n# d\nw\n` loses `w`, `--- *a\n` emits the scalar `*a`, `--- [x] [y]\n` loads as one scalar; `block` document start handling; libfyaml comparison.
 - A property line before a flow key goes on the key, not the new mapping (`&y\n[x]: 2\n`); `x:\n- &k\ny: 1\n` leaks the anchor to the key; libfyaml comparison.
 - `[a\n\n  b]` loads as `"a b"`, should fold to `"a\nb"`; `- a\0\n- b\n` yields events after the error (`block/sequence.rs`); BOM in a plain scalar errors here and loads in libfyaml; libfyaml comparison.
-- Multi-line quoted scalars end their span after the line break (`try_consume_single_quoted`, `try_consume_double_quoted` in `lexer/quoted.rs`), so their value tokens have a wrong length (`classify_scalar_node`), `a: "x\n  y" # c\nb: 1` stores `# c` on `b`, and `a: "x\n  y"\n# d\nb: 1\n` stores `# d` as the scalar's trailing comment; once fixed, add a place case to `tests/loader_comments.rs`; span plan, comment plan Task 5.
+- Multi-line quoted scalars end their span after the line break (`try_consume_single_quoted`, `try_consume_double_quoted` in `lexer/quoted.rs`), so their value tokens have a wrong length (`classify_scalar_node`); span plan, comment plan Task 7.
 - Block-scalar code action moves a trailing comment and trailing spaces into the literal value (`editing/code_actions/block_scalar.rs`); span plan.
 - `REGEX_CACHE` unbounded and `validate_schema` on the async executor (`src/schema/pattern.rs`); schema queue.
 - Path resolver's first pass is unpriced (`resolve_schema_path`, `src/schema/path.rs`); security Medium.
@@ -60,3 +60,10 @@ target goes here only after the user has lowered the target.
 - The server reads the modeline and suppressions with `str::lines()`, so they have no effect with `line_ending = cr`; comment plan Task 6 security review.
 - The formatter drops `%YAML` and `%TAG` directives, and blank-line pairing then loses every blank line in the rest of the file; comment plan Task 6 security review.
 - Test consolidation candidates: the triple `comment-*` formatter fixtures and two `blank-line-*` fixtures with identical content and no blank line; comment plan Task 6 test review.
+- `x:\n  : v\n` loads as `x: v` and `x:\n  :\n    - 1\n` as `x: [1]`, losing the empty key, while libfyaml gives a nested mapping; silent data change; comment plan Task 7 review.
+- `-\n# zz\n  a: 1\n` splits into an empty item plus a mapping, while libfyaml gives one mapping item; comment plan Task 7 test review.
+- An own-line comment between `k:` and its scalar value prints after the entry, so a suppression comment there hits the neighbour; comment plan Task 7 security review.
+- `delete_anchor` misindents a block scalar's content lines; comment plan Task 7.
+- `explicit_key_to_doc` is `pub(super)` but only used in its own file; comment plan Task 7 review.
+- `- ` keeps a trailing space for null items and nested sequences; comment plan Task 7 test review.
+- Test consolidation candidates: the weak `anchor_with_trailing_comment_preserved` and the similar `comment-line-after-plain-*` fixtures; comment plan Task 7 test review.

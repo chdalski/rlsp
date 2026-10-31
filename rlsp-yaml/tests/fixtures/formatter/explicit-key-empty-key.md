@@ -7,7 +7,7 @@ category: explicit-key
 
 When the key is an explicit null/empty scalar (`? ` with no content), the entry
 renders as `: value` — no `?` prefix. Exercises the `is_empty_key` path in
-`key_value_to_doc`.
+`entry_to_parts`.
 
 ## Test-Document
 

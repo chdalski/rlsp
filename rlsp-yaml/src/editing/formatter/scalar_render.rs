@@ -210,6 +210,19 @@ pub(super) fn escape_double_quoted(s: &str) -> String {
     out
 }
 
+/// Whether a block scalar's value cannot be printed as a block scalar: a
+/// non-empty line of the value consists of spaces and tabs only and starts with
+/// a space.  After the formatter's indentation such a line is an over-indented
+/// blank line, which a re-parser rejects; the scalar is printed double-quoted
+/// instead.  A line of whitespace that starts with a tab is safe.
+pub(super) fn block_value_needs_quoting(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .lines()
+            .filter(|l| !l.is_empty())
+            .any(|l| l.starts_with(' ') && l.chars().all(|c| c == ' ' || c == '\t'))
+}
+
 /// Convert a block scalar to Doc using hard lines.
 ///
 /// The parser preserves the original chomping indicator, so we emit it
@@ -232,7 +245,15 @@ pub(super) fn escape_double_quoted(s: &str) -> String {
 /// value.  N blank lines between two content lines produces N newlines in the
 /// value; without them, adjacent content lines would fold into a single space on
 /// re-parse, making the output non-idempotent.
-pub(super) fn repr_block_to_doc(s: &str, style: ScalarStyle, tab_width: usize) -> Doc {
+///
+/// `header_comment` is printed on the header line, two spaces after the
+/// indicators.
+pub(super) fn repr_block_to_doc(
+    s: &str,
+    style: ScalarStyle,
+    tab_width: usize,
+    header_comment: Option<&str>,
+) -> Doc {
     // Detect whether the first non-empty content line requires an explicit
     // indentation indicator digit.
     //
@@ -272,6 +293,10 @@ pub(super) fn repr_block_to_doc(s: &str, style: ScalarStyle, tab_width: usize) -
         base_header.to_string()
     };
 
+    let header = match header_comment {
+        Some(comment) => format!("{header}  {comment}"),
+        None => header,
+    };
     let mut parts = vec![text(header)];
 
     if matches!(style, ScalarStyle::Folded(_)) {

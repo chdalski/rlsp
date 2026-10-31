@@ -278,4 +278,18 @@ mod tests {
             "edited YAML must produce exactly one document; result text:\n{result}"
         );
     }
+
+    // The flow style has no place for the comments inside the collection: none
+    // of them is printed, and the result is valid YAML with the same data.
+    #[test]
+    fn should_print_no_comment_inside_the_flow_collection() {
+        let text = "a:\n  b: 1 # c\n  d: # e\n    f: 1\n  g: x\n";
+        let result = apply_block_to_flow_edit(text, 0);
+        assert!(
+            result.starts_with("a: { b: 1, d: { f: 1 }, g: x }\n"),
+            "{result:?}"
+        );
+        assert!(!result.contains('#'), "{result:?}");
+        assert!(parse_yaml(&result).diagnostics.is_empty(), "{result}");
+    }
 }

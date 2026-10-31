@@ -8,8 +8,9 @@ use rlsp_yaml_parser::{ScalarStyle, Span};
 use super::mapping_render;
 use super::options::YamlFormatOptions;
 use super::scalar_render::{
-    escape_double_quoted, flow_quoted_to_doc, format_tag, is_core_schema_tag, needs_flow_quoting,
-    needs_quoting, repr_block_to_doc, requires_double_quoting, string_to_doc,
+    block_value_needs_quoting, escape_double_quoted, flow_quoted_to_doc, format_tag,
+    is_core_schema_tag, needs_flow_quoting, needs_quoting, repr_block_to_doc,
+    requires_double_quoting, string_to_doc,
 };
 use super::sequence_render;
 
@@ -17,8 +18,56 @@ use super::sequence_render;
 ///
 /// When `in_key` is `true`, the `single_quote` style option is suppressed for
 /// scalar strings — keys are never single-quoted by style preference alone.
+///
+/// A block scalar prints its own trailing comment on its header line.
 pub(super) fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> Doc {
-    render_node(node, options, in_key, false)
+    render_node(node, options, in_key, false, node.trailing_comment())
+}
+
+/// Convert a mapping value to a `Doc`.  A block scalar value prints
+/// `header_comment` on its header line, which is the slot the entry chose for
+/// its comment (see `mapping_render::place_entry_comments`).
+pub(super) fn value_to_doc(
+    node: &Node<Span>,
+    options: &YamlFormatOptions,
+    header_comment: Option<&str>,
+) -> Doc {
+    render_node(node, options, false, false, header_comment)
+}
+
+/// Whether the formatter prints `node` as a block scalar, so that its header
+/// line is a slot for a comment.  A block scalar whose value cannot be printed
+/// as one (see `block_value_needs_quoting`) comes out double-quoted and has no
+/// header.
+pub fn prints_block_header(node: &Node<Span>) -> bool {
+    matches!(
+        node,
+        Node::Scalar {
+            style: ScalarStyle::Literal(_) | ScalarStyle::Folded(_),
+            value,
+            ..
+        } if !block_value_needs_quoting(value)
+    )
+}
+
+/// Whether the formatter prints nothing for `node` itself: an empty plain scalar
+/// with no anchor and no tag that is printed.  A comment may still follow it.
+pub(super) fn renders_empty(node: &Node<Span>) -> bool {
+    let Node::Scalar {
+        value,
+        style: ScalarStyle::Plain,
+        tag,
+        ..
+    } = node
+    else {
+        return false;
+    };
+    // A core tag is printed, in its short form, only on an empty scalar that
+    // carries it in the source; any other tag is always printed.
+    let tag_printed = tag
+        .as_ref()
+        .is_some_and(|t| !is_core_schema_tag(t) || node.tag_loc().is_some());
+    value.is_empty() && !tag_printed && node.anchor().is_none()
 }
 
 /// Render `node`; `in_flow` marks a scalar that sits directly inside a flow
@@ -30,7 +79,13 @@ pub(super) fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key
     clippy::too_many_lines,
     reason = "comprehensive match over all node variants"
 )]
-fn render_node(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool, in_flow: bool) -> Doc {
+fn render_node(
+    node: &Node<Span>,
+    options: &YamlFormatOptions,
+    in_key: bool,
+    in_flow: bool,
+    header_comment: Option<&str>,
+) -> Doc {
     match node {
         Node::Scalar {
             value, style, tag, ..
@@ -76,37 +131,12 @@ fn render_node(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool, in_
 
             let scalar_doc = match style {
                 ScalarStyle::Literal(_) | ScalarStyle::Folded(_) => {
-                    // YAML treats a content line as a "blank line" when it consists
-                    // solely of whitespace characters.  A blank line in a block scalar
-                    // cannot carry more indentation than the declared indent level — if
-                    // it does, re-parsers reject the output with "blank line has more
-                    // indentation than the content".
-                    //
-                    // When the formatter emits a block scalar the indent() call adds the
-                    // mapping/sequence indent to every line, including content lines that
-                    // are entirely whitespace.  This pushes those lines beyond the
-                    // declared indent, triggering the re-parse error.
-                    //
-                    // A line starting with a space character is problematic: after the
-                    // indent strip the remaining content still starts with a space, so
-                    // some parsers count it as a blank line.  A line starting with a tab
-                    // is safe: the tab is treated as a non-blank content character even
-                    // when the rest of the line is whitespace (e.g. `\t  ` round-trips
-                    // correctly).
-                    //
-                    // Fall back to double-quoted output when any non-empty decoded line
-                    // is entirely whitespace and starts with a space.  Such lines become
-                    // over-indented blank lines after the formatter's indent() call and
-                    // the re-parser rejects them.  A tab-first whitespace-only line (e.g.
-                    // `\t  `) is safe and must not trigger the fallback.
-                    let has_problematic_whitespace_line = !value.is_empty()
-                        && value.lines().filter(|l| !l.is_empty()).any(|l| {
-                            l.starts_with(' ') && l.chars().all(|c| c == ' ' || c == '\t')
-                        });
-                    if has_problematic_whitespace_line {
+                    // A value with an over-indented blank line cannot be printed as a
+                    // block scalar (see `block_value_needs_quoting`).
+                    if block_value_needs_quoting(value) {
                         text(format!("\"{}\"", escape_double_quoted(value)))
                     } else {
-                        repr_block_to_doc(value, *style, options.tab_width)
+                        repr_block_to_doc(value, *style, options.tab_width, header_comment)
                     }
                 }
                 ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted => {
@@ -242,5 +272,5 @@ pub(super) fn flow_item_to_doc(
     options: &YamlFormatOptions,
     in_key: bool,
 ) -> Doc {
-    render_node(node, options, in_key, true)
+    render_node(node, options, in_key, true, None)
 }

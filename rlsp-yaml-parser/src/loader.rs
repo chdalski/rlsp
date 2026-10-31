@@ -44,7 +44,10 @@ use crate::schema::{CollectionKind, Schema, resolve_collection, resolve_scalar};
 
 use comments::{attach_leading_comments, attach_trailing_comment, clone_without_comments};
 use reloc::reloc;
-use stream::{consume_leading_comments, next_from, peek_trailing_comment, with_hash_prefix};
+use stream::{
+    consume_leading_comments, consume_leading_comments_at, next_from, peek_trailing_comment,
+    with_hash_prefix,
+};
 
 mod comments;
 mod reloc;
@@ -379,6 +382,14 @@ struct LoadState<'opt> {
     line_index: Arc<LineIndex>,
 }
 
+/// Comments read before a node, split by [`LoadState::split_comments_after_empty_node`].
+struct SplitComments {
+    /// The comments that belong to the node.
+    before: Vec<String>,
+    /// The comments that belong to what follows it.
+    after: Vec<String>,
+}
+
 impl<'opt> LoadState<'opt> {
     fn new(options: &'opt LoaderOptions, input: &str) -> Self {
         Self {
@@ -571,14 +582,8 @@ impl<'opt> LoadState<'opt> {
                     // Consume leading comments before the next key.  Also
                     // collect any comments that spilled over from a sibling
                     // value's collection end (stored in `pending_leading`).
-                    let raw_leading = consume_leading_comments(stream)?;
-                    let leading = if self.pending_leading.is_empty() {
-                        raw_leading
-                    } else {
-                        let mut combined = std::mem::take(&mut self.pending_leading);
-                        combined.extend(raw_leading);
-                        combined
-                    };
+                    let raw_leading = consume_leading_comments_at(stream)?;
+                    let mut leading = std::mem::take(&mut self.pending_leading);
 
                     match stream.peek() {
                         None | Some(Ok((Event::MappingEnd | Event::StreamEnd, _))) => {
@@ -586,6 +591,7 @@ impl<'opt> LoadState<'opt> {
                             // sibling entry in the parent collection can inherit
                             // them (e.g. a comment just before MappingEnd that
                             // belongs to the following mapping entry).
+                            leading.extend(raw_leading.into_iter().map(|(text, _)| text));
                             if !leading.is_empty() {
                                 self.pending_leading = leading;
                             }
@@ -606,10 +612,13 @@ impl<'opt> LoadState<'opt> {
                     }
 
                     let mut key = self.parse_node(stream)?;
+                    let after_key = self.split_comments_after_empty_node(&key, raw_leading);
+                    leading.extend(after_key.before);
                     attach_leading_comments(&mut key, leading);
+                    self.pending_leading.extend(after_key.after);
                     // The comment after the key on its own line (`k: # c`,
                     // `a: &x # c`) sits between the key and the value event.
-                    attach_line_comment(stream, &mut key, &self.line_index)?;
+                    attach_key_line_comment(stream, &mut key, &self.line_index)?;
 
                     let mut value = self.parse_node(stream)?;
                     attach_line_comment(stream, &mut value, &self.line_index)?;
@@ -671,14 +680,8 @@ impl<'opt> LoadState<'opt> {
                     // Collect leading comments before the next item.  Also
                     // collect any comments that spilled over from a sibling
                     // value's collection end (stored in `pending_leading`).
-                    let raw_leading = consume_leading_comments(stream)?;
-                    let leading = if self.pending_leading.is_empty() {
-                        raw_leading
-                    } else {
-                        let mut combined = std::mem::take(&mut self.pending_leading);
-                        combined.extend(raw_leading);
-                        combined
-                    };
+                    let raw_leading = consume_leading_comments_at(stream)?;
+                    let mut leading = std::mem::take(&mut self.pending_leading);
 
                     match stream.peek() {
                         None | Some(Ok((Event::SequenceEnd | Event::StreamEnd, _))) => {
@@ -687,6 +690,7 @@ impl<'opt> LoadState<'opt> {
                             // them (e.g. a comment just before SequenceEnd that
                             // belongs to the following sequence item or mapping
                             // entry in the parent).
+                            leading.extend(raw_leading.into_iter().map(|(text, _)| text));
                             if !leading.is_empty() {
                                 self.pending_leading = leading;
                             }
@@ -707,7 +711,10 @@ impl<'opt> LoadState<'opt> {
                     }
 
                     let mut item = self.parse_node(stream)?;
+                    let after_item = self.split_comments_after_empty_node(&item, raw_leading);
+                    leading.extend(after_item.before);
                     attach_leading_comments(&mut item, leading);
+                    self.pending_leading.extend(after_item.after);
                     attach_line_comment(stream, &mut item, &self.line_index)?;
 
                     items.push(item);
@@ -779,6 +786,47 @@ impl<'opt> LoadState<'opt> {
                 Ok(empty_scalar())
             }
         }
+    }
+
+    /// Split the comments read before `node` into those that stay with it and
+    /// those that stand on lines below the properties of an empty node.
+    ///
+    /// A tag or an anchor alone (`- !!str`) is a node of its own that ends with
+    /// its properties.  The parser emits its scalar after the comment lines
+    /// that follow (the scalar sits where the next token starts), so those
+    /// comments reach the loader as comments before the node.  They belong to
+    /// what follows it; a comment on the properties' own line stays.
+    fn split_comments_after_empty_node(
+        &self,
+        node: &Node<Span>,
+        comments: Vec<(String, u32)>,
+    ) -> SplitComments {
+        let properties_end = match node {
+            Node::Scalar {
+                value,
+                style: ScalarStyle::Plain,
+                meta: Some(meta),
+                ..
+            } if value.is_empty() => [meta.anchor_loc, meta.tag_loc]
+                .into_iter()
+                .flatten()
+                .map(|loc| loc.end)
+                .max(),
+            Node::Scalar { .. }
+            | Node::Mapping { .. }
+            | Node::Sequence { .. }
+            | Node::Alias { .. } => None,
+        };
+        let split_at = properties_end.map_or(comments.len(), |end| {
+            let properties_line = self.line_index.line_column(end).0;
+            comments
+                .iter()
+                .position(|&(_, start)| self.line_index.line_column(start).0 > properties_line)
+                .unwrap_or(comments.len())
+        });
+        let mut before: Vec<String> = comments.into_iter().map(|(text, _)| text).collect();
+        let after = before.split_off(split_at);
+        SplitComments { before, after }
     }
 
     fn register_anchor(
@@ -963,19 +1011,50 @@ fn span_start_to_pos(offset: u32, line_index: &LineIndex) -> Pos {
 /// A block scalar's line is its header line: its span ends on the line after
 /// its content (chomping consumes trailing blank lines), so that line can
 /// coincide with the next own-line comment, which is a leading comment of the
-/// next node.  Every other node's line is the line its span ends on.
+/// next node.  Every other node's line is the line its text ends on; a node
+/// without text (an empty scalar) has no line to hold a comment, and a comment
+/// after it belongs to what follows.
 fn attach_line_comment(
     stream: &mut EventStream<'_>,
     node: &mut Node<Span>,
     line_index: &LineIndex,
 ) -> Result<()> {
+    let line = if is_block_scalar(node) {
+        Some(node_start_line(node, line_index))
+    } else {
+        node_end_line(node, line_index)
+    };
+    attach_comment_on_line(stream, node, line, line_index)
+}
+
+/// [`attach_line_comment`] for a mapping key.  An empty key sits on the line of
+/// its `:`, so the comment after it on that line is the key's.
+fn attach_key_line_comment(
+    stream: &mut EventStream<'_>,
+    key: &mut Node<Span>,
+    line_index: &LineIndex,
+) -> Result<()> {
+    let line = if is_block_scalar(key) {
+        node_start_line(key, line_index)
+    } else {
+        node_end_line(key, line_index).unwrap_or_else(|| node_start_line(key, line_index))
+    };
+    attach_comment_on_line(stream, key, Some(line), line_index)
+}
+
+/// Attach the next event as `node`'s trailing comment if it is a comment on
+/// `line`.
+fn attach_comment_on_line(
+    stream: &mut EventStream<'_>,
+    node: &mut Node<Span>,
+    line: Option<u32>,
+    line_index: &LineIndex,
+) -> Result<()> {
     if !matches!(stream.peek(), Some(Ok((Event::Comment { .. }, _)))) {
         return Ok(());
     }
-    let line = if is_block_scalar(node) {
-        node_start_line(node, line_index)
-    } else {
-        node_end_line(node, line_index)
+    let Some(line) = line else {
+        return Ok(());
     };
     if let Some(comment) = peek_trailing_comment(stream, line, line_index)? {
         attach_trailing_comment(node, comment);
@@ -997,19 +1076,32 @@ fn node_start_line(node: &Node<Span>, line_index: &LineIndex) -> u32 {
     line_index.line_column(start_offset).0
 }
 
-/// Return the line number of a node's span end position.
+/// Return the line number of the last line of a node's text, or `None` for a
+/// node without text.
 ///
 /// Used to determine whether the next `Comment` event is trailing (same line)
-/// or leading (different line).
+/// or leading (different line).  A span that ends at the start of a line ends
+/// on the line before: a block collection's span runs through the line break of
+/// its last line, so the comment on the next item's dash line starts where the
+/// span ends but is not on the collection's line.  An empty scalar's span is
+/// empty and sits at the start of the next token's line.
 #[inline]
-fn node_end_line(node: &Node<Span>, line_index: &LineIndex) -> u32 {
-    let end_offset = match node {
+fn node_end_line(node: &Node<Span>, line_index: &LineIndex) -> Option<u32> {
+    let (start, end) = match node {
         Node::Scalar { loc, .. }
         | Node::Mapping { loc, .. }
         | Node::Sequence { loc, .. }
-        | Node::Alias { loc, .. } => loc.end,
+        | Node::Alias { loc, .. } => (loc.start, loc.end),
     };
-    line_index.line_column(end_offset).0
+    if end == start {
+        return None;
+    }
+    let (line, column) = line_index.line_column(end);
+    Some(if column == 0 {
+        line.saturating_sub(1)
+    } else {
+        line
+    })
 }
 
 /// Return `true` if the node is a block scalar (literal `|` or folded `>`).

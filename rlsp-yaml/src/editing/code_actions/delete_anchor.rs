@@ -118,7 +118,7 @@ fn find_anchored_node_in<'a>(
 #[cfg(test)]
 mod tests {
     use super::super::code_actions;
-    use super::super::test_helpers::{docs_for, line_range, make_diagnostic};
+    use super::super::test_helpers::{apply_text_edit, docs_for, line_range, make_diagnostic};
     use crate::editing::formatter::YamlFormatOptions;
     use crate::test_utils::test_uri;
 
@@ -338,5 +338,30 @@ mod tests {
             actions.iter().all(|a| !a.title.contains("unused anchor")),
             "stale diagnostic must not produce an action"
         );
+    }
+
+    // The anchor's node includes the comment on a block scalar's header line;
+    // the replacement carries it, so the comment neither goes missing nor
+    // doubles.
+    #[test]
+    fn delete_anchor_keeps_the_block_scalar_header_comment_once() {
+        let text = "a: &unused | # c\n  t\nb: 1\n";
+        let diag = make_diagnostic(0, 3, 10, "unusedAnchor");
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            line_range(0),
+            &[diag],
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
+        let action = actions
+            .iter()
+            .find(|a| a.title.contains("unused anchor"))
+            .unwrap();
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        let result = apply_text_edit(text, &edits[0]);
+        assert_eq!(result.matches("# c").count(), 1, "{result:?}");
+        assert!(result.starts_with("a: |  # c\n"), "{result:?}");
     }
 }

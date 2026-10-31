@@ -461,10 +461,20 @@ Comments are emitted as `Event::Comment` items in the event stream. The loader
 converts these to strings and attaches them to adjacent AST nodes.
 
 **Leading comments.** Before parsing each mapping key or sequence item, the
-loader drains all preceding `Comment` events via `consume_leading_comments`. The
-resulting `Vec<String>` is passed to `attach_leading_comments`, which writes it
-into the next node's `leading_comments` field. A comment after the `-` or `?`
-indicator (`- # c`) is such a preceding comment too.
+loader drains all preceding `Comment` events via `consume_leading_comments_at`,
+which returns each comment with the byte offset where it starts. The comments
+are passed to `attach_leading_comments`, which writes them into the next node's
+`leading_comments` field. A comment after the `-` or `?` indicator (`- # c`) is
+such a preceding comment too.
+
+**Comments below the properties of an empty node.** A tag or an anchor with no
+node (`- !!str`, `? &x`) is a node that ends with its properties. The parser
+emits its empty scalar where the next token starts, after the comment lines that
+stand below the properties, so those lines are among the comments drained before
+it. `LoadState::split_comments_after_empty_node` splits them by line: the comments
+on the properties' own line stay with the node, the comments on later lines go
+to `pending_leading` and so to the next item or key, or to the document's
+`end_comments` when none follows.
 
 **Comments between a key and its value.** Keys, sequence items, and the
 document root drain their leading comments in a loop, so a `Comment` event
@@ -484,11 +494,16 @@ value.
 
 **Comments on a node's line.** After parsing a mapping key, a mapping value, a
 sequence item, or the document root, the loader peeks at the event stream via
-`attach_line_comment`. A comment is the node's `trailing_comment` if it is on
-the node's line: the line its span ends on, or, for a block scalar, whose span
-ends after its content, the header line. So a key owns the comment that follows
-it on its line (`k: # c`, `a: &x # c`, `a: !t # c`), and a block scalar owns
-its header comment (`| # c`). A comment on a different line is left in the
+`attach_line_comment` (`attach_key_line_comment` for a key). A comment is the
+node's `trailing_comment` if it is on the node's line: the line its text ends
+on, or, for a block scalar, whose span ends after its content, the header line.
+A span that ends at the start of a line ends on the line before: a block
+collection's span runs through the line break of its last line, so the comment on
+the next item's dash line is not the collection's. A node without text, an empty
+scalar, has no line. An empty key is the exception: it sits on the line of its
+`:`, so the comment after the `:` is its own. So a key owns the comment that
+follows it on its line (`k: # c`, `a: &x # c`, `a: !t # c`), and a block scalar
+owns its header comment (`| # c`). A comment on a different line is left in the
 stream to be picked up as a leading comment of the next node.
 
 **Comments around the document.** Every other comment is in one of four

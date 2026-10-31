@@ -12,6 +12,30 @@ with existing infrastructure.
 
 ---
 
+### A Comment Stays With the Node It Is Next To [completed]
+
+**Description:** `load()` stored some comments on the wrong node. A comment on
+the dash line of a later item (`- a: 1`, then `- # d` and `  b: 2`) or on the `?`
+line of a later key was the previous collection's or empty value's trailing
+comment; it is now a leading comment of that item or key. A comment after a
+quoted scalar that spans several lines (`a: "x`, `  y" # c`) was stored on the
+next entry; it is now the scalar's trailing comment. A comment line below a tag
+or an anchor with no node (`- !!str`, then `# d` and `- x`) was a leading
+comment of that empty item; it now belongs to what follows (`x`), or to the
+document's end comments when nothing follows. A comment on the properties' own
+line (`- !!str # c`) and a comment before a node that continues on a later line
+stay with the node. The event stream is unchanged.
+**Complexity:** Medium
+**Comment:** The loader read the line of a node from the end of its span. A block
+collection's span ends at the start of the next line and the span of an empty
+scalar sits where the next token starts, so the comment of the next line looked
+like the node's own. Without this, a formatter that prints a comment above the
+next item reads it back on the item before it, and formatting twice gives a
+different text.
+**Tier:** 1
+
+---
+
 ### Every Comment Is an Event [completed]
 
 **Description:** `parse_events()` emits an `Event::Comment` for every comment,

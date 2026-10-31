@@ -118,6 +118,20 @@ const ALLOW_LIST: &[AllowEntry] = &[
         },
     },
     AllowEntry {
+        file: "editing/code_actions/block_scalar.rs",
+        func: "lsp_position",
+        marker: AllowMarker::CarveOut {
+            reason: "byte-range arithmetic on a parser-provided span: converts a span offset to an LSP line and UTF-16 column, reads no structure",
+        },
+    },
+    AllowEntry {
+        file: "editing/code_actions/block_scalar.rs",
+        func: "trailing_comment_line_end",
+        marker: AllowMarker::CarveOut {
+            reason: "byte-range arithmetic on a parser-provided span: finds the line end after a scalar span and checks that the rest of the line is the AST's trailing comment, reads no structure",
+        },
+    },
+    AllowEntry {
         file: "editing/code_actions/tab_to_spaces.rs",
         func: "tab_to_spaces",
         marker: AllowMarker::CarveOut {

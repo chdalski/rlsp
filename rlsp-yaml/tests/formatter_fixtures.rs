@@ -322,6 +322,28 @@ fn formatter_fixture(#[files("tests/fixtures/formatter/*.md")] path: PathBuf) {
             first,
         );
     }
+
+    // Formatting the output again changes nothing.  Checked for the comment
+    // fixtures: a comment that moves must move to a place that stays.
+    if fixture_category(&content) == Some("comments") {
+        assert_eq!(
+            format_yaml(&first, &fixture.options),
+            first,
+            "fixture {}: output is not stable under a second format\ntest-name: {}",
+            path.display(),
+            fixture.test_name,
+        );
+    }
+}
+
+/// The `category` of a fixture, from its frontmatter.
+fn fixture_category(content: &str) -> Option<&str> {
+    content
+        .lines()
+        .skip(1)
+        .take_while(|line| *line != "---")
+        .find_map(|line| line.strip_prefix("category: "))
+        .map(str::trim)
 }
 
 // ---- Unit tests for harness helpers -----------------------------------------

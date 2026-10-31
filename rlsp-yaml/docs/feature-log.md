@@ -31,6 +31,15 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### The Formatter Keeps the Comment on a Key's Line, a Block Scalar's Header, and an Empty Key's Value [completed]
+
+**Date:** 2026-10-31
+**Description:** The formatter used to delete the comment on a key's line (`k: # c`), the comment on a block scalar's header line (`a: | # c`), the comment after the value of an empty key (`: v # c`), and the comment after an explicit key (`? k # c`). It keeps all of them now. A comment stays on its line when the output has that line and a slot on it; otherwise it moves to its own line above the node's line. A comment after a value stays after it (`a: "q" # c` becomes `a: q  # c`). A comment on a key's line stays after the key's colon when a block collection, a block scalar, or nothing follows (`k: # c` followed by `sub: 1` becomes `k:  # c`). When the value moves up to the key's line, the comment follows it (`k: # c` followed by `v` becomes `k: v  # c`). A comment on a block scalar's header line stays after the header indicators (`a: |  # c`), never inside the value. A key's comment moves to its own line above the entry when the value has a comment of its own, because the entry has one line and one slot: `k: # c` followed by `v # d` becomes `# c` above `k: v  # d`. A comment on a sequence item's dash line (`- # c`) moves to its own line above the dash, as does a key comment on the first entry of an item; both formats read the same data, and the comment keeps reading as a comment of the same node. A comment on the dash line of a later item stays with that item (`- a: 1` followed by `- # d` and `b: 2` becomes `- a: 1`, `# d`, `- b: 2`), and a comment after a quoted value that spans several lines stays with that value instead of moving to the next entry. Because a comment that moves to its own line can now be read as a standalone line, a suppression comment such as `# rlsp-yaml-disable-next-line` on a key's line, when the value has a comment, applies to the entry below it after formatting. The "Convert to block scalar" quick fix replaces a trailing comment on the scalar's line together with the scalar and prints it on the header line instead of after the literal's last content line, where it became part of the value.
+**Complexity:** Medium
+**Tier:** 1
+
+---
+
 ### SchemaStore Assigns Schemas to Files in Any Directory [completed]
 
 **Date:** 2026-10-29

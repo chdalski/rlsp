@@ -181,6 +181,45 @@ mod test_helpers {
         }
     }
 
+    /// The byte offset of an LSP position of `text`: the column counts UTF-16
+    /// code units, lines end at `\n`, `\r\n` or a lone `\r`.
+    fn byte_offset(buffer: &str, position: Position) -> usize {
+        let mut line_start = 0;
+        let mut line = 0;
+        let bytes = buffer.as_bytes();
+        let mut i = 0;
+        while line < position.line {
+            match bytes.get(i) {
+                Some(b'\r') if bytes.get(i + 1) == Some(&b'\n') => i += 2,
+                Some(b'\r' | b'\n') => i += 1,
+                Some(_) => {
+                    i += 1;
+                    continue;
+                }
+                None => break,
+            }
+            line += 1;
+            line_start = i;
+        }
+        let mut units = 0;
+        for (offset, c) in buffer[line_start..].char_indices() {
+            if units >= position.character {
+                return line_start + offset;
+            }
+            units += u32::try_from(c.len_utf16()).expect("a char is at most two UTF-16 units");
+        }
+        buffer.len()
+    }
+
+    /// `buffer` with `edit` applied.
+    pub(super) fn apply_text_edit(buffer: &str, edit: &TextEdit) -> String {
+        let (start, end) = (
+            byte_offset(buffer, edit.range.start),
+            byte_offset(buffer, edit.range.end),
+        );
+        format!("{}{}{}", &buffer[..start], edit.new_text, &buffer[end..])
+    }
+
     pub(super) fn make_diagnostic(line: u32, start: u32, end: u32, code: &str) -> Diagnostic {
         make_flow_diag(code, line, start, line, end)
     }

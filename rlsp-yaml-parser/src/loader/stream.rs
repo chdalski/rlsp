@@ -67,6 +67,21 @@ fn consume_leading_comments_slow(stream: &mut EventStream<'_>) -> Result<Vec<Str
     Ok(leading)
 }
 
+/// [`consume_leading_comments`] with the byte offset where each comment starts,
+/// for a caller that has to tell on which line a comment stands.
+pub(super) fn consume_leading_comments_at(
+    stream: &mut EventStream<'_>,
+) -> Result<Vec<(String, u32)>> {
+    let mut leading = Vec::new();
+    while let Some(Ok((Event::Comment { .. }, span))) = stream.peek() {
+        let start = span.start;
+        if let Some((Event::Comment { text }, _)) = next_from(stream)? {
+            leading.push((with_hash_prefix(text), start));
+        }
+    }
+    Ok(leading)
+}
+
 /// If the next event is a trailing Comment on the same line as `preceding_end_line`,
 /// consume it and return the text.  Otherwise return `None`.
 ///

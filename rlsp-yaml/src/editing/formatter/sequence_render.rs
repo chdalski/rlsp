@@ -5,6 +5,11 @@ use rlsp_yaml_parser::CollectionStyle;
 use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::Node;
 
+use super::mapping_render::{
+    Entry, block_mapping_parts, join_entries, line_end_comment, with_comments_above,
+    with_line_end_comment,
+};
+use super::node_to_doc::renders_empty;
 use super::options::YamlFormatOptions;
 use super::scalar_render::{format_tag, is_core_schema_tag};
 
@@ -27,13 +32,23 @@ pub(super) fn sequence_to_doc(
     match effective_style {
         CollectionStyle::Flow => flow_sequence_to_doc(seq, options),
         CollectionStyle::Block => {
-            let items: Vec<Doc> = seq
-                .iter()
-                .map(|item| sequence_item_to_doc(item, options))
-                .collect();
-            join(&hard_line(), items)
+            let Entry { above, doc } = block_sequence_parts(seq, options);
+            with_comments_above(doc, above)
         }
     }
+}
+
+/// Convert the items of a block sequence to their Doc and the comments above the
+/// first one, for a caller that puts text before the first `- ` (see
+/// `mapping_render::block_mapping_parts`).
+pub(super) fn block_sequence_parts<'a>(
+    seq: &'a [Node<Span>],
+    options: &YamlFormatOptions,
+) -> Entry<'a> {
+    join_entries(
+        seq.iter().map(|item| sequence_item_parts(item, options)),
+        "[]",
+    )
 }
 
 /// Render a flow sequence as `[item1, item2, item3]`. Uses `group()` so the
@@ -58,8 +73,12 @@ pub(super) fn flow_sequence_to_doc(seq: &[Node<Span>], options: &YamlFormatOptio
     ]))
 }
 
-/// Render a single sequence item with its `- ` prefix, including AST-attached comments.
-pub(super) fn sequence_item_to_doc(item: &Node<Span>, options: &YamlFormatOptions) -> Doc {
+/// Render a single sequence item with its `- ` prefix and the comments above it.
+///
+/// A comment on the `- ` line of an item that is a block collection reads as the
+/// collection's own comment, so every comment of such an item prints above the
+/// `- `: the item's, and those of its first entry.
+fn sequence_item_parts<'a>(item: &'a Node<Span>, options: &YamlFormatOptions) -> Entry<'a> {
     let effective_style = |style: CollectionStyle| {
         if options.format_enforce_block_style {
             CollectionStyle::Block
@@ -68,7 +87,9 @@ pub(super) fn sequence_item_to_doc(item: &Node<Span>, options: &YamlFormatOption
         }
     };
 
-    let item_doc = match item {
+    let mut above: Vec<&str> = item.leading_comments().iter().map(String::as_str).collect();
+
+    let (item_doc, line_end) = match item {
         // Block mapping item: `- key: val\n  key2: val2`.
         // With anchor: `- &anchor\n  key: val\n  key2: val2`.
         // With tag: `- !tag\n  key: val` (anchor before tag per formatter convention).
@@ -78,11 +99,12 @@ pub(super) fn sequence_item_to_doc(item: &Node<Span>, options: &YamlFormatOption
             tag,
             ..
         } if !entries.is_empty() && effective_style(*style) == CollectionStyle::Block => {
-            let pairs: Vec<Doc> = entries
-                .iter()
-                .map(|(k, v)| super::mapping_render::key_value_to_doc(k, v, options))
-                .collect();
-            let inner = join(&hard_line(), pairs);
+            above.extend(item.trailing_comment());
+            let Entry {
+                above: first_above,
+                doc: inner,
+            } = block_mapping_parts(entries, options);
+            above.extend(first_above);
             let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
             let prefix = match (item.anchor(), user_tag) {
                 (Some(name), Some(t)) => format!("&{name} {}", format_tag(t)),
@@ -90,7 +112,7 @@ pub(super) fn sequence_item_to_doc(item: &Node<Span>, options: &YamlFormatOption
                 (None, Some(t)) => format_tag(t),
                 (None, None) => String::new(),
             };
-            if prefix.is_empty() {
+            let doc = if prefix.is_empty() {
                 // `- key: val\n  key2: val2` — first pair on the dash line, remaining
                 // pairs indented one level so they align under the first key.
                 // indent() shifts all hard_line breaks inside `inner` by one level,
@@ -104,7 +126,8 @@ pub(super) fn sequence_item_to_doc(item: &Node<Span>, options: &YamlFormatOption
                     text(prefix),
                     indent(concat(vec![hard_line(), inner])),
                 ])
-            }
+            };
+            (doc, None)
         }
         // Block sequence item: `- \n  - item`.
         // With anchor: `- &anchor\n  - item`.
@@ -112,6 +135,12 @@ pub(super) fn sequence_item_to_doc(item: &Node<Span>, options: &YamlFormatOption
         Node::Sequence {
             items, style, tag, ..
         } if !items.is_empty() && effective_style(*style) == CollectionStyle::Block => {
+            above.extend(item.trailing_comment());
+            let Entry {
+                above: first_above,
+                doc: inner,
+            } = block_sequence_parts(items, options);
+            above.extend(first_above);
             let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
             let prefix_doc = match (item.anchor(), user_tag) {
                 (Some(name), Some(t)) => text(format!("&{name} {}", format_tag(t))),
@@ -119,27 +148,35 @@ pub(super) fn sequence_item_to_doc(item: &Node<Span>, options: &YamlFormatOption
                 (None, Some(t)) => text(format_tag(t)),
                 (None, None) => text(String::new()),
             };
-            concat(vec![
+            let doc = concat(vec![
                 text("- "),
                 prefix_doc,
-                indent(concat(vec![
-                    hard_line(),
-                    sequence_to_doc(items, *style, options),
-                ])),
-            ])
+                indent(concat(vec![hard_line(), inner])),
+            ]);
+            (doc, None)
         }
         // Flow collections, scalars, empty collections, aliases — inline under `- `.
         Node::Scalar { .. } | Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => {
-            concat(vec![
-                text("- "),
-                super::node_to_doc::node_to_doc(item, options, false),
-            ])
+            let comment = line_end_comment(item);
+            // An item that prints nothing leaves the dash's space at the end of
+            // the line, so it is left out before a comment.
+            let dash = if renders_empty(item) && comment.is_some() {
+                "-"
+            } else {
+                "- "
+            };
+            (
+                concat(vec![
+                    text(dash),
+                    super::node_to_doc::node_to_doc(item, options, false),
+                ]),
+                comment,
+            )
         }
     };
 
-    super::mapping_render::with_comments(
-        item_doc,
-        item.leading_comments(),
-        super::mapping_render::printed_trailing_comment(item),
-    )
+    Entry {
+        above,
+        doc: with_line_end_comment(item_doc, line_end),
+    }
 }

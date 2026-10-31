@@ -151,10 +151,12 @@ pub struct NodeMeta<Loc = Span> {
     /// first entry of a nested collection or to the next entry.  Comments
     /// around the document root are on [`Document`] instead.
     pub leading_comments: Option<Vec<String>>,
-    /// The comment on the line this node ends on (e.g. `a: 1 # note`).  A
-    /// mapping key owns the comment that follows it on its own line
+    /// The comment on the line this node's text ends on (e.g. `a: 1 # note`).
+    /// A mapping key owns the comment that follows it on its own line
     /// (`k: # note`, `a: &x # note`, `a: !t # note`), and a block scalar owns
-    /// the comment on its header line (`| # note`).
+    /// the comment on its header line (`| # note`).  A block collection has
+    /// none for the comment on the next item's line (`- # note`), which is a
+    /// leading comment of that item, and an empty scalar has none.
     pub trailing_comment: Option<String>,
 }
 

@@ -33,7 +33,7 @@ formatting it again must change nothing.
 - [x] Task 4: Emit every comment as an event
 - [x] Task 5: Store every comment event in the AST
 - [x] Task 6: Print document-level comments and reduce the text matching
-- [ ] Task 7: Print comments at every node position
+- [x] Task 7: Print comments at every node position
 - [ ] Task 8: Turn a flow collection holding a comment into block style
 - [ ] Task 9: Keep comments when removing duplicate keys
 - [ ] Task 10: Fold only own-line comments
@@ -171,7 +171,7 @@ all of those sites. Behavior is unchanged.
 A comment stays on its line when the output has that line and a slot on it;
 otherwise it moves to its own line above the node's line.
 
-- [ ] `format_yaml` yields, and a fixture pins with its idempotence:
+- [x] `format_yaml` yields, and a fixture pins with its idempotence:
       `a: "q" # c\nb: 1\n` to `a: q  # c\nb: 1\n`,
       `- "1.32" # msrv\n` to `- "1.32"  # msrv\n`,
       `k: # c\nb: 1\n` to `k:  # c\nb: 1\n`, `k: # c\n  sub: 1\n` to
@@ -182,11 +182,11 @@ otherwise it moves to its own line above the node's line.
       `# c\nk: v  # d\n`, `a: &x # c\n  b: 1\n` to `a: &x  # c\n  b: 1\n`,
       `: v # c\n` to `: v  # c\n`, `a:\n  v\n  w # c\n` to `a: v w  # c\n`,
       `a: v\n\n  w # c\n` to `a: "v\nw"  # c\n`
-- [ ] The block-scalar code action on `a: v # c\n` yields text with one `# c`,
+- [x] The block-scalar code action on `a: v # c\n` yields text with one `# c`,
       outside the literal value
-- [ ] With `rlsp-yaml/docs/feature-log.md`, a reader can tell where a comment
+- [x] With `rlsp-yaml/docs/feature-log.md`, a reader can tell where a comment
       moves and why
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 8: Turn a flow collection holding a comment into block style
 
@@ -306,6 +306,11 @@ these inputs change today.
   pairs lines by text, so a blank line could land inside a block scalar and change
   its value. Task 6 closes that without deriving blank lines from the AST, which
   stays the separate plan.
+- **The loader attaches a comment to the node it stands with (review of Task 7):**
+  a comment on a later item's dash or `?` line, or below an empty node's properties,
+  went to the node before it, which reordered comments and made a second format
+  change the output. `attach_line_comment` and the key and item loops now keep it
+  with the following node; events stay unchanged.
 - **`--- # c` and `- # c` move one line:** the data stays the same and no
   further field is needed; `--- # yaml-language-server: $schema=x` thereby
   becomes a valid modeline line. Declined: keeping them on the marker's line.
@@ -313,8 +318,8 @@ these inputs change today.
 - **No field on `Node` or `NodeMeta`:** `Node` is an exhaustive enum and
   `NodeMeta` can be built by callers, so a new field would break them;
   `Document` has a `pub(crate)` field, so new `pub` fields are additive.
-- **Performance:** in the loader, one enum-tag compare per mapping entry on the
-  buffered next event is the only addition on the path without comments.
+- **Performance:** in the loader, a few branches per key and item and no allocation
+  are the only addition on the path without comments.
   `format_yaml` also loads its restored output and compares it, because a blank
   line restored by text could otherwise change a value (security review of Task 6);
   correct data goes before speed here. No benchmark criterion.
@@ -337,3 +342,12 @@ these inputs change today.
 - Task 7: a block scalar as the document root prints its header comment:
   `--- | # c\n  x\n` keeps `# c`
 - Task 11: `insert_final_newline: false` keeps the value of `a: |+\n  x\n\n`
+- Task 11: `? [a]: x\n` with `format_enforce_block_style` keeps its data, and a
+  second format changes nothing; the second-pass check in
+  `tests/formatter_fixtures.rs` then covers every fixture, not only `comments`
+- Task 11: `a: !!str 123\n` keeps its string type through `format_yaml`
+- Task 11: `"": v\n` and `'': v\n` keep their empty string key, not a null key
+- Task 12: `- !!str # c\n- # d\n- x\n` and `?\n:\n?\n:\n` are in the check's inputs
+- Task 12: `? &x\n: v\n`, `&x\n---\ny\n`, `? !!str\n? &x\n`, and, under
+  `format_indent_sequences: false`, `a:\n  - !!str\nb: 1\n` are in the check's
+  inputs; the last needs `a:\n- !!str\nb: 1\n` to load as libfyaml does

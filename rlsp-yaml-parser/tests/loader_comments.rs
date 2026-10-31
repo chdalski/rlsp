@@ -153,6 +153,86 @@ fn on_small_stack<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
     &[("d0.trail:t\\n", "# h"), ("d0.lead:b", "# d")]
 )]
 #[case::hash_in_block_scalar_content_is_no_comment("a: |\n  t # x\n", &[])]
+// A comment on the line of the next item's dash, or of the next explicit key's
+// `?`, belongs to that item or key, not to the collection or the empty node
+// that ends before it.
+#[case::dash_of_second_item_after_mapping_item(
+    "- a: 1\n- # d\n  b: 2\n",
+    &[("d0.lead:<map>", "# d")]
+)]
+#[case::dash_of_second_item_after_sequence_item(
+    "- - a\n- # d\n  b: 2\n",
+    &[("d0.lead:<map>", "# d")]
+)]
+#[case::dash_of_second_item_in_nested_sequence(
+    "a:\n  - b: 1\n  - # d\n    c: 2\nd: 3\n",
+    &[("d0.lead:<map>", "# d")]
+)]
+#[case::dash_of_second_inner_item_after_mapping_item(
+    "- - a: 1\n  - # d\n    b: 1\n",
+    &[("d0.lead:<map>", "# d")]
+)]
+#[case::dash_after_empty_item("- # c\n- # d\n", &[("d0.lead:", "# c"), ("d0.lead:", "# d")])]
+#[case::dash_after_tagged_empty_item(
+    "- !!str # c\n- # d\n- x\n",
+    &[("d0.lead:", "# c"), ("d0.lead:", "# d")]
+)]
+#[case::dash_after_anchored_empty_item(
+    "- &a # c\n- # d\n",
+    &[("d0.lead:", "# c"), ("d0.lead:", "# d")]
+)]
+#[case::question_mark_after_nested_mapping(
+    "a:\n  y: 1\n? # d\n  z\n: 1\n",
+    &[("d0.lead:z", "# d")]
+)]
+// A tag or an anchor alone is a node that ends with its properties: the comment
+// lines below them belong to what follows, while a comment on their own line, or
+// one before a node that continues on a later line, stays with the node.
+#[case::comment_line_below_tag_only_item(
+    "- !!str\n# d\n- x\n",
+    &[("d0.lead:x", "# d")]
+)]
+#[case::comment_line_below_anchor_only_item(
+    "- &x\n  # d\n- y\n",
+    &[("d0.lead:y", "# d")]
+)]
+#[case::comment_lines_and_blank_lines_below_tag_only_item(
+    "- !!str\n\n# d\n\n# e\n- x\n",
+    &[("d0.lead:x", "# d"), ("d0.lead:x", "# e")]
+)]
+#[case::comment_on_the_properties_line_and_below(
+    "- !!str # c\n# d\n- x\n",
+    &[("d0.lead:", "# c"), ("d0.lead:x", "# d")]
+)]
+#[case::comment_below_properties_before_dash_comment(
+    "- !!str\n# d\n- # e\n  a: 1\n",
+    &[("d0.lead:<map>", "# d"), ("d0.lead:<map>", "# e")]
+)]
+#[case::comment_below_tag_only_item_in_nested_sequence(
+    "a:\n  - &x\n  # d\n  - y\nz: 1\n",
+    &[("d0.lead:y", "# d")]
+)]
+#[case::comment_below_last_tag_only_item("- !!str\n# d\n", &[("d0.end", "# d")])]
+#[case::comment_below_last_tag_only_item_goes_to_next_key(
+    "a:\n  - !!str\n  # d\nz: 1\n",
+    &[("d0.lead:z", "# d")]
+)]
+#[case::comment_on_the_properties_line_of_a_tag_only_item("- !!str # c\n- x\n", &[("d0.lead:", "# c")])]
+#[case::comment_before_a_node_on_a_later_line(
+    "- !!str\n# d\n  v\n- x\n",
+    &[("d0.lead:v", "# d")]
+)]
+#[case::comment_below_tag_only_key("? !!str\n# d\n: 1\nb: 2\n", &[("d0.lead:b", "# d")])]
+#[case::comment_below_tag_only_value("a: !!str\n# d\nb: 1\n", &[("d0.lead:b", "# d")])]
+// A comment after an empty key on its line is the key's.
+#[case::empty_key_before_nested_mapping(": # c\n  a: 1\n", &[("d0.trail:", "# c")])]
+// The text of a multi-line quoted scalar ends on the line of its closing quote.
+#[case::multi_line_double_quoted_value("a: \"x\n  y\" # c\nb: 1\n", &[("d0.trail:x y", "# c")])]
+#[case::multi_line_single_quoted_item("- 'x\n  y' # c\n- b\n", &[("d0.trail:x y", "# c")])]
+#[case::own_line_after_multi_line_quoted_value(
+    "a: \"x\n  y\"\n# d\nb: 1\n",
+    &[("d0.lead:b", "# d")]
+)]
 // Own-line comments and comments after an indicator belong to the next node.
 #[case::dash_before_nested_mapping("- # c\n  a: 1\n", &[("d0.lead:<map>", "# c")])]
 #[case::dash_of_second_item("- a\n- # c\n  b: 1\n", &[("d0.lead:<map>", "# c")])]
