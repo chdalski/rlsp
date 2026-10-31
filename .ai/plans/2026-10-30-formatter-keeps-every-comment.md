@@ -32,7 +32,7 @@ formatting it again must change nothing.
 - [x] Task 3: Two helpers assemble node comments and the collection colon
 - [x] Task 4: Emit every comment as an event
 - [x] Task 5: Store every comment event in the AST
-- [ ] Task 6: Print document-level comments and reduce the text matching
+- [x] Task 6: Print document-level comments and reduce the text matching
 - [ ] Task 7: Print comments at every node position
 - [ ] Task 8: Turn a flow collection holding a comment into block style
 - [ ] Task 9: Keep comments when removing duplicate keys
@@ -146,23 +146,25 @@ all of those sites. Behavior is unchanged.
 
 ### Task 6: Print document-level comments and reduce the text matching
 
-- [ ] `format_yaml` keeps each comment of these inputs in the position shown:
+- [x] `format_yaml` keeps each comment of these inputs in the position shown:
       `---\n# c\na: 1\n` (unchanged), `# c\n---\na: 1\n` (unchanged),
       `a: v\n# d\n---\nb: 1\n` (unchanged), `v # c\n---\nw\n` to
       `v  # c\n---\nw\n`, `a: 1\n# d\n...\n# e\n---\nb: 2\n` (unchanged),
       `--- # c\na: 1\n` to `---\n# c\na: 1\n`,
       `%YAML 1.2 # c\n---\na: 1\n` to `# c\n---\na: 1\n`,
       `a: 1\n... # c\n` to `a: 1\n...\n# c\n`, `# only\n` (unchanged)
-- [ ] `name: "P"\non: x\n` with a comment above each key keeps both comments,
+- [x] `name: "P"\non: x\n` with a comment above each key keeps both comments,
       and `a: |\n  t\n  # d\n` keeps one `# d`
-- [ ] `# h\n\na: 1\n` keeps its blank line
-- [ ] `comment_preservation.rs` only restores blank lines: no code in it
+- [x] `# h\n\na: 1\n` keeps its blank line
+- [x] Restoring blank lines never changes a scalar's value:
+      `a: 1\n\nb: "y"\nc: |\n  b: "y"\n  z\n` keeps the value of `c`
+- [x] `comment_preservation.rs` only restores blank lines: no code in it
       creates or removes a comment line, and its name and doc comment say so
-- [ ] The comment about comments at `tests/formatter_conformance.rs`, the doc
+- [x] The comment about comments at `tests/formatter_conformance.rs`, the doc
       comment on `format_yaml`, the mentions of `attach_comments` in
       `scalar_render.rs`, and the "Comments" bullet in
       `rlsp-yaml/docs/configuration.md` match the new behavior
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 7: Print comments at every node position
 
@@ -300,6 +302,10 @@ these inputs change today.
   comment belongs where it stands; the formatter and the language server do not
   use resolved mode. Declined: counting comments against `max_expanded_nodes`, and
   leaving it open.
+- **Blank-line restoration stays out of scalars (security review of Task 6):** it
+  pairs lines by text, so a blank line could land inside a block scalar and change
+  its value. Task 6 closes that without deriving blank lines from the AST, which
+  stays the separate plan.
 - **`--- # c` and `- # c` move one line:** the data stays the same and no
   further field is needed; `--- # yaml-language-server: $schema=x` thereby
   becomes a valid modeline line. Declined: keeping them on the marker's line.
@@ -307,9 +313,11 @@ these inputs change today.
 - **No field on `Node` or `NodeMeta`:** `Node` is an exhaustive enum and
   `NodeMeta` can be built by callers, so a new field would break them;
   `Document` has a `pub(crate)` field, so new `pub` fields are additive.
-- **Performance:** one enum-tag compare per mapping entry on the buffered next
-  event is the only addition on the path without comments; no benchmark
-  criterion.
+- **Performance:** in the loader, one enum-tag compare per mapping entry on the
+  buffered next event is the only addition on the path without comments.
+  `format_yaml` also loads its restored output and compares it, because a blank
+  line restored by text could otherwise change a value (security review of Task 6);
+  correct data goes before speed here. No benchmark criterion.
 
 ## Task Notes
 
@@ -324,3 +332,8 @@ these inputs change today.
   `? | # c\n  k\n: v\n` keeps `# c`
 - Task 11: recheck where `--- [a]\n# c\n` stores `# c` once `--- [a]` loads as a
   sequence; `tests/loader_comments.rs` pins the place
+- Task 11: these keep their values too: `a: |\n  x\n\n\n  y\n`, `a: |\n\n\n  x\n`,
+  `c: >\n\n  y: 1\n  a: 1\n`, and `a: |+\n  x\n\n\nb: 1\n`
+- Task 7: a block scalar as the document root prints its header comment:
+  `--- | # c\n  x\n` keeps `# c`
+- Task 11: `insert_final_newline: false` keeps the value of `a: |+\n  x\n\n`

@@ -611,6 +611,75 @@ async fn preserve_quotes_off_by_default_strips_safe_plain_scalars() {
     );
 }
 
+// ---- document-level comments ----
+
+/// Open `text` and request full-document formatting; the response result.
+async fn format_document(uri: &str, text: &str) -> serde_json::Value {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+    send(&mut service, did_open_notification(uri, text)).await;
+
+    let resp = send(&mut service, formatting_request(2, uri)).await;
+    let resp = resp.expect("formatting should return a response");
+    resp.result()
+        .expect("formatting should have a result")
+        .clone()
+}
+
+#[tokio::test]
+async fn formatting_comment_only_document_returns_no_edit() {
+    let result = format_document("file:///test/comment-only.yaml", "# only\n").await;
+
+    assert!(
+        result.is_null() || result.as_array().is_some_and(Vec::is_empty),
+        "a comment-only document is already formatted; got: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn formatting_moves_marker_line_comment_below_marker() {
+    let result = format_document("file:///test/marker-comment.yaml", "--- # c\na: 1\n").await;
+
+    let edits = result
+        .as_array()
+        .expect("formatting result should be array");
+    assert_eq!(edits.len(), 1, "expected one edit; got: {edits:?}");
+    assert_eq!(edits[0]["newText"], "---\n# c\na: 1\n");
+}
+
+#[tokio::test]
+async fn formatting_keeps_end_comments_and_after_end_comments() {
+    let result = format_document("file:///test/end-comments.yaml", "a: 1\n# d\n...\n# e\n").await;
+
+    assert!(
+        result.is_null() || result.as_array().is_some_and(Vec::is_empty),
+        "comments around the document are already in place; got: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn range_formatting_in_comment_only_document_returns_no_edit() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/range-comment-only.yaml";
+    send(&mut service, did_open_notification(uri, "# only\n# more\n")).await;
+
+    let resp = send(&mut service, range_formatting_request(2, uri, 0, 2)).await;
+    let resp = resp.expect("rangeFormatting should return a response");
+    let result = resp.result().expect("rangeFormatting should have a result");
+    assert!(
+        result.is_null() || result.as_array().is_some_and(Vec::is_empty),
+        "a comment-only document is already formatted; got: {result:?}"
+    );
+}
+
 // ---- formatEnable setting ----
 
 fn range_formatting_request(id: i64, uri: &str, start_line: u32, end_line: u32) -> Request {

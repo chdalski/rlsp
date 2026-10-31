@@ -54,3 +54,9 @@ target goes here only after the user has lowered the target.
 - The doc comment on `consume_leading_comments` in `loader/stream.rs` still says block-level and own-line only, which no longer holds for `- # c`, `--- # c`, and the document-level callers; comment plan Task 5 review.
 - `rlsp-yaml-parser/docs/architecture.md`, Resolved bullet: the added lines lack the list item's indent; comment plan Task 5 review.
 - Test consolidation candidates: the `*_reaches_no_node` cases of `comment_between_key_and_value_placement` in `src/loader.rs` with the `end_comments` cases in `tests/loader_comments.rs`; the walkers `nodes_with_leading_comments` and `comment_places`; comment plan Task 5 test review.
+- `format_subtree` in `formatter.rs` indents a literal's blank lines with `base_indent`, so code actions produce whitespace-only lines (the value stays); comment plan Task 6 review.
+- `prints_nothing` in `formatter.rs` repeats the rule of `node_to_doc.rs` for when a tag prints; comment plan Task 6 review.
+- An empty root document in the middle prints a blank line (`---\n\n---`) in `render_documents`, and `a:\n  # c\n` prints `a: ` with a trailing space; comment plan Task 6.
+- The server reads the modeline and suppressions with `str::lines()`, so they have no effect with `line_ending = cr`; comment plan Task 6 security review.
+- The formatter drops `%YAML` and `%TAG` directives, and blank-line pairing then loses every blank line in the rest of the file; comment plan Task 6 security review.
+- Test consolidation candidates: the triple `comment-*` formatter fixtures and two `blank-line-*` fixtures with identical content and no blank line; comment plan Task 6 test review.

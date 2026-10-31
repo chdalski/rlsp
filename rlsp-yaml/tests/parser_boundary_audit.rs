@@ -104,21 +104,14 @@ const ALLOW_LIST: &[AllowEntry] = &[
         },
     },
     AllowEntry {
-        file: "editing/formatter/comment_preservation.rs",
-        func: "extract_doc_prefix_comments",
-        marker: AllowMarker::CarveOut {
-            reason: "pre-parse lexical: document-prefix comment extraction",
-        },
-    },
-    AllowEntry {
-        file: "editing/formatter/comment_preservation.rs",
+        file: "editing/formatter/blank_lines.rs",
         func: "find_comment_on_line",
         marker: AllowMarker::CarveOut {
-            reason: "pre-parse lexical: comment-boundary scan helper for document-prefix extraction",
+            reason: "pre-parse lexical: comment-boundary scan helper for blank-line restoration",
         },
     },
     AllowEntry {
-        file: "editing/formatter/content_tracking.rs",
+        file: "editing/formatter/blank_lines.rs",
         func: "content_signature",
         marker: AllowMarker::CarveOut {
             reason: "pre-parse lexical: helper of find_comment_on_line",

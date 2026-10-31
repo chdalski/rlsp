@@ -2,14 +2,13 @@
 
 use std::fmt::Write as _;
 
-use rlsp_fmt::{Doc, FormatOptions, concat, format as fmt_format, hard_line, text};
-use rlsp_yaml_parser::Span;
+use rlsp_fmt::{Doc, FormatOptions, format as fmt_format, hard_line, join, text};
 use rlsp_yaml_parser::node::{Document, Node};
+use rlsp_yaml_parser::{Event, ScalarStyle, Span};
 
 use crate::editing::editor_config::LineEnding;
 
-mod comment_preservation;
-mod content_tracking;
+mod blank_lines;
 mod dedup;
 mod mapping_render;
 mod node_to_doc;
@@ -65,10 +64,14 @@ pub fn format_subtree(
 /// Returns the formatted text. If the input fails to parse, returns the
 /// original text unchanged so the caller never loses content.
 ///
-/// Inter-node comments (between mapping entries and sequence items) are read
-/// directly from the AST node fields populated by the loader.  Document-prefix
-/// leading comments (before the first content node) are discarded by the
-/// tokenizer and recovered via a raw-text scan of the preamble only.
+/// Every comment reaches the output from the AST: the loader stores the
+/// comments around a document's root in the document (before `---`, after
+/// `---`, after the root, after the last `...`) and every other comment in the
+/// node it belongs to.  A stream that holds only comments loads as no
+/// document, so its comments come from the parser's event stream.  A comment
+/// on a `---`, `...`, or directive line moves to its own line: below the
+/// `---` or `...` marker, above the `---` that follows the directive.  The
+/// input is consulted only to restore its blank lines.
 #[must_use]
 pub fn format_yaml(text_input: &str, options: &YamlFormatOptions) -> String {
     // The parser preserves scalar styles (plain, quoted, block) and tags natively.
@@ -78,82 +81,29 @@ pub fn format_yaml(text_input: &str, options: &YamlFormatOptions) -> String {
         Err(_) => return text_input.to_string(),
     };
 
-    if documents.is_empty() {
-        return String::new();
-    }
+    let source_blocks = blank_lines::block_scalar_lines(&documents);
 
-    // Extract only document-prefix comments (lines before the first content line).
-    // Inter-node comments are embedded directly by node_to_doc via AST fields.
-    let prefix_comments = comment_preservation::extract_doc_prefix_comments(text_input);
-
-    let fmt_options = FormatOptions {
-        print_width: options.print_width,
-        tab_width: options.tab_width,
-        use_tabs: false,
-    };
-
-    // Apply duplicate-key removal pre-pass when enabled.
-    let documents: Vec<Document<Span>> = if options.format_remove_duplicate_keys {
-        documents
-            .into_iter()
-            .map(|mut doc| {
-                dedup::dedup_mapping_keys(&mut doc.root);
-                doc
-            })
-            .collect()
+    let mut result = if documents.is_empty() {
+        match stream_comments(text_input) {
+            Some(comments) if comments.is_empty() => return String::new(),
+            Some(comments) => comments.join("\n"),
+            None => return text_input.to_string(),
+        }
     } else {
-        documents
+        render_documents(documents, options)
     };
 
-    // Build document parts respecting explicit_start and explicit_end markers.
-    //
-    // Rules:
-    // - Emit `---` before a document when it has `explicit_start: true` (first
-    //   doc) or when it is not the first document (separator always required).
-    // - Emit `...` after a document when it has `explicit_end: true`.
-    let doc_marker = text("---");
-    let end_marker = text("...");
-    let mut parts: Vec<Doc> = Vec::new();
-    for (i, doc) in documents.iter().enumerate() {
-        let is_first = i == 0;
-        let needs_start_marker = !is_first || doc.explicit_start;
-        if needs_start_marker {
-            if !parts.is_empty() {
-                parts.push(hard_line());
-            }
-            parts.push(doc_marker.clone());
-            parts.push(hard_line());
-        }
-        parts.push(node_to_doc::node_to_doc(&doc.root, options, false));
-        if doc.explicit_end {
-            parts.push(hard_line());
-            parts.push(end_marker.clone());
-        }
-    }
-    let joined = concat(parts);
+    // The rendered lines are joined, not terminated: end the last one.  A block
+    // scalar that ends in blank lines needs this too, so the newline is not
+    // conditional on how the output ends.
+    result.push('\n');
 
-    let mut result = fmt_format(&joined, &fmt_options);
-
-    // Ensure output ends with a single newline before attach_comments.
-    // attach_comments also guarantees a trailing newline, but the guard here
-    // keeps the contract clear for readers.
-    if !result.ends_with('\n') {
-        result.push('\n');
-    }
-
-    // Reattach document-prefix comments and blank lines to the formatted output.
-    // Always runs — blank line preservation requires a pass even when there are no comments.
-    // attach_comments always produces LF output with a trailing newline.
-    let last_content_hint = content_tracking::last_content_line_from_ast(&documents);
-    result = comment_preservation::attach_comments(
-        text_input,
-        &result,
-        &prefix_comments,
-        last_content_hint,
-    );
+    // Blank lines are not in the AST; copy them from the input.
+    // restore_blank_lines always produces LF output with a trailing newline.
+    result = blank_lines::restore_blank_lines(text_input, &source_blocks, &result);
 
     // Apply line-ending substitution: replace all LF with the requested terminator.
-    // attach_comments produces only LF, so this replace is safe (no CR complications).
+    // restore_blank_lines produces only LF, so this replace is safe (no CR complications).
     match options.line_ending {
         LineEnding::Lf => {}
         LineEnding::Crlf => {
@@ -188,8 +138,119 @@ pub fn format_yaml(text_input: &str, options: &YamlFormatOptions) -> String {
     result
 }
 
+/// The comments of a stream that holds no document, in source order, each with
+/// its `#`.  `None` when the stream does not parse.
+fn stream_comments(text_input: &str) -> Option<Vec<String>> {
+    rlsp_yaml_parser::parse_events(text_input)
+        .filter_map(|event| match event {
+            Ok((Event::Comment { text }, _)) => Some(Ok(format!("#{text}"))),
+            Ok(_) => None,
+            Err(e) => Some(Err(e)),
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .ok()
+}
+
+/// Render loaded documents with `rlsp-fmt`: for each document its comments, the
+/// `---` and `...` markers its position or `explicit_end` calls for, and the root.
+fn render_documents(documents: Vec<Document<Span>>, options: &YamlFormatOptions) -> String {
+    let fmt_options = FormatOptions {
+        print_width: options.print_width,
+        tab_width: options.tab_width,
+        use_tabs: false,
+    };
+
+    // Apply duplicate-key removal pre-pass when enabled.
+    let documents: Vec<Document<Span>> = if options.format_remove_duplicate_keys {
+        documents
+            .into_iter()
+            .map(|mut doc| {
+                dedup::dedup_mapping_keys(&mut doc.root);
+                doc
+            })
+            .collect()
+    } else {
+        documents
+    };
+
+    // One entry per output line, except that a root renders as one entry.
+    //
+    // Rules:
+    // - Emit `---` before a document when it has `explicit_start: true` (first
+    //   doc) or when it is not the first document (separator always required).
+    // - Emit `...` after a document when it has `explicit_end: true`.
+    let comment_lines =
+        |comments: &[String]| -> Vec<Doc> { comments.iter().map(|c| text(c.clone())).collect() };
+    let mut lines: Vec<Doc> = Vec::new();
+    for (i, doc) in documents.iter().enumerate() {
+        lines.extend(comment_lines(&doc.prefix_comments));
+        if i > 0 || doc.explicit_start {
+            lines.push(text("---"));
+        }
+        lines.extend(comment_lines(&doc.comments));
+        let ends_output = i + 1 == documents.len()
+            && doc.end_comments.is_empty()
+            && !doc.explicit_end
+            && doc.after_end_comments.is_empty();
+        // An empty root that ends the output is no line at all; the final
+        // newline ends the line before it.
+        if !(ends_output && prints_nothing(&doc.root)) {
+            lines.push(mapping_render::with_comments(
+                node_to_doc::node_to_doc(&doc.root, options, false),
+                &[],
+                mapping_render::printed_trailing_comment(&doc.root),
+            ));
+        }
+        lines.extend(comment_lines(&doc.end_comments));
+        if doc.explicit_end {
+            lines.push(text("..."));
+        }
+        lines.extend(comment_lines(&doc.after_end_comments));
+    }
+
+    strip_blank_line_indent(&fmt_format(&join(&hard_line(), lines), &fmt_options))
+}
+
+/// Whether the formatter prints nothing for `node`: an empty plain scalar with
+/// no anchor, no tag that is printed, and no trailing comment that is printed.
+fn prints_nothing(node: &Node<Span>) -> bool {
+    let Node::Scalar {
+        value,
+        style: ScalarStyle::Plain,
+        tag,
+        ..
+    } = node
+    else {
+        return false;
+    };
+    // A core tag is printed, in its short form, only on an empty scalar that
+    // carries it in the source; any other tag is always printed.
+    let tag_printed = tag
+        .as_ref()
+        .is_some_and(|t| !scalar_render::is_core_schema_tag(t) || node.tag_loc().is_some());
+    value.is_empty()
+        && !tag_printed
+        && node.anchor().is_none()
+        && mapping_render::printed_trailing_comment(node).is_none()
+}
+
+/// Empty the lines that hold only spaces.  The printer indents the line after
+/// every line break, so a blank line (of a block scalar's value, say) inside an
+/// indented collection comes out as trailing spaces.  No other line of the
+/// output consists of spaces alone: a block scalar line of spaces alone is
+/// printed double-quoted instead.
+fn strip_blank_line_indent(rendered: &str) -> String {
+    rendered
+        .split('\n')
+        .map(|l| if l.bytes().all(|b| b == b' ') { "" } else { l })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
+    use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
     use rlsp_yaml_parser::CollectionStyle;
     use rstest::rstest;
 
@@ -763,19 +824,666 @@ mod tests {
         assert_eq!(format_yaml(&first, &default_opts()), first);
     }
 
-    #[rstest]
-    #[case::multiline_plain_value("a:\n  v\n  w\n", 2)]
-    #[case::multiline_plain_value_before_comment_line("a:\n  v\n  w\n# d\n", 2)]
-    #[case::single_line_value("a: v\n", 0)]
-    fn last_content_line_of_plain_scalar_is_its_last_source_line(
-        #[case] input: &str,
-        #[case] expected: usize,
-    ) {
-        let docs = rlsp_yaml_parser::load(input).expect("test input must parse");
+    // ---- Group: document-level comments ----
+
+    /// The comments around each document's root as the loader stores them
+    /// (before `---`, after `---`, after the root, after `...`); a stream
+    /// without a document yields its comment events as one entry.
+    fn document_comment_lists(yaml: &str) -> Vec<[Vec<String>; 4]> {
+        let docs = rlsp_yaml_parser::load(yaml).expect("test input must parse");
+        if docs.is_empty() {
+            let comments = stream_comments(yaml).expect("test input must parse");
+            return vec![[comments, Vec::new(), Vec::new(), Vec::new()]];
+        }
+        docs.into_iter()
+            .map(|d| {
+                [
+                    d.prefix_comments,
+                    d.comments,
+                    d.end_comments,
+                    d.after_end_comments,
+                ]
+            })
+            .collect()
+    }
+
+    /// `output` is a fixed point of `format_yaml` and holds the comments of
+    /// `yaml` in the same lists.
+    fn assert_comments_survive(yaml: &str, output: &str, opts: &YamlFormatOptions) {
+        assert_eq!(format_yaml(output, opts), output, "output is not stable");
         assert_eq!(
-            content_tracking::last_content_line_from_ast(&docs),
-            Some(expected)
+            document_comment_lists(output),
+            document_comment_lists(yaml),
+            "comments differ between input {yaml:?} and output {output:?}"
         );
+    }
+
+    fn assert_formats_to(yaml: &str, expected: &str) {
+        let output = format_yaml(yaml, &default_opts());
+        assert_eq!(output, expected);
+        assert_comments_survive(yaml, &output, &default_opts());
+    }
+
+    #[rstest]
+    #[case::own_line_after_marker("---\n# c\na: 1\n", "---\n# c\na: 1\n")]
+    #[case::prefix_before_marker("# c\n---\na: 1\n", "# c\n---\na: 1\n")]
+    #[case::end_comment_before_marker("a: v\n# d\n---\nb: 1\n", "a: v\n# d\n---\nb: 1\n")]
+    #[case::root_scalar_trailing_comment_before_marker("v # c\n---\nw\n", "v  # c\n---\nw\n")]
+    #[case::end_and_prefix_around_document_end(
+        "a: 1\n# d\n...\n# e\n---\nb: 2\n",
+        "a: 1\n# d\n...\n# e\n---\nb: 2\n"
+    )]
+    #[case::marker_line_comment_moves_below_marker("--- # c\na: 1\n", "---\n# c\na: 1\n")]
+    #[case::directive_line_comment_becomes_prefix("%YAML 1.2 # c\n---\na: 1\n", "# c\n---\na: 1\n")]
+    #[case::document_end_line_comment_moves_below("a: 1\n... # c\n", "a: 1\n...\n# c\n")]
+    #[case::comment_only_stream("# only\n", "# only\n")]
+    #[case::implicit_second_document_keeps_prefix_before_inserted_marker(
+        "a: 1\n...\n# e\nb: 2\n",
+        "a: 1\n...\n# e\n---\nb: 2\n"
+    )]
+    #[case::end_comment_without_document_end(
+        "a: 1\n# d\n---\nb: 1\n# e\n",
+        "a: 1\n# d\n---\nb: 1\n# e\n"
+    )]
+    #[case::comment_after_marker_of_second_document(
+        "a: 1\n---\n# x\nb: 2\n",
+        "a: 1\n---\n# x\nb: 2\n"
+    )]
+    #[case::after_end_comments_keep_order("a: 1\n...\n# e1\n# e2\n", "a: 1\n...\n# e1\n# e2\n")]
+    #[case::nested_tail_leaves_its_indent("a:\n  b: 1\n  # tail\n", "a:\n  b: 1\n# tail\n")]
+    #[case::sequence_tail("- a\n- b\n# tail\n", "- a\n- b\n# tail\n")]
+    #[case::comment_before_last_scalar_value_moves_after_root("a:\n  # c\n  v\n", "a: v\n# c\n")]
+    #[case::root_scalar_end_comment("v\n# c\n", "v\n# c\n")]
+    #[case::key_value_then_comment_line("key: value\n# next\n", "key: value\n# next\n")]
+    fn document_comment_is_printed_at_its_place(#[case] input: &str, #[case] expected: &str) {
+        assert_formats_to(input, expected);
+    }
+
+    #[rstest]
+    #[case::comment_under_empty_value("a:\n  # c\n")]
+    #[case::comment_only_with_document_end("# c\n...\n")]
+    #[case::empty_documents_with_comments("# a\n---\n# b\n---\n# c\n")]
+    #[case::comment_after_end_of_empty_document("---\n...\n# e\n")]
+    #[case::comment_only_across_markers("# a\n---\n# b\n")]
+    #[case::keep_chomp_blank_then_end_comment("a: |+\n  t\n\n# d\n")]
+    #[case::comment_with_nel_stays_one_line("# a\u{85}b\na: 1\n")]
+    #[case::comment_looks_like_yaml("# ---\n# ...\n# - x\n# a: \"b\na: 1\n")]
+    #[case::comment_with_unbalanced_quotes("# it's \"odd\na: 1\n")]
+    #[case::comment_with_inner_hash_unicode_and_trailing_spaces("# a # b ü 日本  \n---\na: 1\n")]
+    #[case::hash_inside_plain_scalar_then_real_comment("a: b#c  # d\n")]
+    #[case::multiline_double_quoted_hash_line_is_no_comment("a: \"x\n  # y\"\nb: 1\n")]
+    fn document_comment_survives_formatting(#[case] input: &str) {
+        let output = format_yaml(input, &default_opts());
+        assert_comments_survive(input, &output, &default_opts());
+    }
+
+    #[rstest]
+    #[case::unchanged_single_line_comment("# c\na: 1\n")]
+    #[case::unchanged_nel_comment("# a\u{85}b\na: 1\n")]
+    #[case::unchanged_modeline_like_comment("# yaml-language-server: $schema=x\na: 1\n")]
+    #[case::unchanged_comment_without_space("#nospace\na: 1\n")]
+    #[case::unchanged_comment_with_two_spaces("#  two\na: 1\n")]
+    #[case::unchanged_comment_with_trailing_spaces("# t  \na: 1\n")]
+    #[case::unchanged_comment_with_inner_hash_and_unicode("# a # b ü 日本\na: 1\n")]
+    #[case::unchanged_unbalanced_quotes("# it's \"odd\na: 1\n")]
+    #[case::unchanged_yaml_looking_text("# ---\n# ...\n# - x\na: 1\n")]
+    #[case::unchanged_comment_without_text("#\na: 1\n")]
+    fn comment_text_is_printed_verbatim(#[case] input: &str) {
+        assert_formats_to(input, input);
+    }
+
+    #[test]
+    fn comment_longer_than_print_width_is_not_wrapped() {
+        let comment = format!("# {}", "word ".repeat(30));
+        let input = format!("{comment}\n---\n{comment}\na: 1\n{comment}\n...\n{comment}\n");
+        for print_width in [20, 80] {
+            let opts = YamlFormatOptions {
+                print_width,
+                ..default_opts()
+            };
+            assert_eq!(format_yaml(&input, &opts), input);
+        }
+    }
+
+    #[test]
+    fn modeline_after_marker_stays_a_line_of_its_own() {
+        let output = format_yaml(
+            "--- # yaml-language-server: $schema=x\na: 1\n",
+            &default_opts(),
+        );
+        assert_eq!(output, "---\n# yaml-language-server: $schema=x\na: 1\n");
+    }
+
+    #[test]
+    fn comments_keep_source_order_across_document_lists() {
+        let input = "# one\n---\n# two\na: 1\n# three\n...\n# four\n---\n# five\nb: 2\n# six\n...\n# seven\n";
+        assert_formats_to(input, input);
+    }
+
+    #[test]
+    fn modeline_written_after_marker_acts_as_modeline_in_the_output() {
+        let input = "--- # yaml-language-server: $schema=x\na: 1\n";
+        assert_eq!(crate::schema::association::extract_schema_url(input), None);
+        let output = format_yaml(input, &default_opts());
+        assert_eq!(
+            crate::schema::association::extract_schema_url(&output),
+            Some("x".to_string())
+        );
+    }
+
+    #[test]
+    fn modeline_on_its_own_line_keeps_its_line() {
+        let input = "# yaml-language-server: $schema=x\n---\na: 1\n";
+        assert_formats_to(input, input);
+        let input = "---\n# yaml-language-server: $schema=x\na: 1\n";
+        assert_formats_to(input, input);
+    }
+
+    #[test]
+    fn first_of_several_modelines_stays_first_across_document_lists() {
+        let input = "# yaml-language-server: $schema=first\n---\n# yaml-language-server: $schema=second\na: 1\n# yaml-language-server: $schema=third\n";
+        let output = format_yaml(input, &default_opts());
+        assert_eq!(output, input);
+        assert_eq!(
+            crate::schema::association::extract_schema_url(&output),
+            Some("first".to_string())
+        );
+    }
+
+    #[rstest]
+    #[case::directly_above_key(
+        "a: 1\n# rlsp-yaml-disable-next-line\nb: 2\n",
+        "a: 1\n# rlsp-yaml-disable-next-line\nb: 2\n"
+    )]
+    #[case::blank_line_before_comment_is_kept(
+        "a: 1\n\n# rlsp-yaml-disable-next-line\nb: 2\n",
+        "a: 1\n\n# rlsp-yaml-disable-next-line\nb: 2\n"
+    )]
+    #[case::crlf_input(
+        "a: 1\r\n\r\n# rlsp-yaml-disable-next-line\r\nb: 2\r\n",
+        "a: 1\n\n# rlsp-yaml-disable-next-line\nb: 2\n"
+    )]
+    #[case::after_changed_line(
+        "a: \"q\"\n# rlsp-yaml-disable-next-line\nb: 2\n",
+        "a: q\n# rlsp-yaml-disable-next-line\nb: 2\n"
+    )]
+    fn suppression_comment_stays_directly_above_its_line(
+        #[case] input: &str,
+        #[case] expected: &str,
+    ) {
+        let output = format_yaml(input, &default_opts());
+        assert_eq!(output, expected);
+        let target = output
+            .lines()
+            .position(|l| l == "b: 2")
+            .expect("b: 2 is in the output");
+        let suppression = crate::validation::suppression::build_suppression_map(&output);
+        assert!(suppression.is_suppressed(u32::try_from(target).expect("fits"), "any"));
+    }
+
+    #[test]
+    fn marker_line_suppression_comments_become_active_on_their_own_line() {
+        let output = format_yaml("--- # rlsp-yaml-disable-file\na: 1\n", &default_opts());
+        assert_eq!(output, "---\n# rlsp-yaml-disable-file\na: 1\n");
+        let suppression = crate::validation::suppression::build_suppression_map(&output);
+        assert!(suppression.is_suppressed(0, "any"));
+    }
+
+    #[rstest]
+    #[case::apostrophe_in_plain_scalar("a: don't # c\n", "a: don't  # c\n")]
+    #[case::single_quoted_with_escaped_quote("k: 'it''s' # c\n", "k: it's  # c\n")]
+    #[case::hash_inside_double_quotes("a: \"x # y\" # c\n", "a: \"x # y\"  # c\n")]
+    #[case::blank_lines_and_hash_line_in_literal(
+        "a: |\n  x\n\n  # y\n\n  z\n# e\n",
+        "a: |\n  x\n\n  # y\n\n  z\n# e\n"
+    )]
+    fn comment_like_text_in_scalars_stays_in_the_scalar(
+        #[case] input: &str,
+        #[case] expected: &str,
+    ) {
+        assert_formats_to(input, expected);
+        let values = |text: &str| -> Vec<String> {
+            let docs = rlsp_yaml_parser::load(text).expect("test input must parse");
+            let Node::Mapping { entries, .. } = &docs[0].root else {
+                panic!("test input must be a mapping");
+            };
+            entries
+                .iter()
+                .filter_map(|(_, v)| match v {
+                    Node::Scalar { value, .. } => Some(value.clone()),
+                    Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => None,
+                })
+                .collect()
+        };
+        assert_eq!(values(&format_yaml(input, &default_opts())), values(input));
+    }
+
+    #[test]
+    fn comment_above_each_key_is_kept() {
+        assert_formats_to(
+            "# first\nname: \"P\"\n# second\non: x\n",
+            "# first\nname: P\n# second\non: x\n",
+        );
+    }
+
+    #[test]
+    fn hash_line_at_end_of_block_scalar_is_content_not_a_comment() {
+        assert_formats_to("a: |\n  t\n  # d\n", "a: |\n  t\n  # d\n");
+    }
+
+    #[rstest]
+    #[case::hash_line_at_start("a: |\n  # d\n  t\n")]
+    #[case::content_hash_line_then_end_comment("a: |\n  t\n  # d\n# e\n")]
+    #[case::column_zero_comment_after_scalar("a: |\n  t\n# d\n")]
+    #[case::column_zero_comment_before_next_key("a: |\n  t\n# d\nb: 1\n")]
+    #[case::keep_chomp_comment_before_next_key("a: |+\n  t\n\n# d\nb: 1\n")]
+    fn block_scalar_hash_lines_are_not_counted_as_comments(#[case] input: &str) {
+        assert_formats_to(input, input);
+    }
+
+    #[rstest]
+    #[case::header_comment_and_blank_line_kept("# h\n\na: 1\n", "# h\n\na: 1\n")]
+    #[case::blank_lines_between_comment_groups_collapse(
+        "# a\n\n\n# b\n\na: 1\n",
+        "# a\n\n# b\n\na: 1\n"
+    )]
+    #[case::blank_line_before_end_comment("a: 1\n\n# d\n---\nb: 2\n", "a: 1\n\n# d\n---\nb: 2\n")]
+    #[case::blank_line_between_end_comment_and_marker(
+        "a: 1\n# d\n\n---\nb: 2\n",
+        "a: 1\n# d\n\n---\nb: 2\n"
+    )]
+    #[case::blank_lines_around_document_end_comments(
+        "a: 1\n\n# d\n...\n\n# e\n",
+        "a: 1\n\n# d\n...\n\n# e\n"
+    )]
+    #[case::comment_only_stream_keeps_blank_line("# a\n\n# b\n", "# a\n\n# b\n")]
+    #[case::comment_only_stream_drops_leading_blank_lines("\n\n# a\n", "# a\n")]
+    #[case::comment_only_stream_drops_trailing_blank_lines("# a\n\n\n", "# a\n")]
+    #[case::comment_only_stream_drops_indent("   # ind\n#nospace\n#\n", "# ind\n#nospace\n#\n")]
+    fn blank_lines_around_document_comments_are_restored(
+        #[case] input: &str,
+        #[case] expected: &str,
+    ) {
+        assert_formats_to(input, expected);
+    }
+
+    #[rstest]
+    #[case::empty("")]
+    #[case::newline("\n")]
+    #[case::spaces("   \n")]
+    #[case::document_end_marker("...\n")]
+    fn input_without_comment_formats_to_empty(#[case] input: &str) {
+        assert_eq!(format_yaml(input, &default_opts()), "");
+    }
+
+    #[rstest]
+    #[case::empty_root("---\n", "---\n")]
+    #[case::empty_root_after_document("a: 1\n---\n", "a: 1\n---\n")]
+    #[case::comment_after_empty_root_marker("--- # c\n", "---\n# c\n")]
+    #[case::anchored_empty_root("--- &a\n", "---\n&a\n")]
+    #[case::tagged_empty_root("--- !t\n", "---\n!t\n")]
+    #[case::core_tagged_empty_root("--- !!null\n", "---\n!!null\n")]
+    #[case::quoted_empty_root("--- \"\"\n", "---\n\"\"\n")]
+    #[case::anchored_and_tagged_empty_root("--- &a !t\n", "---\n&a !t\n")]
+    fn last_document_prints_its_root_unless_it_prints_nothing(
+        #[case] input: &str,
+        #[case] expected: &str,
+    ) {
+        for single_quote in [false, true] {
+            let opts = YamlFormatOptions {
+                single_quote,
+                ..default_opts()
+            };
+            assert_eq!(format_yaml(input, &opts), expected);
+        }
+    }
+
+    #[test]
+    fn comment_only_stream_with_unprintable_character_is_returned_unchanged() {
+        let input = "# a\n# \u{1}\n";
+        assert_eq!(format_yaml(input, &default_opts()), input);
+    }
+
+    #[rstest]
+    #[case::comment_only("# a\r\n# b\r\n", "# a\n# b\n")]
+    #[case::document_level_comments(
+        "a: 1\r\n# d\r\n---\r\nb: 2\r\n# e\r\n",
+        "a: 1\n# d\n---\nb: 2\n# e\n"
+    )]
+    #[case::prefix_and_marker_comments("# c\r\n---\r\n# m\r\na: 1\r\n", "# c\n---\n# m\na: 1\n")]
+    #[case::lone_cr_line_endings("# a\r\r# b\ra: 1\r", "# a\n\n# b\na: 1\n")]
+    fn crlf_input_prints_document_comments_without_carriage_returns(
+        #[case] input: &str,
+        #[case] expected: &str,
+    ) {
+        let output = format_yaml(input, &default_opts());
+        assert_eq!(output, expected);
+        assert!(!output.contains('\r'));
+    }
+
+    #[test]
+    fn comment_only_stream_uses_the_requested_line_ending() {
+        let opts = YamlFormatOptions {
+            line_ending: LineEnding::Crlf,
+            ..default_opts()
+        };
+        assert_eq!(format_yaml("# a\n\n# b\n", &opts), "# a\r\n\r\n# b\r\n");
+        let opts = YamlFormatOptions {
+            line_ending: LineEnding::Cr,
+            ..default_opts()
+        };
+        assert_eq!(format_yaml("# a\n# b\n", &opts), "# a\r# b\r");
+    }
+
+    #[test]
+    fn comment_only_stream_without_final_newline() {
+        let opts = YamlFormatOptions {
+            insert_final_newline: false,
+            ..default_opts()
+        };
+        assert_eq!(format_yaml("# only\n", &opts), "# only");
+    }
+
+    #[test]
+    fn document_comments_do_not_depend_on_style_options() {
+        let input =
+            "# p\n---\n# m\na: \"x\"\n# e\n...\n# z\n---\n# m2\nb: [1, 2]\n# e2\n...\n# after\n";
+        let expected = format_yaml(input, &default_opts());
+        for opts in [
+            YamlFormatOptions {
+                print_width: 20,
+                ..default_opts()
+            },
+            YamlFormatOptions {
+                format_enforce_block_style: true,
+                ..default_opts()
+            },
+            YamlFormatOptions {
+                preserve_quotes: true,
+                ..default_opts()
+            },
+            YamlFormatOptions {
+                single_quote: true,
+                ..default_opts()
+            },
+        ] {
+            let output = format_yaml(input, &opts);
+            assert_eq!(
+                document_comment_lists(&output),
+                document_comment_lists(input)
+            );
+            assert_eq!(output.lines().filter(|l| l.starts_with('#')).count(), 7);
+            assert_eq!(expected.lines().filter(|l| l.starts_with('#')).count(), 7);
+        }
+    }
+
+    #[test]
+    fn duplicate_key_removal_leaves_document_comments_in_place() {
+        let opts = YamlFormatOptions {
+            format_remove_duplicate_keys: true,
+            ..default_opts()
+        };
+        let output = format_yaml("# p\n---\n# m\na: 1\na: 2\n# e\n...\n# z\n", &opts);
+        assert_eq!(output, "# p\n---\n# m\na: 2\n# e\n...\n# z\n");
+    }
+
+    #[test]
+    fn many_comment_lines_and_documents_format_without_blowup() {
+        let comments = "# c\n".repeat(20_000);
+        assert_eq!(format_yaml(&comments, &default_opts()), comments);
+        let documents = "# c\n---\na: 1\n".repeat(20_000);
+        let output = format_yaml(&documents, &default_opts());
+        assert_eq!(output.lines().filter(|l| *l == "# c").count(), 20_000);
+    }
+
+    // ---- Group: blank lines never change a scalar value ----
+
+    /// Every scalar value of `yaml`, keys included, in document order.
+    fn scalar_values(yaml: &str) -> Vec<String> {
+        fn collect(node: &Node<Span>, out: &mut Vec<String>) {
+            match node {
+                Node::Scalar { value, .. } => out.push(value.clone()),
+                Node::Alias { name, .. } => out.push(format!("*{name}")),
+                Node::Mapping { entries, .. } => {
+                    for (key, value) in entries {
+                        collect(key, out);
+                        collect(value, out);
+                    }
+                }
+                Node::Sequence { items, .. } => {
+                    for item in items {
+                        collect(item, out);
+                    }
+                }
+            }
+        }
+        let mut out = Vec::new();
+        for doc in rlsp_yaml_parser::load(yaml).expect("test input must parse") {
+            collect(&doc.root, &mut out);
+        }
+        out
+    }
+
+    #[rstest]
+    #[case::literal_line_equals_changed_line(
+        "a: 1\n\nb: \"y\"\nc: |\n  b: \"y\"\n  z\n",
+        "a: 1\nb: y\nc: |\n  b: \"y\"\n  z\n"
+    )]
+    #[case::folded_line_equals_changed_line(
+        "a: 1\n\nb: \"y\"\nc: >\n  b: \"y\"\n",
+        "a: 1\nb: y\nc: >\n  b: \"y\"\n"
+    )]
+    #[case::literal_line_equals_changed_sequence_item(
+        "- 1\n\n- \"x\"\n- |\n  - \"x\"\n  z\n",
+        "- 1\n- x\n- |\n  - \"x\"\n  z\n"
+    )]
+    #[case::literal_in_second_literal(
+        "a: |\n  p: \"y\"\n  q\n\nb: |\n  r\n  p: \"y\"\n",
+        "a: |\n  p: \"y\"\n  q\n\nb: |\n  r\n  p: \"y\"\n"
+    )]
+    #[case::multiline_double_quoted_line_equals_changed_line(
+        "a: 1\n\nb: \"y\"\nc: \"p\n\n  b: \\\"y\\\"\"\n",
+        "a: 1\nb: y\nc: \"p\\nb: \\\"y\\\"\"\n"
+    )]
+    #[case::empty_keep_literal_after_space_only_line(
+        "c: |+\n  x\n      \nc: |+\nc: |+\n",
+        "c: \"x\\n    \\n\"\nc: |+\nc: |+\n"
+    )]
+    #[case::empty_keep_literal_after_tab_only_line(
+        "- |+\n  \t\n- |+\n- |+\n  q\n",
+        "- \" \\t\\n\"\n- |+\n- |+\n  q\n"
+    )]
+    #[case::folded_leading_blank_line("k: >\n\n  x y\n", "k: >\n\n  x y\n")]
+    #[case::folded_strip_leading_blank_line("k: >-\n\n  z\n", "k: >-\n\n  z\n")]
+    #[case::folded_leading_and_inner_blank_line("k: >\n\n  x\n\n  y\n", "k: >\n\n  x\n\n  y\n")]
+    #[case::folded_keep_trailing_blank_line_before_comment(
+        "b: 1\nk: >+\n  z\n\n# c\n",
+        "b: 1\nk: >+\n  z\n\n# c\n"
+    )]
+    #[case::folded_keep_trailing_blank_line_before_key(
+        "k: >+\n  z\n\nb: 1\n",
+        "k: >+\n  z\n\nb: 1\n"
+    )]
+    #[case::two_blank_lines_inside_literal("a: |\n  x\n\n\n  y\n", "a: |\n  x\n\n\n  y\n")]
+    #[case::two_leading_blank_lines_in_literal("a: |\n\n\n  x\n", "a: |\n\n\n  x\n")]
+    #[case::keep_chomp_trailing_blank_lines_before_next_key(
+        "a: |+\n  x\n\n\nb: 1\n",
+        "a: |+\n  x\n\n\nb: 1\n"
+    )]
+    #[case::keep_chomp_trailing_blank_lines_at_end_of_input("a: |+\n  x\n\n", "a: |+\n  x\n\n")]
+    #[case::keep_chomp_blank_lines_only("- |+\n\n\n", "- |+\n\n\n")]
+    #[case::blank_line_after_clip_literal_separates_it_from_the_next_key(
+        "a: |\n  x\n\n\nb: 1\n",
+        "a: |\n  x\n\nb: 1\n"
+    )]
+    #[case::tab_only_line_inside_literal("a: |\n  x\n  \t  \n  y\n", "a: |\n  x\n  \t  \n  y\n")]
+    #[case::nested_literal_blank_lines_carry_no_indentation(
+        "a:\n  b:\n    - |\n      x\n\n\n      y\n    - |+\n      p\n\n\n  c: 1\n",
+        "a:\n  b:\n    - |\n      x\n\n\n      y\n    - |+\n      p\n\n\n  c: 1\n"
+    )]
+    #[case::nested_folded_blank_line_carries_no_indentation(
+        "k:\n  - >\n    t\n\n    u\n",
+        "k:\n  - >\n    t\n\n    u\n"
+    )]
+    fn blank_line_restoration_does_not_enter_a_scalar(#[case] input: &str, #[case] expected: &str) {
+        let output = format_yaml(input, &default_opts());
+        assert_eq!(output, expected);
+        assert_eq!(scalar_values(&output), scalar_values(input));
+    }
+
+    #[test]
+    fn blank_line_inside_literal_is_restored_only_in_the_same_literal() {
+        let input = "a: |\n  x\n\n  y\nb: |\n  x\n  y\n";
+        assert_formats_to(input, input);
+        assert_eq!(
+            scalar_values(&format_yaml(input, &default_opts())),
+            scalar_values(input)
+        );
+    }
+
+    #[rstest]
+    #[case::top_level("a: |\n  x\n     \n  y\n", "a: \"x\\n   \\ny\\n\"\n")]
+    #[case::nested_in_sequence(
+        "k:\n  - |\n    x\n       \n    y\n",
+        "k:\n  - \"x\\n   \\ny\\n\"\n"
+    )]
+    #[case::keep_chomp("a: |+\n  x\n   \n", "a: \"x\\n \\n\"\n")]
+    fn space_only_value_line_of_a_literal_keeps_its_value(
+        #[case] input: &str,
+        #[case] expected: &str,
+    ) {
+        // The value line of spaces is no blank line to empty: the scalar is
+        // printed double-quoted, so no output line consists of spaces alone.
+        let output = format_yaml(input, &default_opts());
+        assert_eq!(output, expected);
+        assert_eq!(scalar_values(&output), scalar_values(input));
+    }
+
+    #[test]
+    fn tab_line_of_a_literal_inside_a_sequence_keeps_its_value() {
+        let input = "k:\n  - |\n    x\n    \t  \n    y\n";
+        assert_formats_to(input, input);
+        assert_eq!(
+            scalar_values(&format_yaml(input, &default_opts())),
+            scalar_values(input)
+        );
+    }
+
+    #[test]
+    fn literal_blank_lines_survive_removal_of_a_duplicate_key() {
+        let opts = YamlFormatOptions {
+            format_remove_duplicate_keys: true,
+            ..default_opts()
+        };
+        let output = format_yaml("a: |\n  x\n\n  y\nb: |\n  p\nb: 2\n", &opts);
+        assert_eq!(output, "a: |\n  x\n\n  y\nb: 2\n");
+    }
+
+    /// A unit of a generated top-level mapping.
+    #[derive(Debug, Clone)]
+    enum Unit {
+        Line(&'static str),
+        /// A literal scalar; each content line has 0 to 2 blank lines before it.
+        Literal {
+            header: &'static str,
+            lines: Vec<(usize, &'static str)>,
+        },
+        /// A folded scalar; each content line has 0 to 2 blank lines before it.
+        Folded {
+            header: &'static str,
+            lines: Vec<(usize, &'static str)>,
+        },
+    }
+
+    /// Content lines that look like the structure lines of the mapping.
+    const BLOCK_LINES: [&str; 6] = ["b: \"y\"", "- \"x\"", "z", "# c", "a: 1", "c: 'q'"];
+
+    /// Content lines of a literal: the above, and lines of spaces or a tab alone.
+    const LITERAL_LINES: [&str; 8] = [
+        "b: \"y\"", "- \"x\"", "z", "# c", "a: 1", "c: 'q'", "    ", "\t",
+    ];
+
+    fn unit_strategy() -> impl Strategy<Value = Unit> {
+        let line = prop::sample::select(BLOCK_LINES.to_vec());
+        let literal_line = prop::sample::select(LITERAL_LINES.to_vec());
+        prop_oneof![
+            prop::sample::select(vec![
+                "a: 1",
+                "b: \"y\"",
+                "c: 'q'",
+                "d: [1, 2]",
+                "e: z",
+                "# c",
+            ])
+            .prop_map(Unit::Line),
+            (
+                prop::sample::select(vec!["k: |", "k: |-", "k: |+"]),
+                prop::collection::vec((0usize..=2, literal_line), 0..=3),
+            )
+                .prop_map(|(header, lines)| Unit::Literal { header, lines }),
+            (
+                prop::sample::select(vec!["k: >", "k: >-", "k: >+"]),
+                prop::collection::vec((0usize..=2, line), 0..=3),
+            )
+                .prop_map(|(header, lines)| Unit::Folded { header, lines }),
+        ]
+    }
+
+    /// One blank line between units, or none; blank lines inside block scalars.
+    fn render_units(units: &[(Unit, bool)]) -> String {
+        let mut text = String::new();
+        for (unit, blank_before) in units {
+            if *blank_before {
+                text.push('\n');
+            }
+            match unit {
+                Unit::Line(line) => {
+                    text.push_str(line);
+                    text.push('\n');
+                }
+                Unit::Literal { header, lines } | Unit::Folded { header, lines } => {
+                    text.push_str(header);
+                    text.push('\n');
+                    for (blanks, line) in lines {
+                        text.push_str(&"\n".repeat(*blanks));
+                        text.push_str("  ");
+                        text.push_str(line);
+                        text.push('\n');
+                    }
+                }
+            }
+        }
+        text
+    }
+
+    #[test]
+    fn formatting_never_changes_a_scalar_value_across_blank_lines() {
+        let mut runner = TestRunner::new_with_rng(
+            Config {
+                cases: 512,
+                max_global_rejects: 8192,
+                failure_persistence: None,
+                ..Config::default()
+            },
+            TestRng::from_seed(RngAlgorithm::ChaCha, &[7; 32]),
+        );
+        let strategy = prop::collection::vec((unit_strategy(), any::<bool>()), 1..=8);
+        let result = runner.run(&strategy, |units| {
+            let input = render_units(&units);
+            if rlsp_yaml_parser::load(&input).is_err() {
+                return Err(TestCaseError::reject("generated input does not load"));
+            }
+            let output = format_yaml(&input, &default_opts());
+            prop_assert_eq!(
+                scalar_values(&output),
+                scalar_values(&input),
+                "input {:?}",
+                input
+            );
+            prop_assert_eq!(format_yaml(&output, &default_opts()), output);
+            Ok(())
+        });
+        result.expect("formatting changed a scalar value or was not stable");
     }
 
     // ---- Group FS: format_subtree unit tests ----

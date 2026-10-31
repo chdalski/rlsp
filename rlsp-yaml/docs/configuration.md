@@ -622,7 +622,7 @@ The server implements `textDocument/formatting` for full-document YAML formattin
 
 - **Indentation** (tab size) is controlled by the editor — the LSP formatting requests carry `tab_size` from the editor's own settings. The formatter always uses spaces; `insertSpaces: false` is silently ignored because YAML 1.2 §6.1 forbids tab indentation.
 - **Style options** (print width, quote style) are controlled via workspace settings (`formatPrintWidth`, `formatSingleQuote`, `formatPreserveQuotes`).
-- **Comments** are preserved during formatting. The formatter extracts comments from the original text and reattaches them to the formatted output.
+- **Comments** are preserved during formatting. The formatter prints them from the parsed document, not from the input text, and keeps the input's blank lines (several in a row collapse to one). A comment on a `---`, `...`, or `%YAML` line moves to its own line next to the marker, so a comment such as a modeline written there starts to act as one.
 - **Syntax errors** — if the document cannot be parsed, the original text is returned unchanged so no content is lost.
 
 **Range formatting** uses the same settings and formatter as full-document formatting. The full document is formatted internally and the resulting lines that correspond to the requested range are returned as the edit. This ensures consistent line-breaking decisions — the printer needs surrounding context to make correct choices.

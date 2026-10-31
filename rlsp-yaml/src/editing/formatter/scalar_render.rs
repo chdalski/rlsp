@@ -224,14 +224,13 @@ pub(super) fn escape_double_quoted(s: &str) -> String {
 /// first content line and misparse any line whose content starts with a leading
 /// space.
 ///
-/// For literal scalars, blank lines (empty strings from `str::lines()`) are
-/// omitted here — `attach_comments` re-inserts them from the original input
-/// when it matches content signatures.
-///
-/// For folded scalars, blank lines must be emitted explicitly because folding
-/// semantics require them to represent embedded newlines in the decoded value.
-/// N blank lines between two content lines produces N newlines in the value;
-/// without them, adjacent content lines would fold into a single space on
+/// Both kinds emit the blank lines of their value themselves, so the value
+/// survives without help from the blank-line restoration, which stays out of
+/// block scalars.  For literal scalars every empty line of the value is a blank
+/// line.  For folded scalars, blank lines must be emitted explicitly because
+/// folding semantics require them to represent embedded newlines in the decoded
+/// value.  N blank lines between two content lines produces N newlines in the
+/// value; without them, adjacent content lines would fold into a single space on
 /// re-parse, making the output non-idempotent.
 pub(super) fn repr_block_to_doc(s: &str, style: ScalarStyle, tab_width: usize) -> Doc {
     // Detect whether the first non-empty content line requires an explicit
@@ -309,27 +308,36 @@ pub(super) fn repr_block_to_doc(s: &str, style: ScalarStyle, tab_width: usize) -
             if seg.is_empty() {
                 pending_empty += 1;
             } else {
-                if let Some(prev) = prev_content {
-                    // Determine whether either the previous or the current
-                    // content line is "more-indented" (has a leading space or
-                    // tab beyond the block scalar's base indentation level).
-                    // YAML treats lines starting with a tab as more-indented
-                    // for folding purposes — their line break is preserved
-                    // (not folded to a space) and no extra blank line is needed
-                    // to represent the transition.
-                    let prev_more = prev.starts_with([' ', '\t']);
-                    let curr_more = seg.starts_with([' ', '\t']);
-                    let either_more = prev_more || curr_more;
+                match prev_content {
+                    None => {
+                        // Blank lines before the first content line are part of
+                        // the value.
+                        for _ in 0..pending_empty {
+                            parts.push(hard_line());
+                        }
+                    }
+                    Some(prev) => {
+                        // Determine whether either the previous or the current
+                        // content line is "more-indented" (has a leading space or
+                        // tab beyond the block scalar's base indentation level).
+                        // YAML treats lines starting with a tab as more-indented
+                        // for folding purposes — their line break is preserved
+                        // (not folded to a space) and no extra blank line is needed
+                        // to represent the transition.
+                        let prev_more = prev.starts_with([' ', '\t']);
+                        let curr_more = seg.starts_with([' ', '\t']);
+                        let either_more = prev_more || curr_more;
 
-                    let blank_count = if either_more {
-                        // Free line-break absorbed; only emit extra blanks.
-                        pending_empty
-                    } else {
-                        // Both at base level: each `\n` needs a blank.
-                        pending_empty + 1
-                    };
-                    for _ in 0..blank_count {
-                        parts.push(hard_line());
+                        let blank_count = if either_more {
+                            // Free line-break absorbed; only emit extra blanks.
+                            pending_empty
+                        } else {
+                            // Both at base level: each `\n` needs a blank.
+                            pending_empty + 1
+                        };
+                        for _ in 0..blank_count {
+                            parts.push(hard_line());
+                        }
                     }
                 }
                 pending_empty = 0;
@@ -337,12 +345,19 @@ pub(super) fn repr_block_to_doc(s: &str, style: ScalarStyle, tab_width: usize) -
                 prev_content = Some(seg);
             }
         }
+        // Blank lines after the last content line (keep chomping) are part of
+        // the value; a value of blank lines alone has no content line at all.
+        for _ in 0..pending_empty {
+            parts.push(hard_line());
+        }
     } else {
-        // For literal scalars, blank lines are omitted here; attach_comments
-        // re-inserts them from the original source, preserving blank-line
-        // semantics without producing trailing-whitespace lines or double blanks.
+        // Every empty line of the value is a blank line of the output.  It sits
+        // outside `indent()` so it carries no indentation, which would make it
+        // an over-indented line for a re-parser.
         for line_str in s.lines() {
-            if !line_str.is_empty() {
+            if line_str.is_empty() {
+                parts.push(hard_line());
+            } else {
                 parts.push(indent(concat(vec![
                     hard_line(),
                     text(line_str.to_string()),
