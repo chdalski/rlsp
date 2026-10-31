@@ -31,7 +31,7 @@ formatting it again must change nothing.
 - [x] Task 2: One helper reads a comment from a line suffix
 - [x] Task 3: Two helpers assemble node comments and the collection colon
 - [x] Task 4: Emit every comment as an event
-- [ ] Task 5: Store every comment event in the AST
+- [x] Task 5: Store every comment event in the AST
 - [ ] Task 6: Print document-level comments and reduce the text matching
 - [ ] Task 7: Print comments at every node position
 - [ ] Task 8: Turn a flow collection holding a comment into block style
@@ -122,24 +122,27 @@ all of those sites. Behavior is unchanged.
 
 ### Task 5: Store every comment event in the AST
 
-- [ ] `Document` has `prefix_comments` (before `---` or implicit content),
+- [x] `Document` has `prefix_comments` (before `---` or implicit content),
       `comments` (after `---`, before the root), `end_comments` (after the
       root, before `...`, `---`, or the end of input), and
       `after_end_comments` (after the last `...`)
-- [ ] Through `load()`, each comment of the Task 4 inputs and of
+- [x] Through `load()`, each comment of the Task 4 inputs and of
       `---\n# c\na: 1\n`, `# c\n---\na: 1\n`, `a: v\n# d\n---\nb: 1\n`,
       `v # c\n---\nw\n`, `a: 1\n# d\n...\n# e\n---\nb: 2\n`, `a: 1\n...\n# e\n`
       is in exactly one place of the AST, and a test pins which
-- [ ] A comment on a key's line or a block scalar's header line is that node's
+- [x] A comment on a key's line or a block scalar's header line is that node's
       `trailing_comment`, and the doc comments on `Document` and `NodeMeta`
       describe all of these places
-- [ ] No test relies on a fabricated comment span, and the single-line filter in
+- [x] No test relies on a fabricated comment span, and the single-line filter in
       `loader/stream.rs` is gone
-- [ ] `rlsp-yaml-parser/docs/architecture.md` (comment attachment and the
+- [x] `rlsp-yaml-parser/docs/architecture.md` (comment attachment and the
       `Document` fields) and the "Comment Preservation" entry in
       `rlsp-yaml-parser/docs/feature-log.md` describe the four places, and
       neither says that prefix comments are discarded
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] In resolved mode a node produced by an alias carries none of the anchor's
+      comments, the definition site keeps them, and the alias site's own comments
+      stay
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 6: Print document-level comments and reduce the text matching
 
@@ -292,6 +295,11 @@ these inputs change today.
   first `Err`, for every input; the first error itself stays the same, and
   `invalid_trailing_comment_leaves_no_comment_for_the_next_sequence_item` in
   `tests/error_reporting.rs` expects no comment after the error.
+- **Alias expansion does not copy comments (security review of Task 5):** the
+  expansion budget counts nodes, so copied comments multiply memory beyond it. A
+  comment belongs where it stands; the formatter and the language server do not
+  use resolved mode. Declined: counting comments against `max_expanded_nodes`, and
+  leaving it open.
 - **`--- # c` and `- # c` move one line:** the data stays the same and no
   further field is needed; `--- # yaml-language-server: $schema=x` thereby
   becomes a valid modeline line. Declined: keeping them on the marker's line.
@@ -307,3 +315,12 @@ these inputs change today.
 
 - Task 11: `x: &a 1\n*a : &y\n  b: 1\n` and `x: &a 1\n*a : !t\n  - 1\n` keep the
   space before the colon, so the output loads with the same data
+- Task 6: `load()` returns no document for a comment-only stream, and that stays:
+  `format_yaml` keeps these comments from `parse_events`, and input without a
+  comment still formats to empty
+- Task 7: `? k\n: # c\n  v\n` and `? k\n# c\n: v\n` give the same events, so both
+  print like an own-line comment before a value: `k: v\n# c\n`, a fixture pins it
+- Task 7: a block scalar as an explicit key prints its header comment:
+  `? | # c\n  k\n: v\n` keeps `# c`
+- Task 11: recheck where `--- [a]\n# c\n` stores `# c` once `--- [a]` loads as a
+  sequence; `tests/loader_comments.rs` pins the place

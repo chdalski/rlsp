@@ -35,6 +35,26 @@ fn collection_colon(bare_colon: &str, anchor: Option<&str>, tag: Option<&str>) -
         .map_or_else(|| text(bare_colon), |props| text(format!(": {props}")))
 }
 
+/// The trailing comment to print after a node's rendered Doc.
+///
+/// A block scalar's trailing comment sits on its header line (`| # c`), not
+/// after its content; printing it after the content would put it inside the
+/// scalar's value.  The formatter does not print the header comment yet.
+pub(super) fn printed_trailing_comment(node: &Node<Span>) -> Option<&str> {
+    let is_block_scalar = matches!(
+        node,
+        Node::Scalar {
+            style: ScalarStyle::Literal(_) | ScalarStyle::Folded(_),
+            ..
+        }
+    );
+    if is_block_scalar {
+        None
+    } else {
+        node.trailing_comment()
+    }
+}
+
 /// Attach a node's comments to its rendered Doc: the trailing comment two spaces
 /// after the Doc, each leading comment on its own line above it.
 pub(super) fn with_comments(doc: Doc, leading: &[String], trailing: Option<&str>) -> Doc {
@@ -325,7 +345,7 @@ pub(super) fn explicit_key_to_doc(
     };
 
     // Append trailing comment from the value node.
-    let colon_line = with_comments(colon_line, &[], value.trailing_comment());
+    let colon_line = with_comments(colon_line, &[], printed_trailing_comment(value));
 
     concat(vec![question_line, hard_line(), colon_line])
 }
@@ -427,7 +447,7 @@ pub(super) fn key_value_to_doc(
     // The value's trailing comment is appended only on the implicit-key path —
     // explicit_key_to_doc handles its own.
     let trailing = if !needs_explicit_key(key) && !is_empty_key(key) {
-        value.trailing_comment()
+        printed_trailing_comment(value)
     } else {
         None
     };

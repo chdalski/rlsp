@@ -10,7 +10,8 @@
 //!   nodes — no expansion, safe for untrusted input without any expansion
 //!   limit.
 //! - **Resolved**: aliases are expanded inline.  An expansion-node counter
-//!   guards against alias bombs (Billion Laughs attack).
+//!   guards against alias bombs (Billion Laughs attack).  The expansion
+//!   carries none of the anchor's comments.
 //!
 //! Security controls (all active in both modes unless noted):
 //! - `max_nesting_depth` — caps sequence/mapping nesting to prevent stack
@@ -41,12 +42,9 @@ use crate::node::{Document, Node, NodeMeta};
 use crate::pos::{LineIndex, Pos, Span};
 use crate::schema::{CollectionKind, Schema, resolve_collection, resolve_scalar};
 
-use comments::{attach_leading_comments, attach_trailing_comment};
+use comments::{attach_leading_comments, attach_trailing_comment, clone_without_comments};
 use reloc::reloc;
-use stream::{
-    consume_leading_comments, consume_leading_doc_comments, drop_comments_on_line, next_from,
-    peek_trailing_comment, with_hash_prefix,
-};
+use stream::{consume_leading_comments, next_from, peek_trailing_comment, with_hash_prefix};
 
 mod comments;
 mod reloc;
@@ -175,6 +173,11 @@ pub enum LoadMode {
     /// Preserve aliases as [`Node::Alias`] nodes (default, safe for LSP).
     Lossless,
     /// Expand aliases inline; subject to `max_expanded_nodes` limit.
+    ///
+    /// A node produced by an alias carries none of the anchor's comments (the
+    /// leading and trailing comments of the anchored node and of the nodes
+    /// inside it): the definition site keeps them, and the comments of the
+    /// alias site stay on the expanded node.
     Resolved,
 }
 
@@ -368,8 +371,8 @@ struct LoadState<'opt> {
     /// value, whatever the value is), or by a sequence/mapping loop when it
     /// hits End with leftover leading comments.  The next mapping/sequence
     /// loop iteration picks these up and prepends them to the next entry's
-    /// leading comments; when no entry follows (the document ends), they are
-    /// dropped.
+    /// leading comments; when no entry follows (the document ends), the
+    /// document takes them as its `end_comments`.
     pending_leading: Vec<String>,
     /// Line index for the current document source; shared across all documents
     /// produced from the same input via `Arc` to avoid N full copies.
@@ -411,8 +414,12 @@ impl<'opt> LoadState<'opt> {
             }
         }
 
+        // Comments outside any document: they wait here until the next
+        // `DocumentStart` takes them as its `prefix_comments`.  What is left
+        // at the end of the stream follows the last document's `...`.
+        let mut outside_comments: Vec<String> = Vec::new();
+
         loop {
-            // Skip any leading comments or unknown events before a document.
             match next_from(&mut stream)? {
                 None | Some((Event::StreamEnd, _)) => break,
                 Some((
@@ -428,13 +435,11 @@ impl<'opt> LoadState<'opt> {
                     let doc_tags = tag_directives;
                     self.reset_for_document();
 
-                    let mut doc_comments: Vec<String> = Vec::new();
-
-                    // Consume leading comments at document level.
-                    consume_leading_doc_comments(&mut stream, &mut doc_comments, &self.line_index)?;
+                    // Comments after `---` and before the root.
+                    let doc_comments = consume_leading_comments(&mut stream)?;
 
                     // Parse root node (may be absent for empty documents).
-                    let root = if is_document_end(stream.peek()) {
+                    let mut root = if is_document_end(stream.peek()) {
                         // Empty document — emit an empty scalar as root.
                         let mut node = empty_scalar();
                         apply_schema_to_node(&mut node, self.options.schema, &self.line_index)?;
@@ -442,12 +447,14 @@ impl<'opt> LoadState<'opt> {
                     } else {
                         self.parse_node(&mut stream)?
                     };
+                    attach_line_comment(&mut stream, &mut root, &self.line_index)?;
 
-                    // Comments after the root node are dropped; they must not hide
-                    // the `...` that follows them from the check below.
-                    while matches!(stream.peek(), Some(Ok((Event::Comment { .. }, _)))) {
-                        let _ = stream.next();
-                    }
+                    // Comments that no node inherited come first, in source
+                    // order, then the comments after the root.  The latter
+                    // must also not hide the `...` that follows them from the
+                    // check below.
+                    let mut end_comments = std::mem::take(&mut self.pending_leading);
+                    end_comments.extend(consume_leading_comments(&mut stream)?);
 
                     // Consume DocumentEnd if present and capture its explicit flag.
                     let doc_explicit_end =
@@ -463,16 +470,27 @@ impl<'opt> LoadState<'opt> {
                         root,
                         version: doc_version,
                         tags: doc_tags,
+                        prefix_comments: std::mem::take(&mut outside_comments),
                         comments: doc_comments,
+                        end_comments,
+                        after_end_comments: Vec::new(),
                         explicit_start: doc_explicit_start,
                         explicit_end: doc_explicit_end,
                         line_index: Some(self.line_index.clone()),
                     });
                 }
+                Some((Event::Comment { text }, _)) => {
+                    outside_comments.push(with_hash_prefix(text));
+                }
                 Some(_) => {
-                    // Comment or any other stray event outside a document — skip.
+                    // Any other stray event outside a document — skip.
                 }
             }
+        }
+
+        // A stream that holds only comments has no document to keep them.
+        if let Some(last) = docs.last_mut() {
+            last.after_end_comments = outside_comments;
         }
 
         Ok(docs)
@@ -589,43 +607,12 @@ impl<'opt> LoadState<'opt> {
 
                     let mut key = self.parse_node(stream)?;
                     attach_leading_comments(&mut key, leading);
-                    if matches!(stream.peek(), Some(Ok((Event::Comment { .. }, _)))) {
-                        drop_comments_on_line(
-                            stream,
-                            node_end_line(&key, &self.line_index),
-                            &self.line_index,
-                        )?;
-                    }
+                    // The comment after the key on its own line (`k: # c`,
+                    // `a: &x # c`) sits between the key and the value event.
+                    attach_line_comment(stream, &mut key, &self.line_index)?;
 
                     let mut value = self.parse_node(stream)?;
-                    if is_block_scalar(&value)
-                        && matches!(stream.peek(), Some(Ok((Event::Comment { .. }, _))))
-                    {
-                        drop_comments_on_line(
-                            stream,
-                            node_start_line(&value, &self.line_index),
-                            &self.line_index,
-                        )?;
-                    }
-
-                    // Trailing comment on the value — peek for inline comment.
-                    // Block scalars (literal `|` and folded `>`) consume trailing
-                    // blank lines as part of chomping; their span.end falls on the
-                    // first line after the scalar, which can coincide with the
-                    // next comment's line number.  That would falsely attach a
-                    // leading inter-node comment as a trailing inline comment.
-                    // Block scalars never have an inline comment on their content
-                    // lines, so skip trailing-comment detection for them.
-                    if !is_block_scalar(&value)
-                        && matches!(stream.peek(), Some(Ok((Event::Comment { .. }, _))))
-                    {
-                        let value_end_line = node_end_line(&value, &self.line_index);
-                        if let Some(trail) =
-                            peek_trailing_comment(stream, value_end_line, &self.line_index)?
-                        {
-                            attach_trailing_comment(&mut value, trail);
-                        }
-                    }
+                    attach_line_comment(stream, &mut value, &self.line_index)?;
 
                     entries.push((key, value));
                 }
@@ -721,31 +708,7 @@ impl<'opt> LoadState<'opt> {
 
                     let mut item = self.parse_node(stream)?;
                     attach_leading_comments(&mut item, leading);
-                    if is_block_scalar(&item)
-                        && matches!(stream.peek(), Some(Ok((Event::Comment { .. }, _))))
-                    {
-                        drop_comments_on_line(
-                            stream,
-                            node_start_line(&item, &self.line_index),
-                            &self.line_index,
-                        )?;
-                    }
-
-                    // Trailing comment on the item — peek for inline comment.
-                    // Block scalars are excluded for the same reason as in the
-                    // mapping path: their span.end can coincide with the next
-                    // comment's line, falsely turning a leading comment into a
-                    // trailing one.
-                    if !is_block_scalar(&item)
-                        && matches!(stream.peek(), Some(Ok((Event::Comment { .. }, _))))
-                    {
-                        let item_end_line = node_end_line(&item, &self.line_index);
-                        if let Some(trail) =
-                            peek_trailing_comment(stream, item_end_line, &self.line_index)?
-                        {
-                            attach_trailing_comment(&mut item, trail);
-                        }
-                    }
+                    attach_line_comment(stream, &mut item, &self.line_index)?;
 
                     items.push(item);
                 }
@@ -845,7 +808,12 @@ impl<'opt> LoadState<'opt> {
                     pos,
                 });
             }
-            self.anchor_map.insert(name, node.clone());
+            // The copy has no comments: they belong to the definition site, and
+            // copying them to every alias site would multiply them by the
+            // expansion count, which the node budget does not count.  The
+            // comments of the alias site are attached by the caller after the
+            // expansion.
+            self.anchor_map.insert(name, clone_without_comments(node));
         } else {
             // Lossless mode never reads anchor_map for expansion; store a
             // zero-cost placeholder so contains_key still detects re-definitions.
@@ -871,7 +839,10 @@ impl<'opt> LoadState<'opt> {
                     }
                 })?;
                 let mut in_progress: HashSet<String> = HashSet::new();
-                self.expand_node(anchored, &mut in_progress, loc)
+                let expanded = self.expand_node(anchored, &mut in_progress, loc)?;
+                // The node stands at the alias site, so a comment on its line
+                // is found there, not on the anchor's line.
+                Ok(reloc(expanded, loc))
             }
         }
     }
@@ -986,6 +957,32 @@ fn span_start_to_pos(offset: u32, line_index: &LineIndex) -> Pos {
     }
 }
 
+/// Attach the comment on a node's line as its `trailing_comment`, if the next
+/// event is that comment.
+///
+/// A block scalar's line is its header line: its span ends on the line after
+/// its content (chomping consumes trailing blank lines), so that line can
+/// coincide with the next own-line comment, which is a leading comment of the
+/// next node.  Every other node's line is the line its span ends on.
+fn attach_line_comment(
+    stream: &mut EventStream<'_>,
+    node: &mut Node<Span>,
+    line_index: &LineIndex,
+) -> Result<()> {
+    if !matches!(stream.peek(), Some(Ok((Event::Comment { .. }, _)))) {
+        return Ok(());
+    }
+    let line = if is_block_scalar(node) {
+        node_start_line(node, line_index)
+    } else {
+        node_end_line(node, line_index)
+    };
+    if let Some(comment) = peek_trailing_comment(stream, line, line_index)? {
+        attach_trailing_comment(node, comment);
+    }
+    Ok(())
+}
+
 /// Return the line number of a node's span start position.
 ///
 /// Used to find the comment on a block scalar's header line.
@@ -1021,8 +1018,8 @@ fn node_end_line(node: &Node<Span>, line_index: &LineIndex) -> u32 {
 /// `span.end` falls on the line *after* the last consumed line.  This means a
 /// comment on the immediately following line has the same line number as
 /// `span.end.line`, which would cause `peek_trailing_comment` to falsely
-/// classify it as an inline trailing comment.  The caller uses this predicate
-/// to skip trailing-comment detection for block scalars.
+/// classify it as an inline trailing comment.  `attach_line_comment` uses this
+/// predicate to look at the header line instead.
 #[inline]
 const fn is_block_scalar(node: &Node<Span>) -> bool {
     matches!(
@@ -1269,6 +1266,41 @@ mod tests {
         );
     }
 
+    fn comment_count(node: &Node<Span>) -> usize {
+        let own = node.leading_comments().len() + usize::from(node.trailing_comment().is_some());
+        own + match node {
+            Node::Mapping { entries, .. } => entries
+                .iter()
+                .map(|(key, value)| comment_count(key) + comment_count(value))
+                .sum(),
+            Node::Sequence { items, .. } => items.iter().map(comment_count).sum(),
+            Node::Scalar { .. } | Node::Alias { .. } => 0,
+        }
+    }
+
+    // Every alias expansion copies the node in the anchor map, so that copy
+    // must not hold the comments of the definition site.
+    #[test]
+    fn resolved_anchor_map_holds_no_comments() {
+        let options = LoaderOptions {
+            mode: LoadMode::Resolved,
+            ..LoaderOptions::default()
+        };
+        let input = "base: &a\n  # lead\n  - x # trail\n  # tail\n  - &b y # more\n";
+        let mut state = LoadState::new(&options, input);
+        let events: Box<dyn Iterator<Item = std::result::Result<(Event<'_>, Span), Error>> + '_> =
+            Box::new(crate::parse_events(input));
+        let docs = state.run(events.peekable()).unwrap();
+        assert!(
+            comment_count(&docs[0].root) > 0,
+            "the definition keeps its comments"
+        );
+        for name in ["a", "b"] {
+            let stored = state.anchor_map.get(name).unwrap();
+            assert_eq!(comment_count(stored), 0, "anchor {name}");
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Comment between mapping key and nested collection is attached to first nested entry
     // -----------------------------------------------------------------------
@@ -1422,7 +1454,7 @@ mod tests {
     #[case::scalar_literal_block("a:\n  # c\n  |\n  lit\nb: 1\n", &[("b", &["# c"][..])])]
     #[case::scalar_tagged("a:\n  # c\n  !!str t\nb: 1\n", &[("b", &["# c"][..])])]
     #[case::scalar_after_anchor_on_key_line("a: &x\n  # c\n  v\nb: 1\n", &[("b", &["# c"][..])])]
-    #[case::scalar_last_entry_comment_is_dropped("a:\n  # c\n  v\n", &[])]
+    #[case::scalar_last_entry_comment_reaches_no_node("a:\n  # c\n  v\n", &[])]
     #[case::scalar_in_nested_mapping_reaches_parent_sibling(
         "outer:\n  a:\n    # c\n    v\nz: 1\n",
         &[("z", &["# c"][..])]
@@ -1444,7 +1476,7 @@ mod tests {
         "a:\n  # c1\n# c2\nb: 1\n",
         &[("b", &["# c1", "# c2"][..])]
     )]
-    #[case::empty_value_last_entry_comment_is_dropped("a:\n  # c\n", &[])]
+    #[case::empty_value_last_entry_comment_reaches_no_node("a:\n  # c\n", &[])]
     #[case::empty_value_mapping_ends_comment_goes_to_next_sequence_item(
         "- a:\n  # c\n- z\n",
         &[("z", &["# c"][..])]
@@ -1678,8 +1710,8 @@ mod tests {
     #[case::empty_value_goes_to_next_key("key:\n", "b: 1\n", &["b"])]
     #[case::alias_value_goes_to_next_key("x: &x 1\na:\n", "  *x\nb: 2\n", &["b"])]
     #[case::mapping_end_reaches_next_item("- a:\n", "- z\n", &["z"])]
-    #[case::last_entry_drops_comments("a:\n", "", &[])]
-    #[case::document_end_drops_comments("a:\n", "---\nb: 1\n", &[])]
+    #[case::last_entry_comments_reach_no_node("a:\n", "", &[])]
+    #[case::document_end_comments_reach_no_node("a:\n", "---\nb: 1\n", &[])]
     fn long_comment_run_at_value_position_is_placed_like_short_run(
         #[case] prefix: &'static str,
         #[case] suffix: &'static str,
@@ -1715,9 +1747,10 @@ mod tests {
     }
 
     #[test]
-    fn comment_run_without_trailing_newline_at_end_of_input_is_dropped() {
+    fn comment_run_without_trailing_newline_at_end_of_input_reaches_no_node() {
         let docs = load("a:\n  # c1\n  # c2").unwrap();
         assert_eq!(nodes_with_leading_comments(&docs), []);
+        assert_eq!(docs[0].end_comments, ["# c1", "# c2"]);
     }
 
     #[test]

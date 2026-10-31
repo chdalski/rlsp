@@ -137,5 +137,9 @@ pub(super) fn sequence_item_to_doc(item: &Node<Span>, options: &YamlFormatOption
         }
     };
 
-    super::mapping_render::with_comments(item_doc, item.leading_comments(), item.trailing_comment())
+    super::mapping_render::with_comments(
+        item_doc,
+        item.leading_comments(),
+        super::mapping_render::printed_trailing_comment(item),
+    )
 }

@@ -17,6 +17,21 @@ use crate::pos::{LineIndex, Span};
 // ---------------------------------------------------------------------------
 
 /// A YAML document: a root node plus directive metadata.
+///
+/// Every comment of a loaded stream is stored in exactly one place.  The
+/// document owns the comments that sit around its root; the four comment
+/// fields below follow the order of the source:
+///
+/// 1. [`prefix_comments`](Self::prefix_comments) — before `---` or before the
+///    content of an implicit document.
+/// 2. [`comments`](Self::comments) — after `---`, before the root.
+/// 3. [`end_comments`](Self::end_comments) — after the root, before `...`,
+///    the next `---`, or the end of input.
+/// 4. [`after_end_comments`](Self::after_end_comments) — after the last `...`.
+///
+/// All other comments belong to a node: see [`NodeMeta::leading_comments`]
+/// and [`NodeMeta::trailing_comment`].  A stream that holds only comments
+/// loads as zero documents, so its comments are not in the AST.
 #[derive(Debug, Clone)]
 pub struct Document<Loc = Span> {
     /// The root node of the document.
@@ -25,8 +40,22 @@ pub struct Document<Loc = Span> {
     pub version: Option<(u8, u8)>,
     /// Tag handle/prefix pairs declared by `%TAG` directives (handle, prefix).
     pub tags: Vec<(String, String)>,
-    /// Comments that appear at document level (before or between nodes).
+    /// Comments before the document's `---` marker, or before the content of
+    /// an implicit document.  This includes the comments on `%YAML` and `%TAG`
+    /// directive lines and the comments between a preceding document's `...`
+    /// and this document.
+    pub prefix_comments: Vec<String>,
+    /// Comments after the `---` marker (on its line or below) and before the
+    /// root node.
     pub comments: Vec<String>,
+    /// Comments after the root node and before `...`, the next `---`, or the
+    /// end of input.  This includes the comments that no node inherits: an
+    /// own-line comment before the value of the last entry (`a:\n  # c\n  v`)
+    /// or after the last entry of a nested collection.
+    pub end_comments: Vec<String>,
+    /// Comments after the last `...` marker, when no document follows.  Only
+    /// the last document of a stream has any.
+    pub after_end_comments: Vec<String>,
     /// Whether the document was introduced with an explicit `---` marker.
     pub explicit_start: bool,
     /// Whether the document was closed with an explicit `...` marker.
@@ -43,7 +72,10 @@ impl<Loc: PartialEq> PartialEq for Document<Loc> {
         self.root == other.root
             && self.version == other.version
             && self.tags == other.tags
+            && self.prefix_comments == other.prefix_comments
             && self.comments == other.comments
+            && self.end_comments == other.end_comments
+            && self.after_end_comments == other.after_end_comments
             && self.explicit_start == other.explicit_start
             && self.explicit_end == other.explicit_end
         // line_index is excluded: it is derived from source and does not
@@ -63,7 +95,10 @@ impl<Loc> Document<Loc> {
             root,
             version: None,
             tags: Vec::new(),
+            prefix_comments: Vec::new(),
             comments: Vec::new(),
+            end_comments: Vec::new(),
+            after_end_comments: Vec::new(),
             explicit_start: false,
             explicit_end: false,
             line_index: None,
@@ -109,12 +144,17 @@ pub struct NodeMeta<Loc = Span> {
     /// Source span of the tag token — from `!` through the last byte of the tag.
     /// `Some` when a user-authored tag is present; `None` for resolver-injected tags.
     pub tag_loc: Option<Loc>,
-    /// Comment lines that appear before this node (e.g. `# note`).
-    /// Populated only for non-first entries in a mapping or sequence.
-    /// Document-prefix leading comments are discarded by the tokenizer
-    /// per YAML §9.2 and cannot be recovered here.
+    /// Comment lines that appear before this node (e.g. `# note`): the
+    /// own-line comments above a mapping key or sequence item, the comment
+    /// after the `-` or `?` indicator of an item or key (`- # note`), and
+    /// the own-line comments between a key and its value, which go to the
+    /// first entry of a nested collection or to the next entry.  Comments
+    /// around the document root are on [`Document`] instead.
     pub leading_comments: Option<Vec<String>>,
-    /// Inline comment on the same line as this node (e.g. `# note`).
+    /// The comment on the line this node ends on (e.g. `a: 1 # note`).  A
+    /// mapping key owns the comment that follows it on its own line
+    /// (`k: # note`, `a: &x # note`, `a: !t # note`), and a block scalar owns
+    /// the comment on its header line (`| # note`).
     pub trailing_comment: Option<String>,
 }
 
@@ -300,6 +340,8 @@ impl<Loc> Node<Loc> {
 #[cfg(test)]
 mod tests {
     use std::borrow::Cow;
+
+    use rstest::rstest;
 
     use super::*;
     use crate::event::{CollectionStyle, ScalarStyle};
@@ -779,7 +821,10 @@ mod tests {
             root: plain_scalar("val"),
             version: None,
             tags: Vec::new(),
+            prefix_comments: Vec::new(),
             comments: Vec::new(),
+            end_comments: Vec::new(),
+            after_end_comments: Vec::new(),
             explicit_start,
             explicit_end,
             line_index: None,
@@ -818,6 +863,32 @@ mod tests {
         assert_eq!(doc, cloned);
         assert!(cloned.explicit_start);
         assert!(cloned.explicit_end);
+    }
+
+    // Each of the four document comment fields takes part in equality.
+    #[rstest]
+    #[case::prefix_comments(|doc: &mut Document<Span>| doc.prefix_comments.push("# c".to_owned()))]
+    #[case::comments(|doc: &mut Document<Span>| doc.comments.push("# c".to_owned()))]
+    #[case::end_comments(|doc: &mut Document<Span>| doc.end_comments.push("# c".to_owned()))]
+    #[case::after_end_comments(
+        |doc: &mut Document<Span>| doc.after_end_comments.push("# c".to_owned())
+    )]
+    fn document_partial_eq_distinguishes_each_comment_field(
+        #[case] set_comment: fn(&mut Document<Span>),
+    ) {
+        let a = bare_document(false, false);
+        let mut b = bare_document(false, false);
+        set_comment(&mut b);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn document_with_root_has_no_comments() {
+        let doc = Document::with_root(plain_scalar("v"));
+        assert!(doc.prefix_comments.is_empty());
+        assert!(doc.comments.is_empty());
+        assert!(doc.end_comments.is_empty());
+        assert!(doc.after_end_comments.is_empty());
     }
 
     // -----------------------------------------------------------------------

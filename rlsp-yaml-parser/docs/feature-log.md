@@ -32,8 +32,7 @@ accepts both (see `docs/conformance/design-decisions.md`, [75]).
 **Complexity:** Medium
 **Comment:** A comment that is dropped from the event stream cannot reach the
 tree or the formatter, so this is the first step of keeping every comment.
-`load()` still keeps the comment on a key's line and on a block scalar's
-header line out of the tree. The span of a token, and the position of an
+The span of a token, and the position of an
 error, after the closing quote of a multi-line double-quoted scalar is now its
 real offset, in flow and block context (it was short by the closing line's
 indentation).
@@ -233,16 +232,23 @@ over untrusted flow input would be exploitable via deep nesting.
 ### Comment Preservation [completed]
 
 **Description:** Comments are emitted as `Event::Comment` events with
-their body text. The loader attaches leading comments (comment lines
-preceding a node) and trailing comments (inline comments on the same
-line as a node value) to AST nodes. One `Comment` event is emitted
-per physical line.
+their body text, and `load()` stores every one of them in the AST, once.
+Leading comments (comment lines preceding a node) and trailing comments
+(the comment on the line of a node, including a key's own line and a
+block scalar's header line) are attached to AST nodes. The comments
+around a document are in four `Document` fields: `prefix_comments`
+(before `---` or the implicit content, including directive lines),
+`comments` (after `---`, before the root), `end_comments` (after the
+root, before `...`, `---` or the end of input) and `after_end_comments`
+(after the last `...`).
 **Complexity:** Medium
 **Comment:** Comments are fully first-class in the AST. Leading
 comments are attached to mapping entries and sequence items;
-trailing comments are attached to values. Document-prefix comments
-before the first node are discarded per YAML §9.2 — the spec does
-not define comment ownership there.
+trailing comments are attached to keys, values and items. The spec
+does not define comment ownership outside a node (YAML 1.2.2 §6.6),
+so the document fields follow the order of the
+source. A stream that holds only comments loads as zero documents and
+has no place for them.
 **Tier:** 1
 
 ### AST Loader — Lossless Mode [completed]
@@ -263,7 +269,9 @@ alias expansion limit because no expansion ever occurs.
 The loader tracks a total expanded-node counter guarded by
 `max_expanded_nodes` (default 1 000 000) to prevent Billion Laughs
 alias bombs. Circular aliases are detected via an `in_progress` set
-and returned as `LoadError::CircularAlias`.
+and returned as `LoadError::CircularAlias`. A node produced by an alias
+carries none of the anchor's comments: the definition site keeps them, and
+the comments of the alias site (`a: *x # c`) stay on the expanded node.
 **Complexity:** Medium
 **Comment:** Resolved mode is needed by tools that want a fully
 materialized document. The expansion limit and cycle detection are

@@ -37,27 +37,6 @@ pub(super) fn next_from<'a>(stream: &mut EventStream<'a>) -> Result<Option<(Even
     }
 }
 
-/// Consume leading block-level Comment events at document level, appending
-/// them to `doc_comments`.  Stops at the first non-Comment event.
-///
-/// Block-level comments have `span.end` on a different line than `span.start`.
-pub(super) fn consume_leading_doc_comments(
-    stream: &mut EventStream<'_>,
-    doc_comments: &mut Vec<String>,
-    line_index: &LineIndex,
-) -> Result<()> {
-    while matches!(stream.peek(), Some(Ok((Event::Comment { .. }, _)))) {
-        if let Some((Event::Comment { text }, span)) = next_from(stream)? {
-            let start_line = line_index.line_column(span.start).0;
-            let end_line = line_index.line_column(span.end).0;
-            if end_line > start_line {
-                doc_comments.push(with_hash_prefix(text));
-            }
-        }
-    }
-    Ok(())
-}
-
 /// Consume leading block-level Comment events before a collection item or
 /// mapping key.  Returns the captured comment texts.
 ///
@@ -86,22 +65,6 @@ fn consume_leading_comments_slow(stream: &mut EventStream<'_>) -> Result<Vec<Str
         }
     }
     Ok(leading)
-}
-
-/// Drop the Comment events that sit on `line`: the comment on a key's own line
-/// (`k: # c`) and on a block scalar's header line (`| # c`) is not stored yet.
-pub(super) fn drop_comments_on_line(
-    stream: &mut EventStream<'_>,
-    line: u32,
-    line_index: &LineIndex,
-) -> Result<()> {
-    while let Some(Ok((Event::Comment { .. }, span))) = stream.peek() {
-        if line_index.line_column(span.start).0 != line {
-            break;
-        }
-        next_from(stream)?;
-    }
-    Ok(())
 }
 
 /// If the next event is a trailing Comment on the same line as `preceding_end_line`,
@@ -152,17 +115,6 @@ mod tests {
         LineIndex::new("a\nb\nc\nd\ne\nf\ng\n")
     }
 
-    /// Span whose start and end are on the same line (both on line 6 = byte 10..11).
-    fn inline_span() -> Span {
-        // Line 6 starts at byte 10 ("f\n"). Start at 10, end at 11 (the \n) — same line 6.
-        Span { start: 10, end: 11 }
-    }
-
-    /// Span whose start is on line 5 (byte 8) and end is on line 6 (byte 10).
-    fn block_span() -> Span {
-        Span { start: 8, end: 10 }
-    }
-
     fn pos(line: usize) -> Pos {
         Pos {
             byte_offset: 0,
@@ -203,64 +155,6 @@ mod tests {
                 kind: crate::error::ErrorKind::Syntax,
             })
         );
-    }
-
-    // -----------------------------------------------------------------------
-    // consume_leading_doc_comments
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn consume_leading_doc_comments_empty_when_first_event_is_not_comment() {
-        let sp = span(1, 1);
-        let idx = multi_line_index();
-        let mut stream = make_stream(vec![Ok((Event::StreamStart, sp))]);
-        let mut doc_comments: Vec<String> = Vec::new();
-        let result = consume_leading_doc_comments(&mut stream, &mut doc_comments, &idx);
-        assert_eq!(result, Ok(()));
-        assert!(doc_comments.is_empty());
-        // stream not consumed — StreamStart still peeked
-        assert!(stream.peek().is_some());
-    }
-
-    #[test]
-    fn consume_leading_doc_comments_accumulates_block_comments() {
-        // block-level: end byte on a later line than start byte
-        let sp = block_span(); // start line 5, end line 6
-        let trailing_sp = span(3, 3);
-        let idx = multi_line_index();
-        let mut stream = make_stream(vec![
-            Ok((Event::Comment { text: " note" }, sp)),
-            Ok((Event::Comment { text: " note" }, sp)),
-            Ok((Event::StreamStart, trailing_sp)),
-        ]);
-        let mut doc_comments: Vec<String> = Vec::new();
-        assert_eq!(
-            consume_leading_doc_comments(&mut stream, &mut doc_comments, &idx),
-            Ok(())
-        );
-        assert_eq!(doc_comments, vec!["# note", "# note"]);
-        // non-comment event still peeked
-        assert!(matches!(stream.peek(), Some(Ok((Event::StreamStart, _)))));
-    }
-
-    #[test]
-    fn consume_leading_doc_comments_skips_single_line_comment() {
-        // inline: start and end on the same line
-        let inline_sp = inline_span();
-        let trailing_sp = span(2, 2);
-        let idx = multi_line_index();
-        let mut stream = make_stream(vec![
-            Ok((Event::Comment { text: " inline" }, inline_sp)),
-            Ok((Event::StreamStart, trailing_sp)),
-        ]);
-        let mut doc_comments: Vec<String> = Vec::new();
-        assert_eq!(
-            consume_leading_doc_comments(&mut stream, &mut doc_comments, &idx),
-            Ok(())
-        );
-        assert!(doc_comments.is_empty());
-        // non-comment still peeked
-        assert!(matches!(stream.peek(), Some(Ok((Event::StreamStart, _)))));
     }
 
     // -----------------------------------------------------------------------

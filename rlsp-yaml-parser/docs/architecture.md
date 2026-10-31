@@ -76,7 +76,7 @@ EventIter (src/lib.rs + src/event_iter/)
 Loader (src/loader/, src/loader.rs)
   │  consumes the event stream
   │  builds Vec<Document<Span>> AST
-  │  attaches comments to adjacent nodes
+  │  stores every comment on a node or in a Document comment field
   │  resolves or preserves aliases depending on LoadMode
   │
   ▼
@@ -384,7 +384,12 @@ stream skip it.
   nodes. No expansion occurs. Safe for untrusted input without any expansion
   limit because no tree growth happens.
 - **Resolved**: aliases are expanded inline by deep-cloning the anchor's
-  subtree into the alias site. Subject to the `max_expanded_nodes` limit.
+  subtree into the alias site. Subject to the `max_expanded_nodes` limit. The
+expansion carries none of the anchor's comments: `register_anchor` stores a
+deep copy without comments (`clone_without_comments`) in `anchor_map`, so the
+definition site keeps them and an expansion neither copies them nor costs more
+for an anchor with many comments. The comments of the alias site are attached
+to the expanded node afterwards.
 
 The language server uses lossless mode. Resolved mode is available for callers
 that need a fully materialised document.
@@ -458,9 +463,8 @@ converts these to strings and attaches them to adjacent AST nodes.
 **Leading comments.** Before parsing each mapping key or sequence item, the
 loader drains all preceding `Comment` events via `consume_leading_comments`. The
 resulting `Vec<String>` is passed to `attach_leading_comments`, which writes it
-into the next node's `leading_comments` field. Document-level leading comments
-are handled separately by `consume_leading_doc_comments` and stored in
-`Document::comments`.
+into the next node's `leading_comments` field. A comment after the `-` or `?`
+indicator (`- # c`) is such a preceding comment too.
 
 **Comments between a key and its value.** Keys, sequence items, and the
 document root drain their leading comments in a loop, so a `Comment` event
@@ -473,19 +477,34 @@ the run decides who inherits it: a nested collection (block or flow) hands the
 run to its first entry or item; a scalar, empty value, or alias leaves it for
 the next key of the same mapping, or for the parent collection's next entry
 when the mapping ends there. When nothing follows (the mapping and document
-end after the value), no node receives the comments.
+end after the value), the document takes the run as its `end_comments`. The
+comment on the `:` line of an explicit key (`? k\n: # c\n  v`) is in such a
+run: its event equals that of an own-line comment between the key and the
+value.
 
-**Trailing comments.** After parsing a mapping value or sequence item, the
-loader peeks at the event stream via `peek_trailing_comment`. A comment is
-considered trailing if it appears on the same line as the node's span end
-(`span.end.line`). If found, it is attached to the node's `trailing_comment`
-field. Comments on a different line are left in the stream to be picked up as
-leading comments for the next node.
+**Comments on a node's line.** After parsing a mapping key, a mapping value, a
+sequence item, or the document root, the loader peeks at the event stream via
+`attach_line_comment`. A comment is the node's `trailing_comment` if it is on
+the node's line: the line its span ends on, or, for a block scalar, whose span
+ends after its content, the header line. So a key owns the comment that follows
+it on its line (`k: # c`, `a: &x # c`, `a: !t # c`), and a block scalar owns
+its header comment (`| # c`). A comment on a different line is left in the
+stream to be picked up as a leading comment of the next node.
 
-**Limitation.** Document-prefix leading comments (before the first node of a
-document) are discarded by the tokenizer per YAML §9.2. The `Document::comments`
-field captures block-level comments (those with `span.end.line > span.start.line`)
-seen between `DocumentStart` and the root node.
+**Comments around the document.** Every other comment is in one of four
+`Document` fields, in source order:
+
+| Field | Comments |
+|-------|----------|
+| `prefix_comments` | before `---`, or before the content of an implicit document; this includes the comments on `%YAML` and `%TAG` lines and the comments after a preceding document's `...` |
+| `comments` | after `---`, before the root |
+| `end_comments` | after the root, before `...`, the next `---`, or the end of input; this includes the run that no node inherited |
+| `after_end_comments` | after the last `...`, when no document follows |
+
+The loader collects the comment events between documents and hands them to the
+next `DocumentStart` as `prefix_comments`; what is left at the end of the
+stream goes to the last document's `after_end_comments`. A stream that holds
+only comments loads as zero documents, so its comments are not in the AST.
 
 ---
 
@@ -501,7 +520,10 @@ Document<Span>
   root: Node<Span>
   version: Option<(u8, u8)>       -- from %YAML directive
   tags: Vec<(String, String)>     -- from %TAG directives (handle, prefix)
-  comments: Vec<String>           -- document-level leading comments
+  prefix_comments: Vec<String>    -- before `---` or the implicit content
+  comments: Vec<String>           -- after `---`, before the root
+  end_comments: Vec<String>       -- after the root, before `...`, `---` or the end
+  after_end_comments: Vec<String> -- after the last `...`
   explicit_start: bool            -- true when document was introduced with `---`
   explicit_end: bool              -- true when document was closed with `...`
 

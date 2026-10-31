@@ -20,7 +20,7 @@ target goes here only after the user has lowered the target.
 - Inline `--- v` path: `--- v\n# d\nw\n` loses `w`, `--- *a\n` emits the scalar `*a`, `--- [x] [y]\n` loads as one scalar; `block` document start handling; libfyaml comparison.
 - A property line before a flow key goes on the key, not the new mapping (`&y\n[x]: 2\n`); `x:\n- &k\ny: 1\n` leaks the anchor to the key; libfyaml comparison.
 - `[a\n\n  b]` loads as `"a b"`, should fold to `"a\nb"`; `- a\0\n- b\n` yields events after the error (`block/sequence.rs`); BOM in a plain scalar errors here and loads in libfyaml; libfyaml comparison.
-- Multi-line quoted scalars end their span after the line break, and their value tokens have a wrong length (`classify_scalar_node`); span plan.
+- Multi-line quoted scalars end their span after the line break (`try_consume_single_quoted`, `try_consume_double_quoted` in `lexer/quoted.rs`), so their value tokens have a wrong length (`classify_scalar_node`), `a: "x\n  y" # c\nb: 1` stores `# c` on `b`, and `a: "x\n  y"\n# d\nb: 1\n` stores `# d` as the scalar's trailing comment; once fixed, add a place case to `tests/loader_comments.rs`; span plan, comment plan Task 5.
 - Block-scalar code action moves a trailing comment and trailing spaces into the literal value (`editing/code_actions/block_scalar.rs`); span plan.
 - `REGEX_CACHE` unbounded and `validate_schema` on the async executor (`src/schema/pattern.rs`); schema queue.
 - Path resolver's first pass is unpriced (`resolve_schema_path`, `src/schema/path.rs`); security Medium.
@@ -51,3 +51,6 @@ target goes here only after the user has lowered the target.
 - One long flow-collection line takes quadratic time, about 25 s for 2 MB (suspect `abs_pos` in `event_iter/flow.rs`), a denial-of-service risk for the language server; comment plan Task 4 security review.
 - Semantic token lengths count code points, not UTF-16 units; comment plan Task 4.
 - Test consolidation candidates: `trailing_comment_after_plain_scalar`, `trailing_comment_after_mapping_value`, `trailing_comment_leading_space_preserved`, `trailing_comment_after_sequence_entry`, `trailing_comment_no_trailing_newline` in `tests/smoke/comments.rs` into one table; `comment_line_produces_comment_token`, `comment_line_with_indent_starts_at_hash`, `indented_comment_position_from_event_span` into `comment_token_position_matches_event_comment_span`; comment plan Task 4 test review.
+- The doc comment on `consume_leading_comments` in `loader/stream.rs` still says block-level and own-line only, which no longer holds for `- # c`, `--- # c`, and the document-level callers; comment plan Task 5 review.
+- `rlsp-yaml-parser/docs/architecture.md`, Resolved bullet: the added lines lack the list item's indent; comment plan Task 5 review.
+- Test consolidation candidates: the `*_reaches_no_node` cases of `comment_between_key_and_value_placement` in `src/loader.rs` with the `end_comments` cases in `tests/loader_comments.rs`; the walkers `nodes_with_leading_comments` and `comment_places`; comment plan Task 5 test review.

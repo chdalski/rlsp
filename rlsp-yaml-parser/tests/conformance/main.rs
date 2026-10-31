@@ -6,6 +6,8 @@
 // Sub-modules:
 //   stream  — event-stream API (`parse_events`) conformance, 351/351
 //   loader  — loader AST (`load`) conformance (Task 2)
+//   comment_events — every comment is an `Event::Comment`
+//   comment_storage — every comment event is stored in the loader AST
 //   plain_scalar_comments — no plain scalar holds a comment, both APIs
 
 #![expect(
@@ -16,6 +18,7 @@
 )]
 
 pub mod comment_events;
+pub mod comment_storage;
 pub mod loader;
 pub mod plain_scalar_comments;
 pub mod stream;

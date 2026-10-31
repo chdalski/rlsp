@@ -664,6 +664,21 @@ mod tests {
         assert_eq!(format_yaml(&result, &default_opts()), result);
     }
 
+    // The loader stores a block scalar's header comment as its trailing
+    // comment; the formatter must not print it after the scalar's content,
+    // where it would become part of the value.
+    #[rstest]
+    #[case::literal_value("a: | # c\n  t\nb: 1\n", "a: |\n  t\nb: 1\n")]
+    #[case::folded_value("a: > # c\n  t\n", "a: >\n  t\n")]
+    #[case::literal_item("- | # c\n  t\n- x\n", "- |\n  t\n- x\n")]
+    #[case::literal_explicit_key_value("? k\n: | # c\n  t\n", "k: |\n  t\n")]
+    fn block_scalar_header_comment_stays_out_of_the_value(
+        #[case] input: &str,
+        #[case] expected: &str,
+    ) {
+        assert_eq!(format_yaml(input, &default_opts()), expected);
+    }
+
     // FM-4: Single document with both `---` and `...` → both preserved
     #[test]
     fn both_markers_preserved() {
