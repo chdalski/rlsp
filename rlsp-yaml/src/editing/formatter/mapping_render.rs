@@ -8,6 +8,51 @@ use rlsp_yaml_parser::{ScalarStyle, Span};
 use super::options::YamlFormatOptions;
 use super::scalar_render::{format_tag, is_core_schema_tag};
 
+/// Join a collection's anchor and user-defined tag into `&anchor !tag`, or just
+/// one of them. Core schema tags are dropped. `None` when neither remains.
+fn collection_properties(anchor: Option<&str>, tag: Option<&str>) -> Option<String> {
+    let tag_prefix = tag.and_then(|t| {
+        if is_core_schema_tag(t) {
+            None
+        } else {
+            Some(format_tag(t))
+        }
+    });
+
+    match (anchor, tag_prefix.as_deref()) {
+        (Some(name), Some(t)) => Some(format!("&{name} {t}")),
+        (Some(name), None) => Some(format!("&{name}")),
+        (None, Some(t)) => Some(t.to_string()),
+        (None, None) => None,
+    }
+}
+
+/// The colon that ends a key whose value is a block collection, followed by the
+/// collection's properties on the same line: `: &anchor !tag`, or `bare_colon`
+/// (`:` or ` :`) when the collection carries none.
+fn collection_colon(bare_colon: &str, anchor: Option<&str>, tag: Option<&str>) -> Doc {
+    collection_properties(anchor, tag)
+        .map_or_else(|| text(bare_colon), |props| text(format!(": {props}")))
+}
+
+/// Attach a node's comments to its rendered Doc: the trailing comment two spaces
+/// after the Doc, each leading comment on its own line above it.
+pub(super) fn with_comments(doc: Doc, leading: &[String], trailing: Option<&str>) -> Doc {
+    let doc = match trailing {
+        Some(tc) => concat(vec![doc, text(format!("  {tc}"))]),
+        None => doc,
+    };
+    if leading.is_empty() {
+        return doc;
+    }
+    let mut parts: Vec<Doc> = leading
+        .iter()
+        .flat_map(|lc| [text(lc.clone()), hard_line()])
+        .collect();
+    parts.push(doc);
+    concat(parts)
+}
+
 /// Prepend anchor and user-defined tag node properties to a collection Doc.
 ///
 /// For **block** collections the properties must appear on their own line — emitting
@@ -25,21 +70,7 @@ pub(super) fn prepend_collection_properties(
     tag: Option<&str>,
     style: CollectionStyle,
 ) -> Doc {
-    let tag_prefix = tag.and_then(|t| {
-        if is_core_schema_tag(t) {
-            None
-        } else {
-            Some(format_tag(t))
-        }
-    });
-
-    // Build the properties string: `&anchor !tag` or just one of them.
-    let props = match (anchor, tag_prefix.as_deref()) {
-        (Some(name), Some(t)) => Some(format!("&{name} {t}")),
-        (Some(name), None) => Some(format!("&{name}")),
-        (None, Some(t)) => Some(t.to_string()),
-        (None, None) => None,
-    };
+    let props = collection_properties(anchor, tag);
 
     let Some(props_str) = props else {
         return doc;
@@ -258,15 +289,9 @@ pub(super) fn explicit_key_to_doc(
                 tag,
                 ..
             } if !entries.is_empty() && effective_style(*style) == CollectionStyle::Block => {
-                let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
-                let colon_prefix = match (value.anchor(), user_tag) {
-                    (Some(name), Some(t)) => format!(": &{name} {}", format_tag(t)),
-                    (Some(name), None) => format!(": &{name}"),
-                    (None, Some(t)) => format!(": {}", format_tag(t)),
-                    (None, None) => ":".to_string(),
-                };
+                let colon_prefix = collection_colon(":", value.anchor(), tag.as_deref());
                 concat(vec![
-                    text(colon_prefix),
+                    colon_prefix,
                     indent(concat(vec![
                         hard_line(),
                         mapping_to_doc(entries, *style, options),
@@ -277,21 +302,15 @@ pub(super) fn explicit_key_to_doc(
             Node::Sequence {
                 items, style, tag, ..
             } if !items.is_empty() && effective_style(*style) == CollectionStyle::Block => {
-                let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
-                let colon_prefix = match (value.anchor(), user_tag) {
-                    (Some(name), Some(t)) => format!(": &{name} {}", format_tag(t)),
-                    (Some(name), None) => format!(": &{name}"),
-                    (None, Some(t)) => format!(": {}", format_tag(t)),
-                    (None, None) => ":".to_string(),
-                };
+                let colon_prefix = collection_colon(":", value.anchor(), tag.as_deref());
                 let seq_doc = super::sequence_render::sequence_to_doc(items, *style, options);
                 if options.format_indent_sequences {
                     concat(vec![
-                        text(colon_prefix),
+                        colon_prefix,
                         indent(concat(vec![hard_line(), seq_doc])),
                     ])
                 } else {
-                    concat(vec![text(colon_prefix), hard_line(), seq_doc])
+                    concat(vec![colon_prefix, hard_line(), seq_doc])
                 }
             }
             // Inline value (scalar, flow collection, empty collection, alias).
@@ -306,20 +325,12 @@ pub(super) fn explicit_key_to_doc(
     };
 
     // Append trailing comment from the value node.
-    let colon_line = if let Some(tc) = value.trailing_comment() {
-        concat(vec![colon_line, text(format!("  {tc}"))])
-    } else {
-        colon_line
-    };
+    let colon_line = with_comments(colon_line, &[], value.trailing_comment());
 
     concat(vec![question_line, hard_line(), colon_line])
 }
 
 /// Convert a single key-value pair to Doc, including any AST-attached comments.
-#[expect(
-    clippy::too_many_lines,
-    reason = "comprehensive match over all value variants"
-)]
 pub(super) fn key_value_to_doc(
     key: &Node<Span>,
     value: &Node<Span>,
@@ -357,18 +368,12 @@ pub(super) fn key_value_to_doc(
                 tag,
                 ..
             } if !entries.is_empty() && effective_style(*style) == CollectionStyle::Block => {
-                let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
                 let bare_colon = if key_needs_space_before_colon(key) {
                     " :"
                 } else {
                     ":"
                 };
-                let colon = match (value.anchor(), user_tag) {
-                    (Some(name), Some(t)) => text(format!(": &{name} {}", format_tag(t))),
-                    (Some(name), None) => text(format!(": &{name}")),
-                    (None, Some(t)) => text(format!(": {}", format_tag(t))),
-                    (None, None) => text(bare_colon),
-                };
+                let colon = collection_colon(bare_colon, value.anchor(), tag.as_deref());
                 concat(vec![
                     key_doc,
                     colon,
@@ -384,18 +389,12 @@ pub(super) fn key_value_to_doc(
             Node::Sequence {
                 items, style, tag, ..
             } if !items.is_empty() && effective_style(*style) == CollectionStyle::Block => {
-                let user_tag = tag.as_ref().filter(|t| !is_core_schema_tag(t));
                 let bare_colon = if key_needs_space_before_colon(key) {
                     " :"
                 } else {
                     ":"
                 };
-                let colon = match (value.anchor(), user_tag) {
-                    (Some(name), Some(t)) => text(format!(": &{name} {}", format_tag(t))),
-                    (Some(name), None) => text(format!(": &{name}")),
-                    (None, Some(t)) => text(format!(": {}", format_tag(t))),
-                    (None, None) => text(bare_colon),
-                };
+                let colon = collection_colon(bare_colon, value.anchor(), tag.as_deref());
                 let seq_doc = super::sequence_render::sequence_to_doc(items, *style, options);
                 if options.format_indent_sequences {
                     concat(vec![
@@ -425,29 +424,12 @@ pub(super) fn key_value_to_doc(
         }
     };
 
-    // Append trailing comment from the value node (only for non-explicit-key paths —
-    // explicit_key_to_doc handles its own trailing comment).
-    let pair_doc = if !needs_explicit_key(key) && !is_empty_key(key) {
-        if let Some(tc) = value.trailing_comment() {
-            concat(vec![pair_doc, text(format!("  {tc}"))])
-        } else {
-            pair_doc
-        }
+    // The value's trailing comment is appended only on the implicit-key path —
+    // explicit_key_to_doc handles its own.
+    let trailing = if !needs_explicit_key(key) && !is_empty_key(key) {
+        value.trailing_comment()
     } else {
-        pair_doc
+        None
     };
-
-    // Prepend leading comments from the key node.
-    let leading = key.leading_comments();
-    if leading.is_empty() {
-        pair_doc
-    } else {
-        let mut parts: Vec<Doc> = Vec::new();
-        for lc in leading {
-            parts.push(text(lc.clone()));
-            parts.push(hard_line());
-        }
-        parts.push(pair_doc);
-        concat(parts)
-    }
+    with_comments(pair_doc, key.leading_comments(), trailing)
 }

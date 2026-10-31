@@ -137,24 +137,5 @@ pub(super) fn sequence_item_to_doc(item: &Node<Span>, options: &YamlFormatOption
         }
     };
 
-    // Append trailing comment from the item node.
-    let item_doc = if let Some(tc) = item.trailing_comment() {
-        concat(vec![item_doc, text(format!("  {tc}"))])
-    } else {
-        item_doc
-    };
-
-    // Prepend leading comments from the item node.
-    let leading = item.leading_comments();
-    if leading.is_empty() {
-        item_doc
-    } else {
-        let mut parts: Vec<Doc> = Vec::new();
-        for lc in leading {
-            parts.push(text(lc.clone()));
-            parts.push(hard_line());
-        }
-        parts.push(item_doc);
-        concat(parts)
-    }
+    super::mapping_render::with_comments(item_doc, item.leading_comments(), item.trailing_comment())
 }

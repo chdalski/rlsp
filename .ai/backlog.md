@@ -43,3 +43,4 @@ target goes here only after the user has lowered the target.
 - `rlsp-yaml-parser/CLAUDE.md` requires `#[non_exhaustive]` on public types, but `Document`, `Node`, `NodeMeta` and others lack it; settle the rule or the types; comment plan design review.
 - Formatter fixtures `flow-mapping-long-breaks`, `flow-mapping-bracket-spacing-false-long-breaks`, `interact-bracket-spacing-print-width` and unit cases `flow_map_under_key`, `flow_map_bracket_spacing_false` pin the same layout; comment plan Task 1.
 - U+FEFF in a comment body loads though [75] `nb-char` excludes it (libfyaml accepts it too), and `bnf-§6.md` [75] says Strict-conformant; comment plan Task 2.
+- `sequence_item_to_doc` in `sequence_render.rs` still copies the prefix matches of `collection_properties`; comment plan Task 3 review.

@@ -29,7 +29,7 @@ formatting it again must change nothing.
 - [x] Design review of the approach
 - [x] Task 1: Indent the closing bracket of a broken flow collection
 - [x] Task 2: One helper reads a comment from a line suffix
-- [ ] Task 3: Two helpers assemble node comments and the collection colon
+- [x] Task 3: Two helpers assemble node comments and the collection colon
 - [ ] Task 4: Emit every comment as an event
 - [ ] Task 5: Store every comment event in the AST
 - [ ] Task 6: Print document-level comments and reduce the text matching
@@ -88,11 +88,11 @@ in the first criterion.
 leading and trailing comments and of the collection colon, and Task 7 changes
 all of those sites. Behavior is unchanged.
 
-- [ ] One helper assembles a node's comments and one the collection colon, and
+- [x] One helper assembles a node's comments and one the collection colon, and
       the render functions use them
-- [ ] The `comment-*.md` fixtures and the anchor tests in
+- [x] The `comment-*.md` fixtures and the anchor tests in
       `rlsp-yaml/src/editing/formatter.rs` pass with their assertions unchanged
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 4: Emit every comment as an event
 
@@ -287,3 +287,8 @@ these inputs change today.
 - **Performance:** one enum-tag compare per mapping entry on the buffered next
   event is the only addition on the path without comments; no benchmark
   criterion.
+
+## Task Notes
+
+- Task 11: `x: &a 1\n*a : &y\n  b: 1\n` and `x: &a 1\n*a : !t\n  - 1\n` keep the
+  space before the colon, so the output loads with the same data
