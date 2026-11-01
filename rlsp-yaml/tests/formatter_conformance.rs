@@ -15,10 +15,14 @@
 //   4. The output holds no comment event the input lacks, so a comment is neither
 //      invented nor printed twice.  The output may hold fewer: comments at node
 //      positions are not printed yet.
+//   5. The output of a case that loads loads to the same data (see
+//      `formatter_keeps_the_data_of_suite_case`).
 //
 // The same comment checks run over the real files in `tests/corpus/`.
 
 #![expect(clippy::unwrap_used, missing_docs, reason = "test code")]
+
+mod loaded_data;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -376,6 +380,57 @@ fn formatter_conformance(
             &output[..output.len().min(200)],
             &second[..second.len().min(200)],
         );
+    }
+}
+
+/// The output of every suite case that loads loads to the same data, whatever
+/// the options say about style: structure, values, tags, anchors and aliases.
+#[rstest]
+#[timeout(Duration::from_secs(5))]
+fn formatter_keeps_the_data_of_suite_case(
+    #[files("../tests/yaml-test-suite/src/*.yaml")] path: PathBuf,
+) {
+    let base = YamlFormatOptions::default;
+    let option_sets = [
+        base(),
+        YamlFormatOptions {
+            format_enforce_block_style: true,
+            ..base()
+        },
+        YamlFormatOptions {
+            print_width: 20,
+            ..base()
+        },
+        YamlFormatOptions {
+            single_quote: true,
+            ..base()
+        },
+        YamlFormatOptions {
+            format_indent_sequences: false,
+            ..base()
+        },
+        YamlFormatOptions {
+            preserve_quotes: true,
+            ..base()
+        },
+    ];
+    for case in load_cases_from_file(&path).iter().filter(|case| !case.fail) {
+        let Some(expected) = loaded_data::data_signature(&case.yaml) else {
+            continue;
+        };
+        for options in &option_sets {
+            let output = format_yaml(&case.yaml, options);
+            assert_eq!(
+                loaded_data::data_signature(&output).as_deref(),
+                Some(expected.as_str()),
+                "{}[{}] {}: the output holds other data\n  input:  {:?}\n  output: {:?}",
+                case.file,
+                case.index,
+                case.name,
+                case.yaml,
+                output,
+            );
+        }
     }
 }
 

@@ -12,6 +12,63 @@ with existing infrastructure.
 
 ---
 
+### A Plain Scalar Cannot Start With a Reserved Indicator [completed]
+
+**Description:** A node that starts with `,`, `@`, a backtick, or an indented
+`%` is a syntax error: `v: ,`, `- @a`, `` `a: b ``, `a: %b`, `--- ,`, `--- %a`.
+Before, the parser took the line for an empty node and dropped its text, so
+a file with such a line loaded with that data missing. A file that holds one
+now reports an error at the indicator; libfyaml 0.9.6 rejects them too. The same
+characters inside a scalar, in a continuation line, in a flow collection after
+the first character, in a quoted scalar, or in a comment are content as before.
+A `%` at the start of a line still opens a directive.
+**Complexity:** Low
+**Comment:** YAML 1.2.2 [126] `ns-plain-first` excludes the indicators from
+the first character of a plain scalar. The yaml-test-suite and the real files of
+the repository load as before.
+**Tier:** 1
+
+---
+
+### An Explicit Flow Key Keeps Its Exemption From the Key Length Limit [completed]
+
+**Description:** An explicit key in a flow collection (`? K`) has no length limit.
+Before, a `:` inside the key ended the exemption, so `{ ? {a: 1, b: <1100
+characters>}: v }` was rejected with "implicit flow key exceeds 1024 Unicode
+characters". It loads now, as it does in libfyaml 0.9.6. Implicit keys keep the
+limit.
+**Complexity:** Low
+**Comment:** The parser tracked the current key in one variable for all open flow
+collections; each open collection now has its own.
+**Tier:** 1
+
+---
+
+### A Flow Collection or an Alias After `---` Is the Root Node [completed]
+
+**Description:** `--- [alpha, bravo]` loads as a sequence of two scalars,
+`--- {a: 1}` as a mapping, and `--- *a` as an alias. Before, `--- [alpha,
+bravo]` loaded as the plain scalar `"[alpha, bravo]"`, `--- *a` as the scalar
+`"*a"`, and `--- {a: 1}` was an error. `parse_events()` and `load()` give the
+same events as libfyaml 0.9.6. A collection written with the bare `!`
+(`- ! [a, b]`) keeps the span of the `!` in `tag_loc`, as a scalar does, so a
+consumer can tell it from a collection without a tag; its tag is still `!!seq`
+or `!!map`. Content after the node on the `---` line is an error: `--- [x] [y]`
+(it loaded as one scalar), `--- [x]: 1`, `--- {a: 1}: 2`, `--- *a b`,
+`--- *a: v` and `--- *a : v`, since a block mapping cannot start on the marker
+line and a document holds one node. A closing bracket there (`--- ]`, `--- }x`)
+is an error too, as on the line below; it loaded as a plain scalar. A document
+that holds such a line loads
+differently than before: a formatter that rewrites `--- [a]` as `---`, then
+`[a]` on the next line changed its data until now.
+**Complexity:** Low
+**Comment:** The inline-content path of the `---` line took any text that was
+not a block scalar header, anchor, tag or quote for a plain scalar. A flow
+collection or alias there now goes through the dispatch of a later line.
+**Tier:** 1
+
+---
+
 ### A Comment Stays With the Node It Is Next To [completed]
 
 **Description:** `load()` stored some comments on the wrong node. A comment on

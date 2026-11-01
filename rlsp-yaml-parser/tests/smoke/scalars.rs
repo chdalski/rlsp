@@ -253,3 +253,67 @@ fn single_quoted_scalar_with_trailing_comment_matches_double_quoted_spans() {
     assert_eq!(single, spans("- \"q\" # c\n"));
     assert_eq!(single.first(), Some(&(2, 5)));
 }
+
+// A plain scalar cannot start with an indicator (YAML 1.2.2 [126]
+// `ns-plain-first`).  `,`, `@`, the backtick and an indented `%` are errors, not
+// an empty node that drops their text.
+#[rstest]
+#[case::comma_as_a_mapping_value("v: ,\n")]
+#[case::comma_then_text_as_a_mapping_value("v: ,a\n")]
+#[case::comma_as_a_sequence_item("- ,\n")]
+#[case::comma_then_text_as_a_sequence_item("- ,a\n")]
+#[case::comma_as_the_root("a\n---\n,\n")]
+#[case::comma_as_a_bare_root(",a\n")]
+#[case::comma_as_a_key(",: v\n")]
+#[case::at_sign_as_a_mapping_value("v: @a\n")]
+#[case::at_sign_as_a_sequence_item("- @a\n")]
+#[case::at_sign_as_a_key("@a: b\n")]
+#[case::at_sign_as_the_root("@a\n")]
+#[case::backtick_as_a_mapping_value("v: `a\n")]
+#[case::backtick_as_a_sequence_item("- `a\n")]
+#[case::backtick_as_a_key("`a: b\n")]
+#[case::backtick_as_the_root("`a\n")]
+#[case::percent_as_a_mapping_value("v: %a\n")]
+#[case::percent_as_a_sequence_item("- %a\n")]
+#[case::after_an_anchor("v: &x ,\n")]
+#[case::after_a_tag("v: !t @a\n")]
+#[case::on_its_own_line_below_a_key("a:\n  ,\n")]
+#[case::in_an_explicit_key("? ,\n")]
+#[case::on_the_marker_line_comma("--- ,\n")]
+#[case::on_the_marker_line_comma_then_text("--- ,x\n")]
+#[case::on_the_marker_line_percent("--- %a\n")]
+#[case::on_the_marker_line_at_sign("--- @a\n")]
+#[case::on_the_marker_line_backtick("--- `a\n")]
+fn reserved_indicator_cannot_start_a_plain_scalar(#[case] input: &str) {
+    assert!(has_error(input), "input: {input:?}");
+}
+
+// The same characters later in a scalar, in a continuation line, in a flow
+// collection, in a quoted scalar or in a comment are content, and a directive
+// still starts with `%` at the start of a line.
+#[rstest]
+#[case::comma_inside("v: a,b\n")]
+#[case::at_sign_inside("v: a@b\n")]
+#[case::backtick_inside("v: a`b\n")]
+#[case::percent_inside("v: a%b\n")]
+#[case::comma_in_a_continuation_line("a: b\n  ,c\n")]
+#[case::at_sign_in_a_continuation_line("a: b\n  @c\n")]
+#[case::percent_in_a_continuation_line("- a\n  %c\n")]
+#[case::in_a_flow_item("v: [a@b, c`d, e%f]\n")]
+#[case::quoted("v: \"@a\"\nw: ',a'\n")]
+#[case::block_scalar_content("v: |\n  ,a\n  @b\n")]
+#[case::in_a_comment("k: v # , @ `\n")]
+#[case::directive("%YAML 1.2\n---\na: 1\n")]
+#[case::directive_after_a_document_end("a: 1\n...\n%YAML 1.2\n---\nb: 2\n")]
+fn reserved_indicator_elsewhere_is_content(#[case] input: &str) {
+    assert!(!has_error(input), "input: {input:?}");
+}
+
+#[test]
+fn reserved_indicator_error_points_at_the_indicator() {
+    let error = parse_to_vec("a:\n  - b\n  - ,x\n")
+        .into_iter()
+        .find_map(Result::err)
+        .expect("an error");
+    assert_eq!((error.pos.line, error.pos.column), (3, 4));
+}

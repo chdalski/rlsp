@@ -1,4 +1,5 @@
 use super::*;
+use rstest::rstest;
 
 // -----------------------------------------------------------------------
 // Group A — Basic explicit-start documents
@@ -851,4 +852,330 @@ fn content_after_root_node_without_marker_errors() {
             err.message
         );
     }
+}
+
+// -----------------------------------------------------------------------
+// Group O: A flow collection or an alias on the `---` line
+// -----------------------------------------------------------------------
+// YAML 1.2.2 [207] l-bare-document ::= s-l+block-node(-1,block-in), whose
+// s-l+flow-in-block [197] takes `s-separate ns-flow-node s-l-comments` — a
+// flow collection ([137]/[140]) or an alias ([104] c-ns-alias-node) after the
+// `---` marker is the root node; a block mapping cannot start on the marker
+// line, so a node followed by more content there is an error.  libfyaml 0.9.6
+// gives the same events.
+
+const fn explicit_start() -> Event<'static> {
+    Event::DocumentStart {
+        explicit: true,
+        version: None,
+        tag_directives: vec![],
+    }
+}
+
+fn flow_plain(v: &'static str) -> Event<'static> {
+    Event::Scalar {
+        value: v.into(),
+        style: ScalarStyle::Plain,
+        meta: None,
+    }
+}
+
+const fn flow_start(is_sequence: bool) -> Event<'static> {
+    if is_sequence {
+        Event::SequenceStart {
+            style: CollectionStyle::Flow,
+            meta: None,
+        }
+    } else {
+        Event::MappingStart {
+            style: CollectionStyle::Flow,
+            meta: None,
+        }
+    }
+}
+
+#[test]
+fn flow_sequence_on_the_marker_line_is_the_root_sequence() {
+    assert_eq!(
+        event_variants("--- [alpha, bravo]\n"),
+        [
+            Event::StreamStart,
+            explicit_start(),
+            flow_start(true),
+            flow_plain("alpha"),
+            flow_plain("bravo"),
+            Event::SequenceEnd,
+            Event::DocumentEnd { explicit: false },
+            Event::StreamEnd,
+        ]
+    );
+}
+
+#[test]
+fn flow_mapping_on_the_marker_line_is_the_root_mapping() {
+    assert_eq!(
+        event_variants("--- {a: 1}\n"),
+        [
+            Event::StreamStart,
+            explicit_start(),
+            flow_start(false),
+            flow_plain("a"),
+            flow_plain("1"),
+            Event::MappingEnd,
+            Event::DocumentEnd { explicit: false },
+            Event::StreamEnd,
+        ]
+    );
+}
+
+#[test]
+fn alias_on_the_marker_line_is_an_alias_node() {
+    assert_eq!(
+        event_variants("--- *a\n"),
+        [
+            Event::StreamStart,
+            explicit_start(),
+            Event::Alias { name: "a" },
+            Event::DocumentEnd { explicit: false },
+            Event::StreamEnd,
+        ]
+    );
+}
+
+#[rstest]
+#[case::space_run("---   [x]\n")]
+#[case::tab("---\t[x]\n")]
+#[case::comment_after("--- [x] # c\n")]
+#[case::collection_spans_lines("--- [x,\n  y]\n")]
+#[case::closing_bracket_on_its_own_line("--- [\n  x\n]\n")]
+#[case::comment_inside("--- [ # c\n  x]\n")]
+#[case::nested("--- [[x], {y: z}]\n")]
+#[case::alias_inside("--- [*a]\n")]
+#[case::anchor("--- &a [x]\n")]
+#[case::tag("--- !t [x]\n")]
+#[case::followed_by_document_end("--- [x]\n...\n")]
+#[case::followed_by_next_document("--- [x]\n--- [y]\n")]
+#[case::alias_with_comment("--- *a # c\n")]
+fn collection_or_alias_on_the_marker_line_parses(#[case] input: &str) {
+    assert!(!has_error(input), "input: {input:?}");
+}
+
+#[rstest]
+#[case::second_flow_collection("--- [x] [y]\n")]
+#[case::flow_collection_then_plain("--- [x] y\n")]
+#[case::flow_sequence_as_a_key("--- [x]: 1\n")]
+#[case::pair_sequence_as_a_key("--- [a: b]: c\n")]
+#[case::multi_line_sequence_as_a_key("--- [a,\n b]: v\n")]
+#[case::flow_mapping_as_a_key("--- {a: 1}: 2\n")]
+#[case::alias_then_plain("--- *a b\n")]
+#[case::alias_as_a_key("--- *a : v\n")]
+#[case::alias_named_with_a_colon_then_plain("--- *a: v\n")]
+#[case::properties_then_alias("--- &x *a\n")]
+#[case::tag_then_alias("--- !t *a\n")]
+#[case::closing_bracket("--- ]\n")]
+#[case::closing_brace("--- }\n")]
+#[case::closing_bracket_then_plain("--- ]x\n")]
+#[case::closing_brace_then_plain("--- }x\n")]
+#[case::two_closing_brackets("--- ]]\n")]
+#[case::comment_without_space("--- [x]#c\n")]
+#[case::extra_closing_bracket("--- [a]]\n")]
+#[case::unclosed("--- [a\n")]
+#[case::unclosed_after_comma("--- [a,\n")]
+#[case::unclosed_mapping("--- {\n")]
+#[case::alias_without_name("--- *\n")]
+#[case::alias_on_the_next_line_then_plain("--- *a\nz\n")]
+#[case::collection_then_plain_on_the_next_line("--- [x]\nz\n")]
+#[case::collection_then_sequence_entry("--- [x]\n- y\n")]
+#[case::collection_then_mapping_entry("--- [x]\nk: v\n")]
+fn content_after_the_node_on_the_marker_line_is_an_error(#[case] input: &str) {
+    assert!(has_error(input), "input: {input:?}");
+}
+
+// -----------------------------------------------------------------------
+// Group P: The marker line and the line below give the same events
+// -----------------------------------------------------------------------
+// Every node that starts on the `---` line is read as it is read when it starts
+// on the next line; where the next line is an error, so is the marker line.
+
+/// The events of `input` as text, or `Err` when the stream has an error.  What
+/// comes before an error is left out: the marker line is rejected before it
+/// emits the start of the document, and its message differs from the one the
+/// line below gets.
+fn event_trace(input: &str) -> Result<Vec<String>, ()> {
+    parse_events(input)
+        .map(|item| item.map(|(event, _)| format!("{event:?}")).map_err(|_| ()))
+        .collect()
+}
+
+#[rstest]
+#[case::flow_sequence("[alpha, bravo]")]
+#[case::empty_sequence("[]")]
+#[case::padded("[ a ]")]
+#[case::nested("[a, [b, c]]")]
+#[case::over_two_lines("[a,\n b]")]
+#[case::bracket_on_its_own_line("[\n a,\n b]")]
+#[case::quoted_items("[\"q\" , 'r']")]
+#[case::trailing_comma("[a, ]")]
+#[case::plain_item_with_a_space("[a b]")]
+#[case::alias_item("[*a]")]
+#[case::anchored_and_aliased_items("[&a x, *a]")]
+#[case::tagged_item("[!t x]")]
+#[case::single_pair("[a: 1]")]
+#[case::explicit_single_pair("[? a: 1]")]
+#[case::comment_inside("[ # c\n 1]")]
+#[case::comment_after("[a] # c")]
+#[case::tab_comment_after("[a]\t# c")]
+#[case::trailing_spaces("[a]  ")]
+#[case::comment_on_the_next_line("[a]\n# c")]
+#[case::indented_comment_on_the_next_line("[a]\n  # c")]
+#[case::document_end("[a, b]\n...")]
+#[case::next_document("[a]\n---\n[b]")]
+#[case::alias("*a")]
+#[case::alias_with_comment("*a # c")]
+#[case::alias_comment_on_the_next_line("*a\n# c")]
+#[case::alias_named_with_a_colon("*a:")]
+#[case::alias_named_with_a_colon_inside("*a:b")]
+#[case::flow_mapping("{a: 1}")]
+#[case::empty_mapping("{}")]
+#[case::mapping_with_comment_after("{a: 1} # c")]
+#[case::mapping_with_comment_inside("{ # c\n a: 1}")]
+#[case::bracket_in_a_quoted_item("[\"]\", a]")]
+#[case::apostrophe_in_a_quoted_item("[a, 'it''s']")]
+#[case::hash_after_a_comment_start("[a] # c: d")]
+#[case::colon_in_a_quoted_value("{a: \"x: y\"}")]
+#[case::comment_with_brackets("[a] # [b] [c]")]
+#[case::alias_comment_with_brackets("*a # [x] [y]")]
+#[case::multibyte_items("[ä, \"日本\"]")]
+#[case::multibyte_alias("*é")]
+#[case::pair_in_a_mapping("{a: 1, b: [c: d]}")]
+#[case::pairs_in_a_sequence("[a: 1, b: 2]")]
+#[case::comment_with_a_key("[ # k: v\n a]")]
+#[case::second_collection("[x] [y]")]
+#[case::collection_then_plain("[x] y")]
+#[case::collection_then_plain_without_space("[x]y")]
+#[case::closing_bracket_twice("[x]]")]
+#[case::comment_without_space("[x]#c")]
+#[case::collection_then_tab_then_collection("[x]\t[y]")]
+#[case::multi_line_collection_as_a_key("[a,\n b]: v")]
+#[case::multi_line_collection_then_collection("[a,\n b] [c]")]
+#[case::multi_line_collection_then_plain("[a,\n b] x")]
+#[case::alias_then_alias("*a *b")]
+#[case::alias_then_plain("*a b")]
+#[case::properties_then_alias("&x *a")]
+#[case::tag_then_alias("!t *a")]
+#[case::document_marker_inside("[a,\n---\n b]")]
+#[case::document_end_inside("[a,\n...\n]")]
+#[case::unclosed("[a")]
+#[case::unclosed_mapping("{")]
+#[case::lone_closing_bracket("]")]
+#[case::lone_closing_brace("}")]
+#[case::closing_bracket_then_plain("]x")]
+#[case::closing_brace_then_plain("}x")]
+#[case::two_closing_brackets("]]")]
+#[case::alias_named_with_a_colon_then_plain("*a: v")]
+fn marker_line_node_reads_as_the_node_on_the_next_line(#[case] node: &str) {
+    let same_line = event_trace(&format!("--- {node}\n"));
+    let next_line = event_trace(&format!("---\n{node}\n"));
+    assert_eq!(same_line, next_line, "node: {node:?}");
+}
+
+#[rstest]
+#[case::lf("--- [alpha, bravo]\n")]
+#[case::crlf("--- [alpha, bravo]\r\n")]
+#[case::lone_cr("--- [alpha, bravo]\r")]
+#[case::bom("\u{feff}--- [alpha, bravo]\n")]
+#[case::tab("---\t[alpha, bravo]\n")]
+#[case::spaces("---   [alpha, bravo]\n")]
+#[case::multibyte("--- [äb, \"日本\", bravo]\n")]
+fn marker_line_flow_sequence_has_the_spans_of_its_text(#[case] input: &str) {
+    let items: Vec<_> = parse_events(input)
+        .map(|item| item.expect("the input parses"))
+        .collect();
+    let start = input.find('[').expect("a bracket");
+    for (event, span) in &items {
+        let text = &input[span.start as usize..span.end as usize];
+        match event {
+            Event::Scalar { value, style, .. } if *style == ScalarStyle::Plain => {
+                assert_eq!(text, value, "scalar span in {input:?}");
+            }
+            Event::Alias { name } => assert_eq!(text, format!("*{name}")),
+            Event::SequenceStart { .. } => assert_eq!(span.start as usize, start),
+            Event::Scalar { .. }
+            | Event::StreamStart
+            | Event::StreamEnd
+            | Event::Comment { .. }
+            | Event::DocumentStart { .. }
+            | Event::DocumentEnd { .. }
+            | Event::SequenceEnd
+            | Event::MappingStart { .. }
+            | Event::MappingEnd => {}
+        }
+    }
+    let (line, column) = line_col(input, u32::try_from(start).unwrap());
+    assert_eq!(line, 1, "{input:?}");
+    assert_eq!(
+        column,
+        u32::try_from(
+            input[..start]
+                .trim_start_matches('\u{feff}')
+                .chars()
+                .count()
+        )
+        .unwrap()
+            + u32::from(input.starts_with('\u{feff}')),
+        "{input:?}"
+    );
+}
+
+#[test]
+fn marker_line_alias_has_the_span_of_its_text() {
+    let items: Vec<_> = parse_events("--- *a\n").map(Result::unwrap).collect();
+    let (_, span) = items
+        .iter()
+        .find(|(event, _)| matches!(event, Event::Alias { .. }))
+        .expect("an alias");
+    assert_eq!((span.start, span.end), (4, 6));
+}
+
+#[test]
+fn marker_line_multi_line_collection_takes_continuation_lines_at_any_indent() {
+    for input in ["--- [a,\nb]\n", "--- [a,\n b]\n", "--- [a,\n    b]\n"] {
+        assert!(!has_error(input), "{input:?}");
+    }
+}
+
+#[test]
+fn marker_line_flow_collection_nesting_is_limited_without_overflowing_the_stack() {
+    std::thread::Builder::new()
+        .stack_size(64 << 20)
+        .spawn(|| {
+            let deepest = MAX_COLLECTION_DEPTH - 1;
+            let ok = format!("--- {}{}\n", "[".repeat(deepest), "]".repeat(deepest));
+            assert!(!has_error(&ok), "the deepest nesting the parser accepts");
+            for levels in [MAX_COLLECTION_DEPTH + 1, 100_000] {
+                let deep = format!("--- {}{}\n", "[".repeat(levels), "]".repeat(levels));
+                assert!(has_error(&deep), "{levels} levels");
+                let unclosed = format!("--- {}\n", "[".repeat(levels));
+                assert!(has_error(&unclosed), "{levels} levels, unclosed");
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+#[test]
+fn marker_line_alias_name_is_limited() {
+    let longest = format!("--- *{}\n", "a".repeat(MAX_ANCHOR_NAME_BYTES - 1));
+    assert!(!has_error(&longest));
+    let too_long = format!("--- *{}\n", "a".repeat(MAX_ANCHOR_NAME_BYTES + 1));
+    assert!(has_error(&too_long));
+}
+
+#[test]
+fn marker_line_flow_sequence_with_many_items_reads_as_on_the_next_line() {
+    let items = "a, ".repeat(5_000);
+    let on_marker_line = event_trace(&format!("--- [{items}b]\n"));
+    let on_next_line = event_trace(&format!("---\n[{items}b]\n"));
+    assert_eq!(on_marker_line, on_next_line);
 }

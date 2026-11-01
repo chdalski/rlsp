@@ -10,6 +10,7 @@ use std::borrow::Cow;
 
 use crate::chars::{find_non_c_printable, is_ns_anchor_char};
 use crate::error::Error;
+use crate::event_iter::line_mapping::is_implicit_key_line;
 use crate::lines::{Line, LineBuffer, pos_after_line};
 use crate::pos::{Pos, Span};
 
@@ -307,6 +308,17 @@ impl<'input> Lexer<'input> {
 
     /// Handle non-comment inline content on a `---` marker line.
     ///
+    /// The content is the root node of the document (YAML 1.2.2 [207]
+    /// `l-bare-document` through [197] `s-l+flow-in-block`).  A block scalar
+    /// header, anchor, tag, quoted scalar, flow collection (`[`, `{`) or alias
+    /// (`*`) is prepended as a synthetic line so the dispatch of a later line
+    /// handles it; a plain scalar is scanned here.  A flow collection or alias
+    /// followed by more content on the line (`--- [x] [y]`, `--- [x]: v`,
+    /// `--- *a b`) is an error: a block mapping cannot start on the marker
+    /// line, and a document holds one node.  A closing bracket (`]`, `}`) or a
+    /// reserved indicator (`,`, `%`, `@`, backtick) is an error as it is on a
+    /// later line.
+    ///
     /// Returns `Some((marker_pos, after))` when processing must terminate
     /// early (invalid block-scalar header).  Returns `None` on success or
     /// when a non-fatal error is stored in [`Self::marker_inline_error`].
@@ -350,8 +362,29 @@ impl<'input> Lexer<'input> {
                     pos: inline_start,
                 });
             }
-        } else if matches!(first_byte, Some(b'!' | b'"' | b'\'')) {
-            // Tag or quoted scalar — prepend for normal dispatch.
+        } else if matches!(first_byte, Some(b'[' | b'{' | b'*')) && is_implicit_key_line(inline) {
+            // A flow collection or alias followed by more content on the line
+            // (`--- [x] [y]`, `--- [x]: v`, `--- *a b`): a block mapping cannot
+            // start on the `---` line and a document holds one node.
+            self.marker_inline_error = Some(Error::syntax(
+                inline_start,
+                "invalid content after document-start marker '---'".into(),
+            ));
+        } else if matches!(first_byte, Some(b']' | b'}'))
+            || inline
+                .chars()
+                .next()
+                .is_some_and(|ch| plain::is_reserved_plain_start(ch, true))
+        {
+            // These indicators cannot start a plain scalar (YAML 1.2.2 [126]
+            // `ns-plain-first`).  A closing bracket has nothing open to close,
+            // and the line below rejects all of them too.
+            self.marker_inline_error = Some(Error::syntax(
+                inline_start,
+                "invalid content after document-start marker '---'".into(),
+            ));
+        } else if matches!(first_byte, Some(b'!' | b'"' | b'\'' | b'[' | b'{' | b'*')) {
+            // Tag, quoted scalar, flow collection, or alias — prepend for normal dispatch.
             self.buf.prepend_line(Line {
                 content: inline,
                 offset: inline_start.byte_offset,

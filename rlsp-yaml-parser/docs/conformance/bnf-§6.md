@@ -359,8 +359,8 @@ BNF: `c-non-specific-tag ::= '!'`
 
 - **Verdict:** Strict-conformant
 - **Spec (§6.9.1):** "If a node has no tag property, it is assigned a non-specific tag that needs to be resolved to a specific one."
-- **Implementation:** `scan_tag()` in `event_iter/properties.rs` — when `scan_tag_suffix` returns 0 and content does not start with `<` or `!`, the tag is the bare `!` one-byte slice
-- **Tests:** `rlsp-yaml-parser/tests/smoke/tags.rs`; `properties.rs` unit tests `scan_tag_non_specific_*`
+- **Implementation:** `scan_tag()` in `event_iter/properties.rs` — when `scan_tag_suffix` returns 0 and content does not start with `<` or `!`, the tag is the bare `!` one-byte slice. The loader resolves it by kind in `apply_schema_to_node()` (`loader.rs`): a scalar to `!!str`, a collection to `!!seq` or `!!map`; the node keeps `tag_loc`, the one-byte span of the `!`, which tells it from a resolver-injected tag
+- **Tests:** `rlsp-yaml-parser/tests/smoke/tags.rs`; `properties.rs` unit tests `scan_tag_non_specific_*`; `rlsp-yaml-parser/tests/loader.rs` (`non_specific_tag_on_a_collection_keeps_its_span_and_resolves_by_kind`)
 
 ### [101] c-ns-anchor-property
 

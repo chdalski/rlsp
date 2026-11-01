@@ -7,6 +7,7 @@
 #![expect(missing_docs, reason = "test code")]
 
 use rlsp_yaml_parser::{load, parse_events};
+use rstest::rstest;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -735,4 +736,48 @@ fn h8_flow_seq_overlong_multiline_key_fires_single_line_error_not_length_error()
         !msg.contains("1024"),
         "length-limit error must not fire when single-line restriction fires first; got: {msg}"
     );
+}
+
+// ===========================================================================
+// Group P: The key of one collection is not the key of the collection around it
+// ===========================================================================
+// A key can hold collections that read keys of their own.  Their `:` and `?`
+// must neither take away the exemption of an explicit key (`? K: v`) nor leave
+// an implicit key unchecked, and a long value or key before a key must not be
+// counted into it.  `{item}` stands for a text of 1100 characters.
+
+fn with_item(template: &str) -> String {
+    template.replace("{item}", &"x".repeat(1_100))
+}
+
+#[rstest]
+#[case::mapping_key_with_a_pair("{ ? {a: 1, b: {item}}: v }")]
+#[case::sequence_key_with_a_pair("{ ? [a: 1, {item}]: v }")]
+#[case::in_a_flow_sequence("[? {a: 1, b: {item}}: v]")]
+#[case::explicit_key_inside_an_explicit_key("{ ? { ? {a: 1, b: {item}}: w }: v }")]
+#[case::second_entry("{ ? {a: 1}: v, ? {b: {item}}: w }")]
+#[case::quoted_pair_inside("{ ? {\"a\": 1, b: {item}}: v }")]
+fn explicit_key_holding_pairs_is_not_limited(#[case] template: &str) {
+    let input = with_item(template);
+    assert!(parses_clean(&input), "input: {template}");
+    assert!(load(&input).is_ok(), "input: {template}");
+}
+
+#[rstest]
+#[case::scalar_key_after_an_explicit_pair_inside("{ ? {a: 1}: v, {item}: w }")]
+#[case::scalar_key_after_a_collection_key("{ [a]: v, {item}: w }")]
+fn implicit_scalar_key_after_a_collection_is_limited(#[case] template: &str) {
+    let input = with_item(template);
+    assert!(has_parse_error(&input), "input: {template}");
+    let message = first_error_message(&input).expect("an error");
+    assert!(message.contains("1024"), "message: {message}");
+}
+
+#[rstest]
+#[case::long_value_before_an_alias_key("{ a: [{item}], *b : v }")]
+#[case::long_value_before_a_collection_key("{ a: {item}, [x]: v }")]
+#[case::long_scalar_before_an_alias_pair("[ {item}, *b : v ]")]
+fn long_text_before_a_key_is_not_counted_into_it(#[case] template: &str) {
+    let input = with_item(template);
+    assert!(parses_clean(&input), "input: {template}");
 }

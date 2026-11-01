@@ -31,6 +31,15 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### The Formatter Keeps the Data of a File [completed]
+
+**Date:** 2026-10-31
+**Description:** Formatting a file that loads gives a file that loads to the same data. Cases that changed it before: an explicit core tag on a scalar the output would read as another type (`a: !!str 123` printed `a: 123`, which is an integer; `- ! 5` and `a: !!int "5"` likewise) keeps its tag as `!!str 123`; a quoted string that reads as a number (`"0x1F"`, `'0o17'`) stays quoted, and a plain `0x1F` stays plain with [`formatSingleQuote`](configuration.md#formatsinglequote); with `formatSingleQuote` a value that holds an apostrophe is double-quoted (`"it's"`), where it printed `'it's'`, which does not load; a string that starts with a comma (`","`) or reads like a document marker (`"... x": 1`) stays quoted; a collection keeps a core tag of another type than its own (`!!set`, `!!omap`; the formatter dropped them); an empty item of a flow sequence (`[!!null "", b]`) prints its empty string; an empty collection with an anchor or tag stays on its line under [`formatEnforceBlockStyle`](configuration.md#formatenforceblockstyle) (`- &a []`); a collection key stays flow where its block form would load as another structure (`? [a]: x` prints `? { [a]: x }`; a flow key stays flow under `formatEnforceBlockStyle`); and with `insert_final_newline` off the file keeps its last line break when it ends in a `|+` or `>+` block scalar whose value ends in it. A `---` line followed by a flow collection or an alias (`--- [a, b]`, `--- *a`) is now read as that collection or alias, so the formatter no longer rewrites it into a different document.
+**Complexity:** Medium
+**Tier:** 1
+
+---
+
 ### The Formatter Keeps the Comments of a Duplicate Key It Removes [completed]
 
 **Date:** 2026-10-31

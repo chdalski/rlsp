@@ -2040,3 +2040,111 @@ fn data_of(input: &str) -> Vec<String> {
 fn comment_at_a_new_position_changes_no_data(#[case] with: &str, #[case] without: &str) {
     assert_eq!(data_of(with), data_of(without), "input: {with:?}");
 }
+
+// ---------------------------------------------------------------------------
+// A flow collection or an alias on the `---` line
+// ---------------------------------------------------------------------------
+// YAML 1.2.2 [207] l-bare-document takes a flow node after the marker; the
+// same events as libfyaml 0.9.6.
+
+#[test]
+fn flow_sequence_after_the_marker_loads_as_a_sequence() {
+    let node = load_one("--- [alpha, bravo]\n");
+    let Node::Sequence { items, style, .. } = &node else {
+        panic!("expected a sequence, got: {node:?}");
+    };
+    assert_eq!(*style, CollectionStyle::Flow);
+    assert_eq!(items.len(), 2);
+    assert_eq!(scalar_value(&items[0]), "alpha");
+    assert_eq!(scalar_value(&items[1]), "bravo");
+}
+
+#[test]
+fn flow_mapping_after_the_marker_loads_as_a_mapping() {
+    let node = load_one("--- {a: 1}\n");
+    let Node::Mapping { entries, style, .. } = &node else {
+        panic!("expected a mapping, got: {node:?}");
+    };
+    assert_eq!(*style, CollectionStyle::Flow);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(scalar_value(&entries[0].0), "a");
+    assert_eq!(scalar_value(&entries[0].1), "1");
+}
+
+#[test]
+fn alias_after_the_marker_loads_as_an_alias() {
+    let node = load_one("--- *a\n");
+    assert!(
+        matches!(&node, Node::Alias { name, .. } if name == "a"),
+        "expected the alias *a, got: {node:?}"
+    );
+}
+
+#[test]
+fn anchored_flow_sequence_after_the_marker_keeps_its_anchor() {
+    let node = load_one("--- &x [a]\n");
+    assert!(matches!(node, Node::Sequence { .. }));
+    assert_eq!(node.anchor(), Some("x"));
+}
+
+#[rstest]
+#[case::two_collections("--- [x] [y]\n")]
+#[case::collection_as_a_key("--- [x]: 1\n")]
+#[case::alias_then_text("--- *a b\n")]
+#[case::collection_then_text("--- [x]\nz\n")]
+#[case::alias_named_with_a_colon_then_text("--- *a: v\n")]
+#[case::closing_bracket("--- ]\n")]
+#[case::closing_brace("--- }\n")]
+#[case::closing_bracket_then_text("--- ]x\n")]
+#[case::comma("--- ,\n")]
+#[case::percent("--- %a\n")]
+#[case::at_sign("--- @a\n")]
+#[case::backtick("--- `a\n")]
+fn content_after_the_node_on_the_marker_line_does_not_load(#[case] input: &str) {
+    assert!(
+        matches!(load(input), Err(LoadError::Parse { .. })),
+        "input: {input:?}"
+    );
+}
+
+#[rstest]
+#[case::flow_sequence("- ! [a]\n")]
+#[case::flow_mapping("- ! {a: 1}\n")]
+#[case::block_sequence("k: !\n  - a\n")]
+#[case::block_mapping("- !\n  a: 1\n")]
+fn non_specific_tag_on_a_collection_keeps_its_span_and_resolves_by_kind(#[case] input: &str) {
+    fn find_collection(
+        node: &Node<rlsp_yaml_parser::Span>,
+    ) -> Option<&Node<rlsp_yaml_parser::Span>> {
+        match node {
+            Node::Sequence { items, .. } => items
+                .iter()
+                .find_map(find_collection)
+                .or_else(|| node.tag_loc().map(|_| node)),
+            Node::Mapping { entries, .. } => entries
+                .iter()
+                .find_map(|(_, value)| find_collection(value))
+                .or_else(|| node.tag_loc().map(|_| node)),
+            Node::Scalar { .. } | Node::Alias { .. } => None,
+        }
+    }
+    let root = load_one(input);
+    let node = find_collection(&root).expect("a collection with a tag_loc");
+    let span = node.tag_loc().unwrap();
+    assert_eq!(&input[span.start as usize..span.end as usize], "!");
+    let tag = match node {
+        Node::Sequence { tag, .. } | Node::Mapping { tag, .. } => tag.as_deref(),
+        Node::Scalar { .. } | Node::Alias { .. } => None,
+    };
+    assert!(
+        tag == Some("tag:yaml.org,2002:seq") || tag == Some("tag:yaml.org,2002:map"),
+        "tag: {tag:?}"
+    );
+}
+
+#[test]
+fn explicit_core_tag_on_a_collection_keeps_its_span() {
+    let node = load_one("!!seq [a]\n");
+    let span = node.tag_loc().unwrap();
+    assert_eq!(span.end - span.start, 5);
+}

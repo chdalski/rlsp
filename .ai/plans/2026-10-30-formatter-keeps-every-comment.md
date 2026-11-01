@@ -37,7 +37,7 @@ formatting it again must change nothing.
 - [x] Task 8: Turn a flow collection holding a comment into block style
 - [x] Task 9: Keep comments when removing duplicate keys
 - [x] Task 10: Fold only own-line comments
-- [ ] Task 11: Keep the data when formatting
+- [x] Task 11: Keep the data when formatting
 - [ ] Task 12: Pin that no comment is lost
 - [ ] Measure every `*.yml` and `*.yaml` file under `/workspace`,
       `/usr/local/cargo/registry`, and `~/.local/share/pnpm`: for each file
@@ -221,19 +221,23 @@ blocks must not hide the content between them.
 The check in Task 12 compares the documents before and after formatting, and
 these inputs change today.
 
-- [ ] `a: |+\n  keep\n\n` and a block scalar with leading blank lines keep their
+- [x] `a: |+\n  keep\n\n` and a block scalar with leading blank lines keep their
       values through `format_yaml`, and a second format changes nothing
-- [ ] `- ! [a, b]\n` keeps its non-specific tag, and an anchor on an empty scalar
+- [x] `- ! [a, b]\n` keeps its non-specific tag, and an anchor on an empty scalar
       keeps its anchor
-- [ ] With `single_quote: true`, `a: 'here''s'\nb: "it's"\n` yields output that
+- [x] With `single_quote: true`, `a: 'here''s'\nb: "it's"\n` yields output that
       `load()` accepts with the same values
-- [ ] `--- [alpha, bravo]\n` loads as a sequence and `--- *a\n` as an alias through
+- [x] `--- [alpha, bravo]\n` loads as a sequence and `--- *a\n` as an alias through
       `parse_events` and `load()`, the same events as libfyaml 0.9.6, and
       `--- [x] [y]\n` reports a syntax error
-- [ ] `.ai/backlog.md` no longer lists `--- *a` and `--- [x] [y]`
-- [ ] `docs/conformance/` names the enforcement site of each parser change, and
+- [x] `v: ,\n`, `- @a\n`, `` `a\n ``, `@a: b\n`, `a: %b\n`, `- %a\n`, `--- %a\n`, and `--- ,\n`
+      report a syntax error, as
+      libfyaml does ([126] `ns-plain-first`): the parser no longer discards their
+      text, and `format_yaml` returns them unchanged
+- [x] `.ai/backlog.md` no longer lists `--- *a` and `--- [x] [y]`
+- [x] `docs/conformance/` names the enforcement site of each parser change, and
       `rlsp-yaml-parser/docs/feature-log.md` tells a reader what `--- [a]` loads as
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 12: Pin that no comment is lost
 
@@ -316,6 +320,15 @@ these inputs change today.
   went to the node before it, which reordered comments and made a second format
   change the output. `attach_line_comment` and the key and item loops now keep it
   with the following node; events stay unchanged.
+- **A plain scalar cannot start with a reserved indicator (review of Task 11):** the
+  parser accepted `,`, `@`, `%`, and `` ` `` there and discarded the text, so formatting
+  deleted it from the file. These inputs now report an error, as [126]
+  `ns-plain-first` and libfyaml say, and `format_yaml` leaves them alone. Declined:
+  keeping the silent loss until a separate plan.
+- **Each open flow collection tracks its own key (Task 11):** one shared flag let an
+  inner implicit key take the length exemption from an outer explicit key, so the
+  parser rejected valid input that no output form avoids. Valid input it rejected
+  now loads; no event changes on input it accepted.
 - **`--- # c` and `- # c` move one line:** the data stays the same and no
   further field is needed; `--- # yaml-language-server: $schema=x` thereby
   becomes a valid modeline line. Declined: keeping them on the marker's line.
@@ -369,3 +382,10 @@ these inputs change today.
   find inputs for the check
 - Task 12: with `format_remove_duplicate_keys`, `a: &x 1\nb: *x\na: 2\n` keeps the
   value of `b`
+- Task 12: the options include `tab_width: 4`, under which `- a: 1\n  b: 2\n` keeps
+  its data
+- Task 12: a scalar key that escaping makes longer than the implicit key limit, such
+  as about 1000 U+2028 characters, prints a form that loads with the same data
+- Task 12: the options include `yaml_version: 1.1`, under which `"y"` and `"1_000"`
+  stay strings
+- Task 12: `a: ?\n` keeps its data through `format_yaml`

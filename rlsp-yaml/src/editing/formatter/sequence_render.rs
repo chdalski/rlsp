@@ -72,7 +72,7 @@ pub(super) fn block_sequence_parts<'a>(
 pub(super) fn flow_sequence_to_doc(seq: &[Node<Span>], options: &YamlFormatOptions) -> Doc {
     let items: Vec<Doc> = seq
         .iter()
-        .map(|item| super::node_to_doc::flow_item_to_doc(item, options, false))
+        .map(|item| super::node_to_doc::flow_seq_item_to_doc(item, options))
         .collect();
     let sep = concat(vec![text(","), line()]);
     let inner = join(&sep, items);

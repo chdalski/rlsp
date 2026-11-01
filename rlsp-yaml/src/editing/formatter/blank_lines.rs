@@ -225,7 +225,9 @@ pub(super) fn restore_blank_lines(
 /// Pairing lines by their text can drift, and a blank line in the wrong place can
 /// change a value (after an empty `|+`, say).  This check makes the restoration
 /// safe whatever the drift: when it fails, the formatter's own output stands.
-fn same_content(restored: &str, documents: &[Document<Span>]) -> bool {
+/// The same check guards the removal of the final line break, which ends the
+/// value of a last `|+` scalar.
+pub(super) fn same_content(restored: &str, documents: &[Document<Span>]) -> bool {
     fn shape(node: &Node<Span>, out: &mut Vec<String>) {
         match node {
             Node::Scalar { value, .. } => out.push(format!("={value}")),

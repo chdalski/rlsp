@@ -5,19 +5,18 @@ settings:
   format_enforce_block_style: true
 ---
 
-# Test: `enforce_block_style` Converts Flow Sequence Key to Block
+# Test: `enforce_block_style` Keeps a Key That Holds an Explicit Entry Flow
 
-When `format_enforce_block_style: true` and the key is a non-empty flow
-sequence, the key is converted to block `- item` form. The explicit key
-prefix `?` is preserved. Exercises the interaction between
-`format_enforce_block_style` and `needs_explicit_key`.
+When `format_enforce_block_style: true` and the key is a mapping with a flow
+sequence key (`[a]: x`), the block form of the key would nest an explicit
+`? ` entry inside the explicit `? ` of the outer key. The parser reads the `:`
+after such a key as the start of a new entry, so the output would load as a
+different structure and grow on every format. The key keeps the flow style
+the option would otherwise remove; the explicit key prefix `?` is preserved.
+Exercises the interaction between `format_enforce_block_style` and
+`needs_explicit_key`.
 
 The parser produces: outer-mapping{key=inner-mapping{key=[a], value=x}, value=""}.
-The formatter outputs the inner mapping as a nested explicit key with the
-sequence converted to block form.
-
-The formatter produces correct idempotent output. The key `[a]` is non-empty,
-so `needs_explicit_key` returns `true` and the explicit `?` prefix is used.
 
 ## Test-Document
 
@@ -28,7 +27,6 @@ so `needs_explicit_key` returns `true` and the explicit `?` prefix is used.
 ## Expected-Document
 
 ```yaml
-? ? - a
-  : x
+? { [a]: x }
 :
 ```

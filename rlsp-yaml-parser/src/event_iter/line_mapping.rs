@@ -70,7 +70,7 @@ pub(in crate::event_iter) fn inline_contains_mapping_key(inline: &str) -> bool {
 ///
 /// Where the line is ambiguous it counts as a key: callers use `false` to
 /// reject the line, so a key must never be taken for a node.
-pub(in crate::event_iter) fn is_implicit_key_line(trimmed: &str) -> bool {
+pub fn is_implicit_key_line(trimmed: &str) -> bool {
     let mut rest = trimmed;
     while rest.starts_with(['&', '!']) {
         let token_end = rest.find([' ', '\t']).unwrap_or(rest.len());

@@ -14,8 +14,8 @@ BNF: `c-ns-alias-node ::= c-alias ns-anchor-name`
 
 - **Verdict:** Strict-conformant
 - **Spec (§7.1):** "An alias node is denoted by the `*` indicator. The alias refers to the most recent preceding node having the same anchor."
-- **Implementation:** Flow context: `*` consumed, `scan_anchor_name()` called, `Event::Alias` pushed in `event_iter/flow.rs`; tag/anchor on alias rejected as errors. Block context: alias scanning via `scan_anchor_name()` in `event_iter/properties.rs`. `resolve_alias()` in `loader.rs` handles undefined-alias errors. In block context the alias arm of `step_in_document()` (`event_iter/step.rs`) allows only a comment or the `:` of an implicit key after the alias name (`ns-anchor-char` includes `:`, so `*a: v` is an alias named `a:` followed by stray text, an error; `,` ends the name, so `*a,b` is an error)
-- **Tests:** `rlsp-yaml-parser/tests/smoke/anchors_and_aliases.rs`; `rlsp-yaml-parser/tests/error_reporting.rs` (Group H); `tests/yaml-test-suite/src/3GZX.yaml` (Spec Example 7.1. Alias Nodes)
+- **Implementation:** Flow context: `*` consumed, `scan_anchor_name()` called, `Event::Alias` pushed in `event_iter/flow.rs`; tag/anchor on alias rejected as errors. Block context: alias scanning via `scan_anchor_name()` in `event_iter/properties.rs`. `resolve_alias()` in `loader.rs` handles undefined-alias errors. In block context the alias arm of `step_in_document()` (`event_iter/step.rs`) allows only a comment or the `:` of an implicit key after the alias name (`ns-anchor-char` includes `:`, so `*a: v` is an alias named `a:` followed by stray text, an error; `,` ends the name, so `*a,b` is an error). An alias on the `---` line (`--- *a`) is handed to this arm by `handle_marker_inline()` in `lexer.rs`, which rejects a tail after it (`--- *a b`, `--- *a : v`) with `is_implicit_key_line()`
+- **Tests:** `rlsp-yaml-parser/tests/smoke/anchors_and_aliases.rs`; `rlsp-yaml-parser/tests/smoke/documents.rs` (Group O); `rlsp-yaml-parser/tests/error_reporting.rs` (Group H); `tests/yaml-test-suite/src/3GZX.yaml` (Spec Example 7.1. Alias Nodes)
 
 ### [105] e-scalar
 
@@ -297,8 +297,8 @@ BNF: `ns-plain-first(c) ::= ( ns-char - c-indicator ) | ( ( c-mapping-key | c-ma
 
 - **Verdict:** Strict-conformant
 - **Spec (§7.3.3):** "Plain scalars must not begin with most indicators. However, the `:`, `?` and `-` indicators may be used as the first character if followed by a non-space 'safe' character."
-- **Implementation:** `ns_plain_first_block()` in `lexer/plain.rs` — `is_c_indicator()` check; `?`, `:`, `-` allowed if followed by `ns_plain_safe_block()`; `scan_plain_line_flow()` in `lexer/plain.rs` for flow context
-- **Tests:** `tests/yaml-test-suite/src/DBG4.yaml` (Spec Example 7.10. Plain Characters); `plain.rs` unit tests `scan_plain_line_block_cases`
+- **Implementation:** `ns_plain_first_block()` in `lexer/plain.rs` — `is_c_indicator()` check; `?`, `:`, `-` allowed if followed by `ns_plain_safe_block()`; `scan_plain_line_flow()` in `lexer/plain.rs` for flow context. `is_reserved_plain_start()` in `lexer/plain.rs` names the indicators no construct claims in block context: `,`, `@`, the backtick, and a `%` that does not start a line (where it opens a directive). `try_consume_scalar()` in `event_iter/base.rs` reports a syntax error for a node that starts with one (`v: ,`, `- @a`, `` `a: b ``, `a: %b`); before, the line was taken for an empty node and its text dropped. On the `---` line, `handle_marker_inline()` in `lexer.rs` rejects the same characters and a plain scalar that starts with `]` or `}` (`--- ,`, `--- %a`, `--- ]`, `--- }x`), as the line below does. Not yet enforced: `-` and `?` followed by a space or by the end of the line on the `---` line (`--- - a`, `--- ? a`), which load as plain scalars
+- **Tests:** `tests/yaml-test-suite/src/DBG4.yaml` (Spec Example 7.10. Plain Characters); `plain.rs` unit tests `scan_plain_line_block_cases`; `rlsp-yaml-parser/tests/smoke/documents.rs` (Group O: `closing_bracket`, `closing_brace`); `rlsp-yaml-parser/tests/smoke/scalars.rs` (`reserved_indicator_cannot_start_a_plain_scalar`, `reserved_indicator_elsewhere_is_content`)
 
 ### [127] ns-plain-safe(c)
 
@@ -399,8 +399,8 @@ BNF: `c-flow-sequence(n,c) ::= c-sequence-start s-separate(n,c)? in-flow(n,c)? c
 
 - **Verdict:** Strict-conformant
 - **Spec (§7.4.1):** "Flow sequence content is denoted by surrounding `[` and `]` characters."
-- **Implementation:** `[` branch pushes `FlowFrame::Sequence` in `event_iter/flow.rs`; `]` branch pops it
-- **Tests:** `tests/yaml-test-suite/src/5KJE.yaml` (Spec Example 7.13. Flow Sequence)
+- **Implementation:** `[` branch pushes `FlowFrame::Sequence` in `event_iter/flow.rs`; `]` branch pops it. A flow sequence on the `---` line (`--- [a, b]`) is handed to this code by `handle_marker_inline()` in `lexer.rs`
+- **Tests:** `tests/yaml-test-suite/src/5KJE.yaml` (Spec Example 7.13. Flow Sequence); `tests/smoke/documents.rs` (Group O)
 
 ### [138] ns-s-flow-seq-entries(n,c)
 
@@ -552,8 +552,8 @@ BNF: `ns-s-implicit-yaml-key(c) ::= ns-flow-yaml-node(0,c) s-separate-in-line? /
 
 - **Verdict:** Strict-conformant
 - **Spec (§7.4.3):** "To limit the amount of lookahead required, the `:` indicator must appear at most 1024 Unicode characters beyond the start of the key. In addition, the key is restricted to a single line."
-- **Implementation:** Single-line restriction and 1024-Unicode-character limit both enforced in `event_iter/flow.rs`; plain YAML-key and quoted JSON-key forms share the same check via `key_start_byte` tracking
-- **Tests:** `rlsp-yaml-parser/tests/implicit_key_length.rs` (groups A–N and H5–H8, 48 cases)
+- **Implementation:** Single-line restriction and 1024-Unicode-character limit both enforced in `event_iter/flow.rs`; plain YAML-key and quoted JSON-key forms share the same check. The key's start offset and its `?` flag are kept per open flow collection (`key_stack`, one `FlowKey` per `FlowFrame`), so the `:` of an implicit key inside a key does not end the exemption of an explicit `? ` key around it (`{ ? {a: 1, b: <1100 characters>}: v }` is valid), and a collection or alias in key position starts the key
+- **Tests:** `rlsp-yaml-parser/tests/implicit_key_length.rs` (groups A–N, H5–H8, and P)
 
 ### [155] c-s-implicit-json-key(c)
 
@@ -562,7 +562,7 @@ BNF: `c-s-implicit-json-key(c) ::= c-flow-json-node(0,c) s-separate-in-line? /* 
 - **Verdict:** Strict-conformant
 - **Spec (§7.4.3):** "To limit the amount of lookahead required, the `:` indicator must appear at most 1024 Unicode characters beyond the start of the key."
 - **Implementation:** Quoted JSON-key start byte recorded at flow `:` detection in `event_iter/flow.rs`; shared 1024-char check covers both plain and quoted implicit keys. In block context a quoted key followed by text before the `:` is rejected by `consume_mapping_entry()` in `event_iter/block/mapping.rs` (`QuotedKeyError`)
-- **Tests:** `rlsp-yaml-parser/tests/implicit_key_length.rs` (groups A–N and H5–H8, 48 cases); `rlsp-yaml-parser/tests/error_reporting.rs` (Group H)
+- **Tests:** `rlsp-yaml-parser/tests/implicit_key_length.rs` (groups A–N, H5–H8, and P); `rlsp-yaml-parser/tests/error_reporting.rs` (Group H)
 
 ### [156] ns-flow-yaml-content(n,c)
 

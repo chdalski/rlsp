@@ -3,15 +3,19 @@
 use std::fmt::Write as _;
 
 use rlsp_fmt::{Doc, concat, hard_line, indent, text};
-use rlsp_yaml_parser::{Chomp, ScalarStyle};
+use rlsp_yaml_parser::schema::resolve_scalar;
+use rlsp_yaml_parser::{Chomp, ResolvedTag, ScalarStyle, Schema};
 
 use crate::server::YamlVersion;
 
 use super::options::YamlFormatOptions;
 
+/// The URI prefix of the YAML Core Schema tags (`!!str` is `tag:yaml.org,2002:str`).
+pub(super) const CORE_TAG_PREFIX: &str = "tag:yaml.org,2002:";
+
 /// Returns `true` if the tag string is a YAML Core Schema tag.
 pub(super) fn is_core_schema_tag(tag: &str) -> bool {
-    tag.starts_with("tag:yaml.org,2002:")
+    tag.starts_with(CORE_TAG_PREFIX)
 }
 
 /// Format a tag string for emission in YAML output.
@@ -33,19 +37,15 @@ pub(super) fn format_tag(tag: &str) -> String {
 /// When `in_key` is `true`, the `single_quote` option is ignored — keys are
 /// never wrapped in single quotes by style preference alone.
 pub(super) fn string_to_doc(s: &str, options: &YamlFormatOptions, in_key: bool) -> Doc {
-    if needs_quoting(s, options.yaml_version) {
-        // Must quote — use the preferred style.
-        if options.single_quote && !s.contains('\'') {
-            text(format!("'{s}'"))
-        } else {
-            // Double-quote and escape.
-            text(format!("\"{}\"", escape_double_quoted(s)))
-        }
-    } else if options.single_quote && !in_key {
+    let quoted = needs_quoting(s, options.yaml_version) || (options.single_quote && !in_key);
+    if !quoted {
+        text(s.to_string())
+    } else if options.single_quote && !s.contains('\'') {
         text(format!("'{s}'"))
     } else {
-        // Plain — no quotes needed.
-        text(s.to_string())
+        // A single-quoted scalar escapes `'` as `''`; a value that holds one is
+        // double-quoted instead, as `flow_quoted_to_doc` does.
+        text(format!("\"{}\"", escape_double_quoted(s)))
     }
 }
 
@@ -117,10 +117,12 @@ pub(super) fn needs_quoting(s: &str, version: YamlVersion) -> bool {
     always_reserved
         || v1_1_reserved
         || looks_like_number(s)
+        || plain_core_tag(s) != Some(ResolvedTag::Str)
         || s.starts_with(|c: char| {
             matches!(
                 c,
                 ':' | '#'
+                    | ','
                     | '&'
                     | '*'
                     | '?'
@@ -145,9 +147,36 @@ pub(super) fn needs_quoting(s: &str, version: YamlVersion) -> bool {
         || s.contains(": ")
         || s.contains(" #")
         || s.starts_with("- ")
-        || s.starts_with("--- ")
-        || s == "---"
-        || s == "..."
+        || starts_with_document_marker(s)
+}
+
+/// Whether `s` begins with the indicator of a block entry, `-`, `?` or `:` alone
+/// or followed by a space or tab (YAML 1.2.2 [126] `ns-plain-first`: such an
+/// indicator starts a plain scalar only when a plain-safe character follows).
+/// The parser reads `--- - a` as the plain scalar `- a`; printed on a line of its
+/// own it starts a sequence.
+fn starts_with_entry_indicator(s: &str) -> bool {
+    s.strip_prefix(['-', '?', ':'])
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with([' ', '\t']))
+}
+
+/// Whether `s` begins like a document marker line, `---` or `...` alone or
+/// followed by a space or tab (YAML 1.2.2 [206] `c-forbidden`).  A scalar printed
+/// at the start of a line, as a root scalar or a key of the top-level mapping,
+/// would be read as the marker.
+fn starts_with_document_marker(s: &str) -> bool {
+    ["---", "..."].iter().any(|marker| {
+        s.strip_prefix(marker)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with([' ', '\t']))
+    })
+}
+
+/// Whether a plain scalar with the value `s`, printed on a line of its own, is
+/// read as something else than a scalar.  The parser takes such text as the
+/// plain scalar of a `---` line (`--- - a`, `--- ... x`), where the lines below
+/// it are read otherwise: a block entry, or a document marker.
+pub(super) fn reads_as_another_node_on_its_own_line(s: &str) -> bool {
+    starts_with_document_marker(s) || starts_with_entry_indicator(s)
 }
 
 /// Returns true if the string looks like a YAML number (integer or float).
@@ -158,6 +187,13 @@ pub(super) fn looks_like_number(s: &str) -> bool {
             s,
             ".inf" | ".Inf" | ".INF" | "+.inf" | "-.inf" | ".nan" | ".NaN" | ".NAN"
         )
+}
+
+/// The tag the Core schema gives `value` when it is printed as a plain scalar.
+pub(super) fn plain_core_tag(value: &str) -> Option<ResolvedTag> {
+    resolve_scalar(Schema::Core, ScalarStyle::Plain, value, None)
+        .ok()
+        .flatten()
 }
 
 /// Returns `true` if the decoded string value contains characters that require

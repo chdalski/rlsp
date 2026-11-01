@@ -11,9 +11,14 @@ use super::flow_comments::{drain_comments, leading_comments_mut};
 ///
 /// Returns `Some(key)` for scalar and alias keys, `None` for complex keys
 /// (mapping or sequence as key), which are skipped in dedup.
+///
+/// A scalar key is its tag and its value: `a` and `"a"` are one key, but `1` and
+/// `"1"`, or the null key (`: v`) and the empty string key (`"": v`), are two.
 pub(super) fn dedup_key_str(key: &Node<Span>) -> Option<String> {
     match key {
-        Node::Scalar { value, .. } => Some(value.clone()),
+        Node::Scalar { value, tag, .. } => {
+            Some(format!("{}\0{value}", tag.as_deref().unwrap_or_default()))
+        }
         Node::Alias { name, .. } => Some(format!("*{name}")),
         Node::Mapping { .. } | Node::Sequence { .. } => None,
     }
@@ -29,7 +34,7 @@ pub(super) fn dedup_key_str(key: &Node<Span>) -> Option<String> {
 /// Recurses into values of remaining entries and into sequence items.
 ///
 /// Key extraction rules:
-/// - `Node::Scalar { value, .. }` → key string is `value`
+/// - `Node::Scalar { value, tag, .. }` → key string is `tag` and `value`
 /// - `Node::Alias { name, .. }` → key string is `*name`
 /// - Complex keys (`Node::Mapping`, `Node::Sequence`) → skipped (not deduplicated)
 pub(super) fn dedup_mapping_keys(node: &mut Node<Span>) {

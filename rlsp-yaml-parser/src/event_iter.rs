@@ -8,7 +8,7 @@ mod block;
 mod directive_scope;
 mod directives;
 mod flow;
-mod line_mapping;
+pub mod line_mapping;
 mod properties;
 mod state;
 mod step;

@@ -9,6 +9,7 @@ use super::state::{
 use crate::error::Error;
 use crate::event::{Event, EventMeta, ScalarStyle, make_meta};
 use crate::lexer::Lexer;
+use crate::lexer::plain::is_reserved_plain_start;
 use crate::pos::{Pos, Span};
 use crate::{EventIter, zero_span};
 
@@ -299,6 +300,22 @@ impl<'input> EventIter<'input> {
         plain_parent_indent: usize,
         block_parent_indent: usize,
     ) -> Result<Option<(Event<'input>, Span)>, Error> {
+        // A line that starts with a reserved indicator (`k: ,`, `- @a`) is an
+        // error: no plain scalar starts with it, and no other node either.
+        if !self.lexer.has_inline_scalar()
+            && let Some(line) = self.lexer.peek_next_line()
+        {
+            let trimmed = line.content.trim_start_matches([' ', '\t']);
+            if let Some(ch) = trimmed.chars().next()
+                && is_reserved_plain_start(ch, line.indent > 0)
+            {
+                let leading = &line.content[..line.content.len() - trimmed.len()];
+                return Err(Error::syntax(
+                    crate::pos::advance_within_line(line.pos, leading),
+                    format!("'{ch}' cannot start a plain scalar (YAML 1.2 §7.3.3 [126])"),
+                ));
+            }
+        }
         // A pending inline scalar (from `--- text`) does not live on the
         // currently-primed line — check before peeking to avoid reading the
         // wrong line.

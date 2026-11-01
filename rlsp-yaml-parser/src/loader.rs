@@ -1228,12 +1228,16 @@ fn apply_schema_to_node(
         Node::Mapping { tag, meta, .. } => {
             // Bare `!` on a collection means non-specific collection tag — translate
             // to None so the resolver returns the kind-based tag (!!map / !!seq).
+            // `tag_loc` stays for a bare `!`, as on a scalar: it is written in the
+            // source, and a consumer that prints the node needs to tell it from a
+            // resolver-injected tag.
+            let non_specific = tag.as_deref() == Some("!");
             let effective_tag = tag.as_deref().filter(|t| *t != "!");
             if let Some(resolved) =
                 resolve_collection(schema, CollectionKind::Mapping, effective_tag)
             {
                 *tag = Some(Cow::Borrowed(resolved.as_str()));
-                if let Some(m) = meta.as_mut() {
+                if let Some(m) = meta.as_mut().filter(|_| !non_specific) {
                     m.tag_loc = None;
                     if m.is_all_none() {
                         *meta = None;
@@ -1242,12 +1246,13 @@ fn apply_schema_to_node(
             }
         }
         Node::Sequence { tag, meta, .. } => {
+            let non_specific = tag.as_deref() == Some("!");
             let effective_tag = tag.as_deref().filter(|t| *t != "!");
             if let Some(resolved) =
                 resolve_collection(schema, CollectionKind::Sequence, effective_tag)
             {
                 *tag = Some(Cow::Borrowed(resolved.as_str()));
-                if let Some(m) = meta.as_mut() {
+                if let Some(m) = meta.as_mut().filter(|_| !non_specific) {
                     m.tag_loc = None;
                     if m.is_all_none() {
                         *meta = None;

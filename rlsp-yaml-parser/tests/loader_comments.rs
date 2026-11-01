@@ -312,6 +312,15 @@ fn on_small_stack<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
 #[case::no_newline_at_end_of_input("a:\n  # c1\n  # c2", &[("d0.end", "# c1"), ("d0.end", "# c2")])]
 // Comments in flow collections.
 #[case::flow_mapping_first_key("{ # c\n a: 1}\n", &[("d0.lead:a", "# c")])]
+// A flow collection or an alias on the `---` line is the root like any other.
+#[case::marker_line_flow_sequence_then_own_line("--- [a]\n# c\n", &[("d0.end", "# c")])]
+#[case::marker_line_flow_sequence_then_comment("--- [a] # c\n", &[("d0.trail:<seq>", "# c")])]
+#[case::marker_line_flow_sequence_comment_inside("--- [ # c\n 1]\n", &[("d0.lead:1", "# c")])]
+#[case::marker_line_flow_mapping_comment_inside("--- { # c\n a: 1}\n", &[("d0.lead:a", "# c")])]
+#[case::marker_line_alias_then_comments(
+    "--- *a # c\n# d\n",
+    &[("d0.trail:*a", "# c"), ("d0.end", "# d")]
+)]
 fn every_comment_is_stored_exactly_once_at_the_pinned_place(
     #[case] input: &str,
     #[case] expected_places: &[(&str, &str)],

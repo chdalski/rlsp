@@ -84,6 +84,7 @@ pub fn format_yaml(text_input: &str, options: &YamlFormatOptions) -> String {
     };
 
     let source_blocks = blank_lines::block_scalar_lines(&documents);
+    let documents = settle_documents(documents, options);
 
     let mut result = if documents.is_empty() {
         match stream_comments(text_input) {
@@ -92,7 +93,7 @@ pub fn format_yaml(text_input: &str, options: &YamlFormatOptions) -> String {
             None => return text_input.to_string(),
         }
     } else {
-        render_documents(documents, options)
+        render_documents(&documents, options)
     };
 
     // The rendered lines are joined, not terminated: end the last one.  A block
@@ -116,28 +117,27 @@ pub fn format_yaml(text_input: &str, options: &YamlFormatOptions) -> String {
         }
     }
 
-    // Apply insert_final_newline policy: strip exactly one trailing terminator.
+    // Apply insert_final_newline policy: strip exactly one trailing terminator,
+    // unless the value of the last block scalar ends in it: `a: |+\n  x\n` loses
+    // its line break, and with it its value, when nothing follows.
     if !options.insert_final_newline {
-        match options.line_ending {
-            LineEnding::Lf => {
-                if result.ends_with('\n') {
-                    result.pop();
-                }
-            }
-            LineEnding::Crlf => {
-                if result.ends_with("\r\n") {
-                    result.truncate(result.len() - 2);
-                }
-            }
-            LineEnding::Cr => {
-                if result.ends_with('\r') {
-                    result.pop();
-                }
-            }
+        let stripped = strip_final_terminator(&result, options.line_ending);
+        if blank_lines::same_content(stripped, &documents) {
+            result.truncate(stripped.len());
         }
     }
 
     result
+}
+
+/// `output` without its last line terminator, if it ends in one.
+fn strip_final_terminator(output: &str, line_ending: LineEnding) -> &str {
+    let terminator = match line_ending {
+        LineEnding::Lf => "\n",
+        LineEnding::Crlf => "\r\n",
+        LineEnding::Cr => "\r",
+    };
+    output.strip_suffix(terminator).unwrap_or(output)
 }
 
 /// The comments of a stream that holds no document, in source order, each with
@@ -153,28 +153,38 @@ fn stream_comments(text_input: &str) -> Option<Vec<String>> {
         .ok()
 }
 
-/// Render loaded documents with `rlsp-fmt`: for each document its comments, the
-/// `---` and `...` markers its position or `explicit_end` calls for, and the root.
-fn render_documents(documents: Vec<Document<Span>>, options: &YamlFormatOptions) -> String {
-    let fmt_options = FormatOptions {
-        print_width: options.print_width,
-        tab_width: options.tab_width,
-        use_tabs: false,
-    };
-
-    // Pre-passes over the AST: duplicate-key removal when enabled, then the style
-    // of the flow collections that hold a comment (after the removal, which can
-    // move a comment into a flow collection).
-    let documents: Vec<Document<Span>> = documents
+/// The pre-passes over the AST: duplicate-key removal when enabled, then the
+/// style of the collections that cannot print as written (after the removal,
+/// which can move a comment into a flow collection), then the tags of the
+/// collections that the renderers would drop.
+fn settle_documents(
+    documents: Vec<Document<Span>>,
+    options: &YamlFormatOptions,
+) -> Vec<Document<Span>> {
+    documents
         .into_iter()
         .map(|mut doc| {
             if options.format_remove_duplicate_keys {
                 dedup::dedup_mapping_keys(&mut doc.root);
             }
-            flow_comments::block_flow_collections_holding_comments(&mut doc.root);
+            flow_comments::settle_collection_styles(
+                &mut doc.root,
+                options.format_enforce_block_style,
+            );
+            mapping_render::spell_collection_tags(&mut doc.root);
             doc
         })
-        .collect();
+        .collect()
+}
+
+/// Render loaded documents with `rlsp-fmt`: for each document its comments, the
+/// `---` and `...` markers its position or `explicit_end` calls for, and the root.
+fn render_documents(documents: &[Document<Span>], options: &YamlFormatOptions) -> String {
+    let fmt_options = FormatOptions {
+        print_width: options.print_width,
+        tab_width: options.tab_width,
+        use_tabs: false,
+    };
 
     // One entry per output line, except that a root renders as one entry.
     //
@@ -2232,10 +2242,7 @@ mod tests {
     #[case::sequence_key_in_a_sequence_item("- { [ { [ a ]: #c\n b } ]: v }\n")]
     #[case::mapping_key_in_a_sequence_key("{ x: 1, [ { # c\n a: 1} ]: v }\n")]
     fn flow_collection_key_keeps_its_comments_above_the_entry(#[case] input: &str) {
-        for (name, opts) in option_sets()
-            .into_iter()
-            .filter(|(name, _)| *name != "enforce block style")
-        {
+        for (name, opts) in option_sets() {
             let input = if opts.line_ending == LineEnding::Crlf {
                 input.replace('\n', "\r\n")
             } else {

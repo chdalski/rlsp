@@ -124,6 +124,39 @@ impl<'input> EventIter<'input> {
             },
         }
 
+        /// The key being read in one open flow collection, for the YAML 1.2
+        /// §7.4.3 limit on implicit keys.  Each open collection has its own: a
+        /// key can hold collections that read keys of their own, and their `:`
+        /// and `?` must not change what the outer key is.
+        #[derive(Clone, Copy)]
+        struct FlowKey {
+            /// Byte offset in `self.input` where the key started: the start of
+            /// the scalar, alias or collection in key position.  The input from
+            /// here to the `:` is counted against the limit.
+            start_byte: usize,
+            /// A `?` introduced the key.  The limit applies to implicit keys
+            /// only.
+            explicit: bool,
+        }
+
+        /// Whether the next node of `frame` is a key: the key of a flow mapping,
+        /// or an item of a flow sequence, which may turn out to be the key of a
+        /// single pair.
+        const fn in_key_position(frame: Option<&FlowFrame>) -> bool {
+            matches!(
+                frame,
+                Some(
+                    FlowFrame::Mapping {
+                        phase: FlowMappingPhase::Key,
+                        ..
+                    } | FlowFrame::Sequence {
+                        has_value: false,
+                        ..
+                    }
+                )
+            )
+        }
+
         // Design note — phase-advance pattern
         //
         // Four sites below repeat the same `if let Some(frame) = flow_stack.last_mut()
@@ -182,19 +215,14 @@ impl<'input> EventIter<'input> {
         // Suppresses the DK4H single-line check for the corresponding `:` separator —
         // explicit keys in flow sequences may span multiple lines (YAML 1.2 §7.4.2).
         let mut explicit_key_in_seq = false;
-        // Byte offset in `self.input` where the current implicit flow key started.
-        // Updated whenever a scalar (plain or quoted) starts in a key position.
-        // Used to slice `self.input[key_start_byte..colon_byte]` and count chars for
-        // the YAML 1.2 §7.4.3 1024-char limit check.
-        let mut key_start_byte: usize = first_line.pos.byte_offset;
-        // Set when a `?` explicit-key indicator introduced the current key (either
-        // in a flow sequence or a flow mapping).  The 1024-char limit does not apply
-        // to explicit keys (YAML 1.2 §7.4.3 applies only to implicit keys).
-        let mut key_is_explicit: bool = false;
 
         // Stack for tracking open flow collections (nested via explicit iteration,
         // not recursion — security requirement).
         let mut flow_stack: Vec<FlowFrame> = Vec::new();
+        // The key being read in each open collection, one entry per `flow_stack`
+        // entry.  `self.input[start_byte..colon_byte]` is counted against the
+        // YAML 1.2 §7.4.3 limit of 1024 characters for an implicit key.
+        let mut key_stack: Vec<FlowKey> = Vec::new();
         // All events assembled during this call (pushed to self.queue at end).
         let mut events: Vec<(Event<'input>, Span)> = Vec::new();
         // Set to the indent of the enclosing block mapping to open when this
@@ -439,6 +467,17 @@ impl<'input> EventIter<'input> {
                 {
                     *key_start_idx = new_start_idx;
                 }
+                // A collection in key position starts the key of the collection
+                // around it.
+                if in_key_position(flow_stack.last())
+                    && let Some(key) = key_stack.last_mut()
+                {
+                    key.start_byte = open_pos.byte_offset;
+                }
+                key_stack.push(FlowKey {
+                    start_byte: open_pos.byte_offset,
+                    explicit: false,
+                });
 
                 if ch == '[' {
                     // Push SequenceStart first, then record key_start_idx as the
@@ -495,6 +534,7 @@ impl<'input> EventIter<'input> {
                 let close_span = zero_span(close_pos);
                 pos_in_line += 1;
 
+                key_stack.pop();
                 let Some(top) = flow_stack.pop() else {
                     // Closing delimiter with empty stack — mismatched.
                     self.state = IterState::Done;
@@ -843,7 +883,9 @@ impl<'input> EventIter<'input> {
                 // triggering the multi-line implicit key error.
                 last_token_line = cur_base_pos.line;
                 // Reset explicit-key tracking; the next entry starts fresh.
-                key_is_explicit = false;
+                if let Some(key) = key_stack.last_mut() {
+                    key.explicit = false;
+                }
 
                 continue 'outer;
             }
@@ -899,20 +941,10 @@ impl<'input> EventIter<'input> {
 
                 // Record key start for §7.4.3 when this quoted scalar is in a key
                 // position. The opening quote is included in the lookahead count.
-                let is_key_pos = matches!(
-                    flow_stack.last(),
-                    Some(
-                        FlowFrame::Mapping {
-                            phase: FlowMappingPhase::Key,
-                            ..
-                        } | FlowFrame::Sequence {
-                            has_value: false,
-                            ..
-                        }
-                    )
-                );
-                if is_key_pos {
-                    key_start_byte = cur_abs_pos.byte_offset;
+                if in_key_position(flow_stack.last())
+                    && let Some(key) = key_stack.last_mut()
+                {
+                    key.start_byte = cur_abs_pos.byte_offset;
                 }
 
                 // Consume the current line from the buffer and replace it with
@@ -1092,7 +1124,9 @@ impl<'input> EventIter<'input> {
                     }
                     // Mark the upcoming key as explicit so the 1024-char length
                     // check is suppressed (YAML 1.2 §7.4.3 limits implicit keys only).
-                    key_is_explicit = true;
+                    if let Some(key) = key_stack.last_mut() {
+                        key.explicit = true;
+                    }
                     pos_in_line += 1;
                     continue 'outer;
                 }
@@ -1174,9 +1208,18 @@ impl<'input> EventIter<'input> {
                             }
                         )
                     );
-                    if has_key && !key_is_explicit && !explicit_key_in_seq {
+                    let key_of_frame = key_stack.last().copied();
+                    if has_key
+                        && key_of_frame.is_some_and(|key| !key.explicit)
+                        && !explicit_key_in_seq
+                    {
                         let colon_byte = cur_base_pos.byte_offset + pos_in_line;
-                        if self.input[key_start_byte..colon_byte].chars().count() > 1024 {
+                        let key_start = key_of_frame.map_or(colon_byte, |key| key.start_byte);
+                        if self
+                            .input
+                            .get(key_start..colon_byte)
+                            .is_some_and(|key| key.chars().count() > 1024)
+                        {
                             let colon_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
                             self.state = IterState::Done;
                             return StepResult::Yield(Err(Error::syntax(
@@ -1185,7 +1228,9 @@ impl<'input> EventIter<'input> {
                             )));
                         }
                     }
-                    key_is_explicit = false;
+                    if let Some(key) = key_stack.last_mut() {
+                        key.explicit = false;
+                    }
                     explicit_key_in_seq = false;
                     if let Some(frame) = flow_stack.last_mut() {
                         match frame {
@@ -1427,6 +1472,11 @@ impl<'input> EventIter<'input> {
                         let alias_span = Span::from_pos(star_pos, alias_end);
                         events.push((Event::Alias { name }, alias_span));
                         pos_in_line += 1 + name.len();
+                        if in_key_position(flow_stack.last())
+                            && let Some(key) = key_stack.last_mut()
+                        {
+                            key.start_byte = star_pos.byte_offset;
+                        }
                         // Advance mapping phase; mark frame as having a value.
                         if let Some(frame) = flow_stack.last_mut() {
                             match frame {
@@ -1653,20 +1703,10 @@ impl<'input> EventIter<'input> {
                         // Record key start for the §7.4.3 1024-char check when this
                         // scalar is in a key position (Mapping Key phase, or the first
                         // scalar in a Sequence entry).
-                        let is_key_pos = matches!(
-                            flow_stack.last(),
-                            Some(
-                                FlowFrame::Mapping {
-                                    phase: FlowMappingPhase::Key,
-                                    ..
-                                } | FlowFrame::Sequence {
-                                    has_value: false,
-                                    ..
-                                }
-                            )
-                        );
-                        if is_key_pos {
-                            key_start_byte = scalar_start.byte_offset;
+                        if in_key_position(flow_stack.last())
+                            && let Some(key) = key_stack.last_mut()
+                        {
+                            key.start_byte = scalar_start.byte_offset;
                         }
 
                         events.push((

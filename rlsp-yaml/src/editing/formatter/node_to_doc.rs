@@ -3,14 +3,15 @@
 use rlsp_fmt::{Doc, concat, text};
 use rlsp_yaml_parser::CollectionStyle;
 use rlsp_yaml_parser::node::Node;
-use rlsp_yaml_parser::{ScalarStyle, Span};
+use rlsp_yaml_parser::{ResolvedTag, ScalarStyle, Span};
 
 use super::mapping_render::{self, Entry, with_comments_above};
 use super::options::YamlFormatOptions;
 use super::scalar_render::{
-    block_value_needs_quoting, escape_double_quoted, flow_quoted_to_doc, format_tag,
-    is_core_schema_tag, needs_flow_quoting, needs_quoting, repr_block_to_doc,
-    requires_double_quoting, string_to_doc,
+    CORE_TAG_PREFIX, block_value_needs_quoting, escape_double_quoted, flow_quoted_to_doc,
+    format_tag, is_core_schema_tag, needs_flow_quoting, needs_quoting, plain_core_tag,
+    reads_as_another_node_on_its_own_line, repr_block_to_doc, requires_double_quoting,
+    string_to_doc,
 };
 use super::sequence_render;
 
@@ -21,7 +22,13 @@ use super::sequence_render;
 ///
 /// A block scalar prints its own trailing comment on its header line.
 pub(super) fn node_to_doc(node: &Node<Span>, options: &YamlFormatOptions, in_key: bool) -> Doc {
-    render_node(node, options, in_key, false, node.trailing_comment())
+    render_node(
+        node,
+        options,
+        in_key,
+        Context::Block,
+        node.trailing_comment(),
+    )
 }
 
 /// Convert a mapping value to a `Doc`.  A block scalar value prints
@@ -32,7 +39,7 @@ pub(super) fn value_to_doc(
     options: &YamlFormatOptions,
     header_comment: Option<&str>,
 ) -> Doc {
-    render_node(node, options, false, false, header_comment)
+    render_node(node, options, false, Context::Block, header_comment)
 }
 
 /// Whether the formatter prints `node` as a block scalar, so that its header
@@ -86,11 +93,57 @@ pub(super) fn prints_no_text(node: &Node<Span>) -> bool {
     value.is_empty() && (matches!(style, ScalarStyle::Plain) || tag_printed)
 }
 
-/// Render `node`; `in_flow` marks a scalar that sits directly inside a flow
-/// collection, where `,` `[` `]` `{` `}` end a plain scalar (`ns-plain-char(c)`
-/// [130] admits only `ns-plain-safe(c)` [127], which is `ns-plain-safe-in` [129]
-/// = `ns-char - c-flow-indicator` in flow context), so a scalar holding one of
-/// them is emitted quoted.
+/// Where a node is printed.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Context {
+    /// Outside a flow collection.
+    Block,
+    /// In a flow collection: a key, or the value of a flow mapping.
+    Flow,
+    /// An item of a flow sequence.
+    FlowSeqItem,
+}
+
+/// A printed scalar and how it reads back: a plain scalar takes its tag from
+/// the Core schema, any quoted or block scalar is a string.
+enum Printed {
+    Plain(Doc),
+    Quoted(Doc),
+}
+
+impl Printed {
+    /// A string value printed by `string_to_doc`: plain unless `single_quote`
+    /// quotes it (a key is never quoted by that preference alone).
+    fn of_string(value: &str, options: &YamlFormatOptions, in_key: bool) -> Self {
+        let doc = string_to_doc(value, options, in_key);
+        if options.single_quote && !in_key {
+            Self::Quoted(doc)
+        } else {
+            Self::Plain(doc)
+        }
+    }
+
+    /// The tag the printed scalar resolves to without a tag of its own.
+    fn resolved_tag(&self, value: &str) -> &'static str {
+        match self {
+            Self::Plain(_) => plain_core_tag(value),
+            Self::Quoted(_) => Some(ResolvedTag::Str),
+        }
+        .map_or("", ResolvedTag::as_str)
+    }
+
+    fn into_doc(self) -> Doc {
+        match self {
+            Self::Plain(doc) | Self::Quoted(doc) => doc,
+        }
+    }
+}
+
+/// Render `node`; `context` tells where it sits.  In a flow collection `,` `[`
+/// `]` `{` `}` end a plain scalar (`ns-plain-char(c)` [130] admits only
+/// `ns-plain-safe(c)` [127], which is `ns-plain-safe-in` [129] = `ns-char -
+/// c-flow-indicator` in flow context), so a scalar holding one of them is
+/// emitted quoted.
 #[expect(
     clippy::too_many_lines,
     reason = "comprehensive match over all node variants"
@@ -99,60 +152,28 @@ fn render_node(
     node: &Node<Span>,
     options: &YamlFormatOptions,
     in_key: bool,
-    in_flow: bool,
+    context: Context,
     header_comment: Option<&str>,
 ) -> Doc {
+    let in_flow = context != Context::Block;
+    let quote_empty = context == Context::FlowSeqItem;
     match node {
         Node::Scalar {
             value, style, tag, ..
         } => {
-            // Prefix with a tag if present.
-            //
-            // Core schema tags (`tag:yaml.org,2002:*`) are handled as follows:
-            //
-            // - **Resolver-injected** (`tag_loc: None`): always stripped — the resolver
-            //   injects these automatically and re-emitting them breaks idempotency.
-            //
-            // - **User-authored on a non-empty scalar** (`tag_loc: Some`, `value` non-empty):
-            //   stripped — the type can be inferred from the value, so the tag adds
-            //   no information and round-trips without it.
-            //
-            // - **User-authored on an empty scalar** (`tag_loc: Some`, `value` empty):
-            //   emitted in short form (`!!str`, `!!null`, etc.) — the tag carries
-            //   semantic meaning that cannot be inferred from an absent value.
-            //
-            // Non-core tags (user tags) are always emitted as-is.
-            let tag_loc_is_some = node.tag_loc().is_some();
-            let tag_prefix = tag.as_ref().and_then(|t| {
-                if is_core_schema_tag(t) {
-                    if tag_loc_is_some && value.is_empty() {
-                        // User-authored explicit core tag on empty scalar: emit in short form.
-                        let suffix = t.trim_start_matches("tag:yaml.org,2002:");
-                        Some(format!("!!{suffix}"))
-                    } else {
-                        // Resolver-injected, or user-authored on non-empty scalar: suppress.
-                        None
-                    }
-                } else {
-                    // Non-empty scalar with user tag: include trailing space for separation.
-                    // Empty scalar with user tag: no trailing space (value is absent).
-                    let formatted = format_tag(t);
-                    if value.is_empty() {
-                        Some(formatted)
-                    } else {
-                        Some(format!("{formatted} "))
-                    }
-                }
-            });
-
             let scalar_doc = match style {
                 ScalarStyle::Literal(_) | ScalarStyle::Folded(_) => {
                     // A value with an over-indented blank line cannot be printed as a
                     // block scalar (see `block_value_needs_quoting`).
                     if block_value_needs_quoting(value) {
-                        text(format!("\"{}\"", escape_double_quoted(value)))
+                        Printed::Quoted(text(format!("\"{}\"", escape_double_quoted(value))))
                     } else {
-                        repr_block_to_doc(value, *style, options.tab_width, header_comment)
+                        Printed::Quoted(repr_block_to_doc(
+                            value,
+                            *style,
+                            options.tab_width,
+                            header_comment,
+                        ))
                     }
                 }
                 ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted => {
@@ -161,81 +182,116 @@ fn render_node(
                         // or in single-quoted scalars (control chars, backslash,
                         // etc.) — always re-emit as double-quoted with proper
                         // escaping regardless of original style.
-                        text(format!("\"{}\"", escape_double_quoted(value)))
+                        Printed::Quoted(text(format!("\"{}\"", escape_double_quoted(value))))
                     } else if needs_quoting(value, options.yaml_version) {
                         if matches!(style, ScalarStyle::DoubleQuoted) {
-                            text(format!("\"{}\"", escape_double_quoted(value)))
+                            Printed::Quoted(text(format!("\"{}\"", escape_double_quoted(value))))
                         } else {
                             // Single-quoted: escape embedded single quotes as ''.
-                            text(format!("'{}'", value.replace('\'', "''")))
+                            Printed::Quoted(text(format!("'{}'", value.replace('\'', "''"))))
                         }
                     } else if options.preserve_quotes {
                         // Safe-plain scalar: reproduce the source quote style
                         // instead of stripping to plain.
                         if matches!(style, ScalarStyle::DoubleQuoted) {
-                            text(format!("\"{}\"", escape_double_quoted(value)))
+                            Printed::Quoted(text(format!("\"{}\"", escape_double_quoted(value))))
                         } else {
-                            text(format!("'{}'", value.replace('\'', "''")))
+                            Printed::Quoted(text(format!("'{}'", value.replace('\'', "''"))))
                         }
                     } else if in_flow && needs_flow_quoting(value) {
                         // Stripping the quotes would leave a flow indicator in a plain scalar.
-                        flow_quoted_to_doc(value, options, in_key)
+                        Printed::Quoted(flow_quoted_to_doc(value, options, in_key))
                     } else {
-                        string_to_doc(value, options, in_key)
+                        Printed::of_string(value, options, in_key)
                     }
                 }
                 ScalarStyle::Plain => {
                     // Values that contain characters which cannot appear in a plain scalar
                     // at all — control characters, backslashes, or embedded newlines —
-                    // must be emitted as double-quoted with proper escaping.
-                    if requires_double_quoting(value) {
-                        text(format!("\"{}\"", escape_double_quoted(value)))
+                    // must be emitted as double-quoted with proper escaping.  So
+                    // must a root scalar that the parser reads from the `---` line
+                    // and that reads as something else on a line of its own
+                    // (`--- ... x`, `--- - a`).
+                    if quote_empty && value.is_empty() {
+                        Printed::Quoted(text("\"\""))
+                    } else if requires_double_quoting(value)
+                        || reads_as_another_node_on_its_own_line(value)
+                    {
+                        Printed::Quoted(text(format!("\"{}\"", escape_double_quoted(value))))
                     } else if in_flow && needs_flow_quoting(value) {
-                        flow_quoted_to_doc(value, options, in_key)
+                        Printed::Quoted(flow_quoted_to_doc(value, options, in_key))
                     } else if needs_quoting(value, options.yaml_version) {
                         // Value needs quoting (reserved keyword, special char, etc.) but
                         // was originally plain — preserve plain style so round-trip matches.
-                        text(value.clone())
+                        Printed::Plain(text(value.clone()))
                     } else {
-                        string_to_doc(value, options, in_key)
+                        Printed::of_string(value, options, in_key)
                     }
                 }
             };
 
-            // `tag_present_on_empty` is true when a tag is being preserved for
-            // an empty scalar — the tag text itself is the entire output, so any
-            // anchor prefix must be separated from it by a space.
-            let tag_present_on_empty = tag_prefix.is_some() && value.is_empty();
-
-            let doc = if let Some(ref prefix) = tag_prefix {
-                // For non-empty scalars the prefix already ends with a space.
-                // For empty scalars the prefix has no trailing space (value is absent).
-                if value.is_empty() {
-                    text(prefix.clone())
-                } else {
-                    concat(vec![text(prefix.clone()), scalar_doc])
-                }
-            } else {
-                scalar_doc
-            };
-
-            if let Some(name) = node.anchor() {
-                // When the scalar is empty we still need a space between the
-                // anchor name and whatever follows (a tag or nothing).
-                if value.is_empty() {
-                    if tag_present_on_empty || !matches!(style, ScalarStyle::Plain) {
-                        // `&anchor !!tag`, or `&anchor ""` — space required between
-                        // anchor and what follows.
-                        concat(vec![text(format!("&{name} ")), doc])
+            // Prefix with a tag if present.
+            //
+            // Core schema tags (`tag:yaml.org,2002:*`) are handled as follows:
+            //
+            // - **Resolver-injected** (`tag_loc: None`): always stripped — the resolver
+            //   injects these automatically and re-emitting them breaks idempotency.
+            //
+            // - **User-authored on a non-empty scalar** (`tag_loc: Some`, `value` non-empty):
+            //   stripped when the printed scalar resolves to the same tag without it
+            //   (`!!str hello`), emitted in short form when it does not (`!!str 123`
+            //   prints a plain scalar that is an int, `!!int "5"` prints a string).
+            //
+            // - **User-authored on an empty scalar** (`tag_loc: Some`, `value` empty):
+            //   emitted in short form (`!!str`, `!!null`, etc.) — the tag carries
+            //   semantic meaning that cannot be inferred from an absent value.
+            //
+            // Non-core tags (user tags) are always emitted as-is.
+            let tag_loc_is_some = node.tag_loc().is_some();
+            // The output has no text for the value of an empty scalar, except in
+            // a flow sequence, where it is `""`.
+            let value_absent = value.is_empty() && !quote_empty;
+            // A tag follows `&anchor ` and precedes the value, so it ends in a
+            // space unless the value is absent.
+            let tag_end = if value_absent { "" } else { " " };
+            let tag_prefix = tag.as_ref().and_then(|t| {
+                if is_core_schema_tag(t) {
+                    let suffix = t.trim_start_matches(CORE_TAG_PREFIX);
+                    // `""` in a flow sequence reads as a string, so the null of an
+                    // empty plain scalar needs its tag there.
+                    let empty_null_item =
+                        value.is_empty() && quote_empty && matches!(style, ScalarStyle::Plain);
+                    if value.is_empty() && (tag_loc_is_some || empty_null_item) {
+                        // Explicit core tag on empty scalar: emit in short form.
+                        Some(format!("!!{suffix}{tag_end}"))
+                    } else if tag_loc_is_some && scalar_doc.resolved_tag(value) != t.as_ref() {
+                        // The printed scalar would not resolve to the tag: keep the tag.
+                        Some(format!("!!{suffix} "))
                     } else {
-                        // `&anchor` alone — no trailing space.
-                        concat(vec![text(format!("&{name}")), doc])
+                        // Resolver-injected, or user-authored and implied by the value.
+                        None
                     }
                 } else {
-                    concat(vec![text(format!("&{name} ")), doc])
+                    Some(format!("{}{tag_end}", format_tag(t)))
                 }
-            } else {
-                doc
+            });
+            let scalar_doc = scalar_doc.into_doc();
+
+            // With an anchor alone, nothing follows the name.
+            let anchor_alone =
+                value_absent && tag_prefix.is_none() && matches!(style, ScalarStyle::Plain);
+            let doc = match tag_prefix {
+                // The prefix is all there is to print for an absent value.
+                Some(prefix) if value_absent => text(prefix),
+                Some(prefix) => concat(vec![text(prefix), scalar_doc]),
+                None => scalar_doc,
+            };
+
+            match node.anchor() {
+                // Anything after the anchor needs a space.
+                Some(name) if anchor_alone => concat(vec![text(format!("&{name}")), doc]),
+                Some(name) => concat(vec![text(format!("&{name} ")), doc]),
+                None => doc,
             }
         }
 
@@ -249,7 +305,10 @@ fn render_node(
                 mapping_render::collection_properties(node.anchor(), tag.as_deref()).is_some();
             let Entry { above, doc } =
                 mapping_render::mapping_to_parts(entries, *style, options, has_properties);
-            let effective_style = if options.format_enforce_block_style {
+            // An empty mapping prints `{}` on the line of its properties.
+            let effective_style = if entries.is_empty() {
+                CollectionStyle::Flow
+            } else if options.format_enforce_block_style {
                 CollectionStyle::Block
             } else {
                 *style
@@ -269,7 +328,10 @@ fn render_node(
             items, style, tag, ..
         } => {
             let Entry { above, doc } = sequence_render::sequence_to_parts(items, *style, options);
-            let effective_style = if options.format_enforce_block_style {
+            // An empty sequence prints `[]` on the line of its properties.
+            let effective_style = if items.is_empty() {
+                CollectionStyle::Flow
+            } else if options.format_enforce_block_style {
                 CollectionStyle::Block
             } else {
                 *style
@@ -298,5 +360,13 @@ pub(super) fn flow_item_to_doc(
     options: &YamlFormatOptions,
     in_key: bool,
 ) -> Doc {
-    render_node(node, options, in_key, true, None)
+    render_node(node, options, in_key, Context::Flow, None)
+}
+
+/// Emit a node for use as an item of a flow sequence.  An item that has no text
+/// of its own (an empty scalar) prints `""`, which the parser reads where it
+/// rejects or drops a bare property before the comma: `[a, !!null , b]`,
+/// `[&a ]`.
+pub(super) fn flow_seq_item_to_doc(node: &Node<Span>, options: &YamlFormatOptions) -> Doc {
+    render_node(node, options, false, Context::FlowSeqItem, None)
 }

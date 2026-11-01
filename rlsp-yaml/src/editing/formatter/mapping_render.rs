@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 
+use std::borrow::Cow;
 use std::iter;
 
 use rlsp_fmt::{Doc, concat, flat_alt, group, hard_line, indent, join, line, text};
@@ -9,7 +10,7 @@ use rlsp_yaml_parser::{ScalarStyle, Span};
 
 use super::node_to_doc::{prints_block_header, prints_no_text, renders_empty, value_to_doc};
 use super::options::YamlFormatOptions;
-use super::scalar_render::{format_tag, is_core_schema_tag};
+use super::scalar_render::{CORE_TAG_PREFIX, format_tag, is_core_schema_tag};
 
 /// Join a collection's anchor and user-defined tag into `&anchor !tag`, or just
 /// one of them. Core schema tags are dropped. `None` when neither remains.
@@ -27,6 +28,50 @@ pub(super) fn collection_properties(anchor: Option<&str>, tag: Option<&str>) -> 
         (Some(name), None) => Some(format!("&{name}")),
         (None, Some(t)) => Some(t.to_string()),
         (None, None) => None,
+    }
+}
+
+/// Spell out the tag of a collection that the renderers would drop, so that they
+/// print it.  They drop `!!map` on a mapping and `!!seq` on a sequence because
+/// they say nothing the kind does not.  Two tags say something:
+///
+/// - a core tag of another type (`!!set` on a mapping, `!!omap` on a sequence,
+///   `!!str` on either) changes the data;
+/// - the bare `!` is the non-specific tag, which the loader resolves to the kind's
+///   own tag.  Only its text tells it from a collection written without a tag, so
+///   it is kept; the loader leaves `tag_loc` on such a collection, and a `!` is the
+///   one tag whose span is one byte long (`!!seq` is not).
+///
+/// The tag becomes its short form (`!!set`, `!`), which is not a core URI, so
+/// `collection_properties` keeps it.
+pub(super) fn spell_collection_tags(node: &mut Node<Span>) {
+    fn spell(tag: &mut Option<Cow<'static, str>>, natural: &str, non_specific: bool) {
+        if non_specific {
+            *tag = Some(Cow::Borrowed("!"));
+        } else if let Some(suffix) = tag
+            .as_deref()
+            .filter(|t| is_core_schema_tag(t) && *t != natural)
+            .map(|t| t.trim_start_matches(CORE_TAG_PREFIX).to_owned())
+        {
+            *tag = Some(Cow::Owned(format!("!!{suffix}")));
+        }
+    }
+    let non_specific = node
+        .tag_loc()
+        .is_some_and(|span| span.end - span.start == 1);
+    match node {
+        Node::Mapping { entries, tag, .. } => {
+            spell(tag, "tag:yaml.org,2002:map", non_specific);
+            for (key, value) in entries.iter_mut() {
+                spell_collection_tags(key);
+                spell_collection_tags(value);
+            }
+        }
+        Node::Sequence { items, tag, .. } => {
+            spell(tag, "tag:yaml.org,2002:seq", non_specific);
+            items.iter_mut().for_each(spell_collection_tags);
+        }
+        Node::Scalar { .. } | Node::Alias { .. } => {}
     }
 }
 
@@ -210,13 +255,24 @@ pub(super) fn block_mapping_parts<'a>(
                 // A key with no text right after a value with none reads as the
                 // value's own properties and content (`a:` followed by `!t : 1`
                 // reads as `a: !t 1`).
-                let explicit_key = previous.map_or_else(
-                    || has_properties && is_collection(key),
-                    |previous| prints_no_text(previous) && prints_no_text(key),
-                );
+                let explicit_key = forced_explicit_key(previous, key, has_properties);
                 entry_to_parts(key, value, options, explicit_key)
             }),
         "{}",
+    )
+}
+
+/// Whether an entry prints with `? ` although its key does not need it
+/// (see `block_mapping_parts`): `previous` is the value of the entry before it,
+/// `None` for the first entry, whose key may sit below its mapping's properties.
+pub(super) fn forced_explicit_key(
+    previous: Option<&Node<Span>>,
+    key: &Node<Span>,
+    has_properties: bool,
+) -> bool {
+    previous.map_or_else(
+        || has_properties && is_collection(key),
+        |previous| prints_no_text(previous) && prints_no_text(key),
     )
 }
 
@@ -258,6 +314,21 @@ pub(super) fn flow_mapping_to_doc(
         .iter()
         .map(|(key, value)| {
             let key_doc = super::node_to_doc::flow_item_to_doc(key, options, true);
+            // An implicit key is one line of at most 1024 characters (YAML
+            // 1.2.2 §7.4.2), and a collection key can be longer than that, or
+            // break over lines, whose indentation counts; an explicit key has no
+            // limit.  The group around the prefix breaks when the key's own group
+            // does, since both hold the same text.
+            let key_doc = if needs_explicit_key(key) {
+                let prefix = if may_exceed_implicit_key_limit(key) {
+                    text("? ")
+                } else {
+                    flat_alt(text(""), text("? "))
+                };
+                group(concat(vec![prefix, key_doc]))
+            } else {
+                key_doc
+            };
             let val_doc = super::node_to_doc::flow_item_to_doc(value, options, false);
             // Alias keys and tagged empty scalar keys require a space before `:`
             // to prevent ambiguous re-parsing:
@@ -285,6 +356,59 @@ pub(super) fn flow_mapping_to_doc(
             text("}"),
         ])),
     ]))
+}
+
+/// The number of characters an implicit key may have (YAML 1.2.2 §7.4.2,
+/// §8.2.2); the parser rejects a longer one.
+const IMPLICIT_KEY_LIMIT: usize = 1024;
+
+/// The most characters one byte of a scalar prints as: a character without a
+/// printable form comes out as an escape such as ` `.
+const MAX_ESCAPED_WIDTH: usize = 6;
+
+/// The characters a node prints besides its scalars' text and its properties:
+/// brackets, separators, quotes, and the `&`, `!` and spaces of the properties.
+const NODE_OVERHEAD: usize = 8;
+
+/// The most characters a tag prints beyond its length: `!<` and `>`.
+const TAG_DELIMITERS: usize = 4;
+
+/// Whether the flow form of `node` may be longer than an implicit key may be.
+/// An upper bound, so a key that fits is never taken for one that does not, and
+/// the walk stops once the bound passes the limit, after
+/// `IMPLICIT_KEY_LIMIT / NODE_OVERHEAD` nodes at most.
+pub(super) fn may_exceed_implicit_key_limit(node: &Node<Span>) -> bool {
+    fn spend(node: &Node<Span>, budget: &mut usize) -> bool {
+        let content = match node {
+            Node::Scalar { value, .. } => value.len().saturating_mul(MAX_ESCAPED_WIDTH),
+            Node::Alias { name, .. } => name.len(),
+            Node::Mapping { .. } | Node::Sequence { .. } => 0,
+        };
+        let tag = match node {
+            Node::Scalar { tag, .. } | Node::Mapping { tag, .. } | Node::Sequence { tag, .. } => {
+                tag.as_deref().map_or(0, |tag| tag.len() + TAG_DELIMITERS)
+            }
+            Node::Alias { .. } => 0,
+        };
+        let anchor = node.anchor().map_or(0, str::len);
+        let cost = content
+            .saturating_add(tag)
+            .saturating_add(anchor)
+            .saturating_add(NODE_OVERHEAD);
+        let Some(left) = budget.checked_sub(cost) else {
+            return true;
+        };
+        *budget = left;
+        match node {
+            Node::Mapping { entries, .. } => entries
+                .iter()
+                .any(|(key, value)| spend(key, budget) || spend(value, budget)),
+            Node::Sequence { items, .. } => items.iter().any(|item| spend(item, budget)),
+            Node::Scalar { .. } | Node::Alias { .. } => false,
+        }
+    }
+    let mut budget = IMPLICIT_KEY_LIMIT;
+    spend(node, &mut budget)
 }
 
 /// Returns `true` when a mapping key requires the explicit `? key` form.
@@ -510,9 +634,13 @@ pub(super) fn explicit_key_to_doc<'a>(
 /// the `? ` line, so the comments above its first entry come back apart from the
 /// Doc.
 fn explicit_key_parts<'a>(key: &'a Node<Span>, options: &YamlFormatOptions) -> Entry<'a> {
-    let is_block = |style: CollectionStyle| {
-        options.format_enforce_block_style || style == CollectionStyle::Block
+    // A flow collection key stays flow (see `flow_comments`), whatever the
+    // option says about the other collections.
+    let flow_key_options = YamlFormatOptions {
+        format_enforce_block_style: false,
+        ..options.clone()
     };
+    let is_block = |style: CollectionStyle| style == CollectionStyle::Block;
     match key {
         Node::Mapping {
             entries,
@@ -546,12 +674,14 @@ fn explicit_key_parts<'a>(key: &'a Node<Span>, options: &YamlFormatOptions) -> E
                 ),
             }
         }
-        Node::Scalar { .. } | Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. } => {
-            Entry {
-                above: Vec::new(),
-                doc: super::node_to_doc::node_to_doc(key, options, true),
-            }
-        }
+        Node::Scalar { .. } | Node::Alias { .. } => Entry {
+            above: Vec::new(),
+            doc: super::node_to_doc::node_to_doc(key, options, true),
+        },
+        Node::Mapping { .. } | Node::Sequence { .. } => Entry {
+            above: Vec::new(),
+            doc: super::node_to_doc::node_to_doc(key, &flow_key_options, true),
+        },
     }
 }
 
