@@ -297,10 +297,8 @@ impl<'input> Lexer<'input> {
                 inline_start,
                 "invalid content after document-end marker '...'".into(),
             ));
-        } else if let Some(early) =
-            self.handle_marker_inline(inline, inline_start, &line, marker_pos, after)
-        {
-            return early;
+        } else {
+            self.handle_marker_inline(inline, inline_start, &line);
         }
 
         (marker_pos, after)
@@ -319,49 +317,34 @@ impl<'input> Lexer<'input> {
     /// reserved indicator (`,`, `%`, `@`, backtick) is an error as it is on a
     /// later line.
     ///
-    /// Returns `Some((marker_pos, after))` when processing must terminate
-    /// early (invalid block-scalar header).  Returns `None` on success or
-    /// when a non-fatal error is stored in [`Self::marker_inline_error`].
+    /// Errors are stored in [`Self::marker_inline_error`]; the content of an
+    /// invalid block-scalar header, an anchor before a block mapping entry and
+    /// every other rejected form is not prepended.
     fn handle_marker_inline(
         &mut self,
         inline: &'input str,
         inline_start: Pos,
         line: &Line<'input>,
-        marker_pos: Pos,
-        after: Pos,
-    ) -> Option<(Pos, Pos)> {
+    ) {
         let first_byte = inline.as_bytes().first().copied();
-        if matches!(first_byte, Some(b'|' | b'>')) {
-            // Block scalar (`|`/`>`) — validate header eagerly; prepend as a
-            // synthetic line so the normal dispatch handles parsing.
+        let prepend = if matches!(first_byte, Some(b'|' | b'>')) {
+            // Block scalar (`|`/`>`) — validate header eagerly.
             let (_, _, header_err) = parse_block_header(&inline[1..], inline_start);
+            let valid = header_err.is_none();
             if let Some(e) = header_err {
                 self.marker_inline_error = Some(e);
-                return Some((marker_pos, after));
             }
-            self.buf.prepend_line(Line {
-                content: inline,
-                offset: inline_start.byte_offset,
-                indent: inline_start.column,
-                break_type: line.break_type,
-                pos: inline_start,
-            });
+            valid
         } else if first_byte == Some(b'&') {
             // Anchor — reject if a block mapping entry follows (CXX2).
-            if anchor_followed_by_block_mapping(inline) {
+            let valid = !anchor_followed_by_block_mapping(inline);
+            if !valid {
                 self.marker_inline_error = Some(Error::syntax(
                     inline_start,
                     "invalid content after document-start marker '---'".into(),
                 ));
-            } else {
-                self.buf.prepend_line(Line {
-                    content: inline,
-                    offset: inline_start.byte_offset,
-                    indent: inline_start.column,
-                    break_type: line.break_type,
-                    pos: inline_start,
-                });
             }
+            valid
         } else if matches!(first_byte, Some(b'[' | b'{' | b'*')) && is_implicit_key_line(inline) {
             // A flow collection or alias followed by more content on the line
             // (`--- [x] [y]`, `--- [x]: v`, `--- *a b`): a block mapping cannot
@@ -370,6 +353,7 @@ impl<'input> Lexer<'input> {
                 inline_start,
                 "invalid content after document-start marker '---'".into(),
             ));
+            false
         } else if matches!(first_byte, Some(b']' | b'}'))
             || inline
                 .chars()
@@ -383,8 +367,17 @@ impl<'input> Lexer<'input> {
                 inline_start,
                 "invalid content after document-start marker '---'".into(),
             ));
+            false
         } else if matches!(first_byte, Some(b'!' | b'"' | b'\'' | b'[' | b'{' | b'*')) {
-            // Tag, quoted scalar, flow collection, or alias — prepend for normal dispatch.
+            // Tag, quoted scalar, flow collection, or alias.
+            true
+        } else {
+            self.handle_plain_scalar_inline(inline, inline_start);
+            false
+        };
+        if prepend {
+            // Prepend the rest of the marker line as a synthetic line so the
+            // dispatch of a later line handles it.
             self.buf.prepend_line(Line {
                 content: inline,
                 offset: inline_start.byte_offset,
@@ -392,10 +385,7 @@ impl<'input> Lexer<'input> {
                 break_type: line.break_type,
                 pos: inline_start,
             });
-        } else {
-            self.handle_plain_scalar_inline(inline, inline_start);
         }
-        None
     }
 
     /// Handle plain-scalar inline content on a `---` marker line.

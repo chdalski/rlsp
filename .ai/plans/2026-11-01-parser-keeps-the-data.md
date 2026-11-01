@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-11-01
 
 # The Parser Reads the Data of Every Input
@@ -21,7 +21,7 @@ directives.
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: One prepend in the marker handler
+- [x] Task 1: One prepend in the marker handler
 - [ ] Task 2: The `--- x` path joins the other marker forms
 - [ ] Task 3: A `%` at a node start is an error
 - [ ] Task 4: A key reads its own `:`
@@ -45,11 +45,11 @@ directives.
 three sites, and its return value repeats what the caller computes. Task 2 removes
 one of its arms. Behavior is unchanged.
 
-- [ ] `consume_marker_line` has one site that prepends the rest of a marker line
-- [ ] The marker tests in `tests/smoke/documents.rs` and `tests/smoke/scalars.rs`, the
+- [x] `consume_marker_line` has one site that prepends the rest of a marker line
+- [x] The marker tests in `tests/smoke/documents.rs` and `tests/smoke/scalars.rs`, the
       `consume_marker_line` tests in `lexer.rs`, and the yaml-test-suite conformance
       tests pass with their assertions unchanged
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 2: The `--- x` path joins the other marker forms
 
