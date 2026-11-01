@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-11-01)
 **Created:** 2026-10-30
 
 # The Formatter Keeps Every Comment
@@ -45,7 +45,7 @@ formatting it again must change nothing.
       scalar spans, equals its count of `Comment` events, and the multiset of
       `Comment` texts of `format_yaml`'s output equals the input's; the number
       of files that fail is 0
-- [ ] Push to `main` and confirm the full CI matrix is green
+- [x] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
