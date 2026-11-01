@@ -39,7 +39,7 @@ formatting it again must change nothing.
 - [x] Task 10: Fold only own-line comments
 - [x] Task 11: Keep the data when formatting
 - [x] Task 12: Pin that no comment is lost
-- [ ] Measure every `*.yml` and `*.yaml` file under `/workspace`,
+- [x] Measure every `*.yml` and `*.yaml` file under `/workspace`,
       `/usr/local/cargo/registry`, and `~/.local/share/pnpm`: for each file
       that loads, the count of `#` at a line start or after whitespace, outside
       scalar spans, equals its count of `Comment` events, and the multiset of
@@ -407,3 +407,5 @@ these inputs change today.
   line counts as outside the scalar
 - Measure step: a quoted scalar ends at its closing quote for the count, because the
   span of a multi-line quoted scalar runs past it (entry on `.ai/backlog.md`)
+- Measure step: a `#` inside a comment's text starts no second comment, as in
+  `#   # x`
