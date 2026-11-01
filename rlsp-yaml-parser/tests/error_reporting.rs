@@ -1739,21 +1739,29 @@ fn flow_and_alias_keys_after_finished_entry_emit_libfyaml_events(
 }
 
 // Properties still pending at `---` or `...` belong to the document they end:
-// the next document starts without them.  (libfyaml also gives the property a
-// null node of its own in the first document; this parser emits none, a known
-// deviation.)
+// they are its empty root node, as in libfyaml, and the next document starts
+// without them.
 #[rstest]
-#[case::anchor_line_before_marker_then_anchored_key("&y\n---\n&k\nb: 1\n", "+M,&k :b :1 -M")]
-#[case::anchor_line_before_end_marker_then_anchored_key("&y\n...\n&k\nb: 1\n", "+M,&k :b :1 -M")]
-#[case::anchor_line_before_marker_then_inline_anchored_key("&y\n--- &k\nb: 1\n", "+M,&k :b :1 -M")]
-#[case::anchor_line_before_marker_then_anchored_scalar("&y\n---\n&k\n", "&k,:")]
-#[case::anchor_line_before_marker_then_plain_key("&y\n---\nb: 1\n", "+M :b :1 -M")]
-#[case::tag_line_before_marker_then_tagged_key("!!str\n---\n!!map\nb: 1\n", "+M,!!map :b :1 -M")]
+#[case::anchor_line_before_marker_then_anchored_key("&y\n---\n&k\nb: 1\n", "&y,: +M,&k :b :1 -M")]
+#[case::anchor_line_before_end_marker_then_anchored_key(
+    "&y\n...\n&k\nb: 1\n",
+    "&y,: +M,&k :b :1 -M"
+)]
+#[case::anchor_line_before_marker_then_inline_anchored_key(
+    "&y\n--- &k\nb: 1\n",
+    "&y,: +M,&k :b :1 -M"
+)]
+#[case::anchor_line_before_marker_then_anchored_scalar("&y\n---\n&k\n", "&y,: &k,:")]
+#[case::anchor_line_before_marker_then_plain_key("&y\n---\nb: 1\n", "&y,: +M :b :1 -M")]
+#[case::tag_line_before_marker_then_tagged_key(
+    "!!str\n---\n!!map\nb: 1\n",
+    "!!str,: +M,!!map :b :1 -M"
+)]
 #[case::tag_line_before_marker_then_inline_tagged_key(
     "!!str\n--- !!map\nb: 1\n",
-    "+M,!!map :b :1 -M"
+    "!!str,: +M,!!map :b :1 -M"
 )]
-#[case::anchor_line_before_marker_then_alias("&y\n---\n*y\n", "*y")]
+#[case::anchor_line_before_marker_then_alias("&y\n---\n*y\n", "&y,: *y")]
 fn pending_properties_do_not_carry_into_the_next_document(
     #[case] input: &str,
     #[case] expected: &str,

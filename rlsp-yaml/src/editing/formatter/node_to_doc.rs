@@ -5,7 +5,7 @@ use rlsp_yaml_parser::CollectionStyle;
 use rlsp_yaml_parser::node::Node;
 use rlsp_yaml_parser::{ResolvedTag, ScalarStyle, Span};
 
-use super::mapping_render::{self, Entry, with_comments_above};
+use super::mapping_render::{self, Entry, Lead, with_comments_above};
 use super::options::YamlFormatOptions;
 use super::scalar_render::{
     CORE_TAG_PREFIX, block_value_needs_quoting, escape_double_quoted, flow_quoted_to_doc,
@@ -171,7 +171,7 @@ fn render_node(
                         Printed::Quoted(repr_block_to_doc(
                             value,
                             *style,
-                            options.tab_width,
+                            options.indent_width(),
                             header_comment,
                         ))
                     }
@@ -218,8 +218,14 @@ fn render_node(
                         || reads_as_another_node_on_its_own_line(value)
                     {
                         Printed::Quoted(text(format!("\"{}\"", escape_double_quoted(value))))
-                    } else if in_flow && needs_flow_quoting(value) {
+                    } else if in_flow && (needs_flow_quoting(value) || value.starts_with(':')) {
+                        // A plain scalar may start with `:` in a flow collection, but
+                        // the parser reads `{ : :c }` as the value `c`.
                         Printed::Quoted(flow_quoted_to_doc(value, options, in_key))
+                    } else if value.ends_with(':') {
+                        // A flow collection may hold `v:`; on a line of its own it is
+                        // a key (`? v:` reads as the key `v`).
+                        Printed::Quoted(string_to_doc(value, options, in_key))
                     } else if needs_quoting(value, options.yaml_version) {
                         // Value needs quoting (reserved keyword, special char, etc.) but
                         // was originally plain — preserve plain style so round-trip matches.
@@ -250,7 +256,11 @@ fn render_node(
             let tag_loc_is_some = node.tag_loc().is_some();
             // The output has no text for the value of an empty scalar, except in
             // a flow sequence, where it is `""`.
-            let value_absent = value.is_empty() && !quote_empty;
+            // A block scalar keeps its header, which holds the comment of its line,
+            // and a quoted one its quotes: a comment after properties alone reads
+            // back as a comment above the node.
+            let value_absent =
+                value.is_empty() && !quote_empty && matches!(style, ScalarStyle::Plain);
             // A tag follows `&anchor ` and precedes the value, so it ends in a
             // space unless the value is absent.
             let tag_end = if value_absent { "" } else { " " };
@@ -301,10 +311,13 @@ fn render_node(
             tag,
             ..
         } => {
-            let has_properties =
-                mapping_render::collection_properties(node.anchor(), tag.as_deref()).is_some();
+            let lead = Lead {
+                properties: mapping_render::collection_properties(node.anchor(), tag.as_deref())
+                    .is_some(),
+                value_indicator: false,
+            };
             let Entry { above, doc } =
-                mapping_render::mapping_to_parts(entries, *style, options, has_properties);
+                mapping_render::mapping_to_parts(entries, *style, options, lead);
             // An empty mapping prints `{}` on the line of its properties.
             let effective_style = if entries.is_empty() {
                 CollectionStyle::Flow
@@ -364,9 +377,12 @@ pub(super) fn flow_item_to_doc(
 }
 
 /// Emit a node for use as an item of a flow sequence.  An item that has no text
-/// of its own (an empty scalar) prints `""`, which the parser reads where it
-/// rejects or drops a bare property before the comma: `[a, !!null , b]`,
-/// `[&a ]`.
+/// of its own (an empty scalar) prints `""`: nothing may stand between two
+/// commas (`[a, , b]` is an error), and properties without a node (`[&a ]`)
+/// load as an empty scalar, so the explicit empty string keeps the item visible
+/// and spells its null tag out (`[&a !!null ""]`).  The shorter `[&a]` would
+/// load to the same data; the longer form is kept so that the output does not
+/// depend on how a parser reads properties alone.
 pub(super) fn flow_seq_item_to_doc(node: &Node<Span>, options: &YamlFormatOptions) -> Doc {
     render_node(node, options, false, Context::FlowSeqItem, None)
 }

@@ -1,0 +1,139 @@
+# cp-01 before the first document marker
+--- # cp-02 on the first document marker
+# cp-03 below the marker, above the root
+a: 1 # cp-04 after a plain value
+# cp-05 below the root
+... # cp-06 on the end marker
+# cp-07 between the end marker and the next document
+%YAML 1.2 # cp-08 on a directive
+--- # cp-09 on the marker after a directive
+- "q" # cp-10 after a double-quoted item
+- 'q' # cp-11 after a single-quoted item
+- # cp-12 after the dash, above a compact mapping
+  a: 1 # cp-13 inside the compact mapping
+- # cp-14 after the dash of an empty item
+-
+  # cp-15 own line between the dash and its mapping
+  b: 2
+- &a # cp-16 after an anchor alone
+  c: 3
+- !t # cp-17 after a tag alone
+  d: 4
+- &y !t # cp-18 after an anchor and a tag alone
+- | # cp-19 after a literal header
+  text
+- > # cp-20 after a folded header
+  text
+- |+ # cp-21 after a keep header
+  text
+
+# cp-22 below the blank line of a keep scalar
+- |- # cp-23 after a strip header
+  text
+- |2 # cp-24 after an indentation indicator
+   text
+- [x, y] # cp-25 after a flow sequence
+- {a: b} # cp-26 after a flow mapping
+- *a # cp-27 after an alias
+- - nested # cp-28 after an item of a nested sequence
+  - x
+# cp-29 own line before the next document
+--- # cp-30 on the marker of the mapping document
+a: # cp-31 after a colon with no value
+b:
+  # cp-32 own line before the first nested key
+  c: 1
+  # cp-33 own line between nested keys
+  d: 2 # cp-34 after a nested value
+  # cp-35 own line at the end of the nested mapping
+e: # cp-36 after a colon above a mapping
+  f: 1
+g:
+  # cp-37 own line between a key and its scalar
+  value
+h: | # cp-38 after a literal header in a mapping
+  t
+i: >+ # cp-39 after a keep header in a mapping
+  t
+
+# cp-40 below the blank line of a keep scalar in a mapping
+j: &x # cp-41 after an anchor above a mapping
+  k: 1
+l: !t # cp-42 after a tag above a mapping
+  m: 1
+n: &z !t # cp-43 after an anchor and a tag above a sequence
+  - 1
+o: v
+  continued # cp-44 after a multi-line plain scalar
+p: [1, 2] # cp-45 after a flow sequence value
+q: {r: s} # cp-46 after a flow mapping value
+t: *x # cp-47 after an alias value
+u: "multi
+  line" # cp-48 after a multi-line double-quoted scalar
+? k # cp-49 after an explicit key
+: v # cp-50 after an explicit value
+? # cp-51 after the question mark
+  w
+: # cp-52 after the colon of an explicit entry
+  x
+? | # cp-53 after the header of a block scalar key
+  lit
+: y
+? - a # cp-54 after an item of a sequence key
+  - b
+: z
+--- !t # cp-73 after a tag on the marker line
+a: 1
+...
+--- &anc # cp-74 after an anchor on the marker line
+- 1
+--- "root quoted" # cp-75 after a root double-quoted scalar
+--- 'root' # cp-76 after a root single-quoted scalar
+--- plain # cp-77 after a root plain scalar
+--- | # cp-78 after the header of a root literal
+  text
+# cp-79 below a root literal
+--- # cp-87 on the marker of the document with a quoted value
+a: "q" # cp-88 after a double-quoted mapping value
+b: 'q' # cp-89 after a single-quoted mapping value
+c: > # cp-90 after a folded header in a mapping
+  t
+d: |
+  t
+  # cp-91 is no comment: it is a line of the literal
+e: # cp-92 after a colon above a scalar on the next line
+  v
+f: # cp-93 after a colon above a scalar with its own comment
+  v # cp-94 after that scalar
+g: v
+
+  w # cp-95 after a multi-line plain scalar with a blank line
+: v # cp-96 after a value of an empty key
+? k
+# cp-97 own line between an explicit key and its value
+: v
+? m # cp-98 after an explicit key
+: v # cp-99 after the value of an explicit key
+? n
+: # cp-105 after the colon above the value on the next line
+  x
+--- # cp-106 on the marker of the document with a comment above each key
+# cp-107 above the first key
+name: "P"
+# cp-108 above the second key
+on: x
+--- # cp-100 on the marker of the document with a comment above a blank line
+# cp-101 above a blank line
+
+a: 1
+... # cp-102 on the end marker before a directive
+%TAG ! tag:x: # cp-103 on a tag directive
+--- # cp-104 on the marker after a tag directive
+a: 1
+--- # cp-80 on the marker of the empty explicit entries
+? # cp-81 after a bare question mark
+: # cp-82 after a bare colon
+? !!str k # cp-83 after a tagged key
+: &v # cp-84 after an anchor alone on a value
+... # cp-85 on the last end marker
+# cp-86 after the last end marker

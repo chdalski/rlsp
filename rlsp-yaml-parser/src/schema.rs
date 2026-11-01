@@ -195,7 +195,14 @@ pub const fn resolve_collection(
 fn resolve_core_plain(value: &str) -> ResolvedTag {
     match value.as_bytes().first().copied() {
         // Empty string or "~" → null (the only two direct-return null forms).
-        None | Some(b'~') => ResolvedTag::Null,
+        None => ResolvedTag::Null,
+        Some(b'~') => {
+            if value == "~" {
+                ResolvedTag::Null
+            } else {
+                ResolvedTag::Str
+            }
+        }
         // "null" | "Null" | "NULL" start with 'n'/'N'; only null uses these.
         Some(b'n' | b'N') => {
             if is_core_null(value) {
@@ -769,6 +776,9 @@ mod tests {
     #[case::plain_null_lowercase(ScalarStyle::Plain, "null", None, ResolvedTag::Null)]
     #[case::plain_null_tilde(ScalarStyle::Plain, "~", None, ResolvedTag::Null)]
     #[case::plain_null_empty(ScalarStyle::Plain, "", None, ResolvedTag::Null)]
+    // §10.3.2: only `~` alone is null; a path or other text that starts with it is a string
+    #[case::plain_tilde_path_is_str(ScalarStyle::Plain, "~/bin", None, ResolvedTag::Str)]
+    #[case::plain_tilde_letter_is_str(ScalarStyle::Plain, "~x", None, ResolvedTag::Str)]
     #[case::plain_bool_true_lower(ScalarStyle::Plain, "true", None, ResolvedTag::Bool)]
     #[case::plain_bool_false_upper(ScalarStyle::Plain, "FALSE", None, ResolvedTag::Bool)]
     #[case::plain_int_decimal(ScalarStyle::Plain, "42", None, ResolvedTag::Int)]

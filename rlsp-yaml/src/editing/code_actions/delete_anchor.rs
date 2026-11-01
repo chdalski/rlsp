@@ -25,8 +25,10 @@ pub(super) fn delete_unused_anchor(
     if anchor_start_col >= line.len() || anchor_end_col > line.len() {
         return None;
     }
-    // Diagnostic range starts at `&` — the name follows.
-    let anchor_name = &line[anchor_start_col + 1..anchor_end_col];
+    // Diagnostic range starts at `&` — the name follows.  The range of an anchor
+    // on an empty node does not (`- &y` ends at the next node, where the empty
+    // node's span is), so it may not hold a name at all.
+    let anchor_name = line.get(anchor_start_col + 1..anchor_end_col)?;
 
     let (node, idx) = find_anchored_node(docs, diag_line, anchor_name)?;
     let loc = node_loc(node);
@@ -363,5 +365,34 @@ mod tests {
         let result = apply_text_edit(text, &edits[0]);
         assert_eq!(result.matches("# c").count(), 1, "{result:?}");
         assert!(result.starts_with("a: |  # c\n"), "{result:?}");
+    }
+
+    // The unused-anchor diagnostic of an anchor on an empty node ranges over
+    // the empty node, which sits at the start of a later line.  The action
+    // finds no anchor name there and offers nothing; it does not panic.
+    #[rstest::rstest]
+    #[case::sequence_item("- &y !t\n- x\n")]
+    #[case::value_before_the_next_key("a: &y\nb: 1\n")]
+    #[case::explicit_value("? k\n: &v\n")]
+    fn delete_anchor_on_an_empty_node_does_not_panic(#[case] text: &str) {
+        let docs = docs_for(text);
+        let diagnostics = crate::validation::validators::validate_unused_anchors(&docs);
+        assert!(!diagnostics.is_empty(), "the anchor is unused in {text:?}");
+        let range = tower_lsp::lsp_types::Range::new(
+            tower_lsp::lsp_types::Position::new(0, 0),
+            tower_lsp::lsp_types::Position::new(10, 0),
+        );
+        let actions = code_actions(
+            &docs,
+            text,
+            range,
+            &diagnostics,
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        );
+        assert!(
+            actions.iter().all(|a| !a.title.contains("unused anchor")),
+            "{actions:?}"
+        );
     }
 }

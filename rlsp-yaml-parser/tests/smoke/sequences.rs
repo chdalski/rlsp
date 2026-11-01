@@ -1117,3 +1117,66 @@ fn fast_path_span_matches_slow_path_for_all_plain_cases() {
         );
     }
 }
+
+// -----------------------------------------------------------------------
+// Properties of the last item of a sequence at its key's column
+// -----------------------------------------------------------------------
+
+/// A property line with nothing after it is the empty node of the last item of
+/// a sequence that sits at the column of its key (YAML 1.2.2 [96]); the key that
+/// closes the sequence keeps only the properties on its own line.
+#[rstest]
+#[case::tag("a:\n- !!str\nb: 1\n", (None, Some("tag:yaml.org,2002:str")), (None, None))]
+#[case::anchor("a:\n- &x\nb: 1\n", (Some("x"), None), (None, None))]
+#[case::anchor_and_tag(
+    "a:\n- &x !!str\n# c\nb: 1\n",
+    (Some("x"), Some("tag:yaml.org,2002:str")),
+    (None, None)
+)]
+#[case::nested_mapping(
+    "a:\n  b:\n  - !!str\n  c: 1\n",
+    (None, Some("tag:yaml.org,2002:str")),
+    (None, None)
+)]
+#[case::key_with_an_anchor(
+    "a:\n- !!str\n&k b: 1\n",
+    (None, Some("tag:yaml.org,2002:str")),
+    (Some("k"), None)
+)]
+#[case::key_with_a_tag(
+    "a:\n- &x\n!u b: 1\n",
+    (Some("x"), None),
+    (None, Some("!u"))
+)]
+#[case::key_with_the_same_kind_of_property(
+    "a:\n- !t\n!u b: 1\n",
+    (None, Some("!t")),
+    (None, Some("!u"))
+)]
+fn property_only_last_item_of_an_indentless_sequence_is_an_empty_scalar(
+    #[case] input: &str,
+    #[case] item: (Option<&str>, Option<&str>),
+    #[case] key: (Option<&str>, Option<&str>),
+) {
+    let events = event_variants(input);
+    let scalar = |matches_value: fn(&str) -> bool| {
+        events
+            .iter()
+            .find(|e| matches!(e, Event::Scalar { value, .. } if matches_value(value)))
+    };
+    // The empty item comes after the key of its sequence and before the next key.
+    let empty = scalar(str::is_empty);
+    assert!(empty.is_some(), "empty item scalar in {input:?}");
+    if let Some(empty) = empty {
+        assert_eq!((empty.anchor(), empty.tag()), item, "item of {input:?}");
+    }
+    let next_key = scalar(|value| matches!(value, "b" | "c"));
+    assert!(next_key.is_some(), "next key in {input:?}");
+    if let Some(next_key) = next_key {
+        assert_eq!(
+            (next_key.anchor(), next_key.tag()),
+            key,
+            "key after the sequence in {input:?}"
+        );
+    }
+}

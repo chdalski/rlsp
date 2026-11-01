@@ -99,10 +99,24 @@ pub(super) fn needs_quoting(s: &str, version: YamlVersion) -> bool {
 
     // Values that are reserved only under YAML 1.1.
     let v1_1_reserved = version == YamlVersion::V1_1
-        && matches!(
+        && (matches!(
             s,
-            "yes" | "no" | "on" | "off" | "Yes" | "No" | "On" | "Off" | "YES" | "NO" | "ON" | "OFF"
-        );
+            "y" | "Y"
+                | "n"
+                | "N"
+                | "yes"
+                | "no"
+                | "on"
+                | "off"
+                | "Yes"
+                | "No"
+                | "On"
+                | "Off"
+                | "YES"
+                | "NO"
+                | "ON"
+                | "OFF"
+        ) || reads_as_yaml_1_1_number(s));
 
     // A string with an embedded newline cannot be emitted as a plain scalar.
     // In YAML, plain scalars that span multiple lines fold line breaks to spaces
@@ -177,6 +191,32 @@ fn starts_with_document_marker(s: &str) -> bool {
 /// it are read otherwise: a block entry, or a document marker.
 pub(super) fn reads_as_another_node_on_its_own_line(s: &str) -> bool {
     starts_with_document_marker(s) || starts_with_entry_indicator(s)
+}
+
+/// Whether YAML 1.1 reads the plain scalar `s` as a number or a timestamp, which
+/// the Core schema of 1.2 takes for a string: the int, float and timestamp types
+/// of <https://yaml.org/type/> allow `_` and `,` in a number, `0b` and `0x`
+/// prefixes, base 60 (`1:30`), and dates.  The check is wider than those
+/// patterns: a string it takes for one is quoted without need, which keeps its
+/// value, and one it misses would change type.
+fn reads_as_yaml_1_1_number(s: &str) -> bool {
+    let body = s.strip_prefix(['-', '+']).unwrap_or(s);
+    let starts_like_number = body.starts_with(|c: char| c.is_ascii_digit() || c == '.');
+    let in_number_alphabet = |c: char| c.is_ascii_digit() || "_.:,eE+-".contains(c);
+    let prefixed = |prefix: &str, digit: fn(char) -> bool| {
+        body.strip_prefix(prefix)
+            .is_some_and(|rest| !rest.is_empty() && rest.chars().all(|c| digit(c) || c == '_'))
+    };
+    let date = body.as_bytes().get(..10).is_some_and(|head| {
+        head.iter().enumerate().all(|(i, b)| match i {
+            4 | 7 => *b == b'-',
+            _ => b.is_ascii_digit(),
+        })
+    });
+    (starts_like_number && body.chars().all(in_number_alphabet))
+        || prefixed("0x", |c| c.is_ascii_hexdigit())
+        || prefixed("0b", |c| c == '0' || c == '1')
+        || date
 }
 
 /// Returns true if the string looks like a YAML number (integer or float).
@@ -259,6 +299,15 @@ pub(super) fn block_value_needs_quoting(value: &str) -> bool {
             .any(|l| l.starts_with(' ') && l.chars().all(|c| c == ' ' || c == '\t'))
 }
 
+/// Whether the block scalar with the value `s` needs an indentation indicator in
+/// its header (see `repr_block_to_doc`): its first non-empty line starts with a
+/// space or holds only white space.
+pub(super) fn block_value_needs_indent_indicator(s: &str) -> bool {
+    s.lines()
+        .find(|l| !l.is_empty())
+        .is_some_and(|l| l.starts_with(' ') || l.chars().all(char::is_whitespace))
+}
+
 /// Convert a block scalar to Doc using hard lines.
 ///
 /// The parser preserves the original chomping indicator, so we emit it
@@ -305,18 +354,29 @@ pub(super) fn repr_block_to_doc(
     // An explicit indicator digit forces the correct indent level on re-parse.
     //
     // Only the first non-empty content line matters for auto-detection.
-    let needs_indent_indicator = s
-        .lines()
-        .find(|l| !l.is_empty())
-        .is_some_and(|l| l.starts_with(' ') || l.chars().all(char::is_whitespace));
+    let needs_indent_indicator = block_value_needs_indent_indicator(s);
 
+    // Keeping the final line breaks of a value that ends in none is stripping
+    // them (`a: |+` at the end of the input, with no line break after `x`).  The
+    // printed line of content ends in a line break, which `|+` would add to the
+    // value.  An empty value has no line of content.
+    let chomp = |chomp: Chomp| match chomp {
+        Chomp::Keep if !s.is_empty() && !s.ends_with('\n') => Chomp::Strip,
+        Chomp::Keep => Chomp::Keep,
+        Chomp::Strip => Chomp::Strip,
+        Chomp::Clip => Chomp::Clip,
+    };
     let base_header = match style {
-        ScalarStyle::Literal(Chomp::Clip) => "|",
-        ScalarStyle::Literal(Chomp::Strip) => "|-",
-        ScalarStyle::Literal(Chomp::Keep) => "|+",
-        ScalarStyle::Folded(Chomp::Clip) => ">",
-        ScalarStyle::Folded(Chomp::Strip) => ">-",
-        ScalarStyle::Folded(Chomp::Keep) => ">+",
+        ScalarStyle::Literal(c) => match chomp(c) {
+            Chomp::Clip => "|",
+            Chomp::Strip => "|-",
+            Chomp::Keep => "|+",
+        },
+        ScalarStyle::Folded(c) => match chomp(c) {
+            Chomp::Clip => ">",
+            Chomp::Strip => ">-",
+            Chomp::Keep => ">+",
+        },
         ScalarStyle::Plain | ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted => "",
     };
 

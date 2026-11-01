@@ -405,6 +405,19 @@ impl<'input> EventIter<'input> {
         if !parent_is_seq_spaces_mapping {
             return false;
         }
+        // A property line of the last item (`- !!str`) with nothing after it is
+        // that item's empty node (YAML 1.2.2 [96] `c-ns-properties` before an
+        // empty `s-l+block-node`), not the key that closes the sequence.  Those
+        // are the standalone ones and the ones a property of the key displaced
+        // into the collection slots (`- !` followed by `&a :`); the inline
+        // properties wait for that key.
+        if matches!(self.pending_tag, Some(PendingTag::Standalone(..)))
+            || matches!(self.pending_anchor, Some(PendingAnchor::Standalone(..)))
+            || self.pending_collection_tag.is_some()
+            || self.pending_collection_anchor.is_some()
+        {
+            self.emit_empty_scalar(pos, InlineProperties::Left);
+        }
         self.coll_stack.pop();
         self.queue.push_back((Event::SequenceEnd, zero_span(pos)));
         // If complex_key_inline is set for the parent mapping, the sequence

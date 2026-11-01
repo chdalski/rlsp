@@ -4,7 +4,7 @@ use std::fmt::Write as _;
 
 use rlsp_fmt::{Doc, FormatOptions, format as fmt_format, hard_line, join, text};
 use rlsp_yaml_parser::node::{Document, Node};
-use rlsp_yaml_parser::{Event, Span};
+use rlsp_yaml_parser::{Event, ScalarStyle, Span};
 
 use crate::editing::editor_config::LineEnding;
 
@@ -40,7 +40,7 @@ pub fn format_subtree(
     let doc = node_to_doc::node_to_doc(node, options, false);
     let fmt_options = FormatOptions {
         print_width: options.print_width,
-        tab_width: options.tab_width,
+        tab_width: options.indent_width(),
         use_tabs: false,
     };
     let rendered = fmt_format(&doc, &fmt_options);
@@ -154,9 +154,10 @@ fn stream_comments(text_input: &str) -> Option<Vec<String>> {
 }
 
 /// The pre-passes over the AST: duplicate-key removal when enabled, then the
-/// style of the collections that cannot print as written (after the removal,
-/// which can move a comment into a flow collection), then the tags of the
-/// collections that the renderers would drop.
+/// tags of the collections that the renderers would drop, then the style of the
+/// collections that cannot print as written (after the removal, which can move a
+/// comment into a flow collection, and after the tags, since a collection with a
+/// printed tag takes an explicit key where one without does not).
 fn settle_documents(
     documents: Vec<Document<Span>>,
     options: &YamlFormatOptions,
@@ -165,16 +166,75 @@ fn settle_documents(
         .into_iter()
         .map(|mut doc| {
             if options.format_remove_duplicate_keys {
-                dedup::dedup_mapping_keys(&mut doc.root);
+                dedup::dedup_mapping_keys(&mut doc.root, options.yaml_version);
             }
+            mapping_render::spell_collection_tags(&mut doc.root);
             flow_comments::settle_collection_styles(
                 &mut doc.root,
                 options.format_enforce_block_style,
             );
-            mapping_render::spell_collection_tags(&mut doc.root);
+            quote_block_scalars_with_indent_indicator(
+                &mut doc.root,
+                false,
+                options.indent_width() <= MAX_INDICATOR_INDENT,
+            );
+            if !doc.end_comments.is_empty() {
+                quote_block_scalar_without_content(&mut doc.root);
+            }
             doc
         })
         .collect()
+}
+
+/// Print a block scalar that needs an indentation indicator double-quoted where
+/// the indicator cannot say how far its content is indented: a key is printed
+/// one level in from its `?`, so its content sits a level deeper than the
+/// indicator counts, and the indicator is one digit, which an indent width above
+/// 9 does not fit.
+fn quote_block_scalars_with_indent_indicator(
+    node: &mut Node<Span>,
+    is_key: bool,
+    digit_fits: bool,
+) {
+    match node {
+        Node::Scalar { value, style, .. } => {
+            if matches!(style, ScalarStyle::Literal(_) | ScalarStyle::Folded(_))
+                && (is_key || !digit_fits)
+                && scalar_render::block_value_needs_indent_indicator(value)
+            {
+                *style = ScalarStyle::DoubleQuoted;
+            }
+        }
+        Node::Mapping { entries, .. } => {
+            for (key, value) in entries.iter_mut() {
+                quote_block_scalars_with_indent_indicator(key, true, digit_fits);
+                quote_block_scalars_with_indent_indicator(value, false, digit_fits);
+            }
+        }
+        Node::Sequence { items, .. } => {
+            for item in items {
+                quote_block_scalars_with_indent_indicator(item, false, digit_fits);
+            }
+        }
+        Node::Alias { .. } => {}
+    }
+}
+
+/// The widest indent whose width is one digit, the most that the indentation
+/// indicator of a block scalar holds.
+const MAX_INDICATOR_INDENT: usize = 9;
+
+/// Print a block scalar that has no line of content double-quoted.  At the root
+/// its content may start in column 0, so the first comment line below it would be
+/// content and not a comment.  `--- |1-` below which `# c` stands is the document
+/// `""` and a comment; as `|-` it would be the document `# c`.
+fn quote_block_scalar_without_content(root: &mut Node<Span>) {
+    if let Node::Scalar { value, style, .. } = root
+        && matches!(style, ScalarStyle::Literal(_) | ScalarStyle::Folded(_))
+        && value.chars().all(|c| c == '\n')
+    {
+        *style = ScalarStyle::DoubleQuoted;
+    }
 }
 
 /// Render loaded documents with `rlsp-fmt`: for each document its comments, the
@@ -182,7 +242,7 @@ fn settle_documents(
 fn render_documents(documents: &[Document<Span>], options: &YamlFormatOptions) -> String {
     let fmt_options = FormatOptions {
         print_width: options.print_width,
-        tab_width: options.tab_width,
+        tab_width: options.indent_width(),
         use_tabs: false,
     };
 
@@ -197,7 +257,10 @@ fn render_documents(documents: &[Document<Span>], options: &YamlFormatOptions) -
     let mut lines: Vec<Doc> = Vec::new();
     for (i, doc) in documents.iter().enumerate() {
         lines.extend(comment_lines(&doc.prefix_comments));
-        if i > 0 || doc.explicit_start {
+        // A document with nothing to print needs its `---`: without it, no
+        // document is there (`&x` alone loads as one, and so does the one before
+        // a `---`).
+        if i > 0 || doc.explicit_start || node_to_doc::renders_empty(&doc.root) {
             lines.push(text("---"));
         }
         lines.extend(comment_lines(&doc.comments));
@@ -208,9 +271,21 @@ fn render_documents(documents: &[Document<Span>], options: &YamlFormatOptions) -
         // An empty root that ends the output is no line at all; the final
         // newline ends the line before it.
         if !(ends_output && prints_nothing(&doc.root)) {
+            // The comment behind a flow collection that turned block is printed
+            // before the comments inside it, which take the end of the lines.
+            let root_comment = mapping_render::line_end_comment(&doc.root);
+            let (above, line_end) = if mapping_render::is_block_collection(
+                &doc.root,
+                options.format_enforce_block_style,
+            ) {
+                (root_comment, None)
+            } else {
+                (None, root_comment)
+            };
+            lines.extend(above.map(|comment| text(comment.to_string())));
             lines.push(mapping_render::with_line_end_comment(
                 node_to_doc::node_to_doc(&doc.root, options, false),
-                mapping_render::line_end_comment(&doc.root),
+                line_end,
             ));
         }
         lines.extend(comment_lines(&doc.end_comments));

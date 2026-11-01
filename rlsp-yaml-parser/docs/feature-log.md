@@ -12,6 +12,75 @@ with existing infrastructure.
 
 ---
 
+### Properties Alone Are an Empty Node [completed]
+
+**Description:** A tag or an anchor with nothing after it is an empty node that
+carries it, wherever it stands: above `---` or `...` (`&x` then `---` is a
+document whose root is empty and anchored), before a `,`, `]` or `}` in a flow
+collection (`[ !!str ]`, `{ k: &a }`, `{ !t , b: 1 }`), and as the last item of a
+sequence at its key's column (`k:\n- !!str\nb: 1`). Before, these properties
+were dropped, or the next key took them. Events equal those of libfyaml 0.9.6.
+**Complexity:** Low
+**Comment:** YAML 1.2.2 [96] `c-ns-properties` on an empty node, [105] `e-scalar`.
+**Tier:** 1
+
+---
+
+### Properties and `?` in a Flow Sequence Pair [completed]
+
+**Description:** In `[ !!str : a ]`, `[ &x : a ]` and `[ !t &x : b ]` the
+properties belong to the empty key of the single pair. Before, the key took none
+of them: a core tag was dropped and any other property moved to the value.
+`[ ? ]`, `[ ? a ]` and `[ ? !!str , b ]` are single pairs with an empty key or
+value; before, `?` was dropped and the entry became a plain scalar. `[ !t ? ]` and
+`[ ? ? ]` are errors. Events equal those of libfyaml 0.9.6.
+**Complexity:** Low
+**Comment:** YAML 1.2.2 [150] `ns-flow-pair` and [151] `ns-flow-pair-entry`.
+**Tier:** 1
+
+---
+
+### A Flow Entry Without the Comma Before It Is an Error [completed]
+
+**Description:** `[: :]`, `[a: b: c]`, `{: :}`, and a collection that starts right
+after an entry (`[ a [ ] ]`, `{ a: b { } }`) report "missing comma in flow
+sequence" or "in flow mapping", as libfyaml 0.9.6 does, at the same position.
+Before, the parser accepted them; `[: :]` gave an unbalanced event stream, and
+`load()` on such a file never returned and used memory until the process died.
+`load()` now also ends in an error for any event stream that closes a collection
+it did not open or stops inside one.
+**Complexity:** Low
+**Comment:** YAML 1.2.2 [138], [141] and [150]: another entry needs a `,`. The
+check in the loader holds whatever the parser emits.
+**Tier:** 1
+
+---
+
+### Only `~` Alone Is Null [completed]
+
+**Description:** A plain scalar that starts with `~` but is not `~` alone
+(`~/bin`, `~x`) loads as a string. Before, it got the null tag.
+**Complexity:** Low
+**Comment:** YAML 1.2.2 §10.3.2, the Core schema null regex.
+**Tier:** 1
+
+---
+
+### Tabs After the Indentation [completed]
+
+**Description:** A tab between the indentation and a tag, anchor or alias
+(`-\n  \t!t a`) separates them and is no part of the tag or the anchor name;
+before, the tab became part of the tag (`"\t!t"`). A `-`, `?` or mapping key
+after indentation spaces and a tab (`k:\n  \ta: 1`) is an error; before, the
+parser read the entry with the tab cut off and lost the lines under it. libfyaml
+0.9.6 rejects the first kind too (see `docs/conformance/design-decisions.md`).
+**Complexity:** Low
+**Comment:** YAML 1.2.2 [69] and [66] allow the tab; [183] and [187] need spaces
+for the indentation of a block entry.
+**Tier:** 1
+
+---
+
 ### A Plain Scalar Cannot Start With a Reserved Indicator [completed]
 
 **Description:** A node that starts with `,`, `@`, a backtick, or an indented

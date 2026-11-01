@@ -196,9 +196,20 @@ impl<'input> EventIter<'input> {
         }
     }
 
+    /// Give the node properties that are still pending at a document boundary
+    /// to an empty root node: a property line before `---` or `...` is the
+    /// whole root node of the document it ends (YAML 1.2.2 [96]
+    /// `c-ns-properties` on an empty node, [105] `e-scalar`), and belongs to
+    /// that document, never to the next one.
+    pub(crate) fn emit_root_properties_as_empty_scalar(&mut self, pos: Pos) {
+        if self.has_pending_properties() {
+            self.emit_empty_scalar(pos, InlineProperties::Taken);
+        }
+        self.clear_pending_properties();
+    }
+
     /// Forget the node properties that are still pending at a document
-    /// boundary: a property line before `---` or `...` belongs to the document
-    /// it ends and never to the next one.
+    /// boundary: they belong to the document it ends and never to the next one.
     pub(crate) fn clear_pending_properties(&mut self) {
         self.pending_anchor = None;
         self.pending_tag = None;

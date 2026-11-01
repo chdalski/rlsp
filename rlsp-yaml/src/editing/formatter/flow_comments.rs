@@ -84,7 +84,7 @@ fn resolve_key(key: &mut Node<Span>, after_first_entry: bool, enforce_block: boo
             let holds_comment = settle_collection_styles(key, enforce_block);
             let block_mapping_after_first = after_first_entry
                 && matches!(key, Node::Mapping { entries, .. } if !entries.is_empty());
-            if block_mapping_after_first || holds_explicit_entry(key, enforce_block) {
+            if block_mapping_after_first || holds_explicit_entry(key, enforce_block, false) {
                 let mut moved = Vec::new();
                 drain_inner_comments(key, &mut moved);
                 add_leading_comments(key, moved);
@@ -108,8 +108,9 @@ fn keep_flow_key(key: &mut Node<Span>) -> bool {
 }
 
 /// Whether the block form of `node` has an entry written with `? ` at any depth.
-/// `enforce_block` makes every collection a block collection.
-fn holds_explicit_entry(node: &Node<Span>, enforce_block: bool) -> bool {
+/// `enforce_block` makes every collection a block collection.  `value_indicator`
+/// tells whether `node` is the value of an entry (see `mapping_render::Lead`).
+fn holds_explicit_entry(node: &Node<Span>, enforce_block: bool, value_indicator: bool) -> bool {
     let is_block = |style: CollectionStyle| enforce_block || style == CollectionStyle::Block;
     match node {
         Node::Mapping {
@@ -118,8 +119,11 @@ fn holds_explicit_entry(node: &Node<Span>, enforce_block: bool) -> bool {
             tag,
             ..
         } if is_block(*style) => {
-            let has_properties =
-                mapping_render::collection_properties(node.anchor(), tag.as_deref()).is_some();
+            let lead = mapping_render::Lead {
+                properties: mapping_render::collection_properties(node.anchor(), tag.as_deref())
+                    .is_some(),
+                value_indicator,
+            };
             let previous_values =
                 iter::once(None).chain(entries.iter().map(|(_, value)| Some(value)));
             entries
@@ -127,13 +131,13 @@ fn holds_explicit_entry(node: &Node<Span>, enforce_block: bool) -> bool {
                 .zip(previous_values)
                 .any(|((key, value), previous)| {
                     mapping_render::needs_explicit_key(key)
-                        || mapping_render::forced_explicit_key(previous, key, has_properties)
-                        || holds_explicit_entry(value, enforce_block)
+                        || mapping_render::forced_explicit_key(previous, key, lead)
+                        || holds_explicit_entry(value, enforce_block, true)
                 })
         }
         Node::Sequence { items, style, .. } if is_block(*style) => items
             .iter()
-            .any(|item| holds_explicit_entry(item, enforce_block)),
+            .any(|item| holds_explicit_entry(item, enforce_block, false)),
         Node::Mapping { .. } | Node::Sequence { .. } | Node::Scalar { .. } | Node::Alias { .. } => {
             false
         }

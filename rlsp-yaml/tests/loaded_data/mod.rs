@@ -9,9 +9,9 @@ use std::fmt::Write as _;
 use rlsp_yaml_parser::node::Node;
 use rlsp_yaml_parser::{Span, load};
 
-/// The data of `yaml`: structure, scalar values, tags, anchors and aliases; not
-/// spans, styles or comments.  `None` when `yaml` does not load.
-pub fn data_signature(yaml: &str) -> Option<String> {
+/// The data of `node`: structure, scalar values, tags, anchors and aliases; not
+/// spans, styles or comments.
+pub fn node_signature(node: &Node<Span>) -> String {
     fn walk(node: &Node<Span>, out: &mut String) {
         let props = format!("&{:?} !{:?}", node.anchor(), tag_of(node));
         match node {
@@ -53,8 +53,15 @@ pub fn data_signature(yaml: &str) -> Option<String> {
         }
     }
     let mut out = String::new();
+    walk(node, &mut out);
+    out
+}
+
+/// The data of `yaml` (see `node_signature`).  `None` when `yaml` does not load.
+pub fn data_signature(yaml: &str) -> Option<String> {
+    let mut out = String::new();
     for doc in load(yaml).ok()? {
-        walk(&doc.root, &mut out);
+        out.push_str(&node_signature(&doc.root));
         out.push('\n');
     }
     Some(out)

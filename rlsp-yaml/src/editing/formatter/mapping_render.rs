@@ -187,17 +187,26 @@ pub(super) fn prepend_collection_properties(
     }
 }
 
+/// What the first entry of a block mapping follows on the line above it.  A key
+/// can read as something else there (see `forced_explicit_key`).
+#[derive(Clone, Copy)]
+pub(super) struct Lead {
+    /// The mapping's anchor or tag is printed there.
+    pub(super) properties: bool,
+    /// The mapping is the value of an entry, and the line ends in its `:`.
+    pub(super) value_indicator: bool,
+}
+
 /// Convert a YAML mapping to Doc, branching on block vs flow style.
 ///
-/// `has_properties` tells whether an anchor or tag of the mapping is printed on
-/// the line above its first entry (see `block_mapping_parts`).
+/// `lead` tells what the first entry follows (see `block_mapping_parts`).
 pub(super) fn mapping_to_doc(
     entries: &[(Node<Span>, Node<Span>)],
     style: CollectionStyle,
     options: &YamlFormatOptions,
-    has_properties: bool,
+    lead: Lead,
 ) -> Doc {
-    let Entry { above, doc } = mapping_to_parts(entries, style, options, has_properties);
+    let Entry { above, doc } = mapping_to_parts(entries, style, options, lead);
     with_comments_above(doc, above)
 }
 
@@ -209,7 +218,7 @@ pub(super) fn mapping_to_parts<'a>(
     entries: &'a [(Node<Span>, Node<Span>)],
     style: CollectionStyle,
     options: &YamlFormatOptions,
-    has_properties: bool,
+    lead: Lead,
 ) -> Entry<'a> {
     if entries.is_empty() {
         return Entry {
@@ -229,7 +238,7 @@ pub(super) fn mapping_to_parts<'a>(
             above: Vec::new(),
             doc: flow_mapping_to_doc(entries, options),
         },
-        CollectionStyle::Block => block_mapping_parts(entries, options, has_properties),
+        CollectionStyle::Block => block_mapping_parts(entries, options, lead),
     }
 }
 
@@ -238,13 +247,14 @@ pub(super) fn mapping_to_parts<'a>(
 /// prints these above that text: between the text and the entry, they would be
 /// read as the comments of the collection.
 ///
-/// `has_properties` tells whether the mapping's anchor or tag is printed on the
-/// line above the first entry, where a first key that is a collection would take
-/// them (see `entry_to_parts`).
+/// `lead` tells what the first entry follows: the mapping's properties, where a
+/// first key that is a collection would take them, and the `:` of the entry whose
+/// value the mapping is, where a first key with no text reads as part of that
+/// value (see `forced_explicit_key`).
 pub(super) fn block_mapping_parts<'a>(
     entries: &'a [(Node<Span>, Node<Span>)],
     options: &YamlFormatOptions,
-    has_properties: bool,
+    lead: Lead,
 ) -> Entry<'a> {
     let previous_values = iter::once(None).chain(entries.iter().map(|(_, value)| Some(value)));
     join_entries(
@@ -255,7 +265,7 @@ pub(super) fn block_mapping_parts<'a>(
                 // A key with no text right after a value with none reads as the
                 // value's own properties and content (`a:` followed by `!t : 1`
                 // reads as `a: !t 1`).
-                let explicit_key = forced_explicit_key(previous, key, has_properties);
+                let explicit_key = forced_explicit_key(previous, key, lead);
                 entry_to_parts(key, value, options, explicit_key)
             }),
         "{}",
@@ -264,20 +274,53 @@ pub(super) fn block_mapping_parts<'a>(
 
 /// Whether an entry prints with `? ` although its key does not need it
 /// (see `block_mapping_parts`): `previous` is the value of the entry before it,
-/// `None` for the first entry, whose key may sit below its mapping's properties.
+/// `None` for the first entry, whose key may sit below its mapping's properties
+/// or the `:` of its mapping's entry (`x:` followed by `: v` reads as `x: v`).
 pub(super) fn forced_explicit_key(
     previous: Option<&Node<Span>>,
     key: &Node<Span>,
-    has_properties: bool,
+    lead: Lead,
 ) -> bool {
     previous.map_or_else(
-        || has_properties && is_collection(key),
-        |previous| prints_no_text(previous) && prints_no_text(key),
+        || (lead.properties && is_collection(key)) || (lead.value_indicator && prints_no_text(key)),
+        // A value that is its properties alone takes the properties that
+        // start the next line, so the next key must not start with any.
+        |previous| prints_no_text(previous) && (prints_no_text(key) || has_properties(key)),
     )
+}
+
+/// Whether `node` prints an anchor or a tag before its text.  A core tag that
+/// the printed form of a non-empty scalar implies is not printed, so it does not
+/// count: the decision must be the same for the output as for the source.
+fn has_properties(node: &Node<Span>) -> bool {
+    match node {
+        Node::Scalar { tag, .. } => {
+            node.anchor().is_some() || tag.as_deref().is_some_and(|t| !is_core_schema_tag(t))
+        }
+        Node::Mapping { tag, .. } | Node::Sequence { tag, .. } => {
+            collection_properties(node.anchor(), tag.as_deref()).is_some()
+        }
+        Node::Alias { .. } => false,
+    }
 }
 
 const fn is_collection(node: &Node<Span>) -> bool {
     matches!(node, Node::Mapping { .. } | Node::Sequence { .. })
+}
+
+/// Whether `node` is a collection with entries that prints as a block collection:
+/// with the style `Block`, or with any style when `enforce_block` is set (the
+/// option that prints every collection as block).
+pub(super) const fn is_block_collection(node: &Node<Span>, enforce_block: bool) -> bool {
+    match node {
+        Node::Mapping { entries, style, .. } => {
+            !entries.is_empty() && (enforce_block || matches!(style, CollectionStyle::Block))
+        }
+        Node::Sequence { items, style, .. } => {
+            !items.is_empty() && (enforce_block || matches!(style, CollectionStyle::Block))
+        }
+        Node::Scalar { .. } | Node::Alias { .. } => false,
+    }
 }
 
 /// Join the Docs of the entries of a block collection, one per line, and take
@@ -411,6 +454,24 @@ pub(super) fn may_exceed_implicit_key_limit(node: &Node<Span>) -> bool {
     spend(node, &mut budget)
 }
 
+/// Whether the printed form of `key`, with its properties and the space before
+/// its colon, is longer than an implicit key may be.  Escaping makes a scalar
+/// longer than its value (`\L` for each U+2028), so the value does not tell.
+fn exceeds_implicit_key_limit(key: &Node<Span>, options: &YamlFormatOptions) -> bool {
+    may_exceed_implicit_key_limit(key) && {
+        let printed = rlsp_fmt::format(
+            &super::node_to_doc::node_to_doc(key, options, true),
+            &rlsp_fmt::FormatOptions {
+                print_width: usize::MAX,
+                tab_width: options.indent_width(),
+                use_tabs: false,
+            },
+        );
+        printed.chars().count() + usize::from(key_needs_space_before_colon(key))
+            > IMPLICIT_KEY_LIMIT
+    }
+}
+
 /// Returns `true` when a mapping key requires the explicit `? key` form.
 ///
 /// Explicit key syntax is required when the key cannot appear as a plain scalar
@@ -539,10 +600,11 @@ pub(super) fn explicit_key_to_doc<'a>(
     options: &YamlFormatOptions,
 ) -> Entry<'a> {
     let Entry {
-        above,
+        mut above,
         doc: key_doc,
     } = explicit_key_parts(key, options);
-    let value_is_empty = matches!(value, Node::Scalar { value, .. } if value.is_empty());
+    // A value with an anchor or a tag prints it after the `:`.
+    let value_is_empty = renders_empty(value);
 
     // `? key_doc` — the key part.
     // For block scalars/collections as keys, the key_doc spans multiple lines.
@@ -551,10 +613,22 @@ pub(super) fn explicit_key_to_doc<'a>(
     // the line, so it is left out.
     let question = if renders_empty(key) {
         text("?")
+    } else if is_block_collection(key, false) {
+        // The first entry shares the line with the `?`; the entries after it
+        // continue in its column.
+        concat(vec![text(options.compact_marker('?')), indent(key_doc)])
     } else {
         concat(vec![text("? "), indent(key_doc)])
     };
-    let question_line = with_line_end_comment(question, line_end_comment(key));
+    // A comment on the line of a `?` that has no key text reads back as a comment
+    // above the key, so it is printed there.
+    let question_comment = if prints_no_text(key) {
+        above.extend(line_end_comment(key));
+        None
+    } else {
+        line_end_comment(key)
+    };
+    let question_line = with_line_end_comment(question, question_comment);
 
     // `: value_doc` — the value part.
     let value_comment = line_end_comment(value);
@@ -578,10 +652,11 @@ pub(super) fn explicit_key_to_doc<'a>(
                 ..
             } if !entries.is_empty() && effective_style(*style) == CollectionStyle::Block => {
                 let colon_prefix = collection_colon(":", value.anchor(), tag.as_deref());
-                let has_properties =
-                    collection_properties(value.anchor(), tag.as_deref()).is_some();
-                let Entry { above, doc } =
-                    mapping_to_parts(entries, *style, options, has_properties);
+                let lead = Lead {
+                    properties: collection_properties(value.anchor(), tag.as_deref()).is_some(),
+                    value_indicator: true,
+                };
+                let Entry { above, doc } = mapping_to_parts(entries, *style, options, lead);
                 // A comment after the colon reads back as a comment of the first
                 // entry, so it is printed as one.
                 concat(vec![
@@ -648,8 +723,11 @@ fn explicit_key_parts<'a>(key: &'a Node<Span>, options: &YamlFormatOptions) -> E
             tag,
             ..
         } if !entries.is_empty() && is_block(*style) => {
-            let has_properties = collection_properties(key.anchor(), tag.as_deref()).is_some();
-            let Entry { above, doc } = block_mapping_parts(entries, options, has_properties);
+            let lead = Lead {
+                properties: collection_properties(key.anchor(), tag.as_deref()).is_some(),
+                value_indicator: false,
+            };
+            let Entry { above, doc } = block_mapping_parts(entries, options, lead);
             Entry {
                 above,
                 doc: prepend_collection_properties(
@@ -717,7 +795,7 @@ pub(super) fn entry_to_parts<'a>(
     let mut above: Vec<&str> = key.leading_comments().iter().map(String::as_str).collect();
 
     // Dispatch to explicit key form when the key type requires it.
-    if needs_explicit_key(key) || explicit_key {
+    if needs_explicit_key(key) || explicit_key || exceeds_implicit_key_limit(key, options) {
         let explicit = explicit_key_to_doc(key, value, options);
         above.extend(explicit.above);
         return Entry {
@@ -760,14 +838,17 @@ pub(super) fn entry_to_parts<'a>(
             ..
         } if !entries.is_empty() && effective_style(*style) == CollectionStyle::Block => {
             let colon = collection_colon(bare_colon, value.anchor(), tag.as_deref());
-            let has_properties = collection_properties(value.anchor(), tag.as_deref()).is_some();
+            let lead = Lead {
+                properties: collection_properties(value.anchor(), tag.as_deref()).is_some(),
+                value_indicator: true,
+            };
             concat(vec![
                 key_doc,
                 colon,
                 trailing_comment_doc(line_end),
                 indent(concat(vec![
                     hard_line(),
-                    mapping_to_doc(entries, *style, options, has_properties),
+                    mapping_to_doc(entries, *style, options, lead),
                 ])),
             ])
         }

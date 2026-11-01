@@ -38,7 +38,7 @@ formatting it again must change nothing.
 - [x] Task 9: Keep comments when removing duplicate keys
 - [x] Task 10: Fold only own-line comments
 - [x] Task 11: Keep the data when formatting
-- [ ] Task 12: Pin that no comment is lost
+- [x] Task 12: Pin that no comment is lost
 - [ ] Measure every `*.yml` and `*.yaml` file under `/workspace`,
       `/usr/local/cargo/registry`, and `~/.local/share/pnpm`: for each file
       that loads, the count of `#` at a line start or after whitespace, outside
@@ -241,7 +241,7 @@ these inputs change today.
 
 ### Task 12: Pin that no comment is lost
 
-- [ ] A property test checks, for every yaml-test-suite input and every file in
+- [x] A property test checks, for every yaml-test-suite input and every file in
       `rlsp-yaml/tests/corpus/` that loads, under the options default,
       `format_enforce_block_style`, `print_width: 20`,
       `format_indent_sequences: false`, `preserve_quotes`, `single_quote: true`,
@@ -249,18 +249,24 @@ these inputs change today.
       `Comment` texts from `parse_events` is the same before and after
       `format_yaml`, `load()` of the output succeeds, the documents are
       equivalent, and a second format changes nothing
-- [ ] The same check runs on variants of those inputs with ` # cN` appended to,
+- [x] The same check runs on variants of those inputs with ` # cN` appended to,
       and separately an own-line `# cN` inserted before, each line outside a
       block or multi-line quoted scalar, whenever the variant's documents are
       equivalent to the original's
-- [ ] Every data difference the check finds is fixed in this task, with its spec
+- [x] Every data difference the check finds is fixed in this task, with its spec
       production named in the handoff: the check passes on every input that loads
-- [ ] Only inputs for which `load()` fails are skipped: `format_yaml` returns
+- [x] Only inputs for which `load()` fails are skipped: `format_yaml` returns
       those unchanged. They are a pinned list in the test that may only shrink,
       and each has its deviation on `.ai/backlog.md`
-- [ ] `rlsp-yaml/tests/corpus/comment-positions.yaml` contains every comment
+- [x] `[: :]\n`, `[ : : ]\n`, `[? : :]\n`, and `[[: :]]\n` report a syntax error, as libfyaml
+      does, `parse_events` yields balanced events, and `load()` ends in an error on
+      an unbalanced stream instead of exhausting memory
+- [x] `[ !!str ]\n`, `{ !!str }\n`, `{ b: !!str }\n`, and `[{ b: &x }, *x]\n` keep their
+      properties through `load()` and `format_yaml`, the same data as libfyaml, and
+      `k:\n  \ta: 1\n` and `k:\n  \t- a\n` report a syntax error, as libfyaml does
+- [x] `rlsp-yaml/tests/corpus/comment-positions.yaml` contains every comment
       position of Tasks 4 to 7
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ## Non-Goals
 
@@ -329,6 +335,14 @@ these inputs change today.
   inner implicit key take the length exemption from an outer explicit key, so the
   parser rejected valid input that no output form avoids. Valid input it rejected
   now loads; no event changes on input it accepted.
+- **Text that formatting would delete silently is fixed where found (review of Task
+  12):** as in Task 11, the parser dropped properties before a closing bracket and
+  accepted a tab after the indentation, and `format_yaml` then removed the text. The
+  check cannot see this, because it compares `load()` with `load()`. Declined: a
+  separate plan.
+- **The memory exhaustion by `[: :]` is fixed in Task 12 (user decision):** these 5
+  bytes take the language server down, also in the released parser, and the fuzz
+  input for the check reaches them. Declined: a separate plan afterwards.
 - **`--- # c` and `- # c` move one line:** the data stays the same and no
   further field is needed; `--- # yaml-language-server: $schema=x` thereby
   becomes a valid modeline line. Declined: keeping them on the marker's line.
@@ -389,3 +403,7 @@ these inputs change today.
 - Task 12: the options include `yaml_version: 1.1`, under which `"y"` and `"1_000"`
   stay strings
 - Task 12: `a: ?\n` keeps its data through `format_yaml`
+- Measure step: a block scalar's span includes its header line, so a comment on that
+  line counts as outside the scalar
+- Measure step: a quoted scalar ends at its closing quote for the count, because the
+  span of a multi-line quoted scalar runs past it (entry on `.ai/backlog.md`)

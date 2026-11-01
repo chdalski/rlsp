@@ -408,7 +408,7 @@ BNF: `ns-s-flow-seq-entries(n,c) ::= ns-flow-seq-entry(n,c) s-separate(n,c)? ( c
 
 - **Verdict:** Strict-conformant
 - **Spec (§7.4.1):** "Sequence entries are separated by a `,` character."
-- **Implementation:** `,` branch inside `FlowFrame::Sequence` in `event_iter/flow.rs` — advances `has_value`, permits trailing comma before `]`
+- **Implementation:** `,` branch inside `FlowFrame::Sequence` in `event_iter/flow.rs` — advances `has_value`, permits trailing comma before `]`; a collection that opens right after an entry (`[ a [ ] ]`) or after a flow mapping entry (`{ a: b { } }`, [141]) reports "missing comma in flow sequence" or "in flow mapping" in the opening-delimiter branch, as does a second `:` after a key's separator in a mapping (`{: :}`)
 - **Tests:** `tests/yaml-test-suite/src/5KJE.yaml`; `tests/yaml-test-suite/src/8UDB.yaml`
 
 ### [139] ns-flow-seq-entry(n,c)
@@ -516,8 +516,8 @@ BNF: `ns-flow-pair(n,c) ::= ( c-mapping-key s-separate(n,c) ns-flow-map-explicit
 
 - **Verdict:** Strict-conformant
 - **Spec (§7.4.3):** "A more compact notation is usable inside flow sequences, if the mapping contains a single key/value pair."
-- **Implementation:** `:` value separator inside `FlowFrame::Sequence` in `event_iter/flow.rs` triggers single-pair implicit mapping — `MappingStart` inserted before the key, `MappingEnd` emitted before next `,` or `]`
-- **Tests:** `tests/yaml-test-suite/src/QF4Y.yaml` (Spec Example 7.19. Single Pair Flow Mappings); `tests/yaml-test-suite/src/CT4Q.yaml`
+- **Implementation:** `:` value separator inside `FlowFrame::Sequence` in `event_iter/flow.rs` triggers single-pair implicit mapping — `MappingStart` inserted before the key, `MappingEnd` emitted before next `,` or `]`; a pair has one `:` — a second one in the same entry (`[: :]`, `[a: b: c]`) is the start of another entry without the `,` of [138], and reports "missing comma in flow sequence" (it once inserted a second `MappingStart`, an unbalanced event stream; `load()` also ends in an error on such a stream); properties before the `:` (`[ !t &x : a ]`) belong to the key, and an explicit `?` forms the pair itself — `[ ? ]`, `[ ? a ]`, `[ ? !t , b ]` are pairs with an empty key or value (`finish_sequence_entry`); a property before the `?` (`[ !t ? ]`) and a second `?` in one entry are errors, as in libfyaml
+- **Tests:** `tests/smoke/flow_collections.rs` (`pairs_with_properties_and_question_marks_in_flow_collections_equal_libfyaml`, `a_flow_entry_that_libfyaml_rejects_is_an_error`); `tests/yaml-test-suite/src/QF4Y.yaml` (Spec Example 7.19. Single Pair Flow Mappings); `tests/yaml-test-suite/src/CT4Q.yaml`
 
 ### [151] ns-flow-pair-entry(n,c)
 

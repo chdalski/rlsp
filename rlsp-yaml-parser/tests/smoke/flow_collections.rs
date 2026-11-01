@@ -1125,3 +1125,320 @@ fn verbatim_tag_in_flow_collection_missing_separator_errors() {
         );
     }
 }
+
+// -----------------------------------------------------------------------
+// A single pair of a flow sequence has one `:`
+// -----------------------------------------------------------------------
+
+/// A second `:` in one entry of a flow sequence needs a comma before it (YAML
+/// 1.2.2 [138], [150]).  The parser once wrapped the key in a second mapping
+/// and emitted a `MappingStart` without its `MappingEnd`, which made `load`
+/// run until memory was exhausted.
+#[rstest]
+#[case::empty_key_and_value("[: :]\n", 3)]
+#[case::spaced("[ : : ]\n", 4)]
+#[case::explicit_key("[? : :]\n", 5)]
+#[case::nested("[[: :]]\n", 4)]
+#[case::plain_key("[a: b: c]\n", 5)]
+#[case::collection_value("[a: [b]: c]\n", 7)]
+#[case::space_before_the_second_colon("[a: b : c]\n", 6)]
+fn second_colon_in_a_flow_sequence_entry_is_an_error(
+    #[case] input: &str,
+    #[case] error_offset: usize,
+) {
+    let error = parse_events(input).find_map(Result::err);
+    assert!(error.is_some(), "{input:?}");
+    if let Some(error) = error {
+        assert_eq!(error.pos.byte_offset, error_offset, "{input:?}");
+        assert!(
+            error.message.contains("missing comma in flow sequence"),
+            "{}",
+            error.message
+        );
+    }
+    assert!(rlsp_yaml_parser::load(input).is_err(), "{input:?}");
+}
+
+/// Entries that each have one `:` stay single pairs.
+#[rstest]
+#[case::two_pairs("[a: b, c: d]\n", 2)]
+#[case::empty_keys("[: a, : b]\n", 2)]
+#[case::explicit_key("[? a : b, c]\n", 1)]
+#[case::pair_in_a_pair("[a: [b: c]]\n", 2)]
+fn flow_sequence_entries_with_one_colon_are_single_pairs(
+    #[case] input: &str,
+    #[case] mappings: usize,
+) {
+    let events = event_variants(input);
+    let starts = events
+        .iter()
+        .filter(|e| matches!(e, Event::MappingStart { .. }))
+        .count();
+    let ends = events
+        .iter()
+        .filter(|e| matches!(e, Event::MappingEnd))
+        .count();
+    assert_eq!((starts, ends), (mappings, mappings), "{input:?}");
+}
+
+// -----------------------------------------------------------------------
+// Properties before a comma or a closing delimiter are an empty node
+// -----------------------------------------------------------------------
+
+const STR: &str = "tag:yaml.org,2002:str";
+
+/// The scalars and aliases of `input` in order, as `(value, anchor, tag)`; an
+/// alias is `("*name", None, None)`.
+fn nodes_of(input: &str) -> Vec<(String, Option<String>, Option<String>)> {
+    event_variants(input)
+        .iter()
+        .filter_map(|e| {
+            if let Event::Scalar { value, .. } = e {
+                Some((
+                    value.to_string(),
+                    e.anchor().map(str::to_string),
+                    e.tag().map(str::to_string),
+                ))
+            } else if let Event::Alias { name } = e {
+                Some((format!("*{name}"), None, None))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn node(
+    value: &str,
+    anchor: Option<&str>,
+    tag: Option<&str>,
+) -> (String, Option<String>, Option<String>) {
+    (
+        value.to_string(),
+        anchor.map(str::to_string),
+        tag.map(str::to_string),
+    )
+}
+
+/// Properties that a `,`, `]` or `}` follows stand on an empty node of their own
+/// (YAML 1.2.2 [96] `c-ns-properties` on an empty node, [105] `e-scalar`).  The
+/// parser dropped those before a closing delimiter and rejected those before a
+/// comma in a sequence; a property that stays pending is also the anchor of the
+/// next node (`[{ b: &x }, *x]` gave a third item).  The expected events are
+/// those of libfyaml (`fy-tool --testsuite`, 0.9.6).
+#[rstest]
+#[case::tag_in_a_sequence("[ !!str ]\n", vec![node("", None, Some(STR))])]
+#[case::anchor_in_a_sequence("[ &x ]\n", vec![node("", Some("x"), None)])]
+#[case::tag_before_a_comma("[a, !!str , b]\n", vec![node("a", None, None), node("", None, Some(STR)), node("b", None, None)])]
+#[case::anchor_before_a_comma_first("[&a , b]\n", vec![node("", Some("a"), None), node("b", None, None)])]
+#[case::tag_as_a_key_in_a_mapping("{ !!str }\n", vec![node("", None, Some(STR)), node("", None, None)])]
+#[case::tag_as_a_key_before_a_comma("{ !t , b: 2 }\n", vec![node("", None, Some("!t")), node("", None, None), node("b", None, None), node("2", None, None)])]
+#[case::tag_as_a_value("{ b: !!str }\n", vec![node("b", None, None), node("", None, Some(STR))])]
+#[case::anchor_as_a_value("{ b: &x }\n", vec![node("b", None, None), node("", Some("x"), None)])]
+#[case::tag_as_a_value_before_a_comma("{ b: !!str , c }\n", vec![node("b", None, None), node("", None, Some(STR)), node("c", None, None), node("", None, None)])]
+#[case::tag_on_a_single_pair_value("[ a: !!str ]\n", vec![node("a", None, None), node("", None, Some(STR))])]
+#[case::anchor_on_a_single_pair_value("[ a: &x ]\n", vec![node("a", None, None), node("", Some("x"), None)])]
+#[case::tag_on_an_explicit_key("{ ? !!str }\n", vec![node("", None, Some(STR)), node("", None, None)])]
+#[case::anchor_does_not_reach_the_next_item("[{ b: &x }, *x]\n", vec![node("b", None, None), node("", Some("x"), None), node("*x", None, None)])]
+#[case::anchor_and_tag("[ &a !t ]\n", vec![node("", Some("a"), Some("!t"))])]
+fn properties_before_a_comma_or_a_closing_delimiter_are_an_empty_node(
+    #[case] input: &str,
+    #[case] expected: Vec<(String, Option<String>, Option<String>)>,
+) {
+    assert_eq!(nodes_of(input), expected, "{input:?}");
+}
+
+// -----------------------------------------------------------------------
+// A collection or a second `:` after a complete entry needs a comma
+// -----------------------------------------------------------------------
+
+/// A flow collection that starts right after an entry, and a second `:` after
+/// the one that follows a key, begin another entry without the `,` before it
+/// (YAML 1.2.2 [138] `ns-s-flow-seq-entries`, [141] `ns-s-flow-map-entries`).
+/// The parser accepted them, and `{ a: 2 !u2 { } }` loaded to data that no
+/// output of the formatter has.  Positions equal those of libfyaml
+/// (`fy-tool --testsuite`, 0.9.6).
+#[rstest]
+#[case::mapping_after_a_plain_value("{ a: b { } }\n", 7, "mapping")]
+#[case::mapping_after_a_quoted_value("{ a: \"q\" { } }\n", 9, "mapping")]
+#[case::mapping_after_an_alias_value("{ a: *x { } }\n", 8, "mapping")]
+#[case::sequence_after_a_plain_value("{ a: b [ ] }\n", 7, "mapping")]
+#[case::sequence_after_a_collection_value("{ a: [x] [y] }\n", 9, "mapping")]
+#[case::second_colon_after_an_empty_key("{: :}\n", 3, "mapping")]
+#[case::collection_after_a_plain_item("[ a [ ] ]\n", 4, "sequence")]
+#[case::collection_after_a_quoted_item("[ \"q\" [ ] ]\n", 6, "sequence")]
+#[case::collection_after_an_alias_item("[ *x [ ] ]\n", 5, "sequence")]
+#[case::collection_after_a_pair("[ a: b [ ] ]\n", 7, "sequence")]
+#[case::the_fuzz_input(
+    "!u { null: \n#c\n &z-\n2 !u2 { }\n#c\n , #c\n true::\n }\n",
+    26,
+    "mapping"
+)]
+fn a_flow_collection_after_a_complete_entry_needs_a_comma(
+    #[case] input: &str,
+    #[case] error_offset: usize,
+    #[case] kind: &str,
+) {
+    let error = parse_events(input).find_map(Result::err);
+    assert!(error.is_some(), "{input:?}");
+    if let Some(error) = error {
+        assert_eq!(error.pos.byte_offset, error_offset, "{input:?}");
+        assert!(
+            error
+                .message
+                .contains(&format!("missing comma in flow {kind}")),
+            "{}",
+            error.message
+        );
+    }
+    assert!(rlsp_yaml_parser::load(input).is_err(), "{input:?}");
+}
+
+/// The same positions with the comma are fine, and so are values that start
+/// with a collection or a colon.
+#[rstest]
+#[case::comma_in_a_mapping("{ a: b, { } }\n")]
+#[case::comma_in_a_sequence("[ a, [ ] ]\n")]
+#[case::collection_as_a_value("{ a: [x] }\n")]
+#[case::collection_as_a_pair_value("[ a: [x] ]\n")]
+#[case::collection_key("{ [x]: 1, {y}: 2 }\n")]
+#[case::value_that_starts_with_a_colon("{ [x]: :c }\n")]
+#[case::collection_with_properties("[ !t [a], &x {b} ]\n")]
+fn a_flow_collection_after_a_comma_or_a_colon_is_accepted(#[case] input: &str) {
+    assert!(!has_error(input), "{input:?}");
+}
+
+// -----------------------------------------------------------------------
+// Single pairs with properties and `?` in flow collections
+// -----------------------------------------------------------------------
+
+/// The events of `input` the way `fy-tool --testsuite` (libfyaml 0.9.6) prints
+/// them, without the stream and document lines, joined by spaces.
+fn fy_shape(input: &str) -> String {
+    let properties = |e: &Event<'_>| {
+        let anchor = e.anchor().map_or(String::new(), |a| format!(" &{a}"));
+        let tag = e.tag().map_or(String::new(), |t| format!(" <{t}>"));
+        format!("{anchor}{tag}")
+    };
+    event_variants(input)
+        .iter()
+        .filter_map(|e| match e {
+            Event::SequenceStart { style, .. } => Some(format!(
+                "+SEQ{}{}",
+                if *style == CollectionStyle::Flow {
+                    " []"
+                } else {
+                    ""
+                },
+                properties(e)
+            )),
+            Event::MappingStart { style, .. } => Some(format!(
+                "+MAP{}{}",
+                if *style == CollectionStyle::Flow {
+                    " {}"
+                } else {
+                    ""
+                },
+                properties(e)
+            )),
+            Event::SequenceEnd => Some("-SEQ".to_string()),
+            Event::MappingEnd => Some("-MAP".to_string()),
+            Event::Alias { name } => Some(format!("=ALI *{name}")),
+            Event::Scalar { value, .. } => Some(format!("=VAL{} :{value}", properties(e))),
+            Event::StreamStart
+            | Event::StreamEnd
+            | Event::DocumentStart { .. }
+            | Event::DocumentEnd { .. }
+            | Event::Comment { .. } => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Properties before the `:` of a pair in a flow sequence belong to its key, and
+/// a `?` with nothing after it, or only a key, is a single pair too (YAML 1.2.2
+/// [150] `ns-flow-pair`, [151]).  Before, the key took none of the properties
+/// (the value did, or a core tag was dropped) and the entry `[ ? a ]` became the
+/// scalar `a`.  Expected events are those of libfyaml.
+#[rstest]
+#[case::core_tag_on_the_key(
+    "[ !!str : a ]\n",
+    "+SEQ [] +MAP {} =VAL <tag:yaml.org,2002:str> : =VAL :a -MAP -SEQ"
+)]
+#[case::tag_on_the_key("[ !t : a ]\n", "+SEQ [] +MAP {} =VAL <!t> : =VAL :a -MAP -SEQ")]
+#[case::anchor_on_the_key("[ &x : a ]\n", "+SEQ [] +MAP {} =VAL &x : =VAL :a -MAP -SEQ")]
+#[case::anchor_and_tag_on_the_key(
+    "[ !t &x : b ]\n",
+    "+SEQ [] +MAP {} =VAL &x <!t> : =VAL :b -MAP -SEQ"
+)]
+#[case::explicit_key_with_a_tag("[ ? !t : a ]\n", "+SEQ [] +MAP {} =VAL <!t> : =VAL :a -MAP -SEQ")]
+#[case::explicit_key_with_an_anchor(
+    "[ ? &x : a ]\n",
+    "+SEQ [] +MAP {} =VAL &x : =VAL :a -MAP -SEQ"
+)]
+#[case::item_before_a_pair(
+    "[ a, !t : b ]\n",
+    "+SEQ [] =VAL :a +MAP {} =VAL <!t> : =VAL :b -MAP -SEQ"
+)]
+#[case::pair_in_a_block_value(
+    "k: [ &x : a ]\n",
+    "+MAP =VAL :k +SEQ [] +MAP {} =VAL &x : =VAL :a -MAP -SEQ -MAP"
+)]
+#[case::empty_value_after_a_tagged_key(
+    "[ !t : ]\n",
+    "+SEQ [] +MAP {} =VAL <!t> : =VAL : -MAP -SEQ"
+)]
+#[case::tagged_key_and_value(
+    "[ ? !!str : !!str ]\n",
+    "+SEQ [] +MAP {} =VAL <tag:yaml.org,2002:str> : =VAL <tag:yaml.org,2002:str> : -MAP -SEQ"
+)]
+#[case::bare_question_mark("[ ? ]\n", "+SEQ [] +MAP {} =VAL : =VAL : -MAP -SEQ")]
+#[case::question_mark_and_key("[ ? a ]\n", "+SEQ [] +MAP {} =VAL :a =VAL : -MAP -SEQ")]
+#[case::question_mark_and_tag(
+    "[ ? !!str ]\n",
+    "+SEQ [] +MAP {} =VAL <tag:yaml.org,2002:str> : =VAL : -MAP -SEQ"
+)]
+#[case::question_mark_and_tag_before_a_comma(
+    "[ ? !!str , a ]\n",
+    "+SEQ [] +MAP {} =VAL <tag:yaml.org,2002:str> : =VAL : -MAP =VAL :a -SEQ"
+)]
+#[case::bare_question_mark_before_a_comma(
+    "[ ? , a ]\n",
+    "+SEQ [] +MAP {} =VAL : =VAL : -MAP =VAL :a -SEQ"
+)]
+#[case::colon_without_a_value("[ a: ]\n", "+SEQ [] +MAP {} =VAL :a =VAL : -MAP -SEQ")]
+#[case::explicit_key_colon_without_a_value(
+    "[ ? a : ]\n",
+    "+SEQ [] +MAP {} =VAL :a =VAL : -MAP -SEQ"
+)]
+#[case::bare_question_mark_in_a_mapping("{ ? , a }\n", "+MAP {} =VAL : =VAL : =VAL :a =VAL : -MAP")]
+#[case::collection_key_without_a_value("{ [b] }\n", "+MAP {} +SEQ [] =VAL :b -SEQ =VAL : -MAP")]
+#[case::collection_key_without_a_value_before_a_comma(
+    "{ [b] , c: d }\n",
+    "+MAP {} +SEQ [] =VAL :b -SEQ =VAL : =VAL :c =VAL :d -MAP"
+)]
+fn pairs_with_properties_and_question_marks_in_flow_collections_equal_libfyaml(
+    #[case] input: &str,
+    #[case] expected: &str,
+) {
+    assert_eq!(fy_shape(input), expected, "{input:?}");
+}
+
+/// libfyaml rejects each of these, and so does the parser: a property before
+/// `?`, a second `?` or a `?` after a complete entry, a node, property or `:`
+/// that starts another entry without the comma.
+#[rstest]
+#[case::property_before_a_question_mark("[ !t ? ]\n")]
+#[case::second_question_mark("[ ? ? ]\n")]
+#[case::question_mark_after_a_colon("[ : ? ]\n")]
+#[case::quoted_scalar_after_a_quoted_scalar("[ \"q\" \"q\" ]\n")]
+#[case::alias_after_a_collection("[ [b] *x ]\n")]
+#[case::property_after_a_collection("[ [b] !t ]\n")]
+#[case::plain_key_after_a_quoted_key("{ \"q\" a }\n")]
+#[case::second_colon_after_a_value("{ : a : }\n")]
+#[case::second_question_mark_in_a_mapping("{ ? ? }\n")]
+#[case::question_mark_after_a_colon_in_a_mapping("{ : ? }\n")]
+fn a_flow_entry_that_libfyaml_rejects_is_an_error(#[case] input: &str) {
+    assert!(has_error(input), "{input:?}");
+    assert!(rlsp_yaml_parser::load(input).is_err(), "{input:?}");
+}

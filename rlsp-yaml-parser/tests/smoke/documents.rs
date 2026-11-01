@@ -1179,3 +1179,51 @@ fn marker_line_flow_sequence_with_many_items_reads_as_on_the_next_line() {
     let on_next_line = event_trace(&format!("---\n[{items}b]\n"));
     assert_eq!(on_marker_line, on_next_line);
 }
+
+// -----------------------------------------------------------------------
+// Properties alone are the root node of the document they end
+// -----------------------------------------------------------------------
+
+/// A property line with nothing after it, before the `---` or `...` that ends
+/// the document, is an empty root node with those properties (YAML 1.2.2 [96]
+/// on an empty node, [105]); it is neither dropped nor given to the next
+/// document.  The end of the input already behaved so.
+#[rstest]
+#[case::anchor_before_a_start_marker("&x\n---\ny\n", (Some("x"), None))]
+#[case::tag_before_a_start_marker("!t\n---\ny\n", (None, Some("!t")))]
+#[case::both_before_a_start_marker("&x !t\n---\ny\n", (Some("x"), Some("!t")))]
+#[case::anchor_with_a_comment("&x # c\n---\ny\n", (Some("x"), None))]
+#[case::anchor_on_a_marker_line("--- &x\n---\ny\n", (Some("x"), None))]
+#[case::anchor_before_an_end_marker("&x\n...\n", (Some("x"), None))]
+#[case::tag_on_a_marker_line_before_an_end_marker("--- !t\n...\n---\ny\n", (None, Some("!t")))]
+#[case::anchor_at_the_end_of_the_input("&x\n", (Some("x"), None))]
+fn properties_alone_before_a_document_boundary_are_an_empty_root(
+    #[case] input: &str,
+    #[case] properties: (Option<&str>, Option<&str>),
+) {
+    let events = event_variants(input);
+    let first_document: Vec<&Event<'_>> = events
+        .iter()
+        .skip_while(|e| !matches!(e, Event::DocumentStart { .. }))
+        .take_while(|e| !matches!(e, Event::DocumentEnd { .. }))
+        .collect();
+    let scalars: Vec<&&Event<'_>> = first_document
+        .iter()
+        .filter(|e| matches!(e, Event::Scalar { .. }))
+        .collect();
+    assert_eq!(scalars.len(), 1, "{input:?}");
+    if let Some(Event::Scalar { value, .. }) = scalars.first().map(|e| **e) {
+        assert!(value.is_empty(), "{input:?}");
+    }
+    if let Some(scalar) = scalars.first() {
+        assert_eq!((scalar.anchor(), scalar.tag()), properties, "{input:?}");
+    }
+    // The next document, if any, has none of them.
+    let next_root = events
+        .iter()
+        .skip_while(|e| !matches!(e, Event::DocumentEnd { .. }))
+        .find(|e| matches!(e, Event::Scalar { .. }));
+    if let Some(next_root) = next_root {
+        assert_eq!((next_root.anchor(), next_root.tag()), (None, None));
+    }
+}

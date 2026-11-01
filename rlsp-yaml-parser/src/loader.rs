@@ -467,6 +467,15 @@ impl<'opt> LoadState<'opt> {
                     let mut end_comments = std::mem::take(&mut self.pending_leading);
                     end_comments.extend(consume_leading_comments(&mut stream)?);
 
+                    // A closing event here closes nothing: the root is complete.
+                    let stray_end = match stream.peek() {
+                        Some(Ok((Event::MappingEnd | Event::SequenceEnd, end))) => Some(*end),
+                        _ => None,
+                    };
+                    if let Some(end) = stray_end {
+                        return Err(self.unbalanced_end(end));
+                    }
+
                     // Consume DocumentEnd if present and capture its explicit flag.
                     let doc_explicit_end =
                         if let Some(Ok((Event::DocumentEnd { explicit }, _))) = stream.peek() {
@@ -586,7 +595,11 @@ impl<'opt> LoadState<'opt> {
                     let mut leading = std::mem::take(&mut self.pending_leading);
 
                     match stream.peek() {
-                        None | Some(Ok((Event::MappingEnd | Event::StreamEnd, _))) => {
+                        None | Some(Ok((Event::StreamEnd, _))) => {
+                            // The stream stops inside the mapping.
+                            return Err(LoadError::UnexpectedEndOfStream);
+                        }
+                        Some(Ok((Event::MappingEnd, _))) => {
                             // Save any collected leading comments so the next
                             // sibling entry in the parent collection can inherit
                             // them (e.g. a comment just before MappingEnd that
@@ -596,6 +609,9 @@ impl<'opt> LoadState<'opt> {
                                 self.pending_leading = leading;
                             }
                             break;
+                        }
+                        Some(Ok((Event::SequenceEnd | Event::DocumentEnd { .. }, end))) => {
+                            return Err(self.unbalanced_end(*end));
                         }
                         Some(Err(_)) => {
                             // Consume the error.
@@ -684,7 +700,11 @@ impl<'opt> LoadState<'opt> {
                     let mut leading = std::mem::take(&mut self.pending_leading);
 
                     match stream.peek() {
-                        None | Some(Ok((Event::SequenceEnd | Event::StreamEnd, _))) => {
+                        None | Some(Ok((Event::StreamEnd, _))) => {
+                            // The stream stops inside the sequence.
+                            return Err(LoadError::UnexpectedEndOfStream);
+                        }
+                        Some(Ok((Event::SequenceEnd, _))) => {
                             // Save any collected leading comments so the next
                             // sibling entry in the parent collection can inherit
                             // them (e.g. a comment just before SequenceEnd that
@@ -695,6 +715,9 @@ impl<'opt> LoadState<'opt> {
                                 self.pending_leading = leading;
                             }
                             break;
+                        }
+                        Some(Ok((Event::MappingEnd | Event::DocumentEnd { .. }, end))) => {
+                            return Err(self.unbalanced_end(*end));
                         }
                         Some(Err(_)) => {
                             // Consume the error.
@@ -785,6 +808,20 @@ impl<'opt> LoadState<'opt> {
                 // Structural event where a node is expected — return empty scalar.
                 Ok(empty_scalar())
             }
+        }
+    }
+
+    /// The error for a closing event that does not close the collection being
+    /// loaded: a mapping that meets a `SequenceEnd`, a sequence that meets a
+    /// `MappingEnd`, either that meets a `DocumentEnd`.  The parser emits such a
+    /// stream only for input it should have rejected; `parse_node` leaves a
+    /// closing event in the stream, so a loop that did not stop here would never
+    /// consume it and would add entries until memory ran out.
+    fn unbalanced_end(&self, end: Span) -> LoadError {
+        LoadError::Parse {
+            pos: span_start_to_pos(end.start, &self.line_index),
+            message: "closing event does not match the open collection".into(),
+            kind: ErrorKind::Syntax,
         }
     }
 
@@ -1286,6 +1323,7 @@ const fn empty_scalar() -> Node<Span> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::CollectionStyle;
     use rstest::rstest;
 
     #[test]
@@ -1303,6 +1341,107 @@ mod tests {
             result.unwrap_err(),
             LoadError::UndefinedAlias { .. }
         ));
+    }
+
+    /// Load a hand-made event stream, as the loader would get it from the parser.
+    fn load_events(
+        events: Vec<Event<'static>>,
+    ) -> std::result::Result<Vec<Document<Span>>, LoadError> {
+        let options = LoaderOptions::default();
+        let mut state = LoadState::new(&options, "");
+        let span = Span { start: 0, end: 0 };
+        let stream: Box<dyn Iterator<Item = std::result::Result<(Event<'_>, Span), Error>>> =
+            Box::new(events.into_iter().map(move |event| Ok((event, span))));
+        state.run(stream.peekable())
+    }
+
+    fn document_of(body: Vec<Event<'static>>) -> Vec<Event<'static>> {
+        let mut events = vec![
+            Event::StreamStart,
+            Event::DocumentStart {
+                explicit: false,
+                version: None,
+                tag_directives: Vec::new(),
+            },
+        ];
+        events.extend(body);
+        events.push(Event::DocumentEnd { explicit: false });
+        events.push(Event::StreamEnd);
+        events
+    }
+
+    fn start_of(style: CollectionStyle, mapping: bool) -> Event<'static> {
+        if mapping {
+            Event::MappingStart { style, meta: None }
+        } else {
+            Event::SequenceStart { style, meta: None }
+        }
+    }
+
+    /// A stream whose closing event does not close the open collection ends in an
+    /// error.  The loader once added empty entries to the collection for ever,
+    /// since a closing event is left in the stream for the collection to consume.
+    #[rstest]
+    #[case::mapping_closed_by_a_sequence_end(true, Event::SequenceEnd)]
+    #[case::sequence_closed_by_a_mapping_end(false, Event::MappingEnd)]
+    #[case::mapping_closed_by_a_document_end(true, Event::DocumentEnd { explicit: false })]
+    #[case::sequence_closed_by_a_document_end(false, Event::DocumentEnd { explicit: false })]
+    fn an_unbalanced_event_stream_is_an_error(
+        #[case] mapping: bool,
+        #[case] wrong: Event<'static>,
+    ) {
+        let events = document_of(vec![start_of(CollectionStyle::Flow, mapping), wrong]);
+        let result = load_events(events);
+        assert!(
+            matches!(
+                result,
+                Err(LoadError::Parse {
+                    kind: ErrorKind::Syntax,
+                    ..
+                })
+            ),
+            "{result:?}"
+        );
+    }
+
+    /// A stream that stops inside a collection, and one with a closing event at
+    /// the root, end in an error too: neither closes what it opened.
+    #[rstest]
+    #[case::stream_ends_in_a_sequence(vec![
+        Event::StreamStart,
+        Event::DocumentStart { explicit: false, version: None, tag_directives: Vec::new() },
+        start_of(CollectionStyle::Flow, false),
+        Event::StreamEnd,
+    ])]
+    #[case::stream_ends_in_a_mapping(vec![
+        Event::StreamStart,
+        Event::DocumentStart { explicit: false, version: None, tag_directives: Vec::new() },
+        start_of(CollectionStyle::Flow, true),
+        Event::StreamEnd,
+    ])]
+    #[case::stream_stops_in_a_mapping(vec![
+        Event::StreamStart,
+        Event::DocumentStart { explicit: false, version: None, tag_directives: Vec::new() },
+        start_of(CollectionStyle::Flow, true),
+    ])]
+    #[case::stray_mapping_end_at_the_root(document_of(vec![Event::MappingEnd]))]
+    #[case::stray_sequence_end_at_the_root(document_of(vec![Event::SequenceEnd]))]
+    fn an_event_stream_that_does_not_close_what_it_opened_is_an_error(
+        #[case] events: Vec<Event<'static>>,
+    ) {
+        let result = load_events(events);
+        assert!(result.is_err(), "{result:?}");
+    }
+
+    #[test]
+    fn a_balanced_event_stream_loads() {
+        let events = document_of(vec![
+            start_of(CollectionStyle::Flow, false),
+            start_of(CollectionStyle::Flow, true),
+            Event::MappingEnd,
+            Event::SequenceEnd,
+        ]);
+        assert!(load_events(events).is_ok());
     }
 
     #[test]

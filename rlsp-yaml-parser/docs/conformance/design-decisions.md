@@ -176,6 +176,31 @@ rule and one length limit to every position that reads a comment.
 
 ---
 
+### [69] s-flow-line-prefix — a tab between the indentation and a property or alias
+
+**Productions:** `s-flow-line-prefix(n)` ([69]: `s-indent(n) s-separate-in-line?`),
+`s-separate-in-line` ([66]: `s-white+ | <start-of-line>`), `c-ns-properties` ([96]),
+`c-ns-alias-node` ([104]).
+
+**libfyaml behavior** (`fy-tool --testsuite`, 0.9.6): rejects a property or alias on its own
+line when white space with a tab follows the indentation spaces (`-\n  \t!t a`,
+`k:\n  \t&a x`, `-\n  \t*a`) with "plain scalar cannot start with '!'" (`'&'`, `'*'`). The
+same tab after the dash (`- \t!t a`) is accepted.
+
+**Parser behavior:** accepts. The line prefix of a node is the indentation spaces and then
+optional white space, tabs included, so the tag, anchor or alias starts at its indicator
+and the tab is separation. Before the fix the tab stayed in the line content the property
+scanners started from: the tag read as `"\t!t"` and the anchor as `"&a"`, which no output
+form can repeat. A tab as the first character of the line stays an error (§6.1: tabs are
+not indentation), except before a flow collection delimiter.
+
+**User decision:** pending; reported by the lead.
+
+**Enforcement site:** `trimmed` in `EventIter::step_in_document()` in
+`src/event_iter/step.rs`, which the tag, anchor and alias branches read.
+
+---
+
 ## "Should is non-mandatory" Precedent
 
 **Established at:** Phase 1, `[83] ns-reserved-directive` (see

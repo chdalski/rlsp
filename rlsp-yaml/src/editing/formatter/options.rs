@@ -39,6 +39,26 @@ pub struct YamlFormatOptions {
     pub insert_final_newline: bool,
 }
 
+/// The least indentation that keeps a nested block collection under the first
+/// entry of a compact one: `- ` and `? ` are two characters wide.
+const MIN_INDENT_WIDTH: usize = 2;
+
+impl YamlFormatOptions {
+    /// Spaces per indent level in the output.  `tab_width` below the width of
+    /// `- ` would put the continuation lines of a compact collection left of its
+    /// first entry, which reads as other data.
+    pub(super) fn indent_width(&self) -> usize {
+        self.tab_width.max(MIN_INDENT_WIDTH)
+    }
+
+    /// The marker (`-` or `?`) of a collection that starts on the marker's line,
+    /// padded to one indent level: the first entry sits where the lines after it
+    /// continue.
+    pub(super) fn compact_marker(&self, marker: char) -> String {
+        format!("{marker}{}", " ".repeat(self.indent_width() - 1))
+    }
+}
+
 impl Default for YamlFormatOptions {
     fn default() -> Self {
         Self {

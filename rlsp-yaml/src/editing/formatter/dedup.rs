@@ -2,32 +2,66 @@
 
 use std::collections::HashSet;
 
-use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::Node;
+use rlsp_yaml_parser::{ScalarStyle, Span};
 
 use super::flow_comments::{drain_comments, leading_comments_mut};
+use crate::server::YamlVersion;
 
 /// Extract a dedup key string for a mapping key node.
 ///
-/// Returns `Some(key)` for scalar and alias keys, `None` for complex keys
-/// (mapping or sequence as key), which are skipped in dedup.
+/// Returns `Some(key)` for scalar and alias keys, `None` for keys that are never
+/// removed: complex keys (mapping or sequence as key) and the merge key `<<`,
+/// whose entries each merge their own mappings.
 ///
 /// A scalar key is its tag and its value: `a` and `"a"` are one key, but `1` and
 /// `"1"`, or the null key (`: v`) and the empty string key (`"": v`), are two.
-pub(super) fn dedup_key_str(key: &Node<Span>) -> Option<String> {
+/// Under YAML 1.1 the quoting tells keys apart too: `y` is a boolean there and
+/// `"y"` a string.
+fn dedup_key_str(key: &Node<Span>, version: YamlVersion) -> Option<String> {
     match key {
-        Node::Scalar { value, tag, .. } => {
-            Some(format!("{}\0{value}", tag.as_deref().unwrap_or_default()))
+        Node::Scalar {
+            value, tag, style, ..
+        } => {
+            let plain = matches!(style, ScalarStyle::Plain);
+            if plain && value == "<<" {
+                return None;
+            }
+            let quoting = if version == YamlVersion::V1_1 {
+                if plain { "plain" } else { "quoted" }
+            } else {
+                ""
+            };
+            Some(format!(
+                "{}\0{value}\0{quoting}",
+                tag.as_deref().unwrap_or_default()
+            ))
         }
         Node::Alias { name, .. } => Some(format!("*{name}")),
         Node::Mapping { .. } | Node::Sequence { .. } => None,
     }
 }
 
+/// Whether `node` or a node inside it defines an anchor.  An alias further down
+/// the document may name it, and the alias loads only while the anchor is there.
+fn defines_anchor(node: &Node<Span>) -> bool {
+    node.anchor().is_some()
+        || match node {
+            Node::Mapping { entries, .. } => entries
+                .iter()
+                .any(|(key, value)| defines_anchor(key) || defines_anchor(value)),
+            Node::Sequence { items, .. } => items.iter().any(defines_anchor),
+            Node::Scalar { .. } | Node::Alias { .. } => false,
+        }
+}
+
 /// Remove duplicate mapping keys from the AST, keeping the last occurrence.
 ///
 /// Iterates each `Node::Mapping` in reverse, tracking seen key strings.
-/// Earlier duplicate entries are removed; the last occurrence is kept.  The
+/// Earlier duplicate entries are removed; the last occurrence is kept.  An
+/// earlier entry that defines an anchor stays, since an alias after it may name
+/// the anchor (`a: &x 1` and `b: *x` before a second `a`), and moving the anchor
+/// to the entry that stays would change the value of the alias.  The
 /// comments of a removed entry, nested ones included, become leading comments of
 /// the next entry that stays, ahead of its own.  The last occurrence of a key
 /// stays and follows every earlier one, so such an entry always exists.
@@ -36,8 +70,8 @@ pub(super) fn dedup_key_str(key: &Node<Span>) -> Option<String> {
 /// Key extraction rules:
 /// - `Node::Scalar { value, tag, .. }` → key string is `tag` and `value`
 /// - `Node::Alias { name, .. }` → key string is `*name`
-/// - Complex keys (`Node::Mapping`, `Node::Sequence`) → skipped (not deduplicated)
-pub(super) fn dedup_mapping_keys(node: &mut Node<Span>) {
+/// - Complex keys (`Node::Mapping`, `Node::Sequence`) and `<<` → skipped (not deduplicated)
+pub(super) fn dedup_mapping_keys(node: &mut Node<Span>, version: YamlVersion) {
     match node {
         Node::Mapping { entries, .. } => {
             // Determine which keys to keep by scanning in reverse: the last
@@ -48,11 +82,14 @@ pub(super) fn dedup_mapping_keys(node: &mut Node<Span>) {
             let keep: Vec<bool> = entries
                 .iter()
                 .rev()
-                .map(|(key, _)| {
+                .map(|(key, value)| {
                     // First time we see this key (in reverse) → keep it.
-                    // Subsequent times → it's a duplicate earlier occurrence → drop.
+                    // Subsequent times → it's a duplicate earlier occurrence → drop,
+                    // unless an anchor of the entry is still needed.
                     // Complex keys (None) are always kept.
-                    dedup_key_str(key).is_none_or(|k| seen.insert(k))
+                    dedup_key_str(key, version).is_none_or(|k| seen.insert(k))
+                        || defines_anchor(key)
+                        || defines_anchor(value)
                 })
                 .collect::<Vec<_>>()
                 .into_iter()
@@ -77,12 +114,12 @@ pub(super) fn dedup_mapping_keys(node: &mut Node<Span>) {
 
             // Recurse into remaining values.
             for (_, value) in entries.iter_mut() {
-                dedup_mapping_keys(value);
+                dedup_mapping_keys(value, version);
             }
         }
         Node::Sequence { items, .. } => {
             for item in items.iter_mut() {
-                dedup_mapping_keys(item);
+                dedup_mapping_keys(item, version);
             }
         }
         Node::Scalar { .. } | Node::Alias { .. } => {}

@@ -319,7 +319,7 @@ default schema.
 | 1 | Tag set identical to JSON | SC |
 | 2 | Schema is loader default | SC |
 | 3 | Schema selectability via `LoaderBuilder` | SC |
-| 4 | Null forms `null \| Null \| NULL \| ~` | SC |
+| 4 | Null forms `null \| Null \| NULL \| ~` (`~` alone: `~/bin` is a string; `resolve_core_plain()` in `src/schema.rs`) | SC |
 | 5 | Empty plain scalar → `!!null` | SC |
 | 6 | Bool forms (six exact strings, case-sensitive) | SC |
 | 7 | Decimal int (leading zeros REJECTED) | ST |

@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use rlsp_yaml_parser::parse_events;
+use rlsp_yaml_parser::{Event, parse_events};
 use rstest::rstest;
 
 use super::{ConformanceCase, load_cases_from_file};
@@ -62,4 +62,67 @@ fn assert_case(case: &ConformanceCase) {
             &case.yaml[..case.yaml.len().min(120)]
         );
     }
+}
+
+// ---- Balanced collections ---------------------------------------------------
+
+/// The collection events of `yaml` up to its first error nest as a stack: every
+/// end closes the start of its own kind, and an input that parses clean ends with
+/// no collection open.  An unbalanced stream makes a consumer loop or over-read;
+/// `[: :]` once gave two `MappingStart` and one `MappingEnd`.
+fn unbalanced_collections(yaml: &str) -> Option<String> {
+    let mut open: Vec<&'static str> = Vec::new();
+    for event in parse_events(yaml) {
+        match event {
+            Ok((Event::MappingStart { .. }, _)) => open.push("mapping"),
+            Ok((Event::SequenceStart { .. }, _)) => open.push("sequence"),
+            Ok((Event::MappingEnd, _)) if open.pop() != Some("mapping") => {
+                return Some("a MappingEnd closes no mapping".to_string());
+            }
+            Ok((Event::SequenceEnd, _)) if open.pop() != Some("sequence") => {
+                return Some("a SequenceEnd closes no sequence".to_string());
+            }
+            Ok((Event::DocumentEnd { .. }, _)) if !open.is_empty() => {
+                return Some(format!("a document ends with {} open", open.len()));
+            }
+            Ok(_) => {}
+            Err(_) => return None,
+        }
+    }
+    None
+}
+
+#[rstest]
+#[timeout(Duration::from_secs(5))]
+pub fn collection_events_of_suite_case_nest(
+    #[files("../tests/yaml-test-suite/src/*.yaml")] path: PathBuf,
+) {
+    for case in load_cases_from_file(&path) {
+        assert_eq!(
+            unbalanced_collections(&case.yaml),
+            None,
+            "{}[{}] {}",
+            case.file,
+            case.index,
+            case.name
+        );
+    }
+}
+
+/// The inputs once found to give an unbalanced stream, and variants with the
+/// pair in other positions.
+#[rstest]
+#[case::empty_key_and_value("[: :]\n")]
+#[case::spaced("[ : : ]\n")]
+#[case::explicit_key("[? : :]\n")]
+#[case::nested("[[: :]]\n")]
+#[case::after_a_key("[a: :]\n")]
+#[case::before_an_item("[: :, a]\n")]
+#[case::as_a_mapping_value("k: [: :]\n")]
+#[case::as_a_sequence_item("- [: :]\n")]
+#[case::plain_second_pair("[a: b: c]\n")]
+fn a_second_colon_in_a_flow_sequence_entry_is_an_error_with_balanced_events(#[case] yaml: &str) {
+    assert!(has_parse_error(yaml), "{yaml:?}");
+    assert_eq!(unbalanced_collections(yaml), None, "{yaml:?}");
+    assert!(rlsp_yaml_parser::load(yaml).is_err(), "{yaml:?}");
 }

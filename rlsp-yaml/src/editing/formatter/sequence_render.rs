@@ -6,7 +6,7 @@ use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::Node;
 
 use super::mapping_render::{
-    Entry, block_mapping_parts, join_entries, line_end_comment, with_comments_above,
+    Entry, Lead, block_mapping_parts, join_entries, line_end_comment, with_comments_above,
     with_line_end_comment,
 };
 use super::node_to_doc::renders_empty;
@@ -125,14 +125,22 @@ fn sequence_item_parts<'a>(item: &'a Node<Span>, options: &YamlFormatOptions) ->
             let Entry {
                 above: first_above,
                 doc: inner,
-            } = block_mapping_parts(entries, options, !prefix.is_empty());
+            } = block_mapping_parts(
+                entries,
+                options,
+                Lead {
+                    properties: !prefix.is_empty(),
+                    value_indicator: false,
+                },
+            );
             above.extend(first_above);
             let doc = if prefix.is_empty() {
                 // `- key: val\n  key2: val2` — first pair on the dash line, remaining
                 // pairs indented one level so they align under the first key.
-                // indent() shifts all hard_line breaks inside `inner` by one level,
-                // placing continuation pairs 2 spaces right of `- `.
-                concat(vec![text("- "), indent(inner)])
+                // indent() shifts all hard_line breaks inside `inner` by one level;
+                // the marker is as wide as a level, so the continuation pairs
+                // align under the first key.
+                concat(vec![text(options.compact_marker('-')), indent(inner)])
             } else {
                 // `- &anchor\n  key: val` or `- !tag\n  key: val` — prefix on the dash
                 // line, content indented.

@@ -1321,3 +1321,71 @@ fn tag_loc_invariant_corpus_wide() {
     }
     assert!(file_count > 0, "no .yaml files found in {suite_dir:?}");
 }
+
+// -----------------------------------------------------------------------
+// White space between the indentation and a property is not part of it
+// -----------------------------------------------------------------------
+
+/// A tab after the indentation spaces separates the node from them (YAML 1.2.2
+/// [69] `s-flow-line-prefix`, [66] `s-separate-in-line`): the tag, anchor and
+/// alias start at their indicator.  The tab was read as part of the tag
+/// (`"\t!t"`) and of the anchor (`"&a"`), which no output form could repeat.
+/// libfyaml rejects these inputs ("plain scalar cannot start with ..."), which
+/// the grammar does not.
+#[rstest]
+#[case::tag_in_a_sequence("-\n  \t!t x\n", (None, Some("!t")))]
+#[case::tag_in_a_mapping("k:\n  \t!t x\n", (None, Some("!t")))]
+#[case::anchor_in_a_sequence("-\n  \t&a x\n", (Some("a"), None))]
+#[case::anchor_in_a_mapping("k:\n  \t&a x\n", (Some("a"), None))]
+fn tab_before_a_property_on_its_own_line_is_white_space(
+    #[case] input: &str,
+    #[case] properties: (Option<&str>, Option<&str>),
+) {
+    let events = event_variants(input);
+    let scalar = events
+        .iter()
+        .find(|e| matches!(e, Event::Scalar { value, .. } if value.as_ref() == "x"));
+    assert!(scalar.is_some(), "{input:?}");
+    if let Some(scalar) = scalar {
+        assert_eq!((scalar.anchor(), scalar.tag()), properties, "{input:?}");
+    }
+}
+
+#[test]
+fn tab_before_an_alias_on_its_own_line_is_white_space() {
+    let events = event_variants("- &a x\n-\n  \t*a\n");
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::Alias { name } if *name == "a")),
+        "{events:?}"
+    );
+}
+
+/// A block entry after a tab that follows the indentation spaces is an error:
+/// `s-indent(n+m)` is spaces (YAML 1.2.2 [183], [187]; §6.1), so the tab does not
+/// put the entry in the column of the spaces.  The parser read the entry with the
+/// tab trimmed, at a column that closed the collection and dropped the lines
+/// under it (`k:\n  \ta: 1\n` gave `k: a`).  libfyaml rejects all of these.
+#[rstest]
+#[case::sequence_entry_under_a_key("k:\n  \t- a\n")]
+#[case::mapping_key_under_a_key("k:\n  \ta: 1\n")]
+#[case::explicit_key_under_a_key("k:\n  \t? x\n")]
+#[case::sequence_entry_under_an_empty_item("- \n  \t- a\n")]
+#[case::key_with_properties("k:\n  \t&x b: c\n")]
+#[case::alias_key("k:\n  \t*a : 1\n")]
+fn block_entry_after_tab_indentation_is_an_error(#[case] input: &str) {
+    assert!(has_error(input), "{input:?}");
+    assert!(rlsp_yaml_parser::load(input).is_err(), "{input:?}");
+}
+
+/// A node that is not a block entry may follow the tab.
+#[rstest]
+#[case::plain_scalar("k:\n  \tv\n")]
+#[case::flow_sequence("k:\n  \t[a]\n")]
+#[case::flow_key("k:\n  \t[a]: 1\n")]
+#[case::tag_and_scalar("k:\n  \t!t v\n")]
+#[case::comment("k:\n  \t# c\n  j: 1\n")]
+fn node_after_tab_indentation_is_accepted(#[case] input: &str) {
+    assert!(!has_error(input), "{input:?}");
+}

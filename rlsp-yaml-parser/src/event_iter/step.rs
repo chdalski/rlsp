@@ -8,7 +8,8 @@
 use super::base::InlineProperties;
 use super::directive_scope::DirectiveScope;
 use super::line_mapping::{
-    find_value_indicator_offset, inline_contains_mapping_key, is_implicit_key_line, skip_properties,
+    find_value_indicator_offset, inline_contains_mapping_key, is_implicit_key_line,
+    is_tab_indented_block_indicator, skip_properties,
 };
 use super::properties::{scan_anchor_name, scan_tag};
 use super::state::{
@@ -106,17 +107,47 @@ impl<'input> EventIter<'input> {
         // the alias/tag/anchor/flow probes below don't each re-trim.
         // `trimmed` borrows from the original input (`'input` lifetime), so it
         // stays valid across `&mut self` calls that follow.
-        let (peeked_indent, trimmed, first_byte): (usize, &'input str, Option<u8>) =
-            self.lexer.peek_next_line().map_or((0, "", None), |line| {
-                let t: &'input str = line.content.trim_start_matches(' ');
-                // first_byte skips leading tabs as well: a line like `\t[...]` is a
-                // tab-indented flow collection (YAML test suite 6CA3, Q5MG) — the tab
-                // is not indentation in the space-count sense (line.indent == 0), but
-                // we must look past it to find the `[` or `{` that dispatches to the
-                // flow-collection handler.
-                let first_byte_val = t.trim_start_matches('\t').as_bytes().first().copied();
-                (line.indent, t, first_byte_val)
+        let (peeked_indent, trimmed, first_byte, tab_after_indent): (
+            usize,
+            &'input str,
+            Option<u8>,
+            bool,
+        ) = self
+            .lexer
+            .peek_next_line()
+            .map_or((0, "", None, false), |line| {
+                // The tabs after the indentation are white space that separates the
+                // node from it (YAML 1.2.2 [69] `s-flow-line-prefix`, [66]
+                // `s-separate-in-line`), not part of the node.  A line like `\t[...]`
+                // is a tab-indented flow collection (YAML test suite 6CA3, Q5MG),
+                // and `  \t!t x` a tagged node; the probes below read the property
+                // or alias from `trimmed` and its offset from the length cut off.
+                let t: &'input str = line.content.trim_start_matches([' ', '\t']);
+                let tab = line.content.trim_start_matches(' ').starts_with('\t');
+                (line.indent, t, t.as_bytes().first().copied(), tab)
             });
+
+        // A block collection entry (`- `, `? `, a mapping key) needs its
+        // indentation to be spaces: the tab that separates a node from the
+        // indentation does not move the collection to its column (YAML 1.2.2
+        // [183] `l+block-sequence`, [187] `l+block-mapping`: `s-indent(n+m)`
+        // then the entry; §6.1).  Reading the entry as if the tab were not there
+        // gave it the wrong column and lost the lines under it.
+        if tab_after_indent
+            && !self.lexer.is_next_line_synthetic()
+            && (is_tab_indented_block_indicator(trimmed)
+                || (is_implicit_key_line(trimmed)
+                    && !skip_properties(trimmed).starts_with(['[', '{'])))
+            && let Some(line) = self.lexer.peek_next_line()
+        {
+            let err_pos = line.pos;
+            self.state = IterState::Done;
+            self.lexer.consume_line();
+            return StepResult::Yield(Err(Error::syntax(
+                err_pos,
+                "tabs are not allowed as indentation (YAML 1.2 §6.1)".into(),
+            )));
+        }
 
         // Document markers (`---`/`...`) must be at column 0 (YAML 1.2 §9.1).
         // Any line with indent > 0 cannot be a marker — skip the function call.
@@ -129,7 +160,7 @@ impl<'input> EventIter<'input> {
         if peeked_indent == 0 && !self.lexer.has_inline_scalar() && self.lexer.is_document_end() {
             let pos = self.lexer.current_pos();
             self.close_all_collections(pos);
-            self.clear_pending_properties();
+            self.emit_root_properties_as_empty_scalar(pos);
             let (marker_pos, _) = self.lexer.consume_marker_line(true);
             if let Some(e) = self.lexer.marker_inline_error.take() {
                 self.state = IterState::Done;
@@ -149,7 +180,7 @@ impl<'input> EventIter<'input> {
         if peeked_indent == 0 && !self.lexer.has_inline_scalar() && self.lexer.is_directives_end() {
             let pos = self.lexer.current_pos();
             self.close_all_collections(pos);
-            self.clear_pending_properties();
+            self.emit_root_properties_as_empty_scalar(pos);
             let (marker_pos, _) = self.lexer.consume_marker_line(false);
             if let Some(e) = self.lexer.marker_inline_error.take() {
                 self.state = IterState::Done;
