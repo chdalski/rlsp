@@ -2108,6 +2108,55 @@ fn content_after_the_node_on_the_marker_line_does_not_load(#[case] input: &str) 
 }
 
 #[rstest]
+#[case::continuation_line("--- x\n  y\n", "x y", (4, 9))]
+#[case::continuation_at_column_zero("--- x\ny\n", "x y", (4, 7))]
+#[case::percent_continuation("--- x\n%y\n", "x %y", (4, 8))]
+#[case::indented_bare_root("  x\ny\n", "x y", (2, 5))]
+#[case::multibyte("--- 日本\n  語\n", "日本 語", (4, 16))]
+fn plain_scalar_after_the_marker_loads_with_its_continuation(
+    #[case] input: &str,
+    #[case] expected: &str,
+    #[case] span: (u32, u32),
+) {
+    let node = load_one(input);
+    let Node::Scalar {
+        value, style, loc, ..
+    } = &node
+    else {
+        panic!("expected a scalar, got: {node:?}");
+    };
+    assert_eq!(value, expected);
+    assert_eq!(*style, ScalarStyle::Plain);
+    assert_eq!((loc.start, loc.end), span);
+}
+
+#[test]
+fn plain_scalar_after_the_marker_keeps_its_properties() {
+    let node = load_one("--- &a x\ny\n");
+    assert_eq!(scalar_value(&node), "x y");
+    assert_eq!(node.anchor(), Some("a"));
+    let node = load_one("--- !t x\n  y\n");
+    assert_eq!(scalar_value(&node), "x y");
+    assert!(matches!(&node, Node::Scalar { tag: Some(tag), .. } if tag == "!t"));
+}
+
+#[rstest]
+#[case::comment_line_then_text("--- v\n# d\nw\n")]
+#[case::key_on_the_next_line("--- x\ny: 1\n")]
+#[case::key_on_the_marker_line("--- x: 1\n")]
+#[case::sequence_entry("--- - a\n")]
+#[case::explicit_key("--- ? a\n")]
+#[case::bare_dash("--- -\n")]
+#[case::bare_question_mark("--- ?\n")]
+#[case::column_zero_text_under_a_key("a:\nw\nx\n")]
+fn plain_scalar_after_the_marker_does_not_load(#[case] input: &str) {
+    assert!(
+        matches!(load(input), Err(LoadError::Parse { .. })),
+        "input: {input:?}"
+    );
+}
+
+#[rstest]
 #[case::flow_sequence("- ! [a]\n")]
 #[case::flow_mapping("- ! {a: 1}\n")]
 #[case::block_sequence("k: !\n  - a\n")]

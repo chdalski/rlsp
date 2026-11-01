@@ -483,6 +483,33 @@ fn flow_node_on_the_marker_line_keeps_its_comments(#[case] input: &str, #[case] 
 }
 
 #[rstest]
+#[case::continuation_line("--- x\n  y\n")]
+#[case::continuation_at_column_zero("--- x\ny\n")]
+#[case::percent_continuation("--- x\n%y\n")]
+#[case::indicator_continuation("--- x\n- y\n")]
+#[case::blank_line_between("--- x\n\n  y\n")]
+#[case::comment_after_the_first_line("--- x # c\n")]
+#[case::comment_after_a_continuation("--- x\n  y # c\n")]
+fn plain_scalar_on_the_marker_line_keeps_its_data(#[case] input: &str) {
+    let output = format_default(input);
+    assert_eq!(format_default(&output), output, "not stable: {output:?}");
+    assert_data_kept_under_every_option_set(input);
+}
+
+#[rstest]
+#[case::continuation_line("--- x\n  y\n", "---\nx y\n")]
+#[case::continuation_at_column_zero("--- x\ny\n", "---\nx y\n")]
+#[case::percent_continuation("--- x\n%y\n", "---\nx %y\n")]
+#[case::indicator_continuation("--- x\n- y\n", "---\nx - y\n")]
+#[case::comment_after("--- x # c\n", "---\nx  # c\n")]
+fn plain_scalar_on_the_marker_line_formats_as_the_root_node(
+    #[case] input: &str,
+    #[case] expected: &str,
+) {
+    assert_eq!(format_default(input), expected);
+}
+
+#[rstest]
 #[case::two_collections("--- [x] [y]\n")]
 #[case::collection_as_a_key("--- [x]: 1\n")]
 #[case::alias_then_text("--- *a b\n")]
@@ -490,6 +517,14 @@ fn flow_node_on_the_marker_line_keeps_its_comments(#[case] input: &str, #[case] 
 #[case::closing_bracket("--- ]\n")]
 #[case::closing_brace("--- }\n")]
 #[case::closing_bracket_then_text("--- ]x\n")]
+#[case::sequence_entry("--- - a\n")]
+#[case::sequence_entry_then_bracket("--- - [\n")]
+#[case::bare_dash("--- -\n")]
+#[case::explicit_key("--- ? a\n")]
+#[case::bare_question_mark("--- ?\n")]
+#[case::plain_key("--- x: 1\n")]
+#[case::plain_then_a_key("--- x\ny: 1\n")]
+#[case::plain_then_text_after_a_comment("--- v\n# d\nw\n")]
 fn invalid_marker_line_is_returned_unchanged(#[case] input: &str) {
     assert!(load(input).is_err());
     assert_eq!(format_default(input), input);
@@ -626,9 +661,6 @@ fn string_starting_with_an_indicator_stays_quoted(#[case] value: &str) {
 #[case::root_after_the_marker_dashes("--- --- x\n")]
 #[case::root_dashes_alone("--- ---\n")]
 #[case::root_dots_then_tab("--- ...\tx\n")]
-#[case::root_reading_as_a_sequence_entry("--- - [\n")]
-#[case::root_reading_as_an_explicit_key("--- ? a\n")]
-#[case::root_dash_alone("--- -\n")]
 #[case::quoted_root("--- \"... x\"\n")]
 #[case::quoted_key_with_dots("\"... x\": 1\n")]
 #[case::quoted_key_with_dashes("\"--- x\": 1\n")]

@@ -15,28 +15,22 @@ impl<'input> Lexer<'input> {
     /// Try to tokenize a plain scalar starting at the current line.
     ///
     /// Implements YAML 1.2 §7.3.3 `ns-plain` in block context.  The caller
-    /// supplies `parent_indent` — the indentation level of the enclosing
-    /// block node (`n` in the spec); continuation lines must have
-    /// `indent >= parent_indent`.
+    /// supplies `parent_indent` — the indentation of the innermost open block
+    /// collection, or `None` when the scalar is the document's root node:
+    /// continuation lines of a scalar inside a collection must be indented past
+    /// `parent_indent`, and those of the root node may start at any column
+    /// (YAML 1.2.2 [207] `l-bare-document`, [197] `s-l+flow-in-block`: the
+    /// root node is at indentation -1).
     ///
     /// Returns `(value, span)` on success or `None` if the current line cannot
     /// start a plain scalar (EOF, blank/comment, or forbidden first character).
     ///
     /// **Borrow contract:** Single-line → `Cow::Borrowed` (zero allocation).
     /// Multi-line → `Cow::Owned` (one allocation for the folded value).
-    ///
-    /// If [`Self::inline_scalar`] is set (populated by a preceding
-    /// [`Self::consume_marker_line`] call for a `--- text` line), it is
-    /// drained and returned immediately without consuming any new lines.
     pub fn try_consume_plain_scalar(
         &mut self,
-        parent_indent: usize,
+        parent_indent: Option<usize>,
     ) -> Option<(Cow<'input, str>, Span)> {
-        // Drain any inline scalar stashed by consume_marker_line (e.g. `--- text`).
-        if let Some(inline) = self.inline_scalar.take() {
-            self.trailing_comment = self.inline_scalar_comment.take();
-            return Some(inline);
-        }
         let (leading_spaces, scalar_start_pos, first_value_len) =
             peek_plain_scalar_first_line(&self.buf)?;
 
@@ -120,7 +114,7 @@ impl<'input> Lexer<'input> {
         let extra = if self.trailing_comment.is_some() || self.plain_scalar_suffix_error.is_some() {
             None
         } else {
-            self.collect_plain_continuations(first_value_ref, parent_indent, consumed_first.indent)
+            self.collect_plain_continuations(first_value_ref, parent_indent)
         };
 
         Some(extra.map_or_else(
@@ -150,8 +144,7 @@ impl<'input> Lexer<'input> {
     fn collect_plain_continuations(
         &mut self,
         first_value_ref: &str,
-        parent_indent: usize,
-        scalar_indent: usize,
+        parent_indent: Option<usize>,
     ) -> Option<(String, Pos)> {
         let mut pending_blanks: usize = 0;
         let mut result: Option<String> = None;
@@ -176,19 +169,16 @@ impl<'input> Lexer<'input> {
                 break;
             }
 
-            // A continuation line is valid when it is strictly more indented
-            // than the enclosing block (`indent > parent_indent`).
-            //
-            // Special case: when `parent_indent == 0` AND the scalar itself
-            // started at column 0 (`scalar_indent == 0`), a continuation at
-            // column 0 is also valid — `s-flow-folded(0)` allows any indentation ≥ 0
-            // for scalars in the n=0 document-root context.
-            // (YAML 1.2 spec example 7.12 / tests HS5T.)
-            // A tab at the start of a continuation also satisfies `s-separate-in-line`
-            // even when parent_indent=0 and scalar_indent>0.
-            let n0_exception = parent_indent == 0 && scalar_indent == 0;
-            let tab_exception = parent_indent == 0 && next.content.starts_with('\t');
-            if next.indent <= parent_indent && !n0_exception && !tab_exception {
+            // A continuation line inside a collection must be indented past
+            // it (`indent > parent_indent`); the root node (`None`) has no
+            // parent, so its continuation lines may start at any column
+            // (YAML 1.2 spec example 7.12 / tests HS5T).  A tab at the start
+            // of a continuation also satisfies `s-separate-in-line` for a
+            // collection at column 0.
+            let continues = parent_indent.is_none_or(|parent| {
+                next.indent > parent || (parent == 0 && next.content.starts_with('\t'))
+            });
+            if !continues {
                 break;
             }
 
@@ -735,7 +725,7 @@ mod tests {
     fn try_consume_plain_scalar_value_cases(#[case] input: &str, #[case] expected: &str) {
         let mut lex = make_lexer(input);
         let (val, _) = lex
-            .try_consume_plain_scalar(0)
+            .try_consume_plain_scalar(None)
             .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, expected);
     }
@@ -746,7 +736,7 @@ mod tests {
     fn try_consume_plain_scalar_cow_cases(#[case] input: &str, #[case] expect_borrowed: bool) {
         let mut lex = make_lexer(input);
         let (val, _) = lex
-            .try_consume_plain_scalar(0)
+            .try_consume_plain_scalar(None)
             .unwrap_or_else(|| unreachable!("should parse"));
         if expect_borrowed {
             assert!(matches!(val, Cow::Borrowed(_)), "expected Cow::Borrowed");
@@ -764,7 +754,7 @@ mod tests {
     #[case::colon_space_returns_none(": ")]
     fn try_consume_plain_scalar_returns_none_cases(#[case] input: &str) {
         let mut lex = make_lexer(input);
-        assert!(lex.try_consume_plain_scalar(0).is_none());
+        assert!(lex.try_consume_plain_scalar(None).is_none());
     }
 
     #[test]
@@ -775,7 +765,7 @@ mod tests {
             "[", "{", "&", "!", "*", ":", "?", "-", "|", ">", "'", "\"", "#", "%", ",", "]", "}",
         ] {
             let mut lex = make_lexer(indicator);
-            let result = lex.try_consume_plain_scalar(0);
+            let result = lex.try_consume_plain_scalar(None);
             assert!(
                 result.is_none(),
                 "indicator '{indicator}' should not start a plain scalar"
@@ -786,22 +776,22 @@ mod tests {
     // Span cases: (input, parent_indent, expected_val, expected_start, expected_end)
     // expected_val is checked when Some; None means skip val assertion.
     #[rstest]
-    #[case::ascii_word_span("hello", 0, Some("hello"), 0, 5)]
-    #[case::indented_start_span("  hello", 0, Some("hello"), 2, 7)]
-    #[case::multibyte_utf8_span("中文", 0, Some("中文"), 0, 6)]
-    #[case::multibyte_with_leading_space_span("  中", 0, Some("中"), 2, 5)]
-    #[case::multiline_lf_trailing_newline_span("v\nw\n", 0, Some("v w"), 0, 3)]
-    #[case::multiline_eof_without_newline_span("v\nw", 0, Some("v w"), 0, 3)]
-    #[case::multiline_trailing_blank_lines_span("v\nw\n\n\n", 0, Some("v w"), 0, 3)]
-    #[case::multiline_trailing_spaces_span("v\nw   \n", 0, Some("v w"), 0, 3)]
-    #[case::multiline_blank_line_between_span("v\n\nw\n\n", 0, Some("v\nw"), 0, 4)]
-    #[case::multiline_multibyte_span("é\nü\n", 0, Some("é ü"), 0, 5)]
-    #[case::multiline_crlf_span("v\r\nw\r\n\r\n", 0, Some("v w"), 0, 4)]
-    #[case::multiline_trailing_comment_span("v\nw # c\n", 0, Some("v w"), 0, 3)]
-    #[case::single_line_trailing_blank_lines_span("v\n\n\n", 0, Some("v"), 0, 1)]
+    #[case::ascii_word_span("hello", None, Some("hello"), 0, 5)]
+    #[case::indented_start_span("  hello", None, Some("hello"), 2, 7)]
+    #[case::multibyte_utf8_span("中文", None, Some("中文"), 0, 6)]
+    #[case::multibyte_with_leading_space_span("  中", None, Some("中"), 2, 5)]
+    #[case::multiline_lf_trailing_newline_span("v\nw\n", None, Some("v w"), 0, 3)]
+    #[case::multiline_eof_without_newline_span("v\nw", None, Some("v w"), 0, 3)]
+    #[case::multiline_trailing_blank_lines_span("v\nw\n\n\n", None, Some("v w"), 0, 3)]
+    #[case::multiline_trailing_spaces_span("v\nw   \n", None, Some("v w"), 0, 3)]
+    #[case::multiline_blank_line_between_span("v\n\nw\n\n", None, Some("v\nw"), 0, 4)]
+    #[case::multiline_multibyte_span("é\nü\n", None, Some("é ü"), 0, 5)]
+    #[case::multiline_crlf_span("v\r\nw\r\n\r\n", None, Some("v w"), 0, 4)]
+    #[case::multiline_trailing_comment_span("v\nw # c\n", None, Some("v w"), 0, 3)]
+    #[case::single_line_trailing_blank_lines_span("v\n\n\n", None, Some("v"), 0, 1)]
     fn try_consume_plain_scalar_span_cases(
         #[case] input: &str,
-        #[case] parent_indent: usize,
+        #[case] parent_indent: Option<usize>,
         #[case] expected_val: Option<&str>,
         #[case] expected_start: usize,
         #[case] expected_end: usize,
@@ -829,7 +819,7 @@ mod tests {
         // stay after the consumed blank lines: container end spans derive from it.
         let mut lex = make_lexer("  v\n  w\n\n\nnext\n");
         let (_, span) = lex
-            .try_consume_plain_scalar(0)
+            .try_consume_plain_scalar(Some(0))
             .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(span.end, 7);
         assert_eq!(lex.current_pos().byte_offset, 10);
@@ -842,7 +832,7 @@ mod tests {
         // For parent_indent=2: "  foo\nbar" — bar at indent 0 < 2, terminates.
         let mut lex = make_lexer("  foo\nbar");
         let (val, _) = lex
-            .try_consume_plain_scalar(2)
+            .try_consume_plain_scalar(Some(2))
             .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "foo");
     }
@@ -857,7 +847,7 @@ mod tests {
     fn try_consume_plain_scalar_colon_edge_cases(#[case] input: &str, #[case] expected: &str) {
         let mut lex = make_lexer(input);
         let (val, _) = lex
-            .try_consume_plain_scalar(0)
+            .try_consume_plain_scalar(None)
             .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, expected);
     }
@@ -871,7 +861,7 @@ mod tests {
         // tab before `#` — tab is s-white, so `#` is whitespace-preceded → terminates.
         let mut lex = make_lexer("foo\t# comment");
         let (val, _) = lex
-            .try_consume_plain_scalar(0)
+            .try_consume_plain_scalar(None)
             .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, "foo");
     }
@@ -889,7 +879,7 @@ mod tests {
     ) {
         let mut lex = make_lexer(input);
         let (val, _) = lex
-            .try_consume_plain_scalar(0)
+            .try_consume_plain_scalar(None)
             .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, expected);
     }
@@ -903,7 +893,7 @@ mod tests {
         // Two blank lines + indented continuation: "foo\n\n\n  bar" → "foo\n\nbar"
         let mut lex = make_lexer("foo\n\n\n  bar");
         let (val, _) = lex
-            .try_consume_plain_scalar(0)
+            .try_consume_plain_scalar(None)
             .unwrap_or_else(|| unreachable!("should parse"));
         assert!(matches!(val, Cow::Owned(_)), "multi-line must be Owned");
         assert_eq!(val, "foo\n\nbar");
@@ -922,39 +912,94 @@ mod tests {
     ) {
         let mut lex = make_lexer(input);
         let (val, _) = lex
-            .try_consume_plain_scalar(0)
+            .try_consume_plain_scalar(None)
             .unwrap_or_else(|| unreachable!("should parse"));
         assert_eq!(val, expected);
     }
 
     // -----------------------------------------------------------------------
-    // Group G extension — inline scalar after --- marker
+    // Group G extension — plain scalar after --- marker
     // -----------------------------------------------------------------------
 
     #[test]
-    fn plain_scalar_inline_after_marker_is_extracted() {
-        // `--- text` — after consuming the marker line, try_consume_plain_scalar
-        // returns the inline content "text".
+    fn plain_scalar_after_marker_is_read_from_the_prepended_line() {
+        // `--- text` — the marker line leaves the rest as a line of its own, and
+        // the plain reader takes it as it takes any root scalar: a zero-copy
+        // borrowed slice.
         let mut lex = make_lexer("--- text");
         lex.consume_marker_line(false);
-        let (val, _) = lex
-            .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| unreachable!("should parse inline scalar"));
+        let (val, span) = lex
+            .try_consume_plain_scalar(None)
+            .unwrap_or_else(|| unreachable!("should parse the scalar"));
         assert_eq!(val, "text");
+        assert!(
+            matches!(val, Cow::Borrowed(_)),
+            "scalar from marker line must be Cow::Borrowed"
+        );
+        assert_eq!((span.start, span.end), (4, 8));
     }
 
     #[test]
-    fn plain_scalar_inline_after_marker_is_cow_borrowed() {
-        // Inline content from `---` line is a zero-copy borrowed slice.
-        let mut lex = make_lexer("--- text");
+    fn plain_scalar_after_marker_keeps_its_comment() {
+        let mut lex = make_lexer("--- text # c");
         lex.consume_marker_line(false);
+        let (val, span) = lex
+            .try_consume_plain_scalar(None)
+            .unwrap_or_else(|| unreachable!("should parse the scalar"));
+        assert_eq!(val, "text");
+        assert_eq!((span.start, span.end), (4, 8));
+        let comment = lex
+            .trailing_comment
+            .map(|(text, span)| (text, span.start, span.end));
+        assert_eq!(comment, Some((" c", 9, 12)));
+    }
+
+    // -----------------------------------------------------------------------
+    // Group G parent indent — root versus a collection at column 0
+    // -----------------------------------------------------------------------
+
+    #[rstest]
+    #[case::column_zero_continuation_joins("w\nx", "w x")]
+    #[case::blank_line_between_is_a_newline("w\n\nx", "w\nx")]
+    #[case::tab_continuation_joins("w\n\tx", "w x")]
+    #[case::indented_scalar_with_column_zero_continuation("  w\nx", "w x")]
+    #[case::marker_ends_the_scalar("w\n---", "w")]
+    #[case::document_end_marker_ends_the_scalar("w\n...", "w")]
+    #[case::marker_prefix_is_content("w\n---x", "w ---x")]
+    #[case::implicit_key_line_ends_the_scalar("w\ny: 1", "w")]
+    #[case::key_with_empty_value_ends_the_scalar("w\ny:", "w")]
+    #[case::key_with_space_before_colon_ends_the_scalar("w\ny :", "w")]
+    fn root_scalar_continues_at_any_column(#[case] input: &str, #[case] expected: &str) {
+        let mut lex = make_lexer(input);
         let (val, _) = lex
-            .try_consume_plain_scalar(0)
-            .unwrap_or_else(|| unreachable!("should parse inline scalar"));
-        assert!(
-            matches!(val, Cow::Borrowed(_)),
-            "inline scalar from marker line must be Cow::Borrowed"
-        );
+            .try_consume_plain_scalar(None)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, expected);
+    }
+
+    #[test]
+    fn root_scalar_stops_before_the_implicit_key_line() {
+        let mut lex = make_lexer("w\ny: 1");
+        lex.try_consume_plain_scalar(None);
+        assert_eq!(lex.peek_next_line().map(|l| l.content), Some("y: 1"));
+    }
+
+    #[rstest]
+    #[case::column_zero_line_is_not_a_continuation("w\nx", Some(0), "w")]
+    #[case::indented_line_continues("w\n x", Some(0), "w x")]
+    #[case::tab_line_continues_at_column_zero_parent("w\n\tx", Some(0), "w x")]
+    #[case::line_at_parent_indent_stops("foo\n  bar", Some(2), "foo")]
+    #[case::line_past_parent_indent_continues("foo\n   bar", Some(2), "foo bar")]
+    fn scalar_in_collection_continues_past_the_parent(
+        #[case] input: &str,
+        #[case] parent_indent: Option<usize>,
+        #[case] expected: &str,
+    ) {
+        let mut lex = make_lexer(input);
+        let (val, _) = lex
+            .try_consume_plain_scalar(parent_indent)
+            .unwrap_or_else(|| unreachable!("should parse"));
+        assert_eq!(val, expected);
     }
 
     // -----------------------------------------------------------------------
@@ -991,7 +1036,7 @@ mod tests {
         // NUL in a plain scalar body must not pass through — the scan_plain_line_block
         // terminates before NUL (it's a terminator byte), so the value is truncated.
         let mut lex = make_lexer("val\x00ue\n");
-        if let Some((val, _)) = lex.try_consume_plain_scalar(0) {
+        if let Some((val, _)) = lex.try_consume_plain_scalar(None) {
             assert!(
                 !val.contains('\x00'),
                 "NUL must not appear in plain scalar value"
@@ -1002,7 +1047,7 @@ mod tests {
     #[test]
     fn plain_scalar_rejects_0x01_soh_in_body() {
         let mut lex = make_lexer("val\x01ue\n");
-        match lex.try_consume_plain_scalar(0) {
+        match lex.try_consume_plain_scalar(None) {
             None => {}
             Some((val, _)) => {
                 assert!(
@@ -1016,7 +1061,7 @@ mod tests {
     #[test]
     fn plain_scalar_rejects_bs_0x08_in_body() {
         let mut lex = make_lexer("val\x08ue\n");
-        match lex.try_consume_plain_scalar(0) {
+        match lex.try_consume_plain_scalar(None) {
             None => {}
             Some((val, _)) => {
                 assert!(
@@ -1030,7 +1075,7 @@ mod tests {
     #[test]
     fn plain_scalar_rejects_vt_0x0b_in_body() {
         let mut lex = make_lexer("val\x0bue\n");
-        match lex.try_consume_plain_scalar(0) {
+        match lex.try_consume_plain_scalar(None) {
             None => {}
             Some((val, _)) => {
                 assert!(
@@ -1044,7 +1089,7 @@ mod tests {
     #[test]
     fn plain_scalar_rejects_ff_0x0c_in_body() {
         let mut lex = make_lexer("val\x0cue\n");
-        match lex.try_consume_plain_scalar(0) {
+        match lex.try_consume_plain_scalar(None) {
             None => {}
             Some((val, _)) => {
                 assert!(
@@ -1058,7 +1103,7 @@ mod tests {
     #[test]
     fn plain_scalar_rejects_0x0e_so_in_body() {
         let mut lex = make_lexer("val\x0eue\n");
-        match lex.try_consume_plain_scalar(0) {
+        match lex.try_consume_plain_scalar(None) {
             None => {}
             Some((val, _)) => {
                 assert!(
@@ -1072,7 +1117,7 @@ mod tests {
     #[test]
     fn plain_scalar_rejects_0x1f_us_in_body() {
         let mut lex = make_lexer("val\x1fue\n");
-        match lex.try_consume_plain_scalar(0) {
+        match lex.try_consume_plain_scalar(None) {
             None => {}
             Some((val, _)) => {
                 assert!(
@@ -1088,7 +1133,7 @@ mod tests {
         // DEL (U+007F) must be rejected by c-printable in plain scalar context.
         // The parse must either error or truncate before DEL.
         let mut lex = make_lexer("val\x7fue\n");
-        match lex.try_consume_plain_scalar(0) {
+        match lex.try_consume_plain_scalar(None) {
             None => {}
             Some((val, _)) => {
                 assert!(
@@ -1103,7 +1148,7 @@ mod tests {
     fn plain_scalar_rejects_c1_control_0x80_in_body() {
         // U+0080 is a C1 control excluded by c-printable.
         let mut lex = make_lexer("val\u{0080}ue\n");
-        match lex.try_consume_plain_scalar(0) {
+        match lex.try_consume_plain_scalar(None) {
             None => {}
             Some((val, _)) => {
                 assert!(
@@ -1117,7 +1162,7 @@ mod tests {
     #[test]
     fn plain_scalar_rejects_0xfffe_in_body() {
         let mut lex = make_lexer("val\u{FFFE}ue\n");
-        match lex.try_consume_plain_scalar(0) {
+        match lex.try_consume_plain_scalar(None) {
             None => {}
             Some((val, _)) => {
                 assert!(
@@ -1131,7 +1176,7 @@ mod tests {
     #[test]
     fn plain_scalar_rejects_0xffff_in_body() {
         let mut lex = make_lexer("val\u{FFFF}ue\n");
-        match lex.try_consume_plain_scalar(0) {
+        match lex.try_consume_plain_scalar(None) {
             None => {}
             Some((val, _)) => {
                 assert!(
@@ -1147,7 +1192,7 @@ mod tests {
         // Non-printable as the very first content byte must not produce a value
         // containing that character.
         let mut lex = make_lexer("a\x07bc\n");
-        match lex.try_consume_plain_scalar(0) {
+        match lex.try_consume_plain_scalar(None) {
             None => {}
             Some((val, _)) => {
                 assert!(
@@ -1162,7 +1207,7 @@ mod tests {
     fn plain_scalar_non_printable_at_boundary_after_multibyte() {
         // Non-printable byte immediately following a multibyte character.
         let mut lex = make_lexer("val\u{263A}\x07end\n");
-        match lex.try_consume_plain_scalar(0) {
+        match lex.try_consume_plain_scalar(None) {
             None => {}
             Some((val, _)) => {
                 assert!(
@@ -1199,7 +1244,7 @@ mod tests {
         // TAB (U+0009) is allowed by c-printable.
         let mut lex = make_lexer("col1\tcol2\n");
         let (val, _) = lex
-            .try_consume_plain_scalar(0)
+            .try_consume_plain_scalar(None)
             .unwrap_or_else(|| unreachable!("should parse"));
         assert!(
             val.contains('\t'),
@@ -1214,7 +1259,7 @@ mod tests {
         let mut lex = make_lexer("val\u{0085}ue\n");
         // Should not produce a non-printable error — NEL is c-printable.
         // The value may be truncated by NEL (line-break semantics) but must not error.
-        let _result = lex.try_consume_plain_scalar(0);
+        let _result = lex.try_consume_plain_scalar(None);
         // If we got here without panic, the acceptance criterion is satisfied.
         // Verify no error event is emitted when NEL appears.
         let events: Vec<_> = crate::parse_events("key: val\u{0085}ue\n").collect();
@@ -1233,7 +1278,7 @@ mod tests {
     fn plain_scalar_accepts_nbsp_0xa0() {
         // NBSP (U+00A0) is allowed by c-printable (0xA0 is in the 0xA0-0xD7FF range).
         let mut lex = make_lexer("val\u{00A0}ue\n");
-        let result = lex.try_consume_plain_scalar(0);
+        let result = lex.try_consume_plain_scalar(None);
         // If parsed, value must contain the NBSP character without error.
         if let Some((val, _)) = result {
             assert!(

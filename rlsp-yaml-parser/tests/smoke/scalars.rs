@@ -317,3 +317,56 @@ fn reserved_indicator_error_points_at_the_indicator() {
         .expect("an error");
     assert_eq!((error.pos.line, error.pos.column), (3, 4));
 }
+
+// -----------------------------------------------------------------------
+// Plain scalar continuation: the root versus a collection at column 0
+// -----------------------------------------------------------------------
+// YAML 1.2.2 [207]/[197]: the root node is at indentation -1, so its
+// continuation lines ([134]/[135]) may start at column 0.  The value of a
+// block collection at column 0 is at indentation 0, so its continuation lines
+// must be indented past the collection.  libfyaml 0.9.6 reports an error for
+// `a:\nw\nx\n`.
+
+#[rstest]
+#[case::root_at_column_zero("x\ny\n", "x y")]
+#[case::indented_root_with_column_zero_continuation("  x\ny\n", "x y")]
+#[case::root_with_tab_continuation("x\n\ty\n", "x y")]
+#[case::root_with_percent_line("x\n%y\n", "x %y")]
+#[case::root_with_at_sign_line("x\n@y\n", "x @y")]
+fn root_plain_scalar_continues_at_any_column(#[case] input: &str, #[case] expected: &str) {
+    assert_eq!(scalar_values(&evs(input)), [expected], "input: {input:?}");
+}
+
+#[rstest]
+#[case::mapping_value_at_column_zero("a:\nw\nx\n")]
+#[case::mapping_value_with_blank_line_between("a:\nw\n\nx\n")]
+#[case::explicit_value_at_column_zero("? a\n:\nw\nx\n")]
+#[case::mapping_value_after_a_line("a:\n  w\nx\n")]
+#[case::mapping_entry_then_text("a: w\nx\n")]
+#[case::sequence_entry_then_text("- w\nx\n")]
+#[case::bare_dash_at_column_zero("-\nw\n")]
+#[case::explicit_key_at_column_zero("?\nw\n")]
+#[case::bare_dash_after_an_entry("- a\n-\nw\n")]
+fn plain_text_at_column_zero_under_a_collection_is_an_error(#[case] input: &str) {
+    let items = parse_to_vec(input);
+    assert!(items.iter().any(Result::is_err), "input: {input:?}");
+    let merged = items.iter().any(|item| {
+        matches!(item, Ok((Event::Scalar { value, .. }, _)) if value == "w x" || value == "w\nx")
+    });
+    assert!(!merged, "the lines are merged: {input:?}");
+}
+
+#[rstest]
+#[case::value_on_the_next_line("a:\nw\n", &["a", "w"])]
+#[case::value_with_indented_continuation("a:\nw\n x\n", &["a", "w x"])]
+#[case::value_on_the_key_line("a: w\n x\n", &["a", "w x"])]
+#[case::value_with_tab_continuation("a: w\n\tx\n", &["a", "w x"])]
+#[case::indented_value_with_shallower_continuation("a:\n  w\n x\n", &["a", "w x"])]
+#[case::indented_value_with_continuation("a:\n  w\n  x\n", &["a", "w x"])]
+#[case::sequence_item_with_continuation("- w\n x\n", &["w x"])]
+fn plain_scalar_in_a_collection_at_column_zero_keeps_valid_continuations(
+    #[case] input: &str,
+    #[case] expected: &[&str],
+) {
+    assert_eq!(scalar_values(&evs(input)), expected, "input: {input:?}");
+}

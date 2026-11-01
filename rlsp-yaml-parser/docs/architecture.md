@@ -139,9 +139,16 @@ Each YAML scalar style has its own scanning method:
 |--------|-------|
 | `try_consume_plain_scalar(parent_indent)` | Plain (unquoted) |
 | `try_consume_single_quoted(parent_indent)` | Single-quoted `'…'` |
-| `try_consume_double_quoted(block_indent)` | Double-quoted `"…"` |
+| `try_consume_double_quoted(parent_indent)` | Double-quoted `"…"` |
 | `try_consume_literal_block_scalar(parent_indent)` | Literal block `\|` |
 | `try_consume_folded_block_scalar(parent_indent)` | Folded block `>` |
+
+`parent_indent` is an `Option<usize>` in every scanner: the indent of the
+innermost open block collection, or `None` for the document's root node (and for
+a key or flow context with no block to enforce). The root node has no parent, so
+its continuation lines may start at any column and the content lines of a block
+scalar may start at column 0; those of a scalar inside a collection must be
+indented past it.
 
 Each scanner returns `Option<Result<(Cow<'input, str>, …), Error>>`: `None`
 when the current position is not a valid start for that style, `Err` for a
@@ -153,9 +160,6 @@ The lexer uses a few `Option` fields as side channels for information that
 needs to be passed from a scanner to its caller without a complicated return
 type:
 
-- `inline_scalar` — scalar content that immediately follows a `---` marker on
-  the same physical line (e.g. `--- value`); drained by the next plain-scalar
-  call, which also hands out `inline_scalar_comment`, the comment after it
 - `trailing_comment` — the `# comment` found on the line of a scalar (plain,
   quoted tail, last plain continuation line, block scalar header) or of an
   indicator (`k:`, `?`); drained by the state machine after it emits that
@@ -167,8 +171,9 @@ type:
 - `plain_scalar_suffix_error` — an error detected in the suffix after a plain
   scalar (e.g. a NUL byte), reported after the scalar event rather than
   instead of it
-- `marker_inline_error` — an error produced when a marker line carries invalid
-  inline content; drained immediately after `consume_marker_line`
+- `marker_inline_error` — an error produced when a marker line carries content
+  that cannot start the document's root node; taken immediately after
+  `consume_marker_line`
 
 ---
 

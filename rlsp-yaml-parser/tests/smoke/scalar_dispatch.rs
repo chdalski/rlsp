@@ -50,7 +50,7 @@ fn it_scalar_dispatch_round_trip_exact_style(
 }
 
 // -----------------------------------------------------------------------
-// Group F — Inline scalar path (the `--- text` short-circuit)
+// Group F — Plain scalar on the `---` line
 // -----------------------------------------------------------------------
 
 // IT-S14 already covers basic `--- text\n`; this group adds edge cases.

@@ -23,7 +23,7 @@ impl<'input> Lexer<'input> {
     ///
     /// Implements YAML 1.2 §8.1.2 `c-l+literal` in block context.  The caller
     /// supplies `parent_indent` — the indentation level of the enclosing block
-    /// node (`n` in the spec).
+    /// node (`n` in the spec), or `None` for the document's root node.
     ///
     /// Returns:
     /// - `None` — the current line does not start with `|` (not a literal block scalar).
@@ -41,7 +41,7 @@ impl<'input> Lexer<'input> {
     )]
     pub fn try_consume_literal_block_scalar(
         &mut self,
-        parent_indent: usize,
+        parent_indent: Option<usize>,
     ) -> LiteralBlockResult<'input> {
         // Check the current line starts with `|`.
         let first_line = self.buf.peek_next()?;
@@ -86,30 +86,20 @@ impl<'input> Lexer<'input> {
         // default (parent_indent + 1) because no content lines exist.  The spec rule
         // "leading empty lines must not exceed the first non-empty line's indent" only
         // applies when there IS a first non-empty line (content_indent_known = true).
-        // `effective_min` is `parent_indent + 1` when parent_indent is a real
-        // value, or `1` when parent_indent == usize::MAX (root-level sentinel,
-        // meaning the scalar has no enclosing collection and body lines may
+        // `effective_min` is `parent_indent + 1`, or `1` for the root node
+        // (`None`: the scalar has no enclosing collection and body lines may
         // start at column 0 per YAML spec §8.1: body indent > -1).
-        let effective_min = if parent_indent == usize::MAX {
-            1_usize
-        } else {
-            parent_indent + 1
-        };
+        let effective_min = parent_indent.map_or(1_usize, |parent| parent + 1);
 
         let (content_indent, content_indent_known): (usize, bool) =
             if let Some(explicit) = explicit_indent {
                 // Explicit indent indicator: content_indent = parent_indent + indicator.
-                // For root level (usize::MAX), treat parent as 0 for arithmetic.
-                let base = if parent_indent == usize::MAX {
-                    0
-                } else {
-                    parent_indent
-                };
-                (base + explicit, true)
+                // For the root node (`None`), treat parent as 0 for arithmetic.
+                (parent_indent.unwrap_or(0) + explicit, true)
             } else {
                 // Use peek_until_dedent to scan for the first non-blank line and
                 // read its indent.  base_indent = parent_indent so we stop at
-                // any line with indent <= parent_indent (usize::MAX means no limit).
+                // any line with indent <= parent_indent (`None` means no limit).
                 let lookahead = self.buf.peek_until_dedent(parent_indent);
                 // Find the first non-blank line's indent.
                 lookahead
@@ -300,7 +290,7 @@ impl<'input> Lexer<'input> {
     ///
     /// Implements YAML 1.2 §8.1.3 `c-l+folded` in block context.  The caller
     /// supplies `parent_indent` — the indentation level of the enclosing block
-    /// node (`n` in the spec).
+    /// node (`n` in the spec), or `None` for the document's root node.
     ///
     /// **Borrow contract:** Always returns `Cow::Owned` — folding assembles a
     /// transformed string that does not exist contiguously in the input.
@@ -310,7 +300,7 @@ impl<'input> Lexer<'input> {
     /// with literal scalars.
     pub fn try_consume_folded_block_scalar(
         &mut self,
-        parent_indent: usize,
+        parent_indent: Option<usize>,
     ) -> LiteralBlockResult<'input> {
         let first_line = self.buf.peek_next()?;
         let content = first_line.content.trim_start_matches([' ', '\t']);
@@ -343,18 +333,9 @@ impl<'input> Lexer<'input> {
             return Some(Err(e));
         }
 
-        let effective_min = if parent_indent == usize::MAX {
-            1_usize
-        } else {
-            parent_indent + 1
-        };
+        let effective_min = parent_indent.map_or(1_usize, |parent| parent + 1);
         let content_indent: usize = if let Some(explicit) = explicit_indent {
-            let base = if parent_indent == usize::MAX {
-                0
-            } else {
-                parent_indent
-            };
-            base + explicit
+            parent_indent.unwrap_or(0) + explicit
         } else {
             let lookahead = self.buf.peek_until_dedent(parent_indent);
             lookahead
@@ -757,7 +738,7 @@ mod tests {
     fn lit_ok(input: &str) -> (String, Chomp) {
         let mut lex = make_lexer(input);
         let result = lex
-            .try_consume_literal_block_scalar(0)
+            .try_consume_literal_block_scalar(Some(0))
             .unwrap_or_else(|| unreachable!("expected Some, got None"));
         let (cow, chomp, _span) =
             result.unwrap_or_else(|e| unreachable!("expected Ok, got Err: {e}"));
@@ -768,7 +749,7 @@ mod tests {
     fn lit_err(input: &str) -> crate::error::Error {
         let mut lex = make_lexer(input);
         let result = lex
-            .try_consume_literal_block_scalar(0)
+            .try_consume_literal_block_scalar(Some(0))
             .unwrap_or_else(|| unreachable!("expected Some, got None"));
         match result {
             Err(e) => e,
@@ -779,7 +760,7 @@ mod tests {
     /// Try a literal block scalar; returns None if not a block scalar.
     fn lit_none(input: &str) -> bool {
         let mut lex = make_lexer(input);
-        lex.try_consume_literal_block_scalar(0).is_none()
+        lex.try_consume_literal_block_scalar(Some(0)).is_none()
     }
 
     // -----------------------------------------------------------------------
@@ -885,7 +866,7 @@ mod tests {
     fn literal_content_terminated_by_dedent() {
         let mut lex = make_lexer("|\n  foo\nkey: val\n");
         let result = lex
-            .try_consume_literal_block_scalar(0)
+            .try_consume_literal_block_scalar(Some(0))
             .unwrap_or_else(|| unreachable!("expected Some"))
             .unwrap_or_else(|e| unreachable!("expected Ok, got {e}"));
         assert_eq!(result.0.as_ref(), "foo\n");
@@ -948,7 +929,7 @@ mod tests {
     fn explicit_indent_relative_to_parent() {
         let mut lex = make_lexer("|2\n    foo\n");
         let result = lex
-            .try_consume_literal_block_scalar(2)
+            .try_consume_literal_block_scalar(Some(2))
             .unwrap_or_else(|| unreachable!("expected Some"))
             .unwrap_or_else(|e| unreachable!("expected Ok, got {e}"));
         // parent_indent=2 + explicit=2 = content_indent=4; "    foo" has indent=4
@@ -964,7 +945,7 @@ mod tests {
     fn literal_stops_at_dedented_non_blank() {
         let mut lex = make_lexer("|\n  foo\nnext line\n");
         let (val, _, _) = lex
-            .try_consume_literal_block_scalar(0)
+            .try_consume_literal_block_scalar(Some(0))
             .unwrap_or_else(|| unreachable!("expected Some"))
             .unwrap_or_else(|e| unreachable!("expected Ok, got {e}"));
         assert_eq!(val.as_ref(), "foo\n");
@@ -985,7 +966,7 @@ mod tests {
         let input = "|\n  hello\n";
         let mut lex = make_lexer(input);
         let (_, _, span) = lex
-            .try_consume_literal_block_scalar(0)
+            .try_consume_literal_block_scalar(Some(0))
             .unwrap_or_else(|| unreachable!("expected Some"))
             .unwrap_or_else(|e| unreachable!("expected Ok, got {e}"));
         assert_eq!(span.start, 0);
@@ -999,7 +980,7 @@ mod tests {
         // "|\n  hello\n" = 10 bytes
         let mut lex = make_lexer("|\n  hello\n");
         let (_, _, span) = lex
-            .try_consume_literal_block_scalar(0)
+            .try_consume_literal_block_scalar(Some(0))
             .unwrap_or_else(|| unreachable!("expected Some"))
             .unwrap_or_else(|e| unreachable!("expected Ok, got {e}"));
         assert_eq!(span.end, 10);
@@ -1012,7 +993,7 @@ mod tests {
         // trailing blank is consumed even under Clip
         let mut lex = make_lexer("|\n  foo\n\n");
         let (_, _, span) = lex
-            .try_consume_literal_block_scalar(0)
+            .try_consume_literal_block_scalar(Some(0))
             .unwrap_or_else(|| unreachable!("expected Some"))
             .unwrap_or_else(|e| unreachable!("expected Ok, got {e}"));
         assert_eq!(span.end, 9);
@@ -1060,7 +1041,7 @@ mod tests {
     fn literal_result_is_always_cow_owned() {
         let mut lex = make_lexer("|\n  hello\n");
         let (cow, _, _) = lex
-            .try_consume_literal_block_scalar(0)
+            .try_consume_literal_block_scalar(Some(0))
             .unwrap_or_else(|| unreachable!("expected Some"))
             .unwrap_or_else(|e| unreachable!("expected Ok, got {e}"));
         assert!(
@@ -1190,7 +1171,7 @@ mod tests {
         // Folded block scalar (>) must also enforce c-printable on content.
         let mut lex = make_lexer(">\n  val\x07ue\n");
         let result = lex
-            .try_consume_folded_block_scalar(0)
+            .try_consume_folded_block_scalar(Some(0))
             .unwrap_or_else(|| unreachable!("expected Some, got None"));
         let Err(e) = result else {
             unreachable!("expected Err for BEL in folded block scalar, got Ok")
@@ -1223,7 +1204,7 @@ mod tests {
         // a line break. No non-printable error should be emitted.
         let mut lex = make_lexer("|\n  val\u{0085}ue\n");
         let result = lex
-            .try_consume_literal_block_scalar(0)
+            .try_consume_literal_block_scalar(Some(0))
             .unwrap_or_else(|| unreachable!("expected Some"));
         if let Err(e) = result {
             assert_ne!(

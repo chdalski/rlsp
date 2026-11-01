@@ -168,7 +168,7 @@ fn cf8_hs5t_plain_lines_spec_example() {
 }
 
 // CF-9: 27NA — "Spec Example 5.9. Directive Indicator"
-// Tests inline scalar on the same line as `---`: `--- text` → scalar "text".
+// Tests a scalar on the same line as `---`: `--- text` → scalar "text".
 // Also tests %YAML directive — now parsed and included in DocumentStart.version.
 #[test]
 fn cf9_27na_directive_indicator_spec_example() {
@@ -291,11 +291,9 @@ fn cf_q2_2lfx_double_quoted_after_directive() {
 }
 
 // CF-Q3: double-quoted scalar on its own line after a directive and `---`.
-// Based on 2LFX (not 6LVF): `%FOO ...\n---\n"foo"\n`.  The full 6LVF
-// fixture (`--- "foo"` on the same line as `---`) is not exercised here
-// because inline quoted scalars after `---` are not yet supported —
-// consume_marker_line dispatches through scan_plain_line_block (plain
-// only).  See the TODO in consume_marker_line for the deferred fix.
+// Based on 2LFX (not 6LVF): `%FOO ...\n---\n"foo"\n`.  The 6LVF fixture
+// (`--- "foo"` on the same line as `---`) is covered by the yaml-test-suite
+// conformance run.
 #[test]
 fn cf_q3_quoted_scalar_after_directive_and_doc_marker() {
     // 2LFX variant: `%FOO ...\n                  # with a warning.\n---\n"foo"\n`

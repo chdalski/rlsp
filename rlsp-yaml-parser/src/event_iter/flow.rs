@@ -1203,7 +1203,7 @@ impl<'input> EventIter<'input> {
 
                 // Call the appropriate quoted-scalar method.
                 let result = if ch == '\'' {
-                    self.lexer.try_consume_single_quoted(0)
+                    self.lexer.try_consume_single_quoted(None)
                 } else {
                     // Flow context: no block-indentation constraint on
                     // continuation lines of double-quoted scalars.

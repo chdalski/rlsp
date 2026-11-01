@@ -15,7 +15,10 @@ use crate::lines::pos_after_line;
 impl<'input> Lexer<'input> {
     /// Try to tokenize a single-quoted scalar starting at the current line.
     ///
-    /// Implements YAML 1.2 §7.3.2 `c-single-quoted` in block context.
+    /// Implements YAML 1.2 §7.3.2 `c-single-quoted` in block context.  The
+    /// caller supplies `parent_indent` — the indentation of the enclosing block
+    /// collection that continuation lines are checked against; `None` (the
+    /// root node, or a context with no block to enforce) checks none.
     ///
     /// Returns:
     /// - `Ok(None)` — current line does not start with `'` (not a single-quoted scalar).
@@ -31,7 +34,7 @@ impl<'input> Lexer<'input> {
     )]
     pub fn try_consume_single_quoted(
         &mut self,
-        parent_indent: usize,
+        parent_indent: Option<usize>,
     ) -> Result<Option<(Cow<'input, str>, Span)>, Error> {
         // A tail left by an earlier scalar that no caller took (an implicit
         // key) must not be mistaken for this scalar's tail.
@@ -161,7 +164,7 @@ impl<'input> Lexer<'input> {
                 // s-indent(n) enforcement — §6.3 production [66].
                 // Non-blank continuation lines must have at least `parent_indent`
                 // leading spaces when in block context; blank lines are exempt.
-                if parent_indent > 0 {
+                if let Some(parent_indent) = parent_indent {
                     let found = consumed.indent;
                     if found < parent_indent {
                         return Err(Error::syntax(
@@ -960,13 +963,13 @@ mod tests {
 
     fn sq(input: &str) -> (Cow<'_, str>, Span) {
         make_lexer(input)
-            .try_consume_single_quoted(0)
+            .try_consume_single_quoted(None)
             .unwrap_or_else(|e| unreachable!("unexpected error: {e}"))
             .unwrap_or_else(|| unreachable!("expected Some, got None"))
     }
 
     fn sq_err(input: &str) -> Error {
-        match make_lexer(input).try_consume_single_quoted(0) {
+        match make_lexer(input).try_consume_single_quoted(None) {
             Err(e) => e,
             Ok(_) => unreachable!("expected Err, got Ok"),
         }
@@ -974,7 +977,7 @@ mod tests {
 
     fn sq_none(input: &str) {
         let result = make_lexer(input)
-            .try_consume_single_quoted(0)
+            .try_consume_single_quoted(None)
             .unwrap_or_else(|e| unreachable!("unexpected error: {e}"));
         assert!(result.is_none(), "expected None for input {input:?}");
     }
@@ -994,7 +997,7 @@ mod tests {
         #[case] expected: Option<(&str, usize)>,
     ) {
         let mut lexer = make_lexer(input);
-        let _ = lexer.try_consume_single_quoted(0);
+        let _ = lexer.try_consume_single_quoted(None);
         let tail = lexer
             .pending_multiline_tail
             .map(|(tail, pos)| (tail, pos.byte_offset));
@@ -1010,14 +1013,14 @@ mod tests {
     fn untaken_quoted_tail_is_dropped_by_the_next_quoted_scalar(#[case] input: &str) {
         let mut lexer = make_lexer(input);
         let first = if input.starts_with('\'') {
-            lexer.try_consume_single_quoted(0)
+            lexer.try_consume_single_quoted(None)
         } else {
             lexer.try_consume_double_quoted(None)
         };
         assert!(matches!(first, Ok(Some(_))));
         assert!(lexer.pending_multiline_tail.is_some());
         let second = if input.contains("\n'") {
-            lexer.try_consume_single_quoted(0)
+            lexer.try_consume_single_quoted(None)
         } else {
             lexer.try_consume_double_quoted(None)
         };
@@ -1748,7 +1751,7 @@ mod tests {
         // The parser sees it as a multi-line scalar and processes it as a fold.
         // Verify no crash occurs and the character is not in the resulting value
         // as a raw C0 byte (it gets converted to a fold/newline by the spec).
-        let result = make_lexer("'val\nue'").try_consume_single_quoted(0);
+        let result = make_lexer("'val\nue'").try_consume_single_quoted(None);
         // LF is a line break — the multi-line path produces a folded value;
         // it should not be rejected as non-printable (it's a structural break).
         if let Err(e) = result {
@@ -1784,7 +1787,7 @@ mod tests {
     fn single_quoted_rejects_cr_literal_in_body() {
         // CR (U+000D) as a literal byte — structural line break, not nb-json C0 rejection.
         // Same reasoning as LF: CR is a line break character, not rejected as non-printable.
-        if let Err(e) = make_lexer("'val\rue'").try_consume_single_quoted(0) {
+        if let Err(e) = make_lexer("'val\rue'").try_consume_single_quoted(None) {
             assert!(
                 !e.message.contains("non-printable"),
                 "CR in single-quoted must not be rejected as non-printable: {}",
@@ -2035,13 +2038,13 @@ mod tests {
 
     fn sq_with_indent(input: &str, n: usize) -> (Cow<'_, str>, Span) {
         make_lexer(input)
-            .try_consume_single_quoted(n)
+            .try_consume_single_quoted(Some(n))
             .unwrap_or_else(|e| unreachable!("unexpected error: {e}"))
             .unwrap_or_else(|| unreachable!("expected Some, got None"))
     }
 
     fn sq_err_with_indent(input: &str, n: usize) -> Error {
-        match make_lexer(input).try_consume_single_quoted(n) {
+        match make_lexer(input).try_consume_single_quoted(Some(n)) {
             Err(e) => e,
             Ok(_) => unreachable!("expected Err, got Ok"),
         }

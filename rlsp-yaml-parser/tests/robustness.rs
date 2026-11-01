@@ -388,3 +388,127 @@ fn extreme_indentation_variation_does_not_panic() {
         "took {elapsed:?}, expected < 30s"
     );
 }
+
+// ===========================================================================
+// Group H: A plain scalar on the `---` line
+// ===========================================================================
+
+/// Events of `input`, up to a fixed budget so that a parser that stops
+/// advancing fails the test instead of hanging it.
+fn bounded_events(input: &str) -> Vec<Result<(), ()>> {
+    parse_events(input)
+        .take(10_000)
+        .map(|item| item.map(|_| ()).map_err(|_| ()))
+        .collect()
+}
+
+#[test]
+fn marker_line_scalar_inputs_terminate_within_the_event_budget() {
+    for input in [
+        "--- x\n%y",
+        "--- x\n---",
+        "--- x\n...",
+        "--- x\n... y",
+        "--- x\n--- y",
+        "--- x\n---y",
+        "--- x",
+        "--- x\n",
+        "--- x\n\n\n",
+        "--- x\n\t",
+        "--- x\n  \t y",
+        "--- x\n\u{FEFF}",
+        "--- x\n\0",
+        "--- x # \u{1}",
+        "--- x\n  y # \u{7f}",
+        "--- #c",
+        "--- #c\n  x",
+        "---\t#c",
+        "--- x\r",
+    ] {
+        let events = bounded_events(input);
+        assert!(events.len() < 10_000, "no end in sight for {input:?}");
+        if let Some(position) = events.iter().position(Result::is_err) {
+            assert_eq!(
+                position + 1,
+                events.len(),
+                "events after an error: {input:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn marker_line_scalar_never_panics_on_marker_alphabet_strings() {
+    const ALPHABET: [&str; 14] = [
+        "-", " ", "\t", "x", "日", "\r", "\n", "#", ":", "%", ".", "\"", "\0", "\u{FEFF}",
+    ];
+    // A small deterministic generator keeps the test reproducible.
+    let mut state: u64 = 0x2545_F491_4F6C_DD1D;
+    let mut next = || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    for _ in 0..20_000 {
+        let length = usize::try_from(next() % 24).unwrap();
+        let mut input = String::from("--- ");
+        for _ in 0..length {
+            let pick = usize::try_from(next() % 14).unwrap();
+            input.push_str(ALPHABET[pick]);
+        }
+        let events = bounded_events(&input);
+        assert!(events.len() < 10_000, "no end in sight for {input:?}");
+        for item in parse_events(&input).take(10_000).flatten() {
+            let (_, span) = item;
+            assert!(span.start <= span.end, "inverted span in {input:?}");
+            assert!(
+                span.end as usize <= input.len(),
+                "span past the end in {input:?}"
+            );
+            assert!(input.is_char_boundary(span.start as usize), "{input:?}");
+            assert!(input.is_char_boundary(span.end as usize), "{input:?}");
+        }
+        let _ = load(&input);
+    }
+}
+
+#[test]
+fn marker_line_scalar_with_many_continuation_lines_is_linear() {
+    let input = format!("--- x\n{}", "  y\n".repeat(200_000));
+    let start = Instant::now();
+    let docs = load(&input).unwrap();
+    let elapsed = start.elapsed();
+    assert_eq!(docs.len(), 1);
+    assert!(elapsed < Duration::from_secs(30), "took {elapsed:?}");
+}
+
+#[test]
+fn many_marker_line_scalar_documents_do_not_hang() {
+    let input = "--- x\n".repeat(200_000);
+    let start = Instant::now();
+    let docs = load(&input).unwrap();
+    let elapsed = start.elapsed();
+    assert_eq!(docs.len(), 200_000);
+    assert!(elapsed < Duration::from_secs(30), "took {elapsed:?}");
+}
+
+#[test]
+fn long_marker_line_scalar_does_not_hang() {
+    let input = format!("--- {}\n", "a ".repeat(2_500_000));
+    let start = Instant::now();
+    let docs = load(&input).unwrap();
+    let elapsed = start.elapsed();
+    assert_eq!(docs.len(), 1);
+    assert!(elapsed < Duration::from_secs(30), "took {elapsed:?}");
+}
+
+#[test]
+fn many_blank_lines_after_a_marker_line_scalar_do_not_hang() {
+    let input = format!("--- x\n{}y\n", "\n".repeat(100_000));
+    let start = Instant::now();
+    let docs = load(&input).unwrap();
+    let elapsed = start.elapsed();
+    assert_eq!(docs.len(), 1);
+    assert!(elapsed < Duration::from_secs(30), "took {elapsed:?}");
+}

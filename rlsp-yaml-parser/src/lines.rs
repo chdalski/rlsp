@@ -328,7 +328,8 @@ impl<'input> LineBuffer<'input> {
 
     /// Scan forward without consuming to collect all lines with
     /// `indent > base_indent`, stopping at the first line with
-    /// `indent <= base_indent`.  Blank lines (empty content) are transparent
+    /// `indent <= base_indent`.  `None` (the root node) has no threshold and
+    /// collects every line.  Blank lines (empty content) are transparent
     /// to the scan and are included in the result regardless of their indent.
     ///
     /// Returns a slice of the buffered lookahead lines.  Calling this method
@@ -338,7 +339,7 @@ impl<'input> LineBuffer<'input> {
     /// the block scalar content — per YAML chomping rules, trailing blank
     /// lines are stripped, clipped, or kept based on the chomping indicator.
     /// The consumer (lexer, Task 8) is responsible for trimming them.
-    pub fn peek_until_dedent(&mut self, base_indent: usize) -> &[Line<'input>] {
+    pub fn peek_until_dedent(&mut self, base_indent: Option<usize>) -> &[Line<'input>] {
         // Rebuild the lookahead starting from the next line.
         self.lookahead.clear();
 
@@ -382,9 +383,9 @@ impl<'input> LineBuffer<'input> {
             }
 
             // Stop before the first non-blank line that is dedented.
-            // base_indent == usize::MAX is the "root level" sentinel meaning
-            // no indent threshold — include all non-blank lines.
-            if base_indent != usize::MAX && line.indent <= base_indent {
+            // `None` is the root node: no indent threshold, so every non-blank
+            // line is included.
+            if base_indent.is_some_and(|base| line.indent <= base) {
                 break;
             }
 
@@ -968,13 +969,13 @@ mod tests {
     #[test]
     fn peek_until_dedent_empty_input_returns_empty_slice() {
         let mut buf = LineBuffer::new("");
-        assert!(buf.peek_until_dedent(0).is_empty());
+        assert!(buf.peek_until_dedent(Some(0)).is_empty());
     }
 
     #[test]
     fn peek_until_dedent_returns_lines_until_indent_le_base() {
         let mut buf = LineBuffer::new("  a\n  b\nc\n");
-        let lines = buf.peek_until_dedent(1);
+        let lines = buf.peek_until_dedent(Some(1));
         assert_eq!(lines.len(), 2);
         assert_eq!(lines.first().map(|l| l.content), Some("  a"));
         assert_eq!(lines.get(1).map(|l| l.content), Some("  b"));
@@ -983,7 +984,7 @@ mod tests {
     #[test]
     fn peek_until_dedent_does_not_consume_lines() {
         let mut buf = LineBuffer::new("  a\n  b\nc\n");
-        let _ = buf.peek_until_dedent(1);
+        let _ = buf.peek_until_dedent(Some(1));
         let Some(first) = buf.consume_next() else {
             unreachable!("expected first");
         };
@@ -993,14 +994,14 @@ mod tests {
     #[test]
     fn peek_until_dedent_includes_all_lines_when_no_dedent_occurs() {
         let mut buf = LineBuffer::new("  a\n  b\n  c");
-        let lines = buf.peek_until_dedent(1);
+        let lines = buf.peek_until_dedent(Some(1));
         assert_eq!(lines.len(), 3);
     }
 
     #[test]
     fn peek_until_dedent_returns_empty_slice_when_first_line_already_dedented() {
         let mut buf = LineBuffer::new("a\n  b\n");
-        let lines = buf.peek_until_dedent(1);
+        let lines = buf.peek_until_dedent(Some(1));
         // "a" has indent 0 <= 1, so stop immediately
         assert!(lines.is_empty());
     }
@@ -1009,12 +1010,12 @@ mod tests {
     fn peek_until_dedent_second_call_returns_same_slice() {
         let mut buf = LineBuffer::new("  a\n  b\nc");
         let first_call: Vec<String> = buf
-            .peek_until_dedent(1)
+            .peek_until_dedent(Some(1))
             .iter()
             .map(|l| l.content.to_owned())
             .collect();
         let second_call: Vec<String> = buf
-            .peek_until_dedent(1)
+            .peek_until_dedent(Some(1))
             .iter()
             .map(|l| l.content.to_owned())
             .collect();
@@ -1027,7 +1028,7 @@ mod tests {
         // base_indent=0: stop at lines with indent <= 0 (i.e., indent == 0).
         // Both lines here have indent > 0, so all are included.
         let mut buf = LineBuffer::new("  a\n  b\n");
-        let lines = buf.peek_until_dedent(0);
+        let lines = buf.peek_until_dedent(Some(0));
         assert_eq!(lines.len(), 2);
     }
 
@@ -1040,11 +1041,37 @@ mod tests {
         // "  b" (indent 2 > 1) -> included
         // "c"   (indent 0 <= 1) -> stop
         let mut buf = LineBuffer::new("  a\n\n  b\nc");
-        let lines = buf.peek_until_dedent(1);
+        let lines = buf.peek_until_dedent(Some(1));
         assert_eq!(lines.len(), 3);
         assert_eq!(lines.first().map(|l| l.content), Some("  a"));
         assert_eq!(lines.get(1).map(|l| l.content), Some(""));
         assert_eq!(lines.get(2).map(|l| l.content), Some("  b"));
+    }
+
+    #[test]
+    fn peek_until_dedent_none_collects_lines_at_every_indent() {
+        // `None` is the root node: no line is a dedent, blank lines stay
+        // transparent as they do for `Some(_)`.
+        let mut buf = LineBuffer::new("a\n b\n\nc\n");
+        let contents: Vec<&str> = buf
+            .peek_until_dedent(None)
+            .iter()
+            .map(|l| l.content)
+            .collect();
+        assert_eq!(contents, ["a", " b", "", "c"]);
+    }
+
+    #[test]
+    fn peek_until_dedent_some_stops_at_the_first_dedent_that_none_passes() {
+        let mut buf = LineBuffer::new(" a\n\nc\n");
+        let contents: Vec<&str> = buf
+            .peek_until_dedent(Some(0))
+            .iter()
+            .map(|l| l.content)
+            .collect();
+        assert_eq!(contents, [" a", ""]);
+        let mut buf = LineBuffer::new("a\n b\n\nc\n");
+        assert!(buf.peek_until_dedent(Some(0)).is_empty());
     }
 
     // -----------------------------------------------------------------------

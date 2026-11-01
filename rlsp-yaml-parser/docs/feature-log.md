@@ -12,6 +12,32 @@ with existing infrastructure.
 
 ---
 
+### A Plain Scalar After `---` Continues Over the Lines Below [completed]
+
+**Description:** `--- x` followed by `  y` loads as the one scalar `x y`, as does
+`y` at column 0, `%y`, `@y` or `- y`; and `  x` followed by `y` at column 0 loads
+as `x y`. Before, the lines below `--- x` were dropped or read as a second
+node: `y` was a second root scalar, `  y: 1` turned `x` into a key, `%y` was
+skipped and `  @y` was an error, and `format_yaml` deleted that text from the
+file. These inputs now report a syntax error, as in libfyaml 0.9.6: a comment
+line ends the scalar and text below it is a second root node (`--- v`, `# d`,
+`w`), a key line below it (`--- x`, `y: 1`), a key on the marker line
+(`--- x: 1`), `-`, `?` or `:` followed by a space or the end of the line on the
+marker line (`--- - a`, `--- ? a`, `--- -`, `--- ?`; they loaded as the plain
+scalar `"- a"`), and plain text at column 0 under a block mapping key (`a:`,
+`w`, `x`; the two lines were merged into the value `w x`). `--- x # y: z` loads
+the scalar `x` with its comment. These inputs give the same events and errors as
+libfyaml 0.9.6; `--- x # c` followed by `%y` is an error here, where libfyaml
+skips the `%y` line. `parse_events()` and `load()` give the same result.
+**Complexity:** Medium
+**Comment:** YAML 1.2.2 [207] `l-bare-document`, [197] `s-l+flow-in-block`,
+[134] and [135] `ns-plain-multi-line`, [126] `ns-plain-first`. The root node has
+no parent indent, so its continuation lines may start at any column. A `%YAML`
+line below such a scalar is part of it, as in a bare document.
+**Tier:** 1
+
+---
+
 ### Properties Alone Are an Empty Node [completed]
 
 **Description:** A tag or an anchor with nothing after it is an empty node that

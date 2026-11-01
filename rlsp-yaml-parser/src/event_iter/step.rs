@@ -87,7 +87,7 @@ impl<'input> EventIter<'input> {
 
         // ---- Document / stream boundaries ----
 
-        if self.lexer.at_eof() && !self.lexer.has_inline_scalar() {
+        if self.lexer.at_eof() {
             let end = self.lexer.drain_to_end();
             self.close_all_collections(end);
             // If a standalone tag or anchor remains after closing all collections
@@ -151,13 +151,7 @@ impl<'input> EventIter<'input> {
 
         // Document markers (`---`/`...`) must be at column 0 (YAML 1.2 §9.1).
         // Any line with indent > 0 cannot be a marker — skip the function call.
-        //
-        // If an inline scalar from the previous `---` marker is still pending,
-        // defer document-boundary checks: the inline content belongs to the
-        // current document and must be emitted before the boundary fires.
-        // Example: `--- foo\n---` — `foo` is the first document's root node;
-        // the second `---` ends the first document only after `foo` is emitted.
-        if peeked_indent == 0 && !self.lexer.has_inline_scalar() && self.lexer.is_document_end() {
+        if peeked_indent == 0 && self.lexer.is_document_end() {
             let pos = self.lexer.current_pos();
             self.close_all_collections(pos);
             self.emit_root_properties_as_empty_scalar(pos);
@@ -177,7 +171,7 @@ impl<'input> EventIter<'input> {
             self.drain_trailing_comment();
             return StepResult::Continue;
         }
-        if peeked_indent == 0 && !self.lexer.has_inline_scalar() && self.lexer.is_directives_end() {
+        if peeked_indent == 0 && self.lexer.is_directives_end() {
             let pos = self.lexer.current_pos();
             self.close_all_collections(pos);
             self.emit_root_properties_as_empty_scalar(pos);
@@ -191,29 +185,6 @@ impl<'input> EventIter<'input> {
             // here since consume_preamble_between_docs will not be called for this
             // transition.
             self.directive_scope = DirectiveScope::default();
-            // Validate any inline tag on this `---` line against the new
-            // document's (empty) directive scope.  Tags defined in the previous
-            // document do not carry over (YAML §9.2), so an undefined handle
-            // must fail immediately.
-            if let Some((tag_val, tag_offset)) = self.lexer.peek_inline_scalar()
-                && tag_val.starts_with('!')
-            {
-                // The inline scalar starts at `tag_offset` bytes from the
-                // start of the input.  Reconstruct the full Pos by computing
-                // the column as the byte distance from the `---` line start —
-                // tags are ASCII-only, so byte distance == codepoint distance.
-                let col_from_line_start = tag_offset as usize - marker_pos.byte_offset;
-                let tag_pos = Pos {
-                    byte_offset: tag_offset as usize,
-                    line: marker_pos.line,
-                    column: col_from_line_start,
-                };
-                if let Err(e) = self.directive_scope.resolve_tag(tag_val, tag_pos) {
-                    self.lexer.drain_inline_scalar();
-                    self.state = IterState::Done;
-                    return StepResult::Yield(Err(e));
-                }
-            }
             self.state = IterState::InDocument;
             self.root_node_emitted = false;
             self.queue.push_back((
@@ -274,7 +245,6 @@ impl<'input> EventIter<'input> {
         // stack is empty, any further non-comment, non-blank content is invalid.
         if self.root_node_emitted
             && self.coll_stack.is_empty()
-            && !self.lexer.has_inline_scalar()
             && let Some(line) = self.lexer.peek_next_line()
         {
             let err_pos = line.pos;
@@ -1074,40 +1044,23 @@ impl<'input> EventIter<'input> {
 
         // ---- Scalars ----
 
-        // `block_parent_indent` — the indent of the enclosing block context;
-        // block scalars (`|`, `>`) must have content lines more indented than
-        // this value.  For a block scalar embedded as inline content after `? `
-        // or `- `, the enclosing block's indent is the *collection's* indent,
-        // not the column of the inline `|`/`>` token.
-        //
-        // `plain_parent_indent` — the enclosing block's indent level.
-        // Plain scalar continuation lines must be indented strictly more than
-        // `plain_parent_indent` (YAML 1.2), with a special exception for
-        // tab-indented lines when `plain_parent_indent == 0` (the tab provides
-        // the s-separate-in-line separator required by s-flow-folded(0)).
-        // Use usize::MAX as a sentinel for "root level" — the root node has no
-        // parent collection, so block scalar body lines may start at column 0
-        // (equivalent to a parent indent of -1 in the YAML spec).
-        let block_parent_indent = self.coll_stack.last().map_or(usize::MAX, |e| e.indent());
-        let plain_parent_indent = self.coll_stack.last().map_or(0, |e| e.indent());
-        // Capture whether an inline scalar (from `--- text`) was pending before
-        // the scalar dispatch call.  If it was, the emitted plain scalar came
-        // from the `---` marker line and is NOT necessarily the complete root
-        // node — the lexer emits `--- >` / `--- |` / `--- "text` inline content
-        // as a plain scalar, but the actual node body follows on subsequent
-        // lines.  Marking root_node_emitted in those cases would incorrectly
-        // reject the body lines as "content after root node".
-        let had_inline_scalar = self.lexer.has_inline_scalar();
-        match self.try_consume_scalar(plain_parent_indent, block_parent_indent) {
+        // `parent_indent` — the indent of the innermost open block collection,
+        // or `None` for the root node, which has no parent collection (a
+        // parent indent of -1 in the YAML spec).  Plain and quoted scalars
+        // continue over lines indented past it, and block scalars (`|`, `>`)
+        // need content lines more indented than it.  For a block scalar
+        // embedded as inline content after `? ` or `- `, the enclosing block's
+        // indent is the *collection's* indent, not the column of the inline
+        // `|`/`>` token.
+        let parent_indent = self.coll_stack.last().map(|e| e.indent());
+        match self.try_consume_scalar(parent_indent) {
             Ok(Some(event)) => {
                 self.tick_mapping_phase_after_scalar();
                 // Drain any trailing comment detected on the scalar's line.
                 self.drain_trailing_comment();
                 // A scalar emitted at the document root (no open collection)
-                // is the complete root node — unless it came from inline
-                // content after `---` (had_inline_scalar), in which case the
-                // body on subsequent lines is part of the same node.
-                if self.coll_stack.is_empty() && !had_inline_scalar {
+                // is the complete root node.
+                if self.coll_stack.is_empty() {
                     self.root_node_emitted = true;
                 }
                 return StepResult::Yield(Ok(event));

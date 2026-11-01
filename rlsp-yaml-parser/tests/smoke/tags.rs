@@ -445,7 +445,7 @@ fn tag_before_anchor_both_emitted_on_sequence() {
 
 #[rstest]
 #[case::duplicate_tag_on_same_node("!!str !!int val\n")]
-#[case::alias_with_tag("&anchor val\n!!str *anchor\n")]
+#[case::alias_with_tag("k: &anchor val\nz: !!str *anchor\n")]
 #[case::flow_duplicate_tag_on_same_node("[!t !t2 val]\n")]
 #[case::flow_alias_with_pending_tag("[!t *a, val]\n")]
 #[case::flow_alias_with_pending_tag_alone("[!a *name]\n")]
@@ -454,6 +454,42 @@ fn tag_error_cases_return_error(#[case] input: &str) {
         has_error(input),
         "invalid tag usage must return an error: {input:?}"
     );
+}
+
+/// At the root, a line that starts like a tagged alias continues the plain
+/// scalar above it, as in libfyaml 0.9.6: there is no alias and no second node.
+#[test]
+fn tagged_alias_text_below_a_root_scalar_is_part_of_the_scalar() {
+    assert_eq!(
+        scalar_values(&evs("&anchor val\n!!str *anchor\n")),
+        ["val !!str *anchor"]
+    );
+}
+
+/// A tag handle defined for one document does not carry over to the `---`
+/// line of the next (YAML 1.2.2 §9.2).
+#[rstest]
+#[case::handle_on_the_next_marker_line("%TAG !e! tag:e,2000:\n--- !e!a v\n--- !e!a w\n")]
+#[case::handle_after_an_end_marker("%TAG !e! tag:e,2000:\n--- !e!a v\n...\n--- !e!a w\n")]
+#[case::handle_on_a_line_below("%TAG !e! tag:e,2000:\n---\n!e!a x\n---\n!e!a y\n")]
+#[case::handle_without_a_directive("--- !e!foo x\n  y\n")]
+fn tag_handle_is_undefined_on_the_marker_line_of_a_later_document(#[case] input: &str) {
+    let error = parse_to_vec(input)
+        .into_iter()
+        .find_map(Result::err)
+        .expect("an error");
+    assert!(error.message.contains("undefined tag handle"), "{error}");
+}
+
+#[test]
+fn tag_handle_resolves_on_a_marker_line_scalar_with_continuation() {
+    let events = evs("%TAG !e! tag:e,2000:\n--- !e!a v\n  y\n");
+    let scalar = events
+        .iter()
+        .find(|e| matches!(e, Event::Scalar { .. }))
+        .expect("a scalar");
+    assert_eq!(scalar.tag(), Some("tag:e,2000:a"));
+    assert_eq!(scalar_values(&events), ["v y"]);
 }
 
 #[test]

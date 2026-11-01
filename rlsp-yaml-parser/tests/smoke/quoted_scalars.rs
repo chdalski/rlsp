@@ -8,8 +8,7 @@ use super::*;
 // Cases with SingleQuoted style use single(); cases with DoubleQuoted use double().
 #[rstest]
 // IT-1 (spike): single-quoted scalar emits Scalar with SingleQuoted style.
-// Use bare document (no --- marker) so quoted scalar starts on its own line,
-// avoiding the inline_scalar slot which is plain-scalar only.
+// Use bare document (no --- marker) so the quoted scalar starts on its own line.
 #[case::single_quoted_hello("'hello'\n", "hello", ScalarStyle::SingleQuoted)]
 // IT-2: double-quoted scalar emits Scalar with DoubleQuoted style.
 #[case::double_quoted_hello("\"hello\"\n", "hello", ScalarStyle::DoubleQuoted)]

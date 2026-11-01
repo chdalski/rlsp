@@ -76,6 +76,8 @@ fn mapping_key_ascii_byte_offset_correct() {
 #[case::anchor_multibyte_scalar("&名前 hello\n", "hello", (8, 1, 4), (13, 1, 9))]
 #[case::sequence_second_item("- 日本\n- 語文\n", "語文", (11, 2, 2), (17, 2, 4))]
 #[case::doc_marker_inline("--- 中文\n", "中文", (4, 1, 4), (10, 1, 6))]
+#[case::doc_marker_two_byte_continuation("--- é\n  ü\n", "é ü", (4, 1, 4), (11, 2, 3))]
+#[case::doc_marker_three_byte_continuation("--- 日本\n  語\n", "日本 語", (4, 1, 4), (16, 2, 3))]
 fn scalar_span_start_and_end(
     #[case] input: &str,
     #[case] find_value: &str,

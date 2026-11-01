@@ -6,8 +6,6 @@
 //! The lexer is lazy — it never buffers the whole input.  It advances through
 //! the [`LineBuffer`] one line at a time, driven by the state machine.
 
-use std::borrow::Cow;
-
 use crate::chars::{find_non_c_printable, is_ns_anchor_char};
 use crate::error::Error;
 use crate::event_iter::line_mapping::is_implicit_key_line;
@@ -18,7 +16,6 @@ pub use crate::chars::is_ns_char;
 pub use plain::scan_plain_line_flow;
 
 use block::parse_block_header;
-use plain::scan_plain_line_block;
 
 mod block;
 mod comment;
@@ -38,15 +35,6 @@ pub struct Lexer<'input> {
     pub(super) buf: LineBuffer<'input>,
     /// Position after the last consumed line (or `Pos::ORIGIN` at start).
     pub(super) current_pos: Pos,
-    /// Inline scalar content following a `---` or `...` marker on the same
-    /// line (e.g. `--- text`).  Populated by [`Self::consume_marker_line`]
-    /// when the marker line has trailing content; drained by
-    /// [`Self::try_consume_plain_scalar`] on the next call.
-    pub(super) inline_scalar: Option<(Cow<'input, str>, Span)>,
-    /// The comment after the inline scalar on its marker line (`--- v # c`).
-    /// Moves to [`Self::trailing_comment`] when the scalar is drained, so the
-    /// comment follows the scalar's event and not the marker's.
-    pub(super) inline_scalar_comment: Option<(&'input str, Span)>,
     /// Comment found on the line of the node or indicator just consumed.
     ///
     /// Populated by [`Self::try_consume_plain_scalar`] (first and last line),
@@ -72,12 +60,11 @@ pub struct Lexer<'input> {
     /// scalar rather than instead of it.
     pub plain_scalar_suffix_error: Option<Error>,
     /// Error produced by [`Self::consume_marker_line`] when the marker line
-    /// carries inline content that cannot be parsed (e.g. `--- !tag` where
-    /// `!` starts a tag indicator that cannot start a plain scalar, or
-    /// `--- key: value` where `: ` occurs after the plain-scanned prefix,
-    /// or any inline on a `...` marker which never permits inline content).
+    /// carries content that cannot start the document's root node (e.g.
+    /// `--- key: value`, `--- - a`, `--- ,`, or any content on a `...` marker
+    /// line).
     ///
-    /// Drained by the callers in `lib.rs` immediately after calling
+    /// Taken by the callers in `event_iter/` immediately after calling
     /// `consume_marker_line`.
     pub marker_inline_error: Option<Error>,
     /// `true` when the entire input contains no non-c-printable bytes.
@@ -96,8 +83,6 @@ impl<'input> Lexer<'input> {
         Self {
             buf: LineBuffer::new(input),
             current_pos: Pos::ORIGIN,
-            inline_scalar: None,
-            inline_scalar_comment: None,
             trailing_comment: None,
             pending_multiline_tail: None,
             plain_scalar_suffix_error: None,
@@ -230,28 +215,24 @@ impl<'input> Lexer<'input> {
             .is_some_and(|line| !is_blank_or_comment(line))
     }
 
-    /// Consume the currently-primed line as a marker line.
+    /// Consume the currently-primed marker line (`---` or `...`).
     ///
-    /// Returns `(marker_pos, after_pos)` where:
-    /// - `marker_pos` is the start position of the marker line
-    /// - `after_pos` is the position immediately after the line terminator
+    /// Returns `(marker_pos, after_pos)` where `marker_pos` is the start
+    /// position of the marker line and `after_pos` is the position immediately
+    /// after the line terminator.
     ///
-    /// If the marker line carries inline content (e.g. `--- text`), that
-    /// content is extracted as a plain scalar and stored in
-    /// [`Self::inline_scalar`] for retrieval by the next call to
-    /// [`Self::try_consume_plain_scalar`].
+    /// Content after a `---` is the root node of the document and is read by
+    /// the dispatch of a later line (see [`Self::handle_marker_inline`]); a
+    /// comment is stored in [`Self::trailing_comment`].
+    ///
+    /// `reject_all_inline` — when `true` (used for `...` markers), any
+    /// non-comment content after the marker is flagged as an error in
+    /// [`Self::marker_inline_error`].  When `false` (used for `---` markers),
+    /// content that cannot start the root node is flagged.
     ///
     /// The caller must ensure the current line is a marker (via
     /// [`Self::is_directives_end`] or [`Self::is_document_end`]) before
     /// calling this.
-    /// Consume the currently-primed marker line (`---` or `...`).
-    ///
-    /// `reject_all_inline` — when `true` (used for `...` markers), any
-    /// non-comment inline content after the marker is flagged as an error in
-    /// [`Self::marker_inline_error`].  When `false` (used for `---` markers),
-    /// a valid plain scalar may appear inline; invalid inline content (an
-    /// indicator character that cannot start a plain scalar, or residual
-    /// content after the scanned scalar) is still flagged.
     pub fn consume_marker_line(&mut self, reject_all_inline: bool) -> (Pos, Pos) {
         // SAFETY: caller must verify via is_directives_end() or is_document_end()
         // before calling — the state machine enforces this precondition.
@@ -307,15 +288,21 @@ impl<'input> Lexer<'input> {
     /// Handle non-comment inline content on a `---` marker line.
     ///
     /// The content is the root node of the document (YAML 1.2.2 [207]
-    /// `l-bare-document` through [197] `s-l+flow-in-block`).  A block scalar
-    /// header, anchor, tag, quoted scalar, flow collection (`[`, `{`) or alias
-    /// (`*`) is prepended as a synthetic line so the dispatch of a later line
-    /// handles it; a plain scalar is scanned here.  A flow collection or alias
-    /// followed by more content on the line (`--- [x] [y]`, `--- [x]: v`,
-    /// `--- *a b`) is an error: a block mapping cannot start on the marker
-    /// line, and a document holds one node.  A closing bracket (`]`, `}`) or a
-    /// reserved indicator (`,`, `%`, `@`, backtick) is an error as it is on a
-    /// later line.
+    /// `l-bare-document` through [197] `s-l+flow-in-block`).  Whatever its
+    /// form (block scalar header, anchor, tag, quoted or plain scalar, flow
+    /// collection, alias), the rest of the line is prepended as a synthetic
+    /// line, so the dispatch of a later line reads it, and its continuation
+    /// lines, as it reads any root node.  Content that cannot start a node
+    /// here is an error:
+    /// - a closing bracket (`]`, `}`) or a reserved indicator (`,`, `%`, `@`,
+    ///   backtick), as on a later line;
+    /// - `-`, `?` or `:` followed by a space, a tab or the end of the line
+    ///   (`--- - a`, `--- ?`): the indicator of a block collection, which
+    ///   cannot start on the marker line ([126] `ns-plain-first`);
+    /// - a plain scalar, flow collection or alias followed by more content that
+    ///   makes the line an implicit mapping key (`--- x: 1`, `--- [x]: v`,
+    ///   `--- *a b`): a block mapping cannot start on the marker line and a
+    ///   document holds one node.
     ///
     /// Errors are stored in [`Self::marker_inline_error`]; the content of an
     /// invalid block-scalar header, an anchor before a block mapping entry and
@@ -372,8 +359,21 @@ impl<'input> Lexer<'input> {
             // Tag, quoted scalar, flow collection, or alias.
             true
         } else {
-            self.handle_plain_scalar_inline(inline, inline_start);
-            false
+            // Plain scalar.  `-`, `?` and `:` start one only when a safe
+            // character follows, and a line that is an implicit key opens a
+            // block mapping, which cannot start on the marker line.
+            let starts_plain = inline
+                .chars()
+                .next()
+                .is_some_and(|ch| plain::ns_plain_first_block(ch, inline));
+            let valid = starts_plain && !is_implicit_key_line(inline);
+            if !valid {
+                self.marker_inline_error = Some(Error::syntax(
+                    inline_start,
+                    "invalid content after document-start marker '---'".into(),
+                ));
+            }
+            valid
         };
         if prepend {
             // Prepend the rest of the marker line as a synthetic line so the
@@ -385,41 +385,6 @@ impl<'input> Lexer<'input> {
                 break_type: line.break_type,
                 pos: inline_start,
             });
-        }
-    }
-
-    /// Handle plain-scalar inline content on a `---` marker line.
-    fn handle_plain_scalar_inline(&mut self, inline: &'input str, inline_start: Pos) {
-        let scanned = scan_plain_line_block(inline);
-        if scanned.is_empty() {
-            // First character cannot start a plain scalar (e.g. `*`, `%`,
-            // `{`, `[`) — invalid inline content after `---`.
-            self.marker_inline_error = Some(Error::syntax(
-                inline_start,
-                "invalid content after document-start marker '---'".into(),
-            ));
-            return;
-        }
-        // Any non-whitespace residual that is not a comment is invalid
-        // (e.g. `--- key: value` where `: value` is left after scanning `key`).
-        let residual = inline[scanned.len()..].trim_start_matches([' ', '\t']);
-        if !residual.is_empty() && !residual.starts_with('#') {
-            self.marker_inline_error = Some(Error::syntax(
-                inline_start,
-                "invalid content after document-start marker '---'".into(),
-            ));
-        } else {
-            let inline_end = crate::pos::advance_within_line(inline_start, scanned);
-            match self.comment_in_suffix(&inline[scanned.len()..], inline_end) {
-                Ok(comment) => {
-                    self.inline_scalar_comment = comment;
-                    self.inline_scalar = Some((
-                        Cow::Borrowed(scanned),
-                        Span::from_pos(inline_start, inline_end),
-                    ));
-                }
-                Err(e) => self.marker_inline_error = Some(e),
-            }
         }
     }
 
@@ -466,43 +431,9 @@ impl<'input> Lexer<'input> {
     }
 
     /// True when no more lines remain.
-    ///
-    /// Note: a true result here does **not** mean there is no remaining scalar
-    /// content — an inline scalar from a preceding `--- text` marker may still
-    /// be pending in [`Self::inline_scalar`].  Check
-    /// [`Self::has_inline_scalar`] separately when needed.
     #[must_use]
     pub fn at_eof(&self) -> bool {
         self.buf.at_eof()
-    }
-
-    /// True when an inline scalar extracted from a preceding `---` or `...`
-    /// marker line is waiting to be consumed by [`Self::try_consume_plain_scalar`].
-    #[must_use]
-    pub const fn has_inline_scalar(&self) -> bool {
-        self.inline_scalar.is_some()
-    }
-
-    /// Return a reference to the pending inline scalar (value, start byte offset)
-    /// without consuming it, or `None` if there is no pending inline scalar.
-    #[must_use]
-    pub fn peek_inline_scalar(&self) -> Option<(&str, u32)> {
-        self.inline_scalar
-            .as_ref()
-            .map(|(v, span)| (v.as_ref(), span.start))
-    }
-
-    /// Discard the pending inline scalar without emitting it.
-    pub fn drain_inline_scalar(&mut self) {
-        self.inline_scalar = None;
-        self.inline_scalar_comment = None;
-    }
-
-    /// Inject an inline scalar for testing — simulates the state left by
-    /// `consume_marker_line` after parsing `--- text`.
-    #[cfg(test)]
-    pub fn set_inline_scalar_for_test(&mut self, value: Cow<'input, str>, span: crate::pos::Span) {
-        self.inline_scalar = Some((value, span));
     }
 
     /// True when the next line in the buffer is a synthetic line prepended by
@@ -750,6 +681,70 @@ mod tests {
         let mut lex = make_lexer("---\nnext");
         lex.consume_marker_line(false);
         assert!(lex.buf.peek_next().is_some_and(|l| l.content == "next"));
+    }
+
+    #[rstest]
+    #[case::plain("--- x", "x", 4)]
+    #[case::two_words("--- x y", "x y", 4)]
+    #[case::extra_spaces("---   x", "x", 6)]
+    #[case::tab_separator("---\tx", "x", 4)]
+    #[case::comment_stays_in_the_line("--- x # c", "x # c", 4)]
+    #[case::comment_with_colon("--- x # y: z", "x # y: z", 4)]
+    #[case::colon_start_with_safe_char("--- :x", ":x", 4)]
+    #[case::dash_start_with_safe_char("--- -x", "-x", 4)]
+    #[case::question_start_with_safe_char("--- ?x", "?x", 4)]
+    #[case::colon_inside("--- x:y", "x:y", 4)]
+    #[case::url("--- http://x", "http://x", 4)]
+    #[case::document_end_text("--- ...", "...", 4)]
+    #[case::directives_end_text("--- ---", "---", 4)]
+    #[case::multibyte("--- 日本", "日本", 4)]
+    fn consume_marker_line_prepends_plain_rest_as_synthetic_line(
+        #[case] input: &str,
+        #[case] content: &str,
+        #[case] column: usize,
+    ) {
+        let mut lex = make_lexer(input);
+        lex.consume_marker_line(false);
+        assert!(lex.marker_inline_error.is_none());
+        assert!(lex.trailing_comment.is_none());
+        let line = lex
+            .peek_next_line()
+            .unwrap_or_else(|| unreachable!("the rest of the marker line is prepended"));
+        assert_eq!(line.content, content);
+        assert_eq!(line.indent, column);
+        assert_eq!(line.pos.column, column);
+        assert_eq!(line.pos.line, 1);
+        assert_eq!(line.pos.byte_offset, line.offset);
+        assert_eq!(line.offset, input.len() - content.len());
+    }
+
+    #[rstest]
+    #[case::key("--- x: 1")]
+    #[case::key_with_empty_value("--- x :")]
+    #[case::hash_inside_key("--- x#y: z")]
+    #[case::multi_word_key("--- x y: 1")]
+    #[case::key_with_colon_inside("--- a:b: c")]
+    #[case::double_colon("--- x::")]
+    #[case::tab_before_colon("--- x\t: 1")]
+    #[case::multibyte_key("--- é: 1")]
+    #[case::sequence_entry("--- - a")]
+    #[case::bare_dash("--- -")]
+    #[case::dash_tab("--- -\tx")]
+    #[case::explicit_key("--- ? a")]
+    #[case::bare_question_mark("--- ?")]
+    #[case::question_mark_tab("--- ?\tx")]
+    #[case::value_indicator("--- : a")]
+    #[case::bare_colon("--- :")]
+    #[case::colon_tab("--- :\tx")]
+    fn consume_marker_line_rejects_invalid_plain_rest(#[case] input: &str) {
+        let mut lex = make_lexer(input);
+        lex.consume_marker_line(false);
+        let error = lex
+            .marker_inline_error
+            .take()
+            .unwrap_or_else(|| unreachable!("the marker line must be rejected"));
+        assert_eq!((error.pos.line, error.pos.column), (1, 4));
+        assert!(lex.peek_next_line().is_none());
     }
 
     // -----------------------------------------------------------------------

@@ -22,7 +22,7 @@ directives.
 - [x] Clarify scope with the user
 - [x] Design review of the approach
 - [x] Task 1: One prepend in the marker handler
-- [ ] Task 2: The `--- x` path joins the other marker forms
+- [x] Task 2: The `--- x` path joins the other marker forms
 - [ ] Task 3: A `%` at a node start is an error
 - [ ] Task 4: A key reads its own `:`
 - [ ] Task 5: A bare `-` looks past comment lines
@@ -57,21 +57,21 @@ one of its arms. Behavior is unchanged.
 becomes a second root scalar. "Root" is also encoded three ways across the scalar
 readers. Productions: [207], [208], [134], [135], [197], [200].
 
-- [ ] `--- x\n  y\n`, `--- x\ny\n`, `  x\ny\n`, `--- x\n%y\n`, and `--- x\n  @y\n` load one
+- [x] `--- x\n  y\n`, `--- x\ny\n`, `  x\ny\n`, `--- x\n%y\n`, and `--- x\n  @y\n` load one
       scalar with the events of libfyaml 0.9.6
-- [ ] `--- v\n# d\nw\n`, `--- x\ny: 1\n`, `a:\nw\nx\n`, `--- - a\n`, `--- ? a\n`, `--- -\n`,
+- [x] `--- v\n# d\nw\n`, `--- x\ny: 1\n`, `a:\nw\nx\n`, `--- - a\n`, `--- ? a\n`, `--- -\n`,
       and `--- ?\n` report a syntax error, as libfyaml does
-- [ ] `--- x # y: z\n` loads the scalar `x` with its comment
-- [ ] One path reads every marker form, and no inline scalar side channel remains in
+- [x] `--- x # y: z\n` loads the scalar `x` with its comment
+- [x] One path reads every marker form, and no inline scalar side channel remains in
       the lexer or the event iterator
-- [ ] No doc or comment describes that side channel: `docs/architecture.md`, including
+- [x] No doc or comment describes that side channel: `docs/architecture.md`, including
       its `marker_inline_error` and `consume_marker_line` text, `bnf-§9.md`,
       `tests/smoke/quoted_scalars.rs`, and `tests/smoke/conformance.rs`
-- [ ] `format_yaml` keeps `y` in `--- x\n  y\n`, and a second format changes nothing
-- [ ] `docs/conformance/` names the enforcement sites, `bnf-§7.md` [126] states one
+- [x] `format_yaml` keeps `y` in `--- x\n  y\n`, and a second format changes nothing
+- [x] `docs/conformance/` names the enforcement sites, `bnf-§7.md` [126] states one
       verdict, and `rlsp-yaml-parser/docs/feature-log.md` tells a reader which inputs
       now report an error
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 3: A `%` at a node start is an error
 
@@ -190,3 +190,8 @@ The loader's "skip" arm drops a node event after the root.
 - **A loss the sweep of Task 8 finds outside this plan's inputs goes to the user:** the
   plan stops for a revision, because the sweep may reach further than the inputs known
   today. The target stays 0.
+
+## Task Notes
+
+- Task 3: `--- x # c\n%y\n` reports an error since Task 2 while libfyaml skips the line;
+  `design-decisions.md` records it with the other `%` inputs

@@ -241,7 +241,7 @@ impl<'input> EventIter<'input> {
             self.lexer.prepend_inline_line(key_synthetic);
 
             if key_content.starts_with('\'') {
-                match self.lexer.try_consume_single_quoted(0) {
+                match self.lexer.try_consume_single_quoted(None) {
                     Ok(Some((value, _))) => (value, ScalarStyle::SingleQuoted),
                     Ok(None) => {
                         return ConsumedMapping::QuotedKeyError(

@@ -295,27 +295,19 @@ impl<'input> EventIter<'input> {
 
     /// Try to consume a scalar from the current lexer position.
     ///
-    /// `plain_parent_indent` — the indent of the current line; plain scalar
-    /// continuation stops when the next line is less-indented than this.
-    ///
-    /// `block_parent_indent` — the indent of the enclosing block context;
-    /// block scalars collect content that is more indented than this value.
+    /// `parent_indent` — the indent of the innermost open block collection, or
+    /// `None` at the document root.  A plain or quoted scalar continues over
+    /// lines indented past it; a block scalar collects the lines indented past
+    /// it (any line at the root).
     ///
     /// Consumes `self.pending_anchor` and attaches it to the emitted scalar.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "match-on-event-type; splitting would obscure flow"
-    )]
     pub(crate) fn try_consume_scalar(
         &mut self,
-        plain_parent_indent: usize,
-        block_parent_indent: usize,
+        parent_indent: Option<usize>,
     ) -> Result<Option<(Event<'input>, Span)>, Error> {
         // A line that starts with a reserved indicator (`k: ,`, `- @a`) is an
         // error: no plain scalar starts with it, and no other node either.
-        if !self.lexer.has_inline_scalar()
-            && let Some(line) = self.lexer.peek_next_line()
-        {
+        let first_byte = if let Some(line) = self.lexer.peek_next_line() {
             let trimmed = line.content.trim_start_matches([' ', '\t']);
             if let Some(ch) = trimmed.chars().next()
                 && is_reserved_plain_start(ch, line.indent > 0)
@@ -326,24 +318,14 @@ impl<'input> EventIter<'input> {
                     format!("'{ch}' cannot start a plain scalar (YAML 1.2 §7.3.3 [126])"),
                 ));
             }
-        }
-        // A pending inline scalar (from `--- text`) does not live on the
-        // currently-primed line — check before peeking to avoid reading the
-        // wrong line.
-        let first_byte = if self.lexer.has_inline_scalar() {
-            None // force plain branch to drain the inline scalar
+            trimmed.as_bytes().first().copied()
         } else {
-            self.lexer.peek_next_line().and_then(|line| {
-                let trimmed = line.content.trim_start_matches([' ', '\t']);
-                trimmed.as_bytes().first().copied()
-            })
+            None
         };
 
         match first_byte {
             Some(b'|') => {
-                let Some(result) = self
-                    .lexer
-                    .try_consume_literal_block_scalar(block_parent_indent)
+                let Some(result) = self.lexer.try_consume_literal_block_scalar(parent_indent)
                 else {
                     return Ok(None);
                 };
@@ -359,10 +341,7 @@ impl<'input> EventIter<'input> {
                 )))
             }
             Some(b'>') => {
-                let Some(result) = self
-                    .lexer
-                    .try_consume_folded_block_scalar(block_parent_indent)
-                else {
+                let Some(result) = self.lexer.try_consume_folded_block_scalar(parent_indent) else {
                     return Ok(None);
                 };
                 let (value, chomp, span) = result?;
@@ -377,8 +356,7 @@ impl<'input> EventIter<'input> {
                 )))
             }
             Some(b'\'') => {
-                let Some((value, span)) =
-                    self.lexer.try_consume_single_quoted(plain_parent_indent)?
+                let Some((value, span)) = self.lexer.try_consume_single_quoted(parent_indent)?
                 else {
                     return Ok(None);
                 };
@@ -394,16 +372,9 @@ impl<'input> EventIter<'input> {
                 )))
             }
             Some(b'"') => {
-                // Pass Some(parent_indent) when inside a block collection so
-                // collect_double_quoted_continuations can validate continuation-line
-                // indentation (YAML 1.2 §7.3.1).  At document root (coll_stack empty)
-                // there is no enclosing block, so no indent constraint: pass None.
-                let dq_block_indent = if self.coll_stack.is_empty() {
-                    None
-                } else {
-                    Some(plain_parent_indent)
-                };
-                let Some((value, span)) = self.lexer.try_consume_double_quoted(dq_block_indent)?
+                // Inside a block collection the continuation-line indentation is
+                // validated (YAML 1.2 §7.3.1); the root has no enclosing block.
+                let Some((value, span)) = self.lexer.try_consume_double_quoted(parent_indent)?
                 else {
                     return Ok(None);
                 };
@@ -419,10 +390,9 @@ impl<'input> EventIter<'input> {
                 )))
             }
             // EOF, blank line, or any byte that is not a block/quoted indicator
-            // — attempt plain scalar (also drains inline_scalar when set).
+            // — attempt plain scalar.
             _ => {
-                let Some((value, span)) = self.lexer.try_consume_plain_scalar(plain_parent_indent)
-                else {
+                let Some((value, span)) = self.lexer.try_consume_plain_scalar(parent_indent) else {
                     return Ok(None);
                 };
                 // Check for invalid content in the suffix (e.g. NUL or mid-stream
@@ -603,7 +573,6 @@ impl<'input> Iterator for EventIter<'input> {
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Cow;
 
     use super::*;
     use crate::EventIter;
@@ -665,7 +634,7 @@ mod tests {
     fn dispatch_at_eof_returns_none() {
         let mut iter = EventIter::new("");
         // At bare EOF, try_consume_scalar must not error and must return None.
-        let result = iter.try_consume_scalar(0, usize::MAX);
+        let result = iter.try_consume_scalar(None);
         assert!(matches!(result, Ok(None)));
     }
 
@@ -673,30 +642,8 @@ mod tests {
     fn dispatch_blank_line_returns_none() {
         let mut iter = EventIter::new("\n");
         iter.state = IterState::InDocument;
-        let result = iter.try_consume_scalar(0, usize::MAX);
+        let result = iter.try_consume_scalar(None);
         assert!(matches!(result, Ok(None)));
-    }
-
-    // -----------------------------------------------------------------------
-    // Group B — Inline scalar short-circuit (has_inline_scalar path)
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn inline_scalar_short_circuits_to_plain_before_peek() {
-        let mut iter = EventIter::new("");
-        let span = crate::zero_span(crate::pos::Pos::ORIGIN);
-        iter.lexer
-            .set_inline_scalar_for_test(Cow::Borrowed("text"), span);
-        let result = iter.try_consume_scalar(0, usize::MAX);
-        if let Ok(Some((Event::Scalar { style, value, .. }, _))) = result {
-            assert!(
-                matches!(style, ScalarStyle::Plain),
-                "expected plain scalar via inline_scalar short-circuit"
-            );
-            assert_eq!(value, "text");
-        } else {
-            unreachable!("expected Ok(Some(plain scalar)) from inline_scalar short-circuit")
-        }
     }
 
     // -----------------------------------------------------------------------
@@ -741,7 +688,7 @@ mod tests {
         // dispatcher must not retry.
         let mut iter = EventIter::new("|\n");
         iter.state = IterState::InDocument;
-        let result = iter.try_consume_scalar(0, usize::MAX);
+        let result = iter.try_consume_scalar(None);
         if let Ok(Some((Event::Scalar { style, .. }, _))) = result {
             assert!(
                 !matches!(style, ScalarStyle::Plain),
