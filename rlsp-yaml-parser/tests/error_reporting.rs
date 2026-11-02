@@ -11,6 +11,8 @@
     reason = "test code"
 )]
 
+mod support;
+
 use rstest::rstest;
 
 use rlsp_yaml_parser::loader::LoadError;
@@ -829,6 +831,13 @@ fn scalar_values(input: &str) -> Vec<String> {
 #[case::colon_line_after_flow_without_key_colon("[x]\n: v\n", 2)]
 #[case::indented_colon_line_after_value("a: 1\n  : v\n", 2)]
 #[case::indented_colon_line_after_colon_line("[x]:\n: v\n  : w\n", 3)]
+#[case::dash_after_empty_explicit_key_in_a_value("x:\n  ?\n- a\n", 3)]
+#[case::flow_seq_after_empty_explicit_key_in_a_value("x:\n  ?\n[a]\n", 3)]
+#[case::dash_after_nested_explicit_key("?\n  ? a\n- b\n", 3)]
+#[case::dash_after_nested_explicit_key_with_colon("?\n  ? a\n  :\n- b\n", 4)]
+#[case::dash_after_nested_empty_explicit_key("?\n  ?\n- a\n", 3)]
+#[case::colon_between_the_columns_of_nested_explicit_keys("?\n  ? a\n : v\n", 3)]
+#[case::dash_after_explicit_value_of_a_plain_key("? a\n: b\n- c\n", 3)]
 fn content_after_complete_node_is_a_syntax_error(#[case] input: &str, #[case] stray_line: usize) {
     let err = first_error(input).expect("expected a parse error");
     assert_eq!(err.kind, ErrorKind::Syntax);
@@ -1273,39 +1282,9 @@ fn load_shape(input: &str) -> String {
 /// Panics unless the events of `input` nest properly and every mapping holds
 /// an even number of nodes, i.e. each key has a value.
 fn assert_well_formed(input: &str) {
-    // One counter per open collection: (is a mapping, nodes seen so far).
-    let mut open: Vec<(bool, usize)> = Vec::new();
-    let complete_node = |open: &mut Vec<(bool, usize)>| {
-        if let Some((_, nodes)) = open.last_mut() {
-            *nodes += 1;
-        }
-    };
-    for item in parse_events(input) {
-        match item.unwrap().0 {
-            Event::MappingStart { .. } => open.push((true, 0)),
-            Event::SequenceStart { .. } => open.push((false, 0)),
-            Event::MappingEnd => {
-                let (is_mapping, nodes) = open.pop().unwrap();
-                assert!(
-                    is_mapping && nodes % 2 == 0,
-                    "{input:?}: mapping with {nodes} nodes"
-                );
-                complete_node(&mut open);
-            }
-            Event::SequenceEnd => {
-                let (is_mapping, _) = open.pop().unwrap();
-                assert!(!is_mapping, "{input:?}: sequence closes a mapping");
-                complete_node(&mut open);
-            }
-            Event::Scalar { .. } | Event::Alias { .. } => complete_node(&mut open),
-            Event::StreamStart
-            | Event::StreamEnd
-            | Event::Comment { .. }
-            | Event::DocumentStart { .. }
-            | Event::DocumentEnd { .. } => {}
-        }
-    }
-    assert!(open.is_empty(), "{input:?}: collections left open");
+    let events = parse_events(input).map(|item| item.unwrap().0);
+    let verdict = support::check_well_formed(events);
+    assert!(verdict.is_ok(), "{input:?}: {verdict:?}");
 }
 
 // A key that starts with a flow collection or an alias is the next entry of the
@@ -1730,6 +1709,59 @@ fn assert_well_formed(input: &str) {
     "+M &y,!!str,: : -M"
 )]
 fn flow_and_alias_keys_after_finished_entry_emit_libfyaml_events(
+    #[case] input: &str,
+    #[case] expected: &str,
+) {
+    assert_eq!(event_shape(input, Tags::Listed), expected, "{input:?}");
+    assert_well_formed(input);
+    assert_eq!(
+        load_shape(input),
+        event_shape(input, Tags::Omitted),
+        "load() of {input:?}"
+    );
+}
+
+// A `:` at the column of an outer `?` is the value of that key, also when the
+// key is a mapping whose last entry has a value (YAML 1.2.2 [189], [191]).
+// libfyaml 0.9.6 reads an empty value and an entry with an empty key there;
+// the parser follows the spec (`docs/conformance/design-decisions.md`).
+#[rstest]
+#[case::nested_explicit_entry_with_a_value("?\n  ? a\n  : b\n: v\n", "+M +M :a :b -M :v -M")]
+#[case::inline_nested_explicit_entry_with_a_value("? ? a\n  : b\n: v\n", "+M +M :a :b -M :v -M")]
+#[case::implicit_entry_then_explicit_entry_with_a_value(
+    "?\n  x: 1\n  ? a\n  : b\n: v\n",
+    "+M +M :x :1 :a :b -M :v -M"
+)]
+#[case::explicit_entry_with_a_value_in_a_sequence_key(
+    "?\n  - ? a\n    : b\n: v\n",
+    "+M +S +M :a :b -M -S :v -M"
+)]
+#[case::explicit_entry_with_a_value_and_an_empty_outer_value(
+    "?\n  ? a\n  : b\n:\n",
+    "+M +M :a :b -M : -M"
+)]
+#[case::explicit_entry_then_an_empty_key_entry(
+    "?\n  ? a\n  : b\n  : c\n: v\n",
+    "+M +M :a :b : :c -M :v -M"
+)]
+#[case::explicit_entry_then_an_implicit_entry(
+    "?\n  ? a\n  b: 1\n: v\n",
+    "+M +M :a : :b :1 -M :v -M"
+)]
+#[case::anchored_explicit_entry_with_a_value_and_an_alias_value(
+    "?\n  ? &a x\n  : y\n: *a\n",
+    "+M +M &a,:x :y -M *a -M"
+)]
+#[case::nested_entry_with_an_empty_value_in_a_key_of_a_key(
+    "? ? ? a\n  : x\n: y\n",
+    "+M +M +M :a : -M :x -M :y -M"
+)]
+#[case::nested_entry_with_a_value_in_a_key_of_a_key(
+    "? ? ? a\n    : x\n  : y\n: z\n",
+    "+M +M +M :a :x -M :y -M :z -M"
+)]
+#[case::nested_entry_with_an_empty_key_and_a_value("? ?\n  : v\n: w\n", "+M +M : :v -M :w -M")]
+fn explicit_key_value_follows_the_spec_where_libfyaml_deviates(
     #[case] input: &str,
     #[case] expected: &str,
 ) {

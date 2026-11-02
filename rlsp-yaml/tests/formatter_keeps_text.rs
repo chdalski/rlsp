@@ -35,6 +35,7 @@ use std::time::{Duration, Instant};
 
 use inputs::{EXTRA_INPUTS, OptionSet, corpus_files, corpus_source, long_escaped_key, suite_files};
 use rlsp_yaml::editing::formatter::format_yaml;
+use rlsp_yaml_parser::{CollectionStyle, Event, ScalarStyle, parse_events};
 use rstest::rstest;
 
 // ---- guards -----------------------------------------------------------------
@@ -587,6 +588,170 @@ fn the_swept_option_sets_are_all_but_the_two_that_delete_entries() {
 #[test]
 fn no_variant_makes_the_loader_panic() {
     assert_eq!(prepared().load_panics, Vec::<String>::new());
+}
+
+// ---- the node count of a mapping ----------------------------------------------
+
+/// Whether a mapping in `events` holds an odd number of nodes, that is a key
+/// without a value or a value without a key.  A collection counts as one node
+/// of the collection that holds it.
+fn has_mapping_with_odd_node_count<'a>(events: impl IntoIterator<Item = Event<'a>>) -> bool {
+    // One counter per open collection: (is a mapping, nodes seen so far).
+    let mut open: Vec<(bool, usize)> = Vec::new();
+    for event in events {
+        match event {
+            Event::MappingStart { .. } => open.push((true, 0)),
+            Event::SequenceStart { .. } => open.push((false, 0)),
+            Event::MappingEnd | Event::SequenceEnd => {
+                let Some((is_mapping, nodes)) = open.pop() else {
+                    continue;
+                };
+                if is_mapping && nodes % 2 == 1 {
+                    return true;
+                }
+                if let Some((_, parent_nodes)) = open.last_mut() {
+                    *parent_nodes += 1;
+                }
+            }
+            Event::Scalar { .. } | Event::Alias { .. } => {
+                if let Some((_, nodes)) = open.last_mut() {
+                    *nodes += 1;
+                }
+            }
+            Event::StreamStart
+            | Event::StreamEnd
+            | Event::Comment { .. }
+            | Event::DocumentStart { .. }
+            | Event::DocumentEnd { .. } => {}
+        }
+    }
+    false
+}
+
+/// The events of `text`, which loads, so that the stream holds no error.
+fn events_of(text: &str) -> Vec<Event<'_>> {
+    parse_events(text)
+        .filter_map(Result::ok)
+        .map(|(event, _)| event)
+        .collect()
+}
+
+/// The inputs and variants of the sweep that load, with a description of each.
+fn loading_texts() -> Vec<(String, String)> {
+    let mut texts = Vec::new();
+    for base in &prepared().bases {
+        if base.data.is_some() {
+            texts.push((base.source.clone(), base.text.clone()));
+        }
+        for entry in &base.entries {
+            if entry.data.is_some() {
+                let variant = &entry.variant;
+                texts.push((
+                    format!(
+                        "{} line {} {:?} {:?}",
+                        base.source,
+                        variant.position + 1,
+                        variant.form,
+                        variant.column
+                    ),
+                    variant.text(&base.text),
+                ));
+            }
+        }
+    }
+    texts
+}
+
+#[test]
+fn every_mapping_in_the_sweep_has_an_even_number_of_nodes() {
+    let texts = loading_texts();
+    let failures: Vec<String> = texts
+        .iter()
+        .filter(|(what, text)| {
+            let _running = Running::enter(format!("{what}: {text:?}"));
+            has_mapping_with_odd_node_count(events_of(text))
+        })
+        .map(|(what, text)| format!("{what}\n    input: {text:?}"))
+        .collect();
+    println!("checked {}, failures {}", texts.len(), failures.len());
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures
+            .iter()
+            .take(MAX_SHOWN_FAILURES)
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+#[test]
+fn the_node_count_check_runs_over_many_loading_texts() {
+    assert!(loading_texts().len() > 10_000);
+}
+
+const fn scalar_event() -> Event<'static> {
+    Event::Scalar {
+        value: std::borrow::Cow::Borrowed("a"),
+        style: ScalarStyle::Plain,
+        meta: None,
+    }
+}
+
+const fn mapping_start() -> Event<'static> {
+    Event::MappingStart {
+        style: CollectionStyle::Block,
+        meta: None,
+    }
+}
+
+const fn sequence_start() -> Event<'static> {
+    Event::SequenceStart {
+        style: CollectionStyle::Block,
+        meta: None,
+    }
+}
+
+#[rstest]
+#[case::key_without_a_value(vec![mapping_start(), scalar_event(), Event::MappingEnd], true)]
+#[case::value_without_a_key(
+    vec![mapping_start(), scalar_event(), scalar_event(), scalar_event(), Event::MappingEnd],
+    true
+)]
+#[case::odd_mapping_in_a_sequence(
+    vec![sequence_start(), mapping_start(), scalar_event(), Event::MappingEnd, Event::SequenceEnd],
+    true
+)]
+#[case::odd_mapping_inside_a_mapping(
+    vec![
+        mapping_start(), scalar_event(), mapping_start(), scalar_event(), Event::MappingEnd,
+        Event::MappingEnd,
+    ],
+    true
+)]
+#[case::key_and_value(
+    vec![mapping_start(), scalar_event(), scalar_event(), Event::MappingEnd],
+    false
+)]
+#[case::empty_mapping(vec![mapping_start(), Event::MappingEnd], false)]
+#[case::collection_counts_as_one_node(
+    vec![
+        mapping_start(), mapping_start(), scalar_event(), scalar_event(), Event::MappingEnd,
+        scalar_event(), Event::MappingEnd,
+    ],
+    false
+)]
+#[case::sequence_with_an_odd_number_of_items(
+    vec![sequence_start(), scalar_event(), Event::SequenceEnd],
+    false
+)]
+fn the_node_count_check_tells_even_mappings_from_odd_ones(
+    #[case] events: Vec<Event<'static>>,
+    #[case] odd: bool,
+) {
+    assert_eq!(has_mapping_with_odd_node_count(events), odd);
 }
 
 // ---- the variants -----------------------------------------------------------

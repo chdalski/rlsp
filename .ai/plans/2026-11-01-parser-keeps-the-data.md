@@ -32,8 +32,9 @@ directives.
 - [x] Task 9: A flow plain scalar reads its continuation lines as text
 - [x] Task 10: The formatter drops its workarounds for these misreads
 - [x] Task 11: One loop closes collections
-- [ ] Task 12: An explicit key keeps its state in its own mapping
-- [ ] Task 13: A collection key with an explicit entry prints in block form
+- [x] Task 12: An explicit key keeps its state in its own mapping
+- [ ] Task 13: A `-` after a tag on the same line is an error
+- [ ] Task 14: A collection key with an explicit entry prints in block form
 - [ ] Measure every `*.yml` and `*.yaml` file under `/workspace`,
       `/usr/local/cargo/registry`, and `~/.local/share/pnpm`: the number of files that
       loaded at the plan's first commit, no longer load, and load in libfyaml 0.9.6 is 0,
@@ -218,7 +219,7 @@ key, so the outer key's `:` starts a new entry and its value becomes a key. A st
 `explicit_key_pending` accepts a key without `?`, and the indentation guard rejects a `?`
 that holds a mapping after the first entry. Productions: [189], [190], [191], [192], [195].
 
-- [ ] These load with the events of libfyaml 0.9.6: `?\n  ? a\n: v\n`, `? ? a\n: v\n`,
+- [x] These load with the events of libfyaml 0.9.6: `?\n  ? a\n: v\n`, `? ? a\n: v\n`,
       `?\n  ?\n: v\n`, `? ?\n: v\n`, `? &a\n  ? a\n: v\n`, `?\n  ? &a\n: v\n`,
       `?\n  ? [a]\n: v\n`, `?\n  ? *x\n: v\n`, `?\n  - ? a\n: v\n`, `? - ? a\n: v\n`,
       `?\n- ? a\n: v\n`, `?\n- a\n- ? b\n: v\n`, `- ?\n    ? a\n  : v\n`,
@@ -226,37 +227,59 @@ that holds a mapping after the first entry. Productions: [189], [190], [191], [1
       `?\n  ? a\n  : b\n  ? c\n: v\n`, `?\n  x:\n    ? a\n: v\n`,
       `?\n  x:\n  - ? a\n: v\n`, `?\n  ? ? a\n: v\n`, `?\n  ?\n    ? a\n: v\n`, and
       `?\n  ? a\n:\n`
-- [ ] These give the outer key its empty value, with the events of libfyaml 0.9.6:
-      `?\n  ? a\n`, `?\n  ? a\n  : b\n`, `?\n  ? a\n...\n`, `?\n  ? a\n---\n`,
+- [x] These give the outer key its empty value, with the events of libfyaml 0.9.6:
+      `?\n  ? a\n`, `?\n  ? a\n  : b\n`, `?\n  ? a\n...\n`, `?\n  ? a\n---\nb\n`,
       `?\n  ? a\n? b\n`, `?\n  ? a\nb: 1\n`, `?\n  ? a\n*x : 1\n`, `?\n  ? a\n[x]: 1\n`,
       `?\n  ? a\n&k : v\n`, and `- ?\n    ? a\n- b\n`
-- [ ] `?\n  ? a\n  : b\n: v\n`, `? ? a\n  : b\n: v\n`, `?\n  x: 1\n  ? a\n  : b\n: v\n`, and
+- [x] `?\n  ? a\n  : b\n: v\n`, `? ? a\n  : b\n: v\n`, `?\n  x: 1\n  ? a\n  : b\n: v\n`, and
       `?\n  - ? a\n    : b\n: v\n` load `v` as the outer key's value, and `?\n  ? a\n  : b\n:\n`
       loads an empty value, as Decisions says; `design-decisions.md` records this deviation
       from libfyaml with [189] and [191]
-- [ ] `x:\n  ?\n- a\n` and `x:\n  ?\n[a]\n` report a syntax error, as libfyaml does
-- [ ] These load with the events of libfyaml 0.9.6: `? a\n?\n  b: 1\n`, `? a\n? b: 1\n: v\n`,
+- [x] `x:\n  ?\n- a\n` and `x:\n  ?\n[a]\n` report a syntax error, as libfyaml does
+- [x] These load with the events of libfyaml 0.9.6: `? a\n?\n  b: 1\n`, `? a\n? b: 1\n: v\n`,
       `a: 1\n?\n  b: 2\n: v\n`, `? a\n: b\n? c: d\n: e\n`, `? a\n?\n  ? b\n: v\n`, and
       `a: 1\n? b: 2\n: c\n`
-- [ ] These keep their behavior: `?\nb\n` and `? a\n? b\n*y : 3\n` keep their errors, and
-      `?\n: v\n`, `?\n- a\n: v\n`, `? !!str\n!zz : v\n? &x\n`, `? : v`, `?\n  a: 1\n: v\n`,
-      `?\n  - a\n: v\n`, and `?\n  *x :\n: v\n` keep their events
-- [ ] `complex_key_inline` and `explicit_key_pending` in `src/lib.rs` are gone, the field of
+- [x] These keep their behavior: `?\nb\n` keeps its error, and `? a\n? b\n*y : 3\n`, `?\n: v\n`,
+      `?\n- a\n: v\n`, `? !!str\n!zz : v\n? &x\n`, `? : v`, `?\n  a: 1\n: v\n`, `?\n  - a\n: v\n`,
+      and `?\n  *x :\n: v\n` keep their events
+- [x] `complex_key_inline` and `explicit_key_pending` in `src/lib.rs` are gone, the field of
       the same name in `FlowFrame::Mapping` stays,
       `MappingPhase::ExplicitKey` means that a `?` is consumed and its node is not complete,
       and `Key` means only that no `?` is open
-- [ ] `libfyaml_events.rs` holds the inputs that match libfyaml, and `format_yaml` keeps the
+- [x] `libfyaml_events.rs` holds the inputs that match libfyaml, and `format_yaml` keeps the
       data of every input of this task that loads, with a second format changing nothing
-- [ ] For every input and variant of the sweep in `formatter_keeps_text.rs` that loads, every
+- [x] For every input and variant of the sweep in `formatter_keeps_text.rs` that loads, every
       mapping in `parse_events` has an even number of child nodes: the number of failures is 0
-- [ ] `docs/conformance/` names the enforcement sites, `rlsp-yaml-parser/docs/feature-log.md`
+- [x] `docs/conformance/` names the enforcement sites, `rlsp-yaml-parser/docs/feature-log.md`
       no longer names a removed field, and it tells a reader which inputs load differently
       or report an error
-- [ ] `rlsp-yaml-parser/docs/architecture.md` states the mapping phases, and the rule for a
+- [x] `rlsp-yaml-parser/docs/architecture.md` states the mapping phases, and the rule for a
       `-` entry, as the code has them
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
+
+### Task 13: A `-` after a tag on the same line is an error
+
+An anchor reports this error today, and a tag does not, so `a: !t - :\n` opens a sequence,
+ends it at the `:`, and gives the outer mapping a third node. Productions: [200], [201].
+
+- [ ] These report a syntax error, as libfyaml 0.9.6 does: `!t - b\n`, `--- !t - b\n`,
+      `&a !t - b\n`, `!t\t- b\n`, `!t -\n`, `a: !t - b\n`, `a: !t - :\n`, `: !t - :\n`,
+      `a: !t -\n`, `- !t - b\n`, `- !t - :\n`, and `? !t - b\n`
+- [ ] `format_yaml` returns these inputs unchanged
+- [ ] These keep their events: `a: !t\n  - b\n`, `!t\n- b\n`, `!t\n  - b\n`, `- !t\n  - b\n`,
+      `? !t\n  - b\n`, `!t -b\n`, `a: !t -b\n`, and `a: !t --- b\n`
+- [ ] `&a - b\n` and `a: - b\n` keep their errors, and `&a -b\n` and `a: -b\n` keep their events
+- [ ] One function decides whether a line starts with a block sequence indicator, and the anchor
+      branch and the tag branch in `step.rs` and `consume_mapping_entry` call it; one method
+      reports the error for both branches
+- [ ] `EXTRA_INPUTS` in `rlsp-yaml/tests/inputs/mod.rs` holds `: !\n?\n! : v\n` in place of
+      `: !\n?\n! - :`, which no longer loads, so the tagged key after a tag alone stays covered
+- [ ] `libfyaml_events.rs` holds these inputs
+- [ ] `docs/conformance/` names the enforcement site in the entry of [200], and
+      `rlsp-yaml-parser/docs/feature-log.md` tells a reader which inputs now report an error
 - [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
-### Task 13: A collection key with an explicit entry prints in block form
+### Task 14: A collection key with an explicit entry prints in block form
 
 `flow_comments.rs` turns such a key into a flow collection because the parser read the `:`
 after it as a new entry. Task 12 removes that misread.
@@ -322,12 +345,23 @@ after it as a new entry. Task 12 removes that misread.
 - **Task 11 keeps behavior:** the shared loop also writes `has_had_item` on a parent sequence,
   which is popped right after, and `root_node_emitted`, which the `---` and `...` paths reset
   before the next document and which is not read after the end of the stream.
-- **Task 13 prints block form (user decision):** a shape whose block form does not reload to
-  the same data is a formatter defect that Task 13 fixes; a parser misread with a cause outside
-  Tasks 2 to 12 stops the task and goes to the user. Declined: leaving the workaround on the
+- **Task 14 prints block form (user decision):** a shape whose block form does not reload to
+  the same data is a formatter defect that Task 14 fixes; a parser misread with a cause outside
+  Tasks 2 to 13 stops the task and goes to the user. Declined: leaving the workaround on the
   backlog.
-- **The sweep's scope stays Tasks 2 to 12:** a failure of the even-node count whose cause Task
-  12 does not name goes to the user like a loss the sweep finds.
+- **The even-node count's scope is Tasks 12 and 13:** a failure whose cause these tasks do not
+  name goes to the user like a loss the sweep finds.
+- **A `-` after a tag on the same line is in this plan (user decision):** `a: !t - :\n` gives a
+  mapping three nodes, which is the Goal's class, and the check exists for anchors. Declined: the
+  backlog.
+- **Anchor and tag share the check (user decision):** a copy would be the third, and the copies
+  drifted apart before. The rest of the two branches stays separate, because their rules differ.
+  Declined: copying the check.
+- **`?\n  ? a\n---\nb\n` stands for `?\n  ? a\n---\n` (Task 12 review):** libfyaml adds an empty
+  root scalar for a trailing `---`, as it does for `---\n` alone, which the parser does not, and
+  this deviation is not this task's.
+- **`? a\n? b\n*y : 3\n` keeps its events, not an error (Task 12 test list):** the plan named it
+  as an error, and it loads at the baseline and in libfyaml 0.9.6.
 
 ## Task Notes
 

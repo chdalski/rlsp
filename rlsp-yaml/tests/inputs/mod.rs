@@ -153,6 +153,43 @@ pub const EXTRA_INPUTS: &[(&str, &str)] = &[
         "y: a\n\"y\": b\n",
     ),
     ("merge keys twice", "<<: *x\n<<: *y\n"),
+    ("explicit key that holds an explicit key", "?\n  ? a\n: v\n"),
+    (
+        "explicit key that holds an entry with a value",
+        "? ? a\n  : b\n: v\n",
+    ),
+    (
+        "three levels of explicit keys with values",
+        "? ? ? a\n    : x\n  : y\n: z\n",
+    ),
+    (
+        "explicit key that holds an explicit entry and a second one",
+        "?\n  ? a\n  : b\n  ? c\n: v\n",
+    ),
+    (
+        "explicit key then a key that holds a mapping",
+        "? a\n?\n  b: 1\n",
+    ),
+    (
+        "explicit key that holds a sequence of explicit keys",
+        "?\n  - ? a\n: v\n",
+    ),
+    (
+        "explicit key that holds an explicit key in a sequence item",
+        "- ?\n    ? a\n  : v\n",
+    ),
+    (
+        "explicit key that holds an explicit key in a mapping value",
+        "x:\n  ?\n    ? a\n  : v\n",
+    ),
+    (
+        "explicit key that holds an explicit key before an anchored empty key",
+        "?\n  ? a\n&k : v\n",
+    ),
+    (
+        "comments in explicit keys that hold explicit keys",
+        "? # c\n  ? a # d\n  # e\n: v # f\n",
+    ),
     // Found by the generated inputs of the plan's fuzz probes.
     ("flow key with an empty key and a tagged value", "? ? : !\n"),
     (

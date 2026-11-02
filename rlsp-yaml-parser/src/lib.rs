@@ -137,23 +137,6 @@ struct EventIter<'input> {
     /// `foo:\n  bar\ninvalid` where `invalid` appears after the root mapping
     /// closes.  Reset to `false` at each document boundary.
     root_node_emitted: bool,
-    /// Set to `true` after consuming a `? ` explicit key indicator whose key
-    /// content will appear on the NEXT line (i.e., `had_key_inline = false`).
-    /// Cleared when the key content is processed.
-    ///
-    /// Used to allow a block sequence indicator on a line following `? ` to be
-    /// treated as the explicit key's content rather than triggering the
-    /// "invalid block sequence entry" guard.
-    explicit_key_pending: bool,
-    /// When `Some(indent)`, a `? inline-content` explicit key was consumed for the
-    /// mapping at column `indent`.  The inline content opens (or is) a complex node
-    /// (sub-mapping or sub-sequence), so the outer mapping stays in Key phase after
-    /// the complex node closes.  The stored indent distinguishes the outer mapping
-    /// from any inner mappings that advance to Value phase while the flag is active.
-    /// Used to allow the subsequent `:` value-indicator line to be recognised as
-    /// the explicit value indicator (rather than as an implicit empty-key entry).
-    /// Cleared when the outer mapping at `indent` advances to Value phase.
-    complex_key_inline: Option<usize>,
     /// When a tag or anchor appears inline on a physical line (e.g. `!!str &a key:`),
     /// the key content is prepended as a synthetic line with the key's column as its
     /// indent.  This field records the indent of the ORIGINAL physical line so that

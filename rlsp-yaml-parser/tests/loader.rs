@@ -1667,6 +1667,62 @@ fn explicit_key_nested_inside_mapping_value_no_phantom_entries() {
     assert_eq!(scalar_value(&inner_entries[0].1), "inner_val");
 }
 
+/// The tree of `node` as text: scalars in quotes, mappings as `{key => value,
+/// ...}`, sequences as `[item, ...]`, aliases as `*name`.
+fn tree(node: &Node<rlsp_yaml_parser::Span>) -> String {
+    match node {
+        Node::Scalar { value, .. } => format!("'{value}'"),
+        Node::Alias { name, .. } => format!("*{name}"),
+        Node::Sequence { items, .. } => {
+            format!(
+                "[{}]",
+                items.iter().map(tree).collect::<Vec<_>>().join(", ")
+            )
+        }
+        Node::Mapping { entries, .. } => format!(
+            "{{{}}}",
+            entries
+                .iter()
+                .map(|(key, value)| format!("{} => {}", tree(key), tree(value)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
+// An explicit key keeps its state in its own mapping: a `?` nested in the key of
+// another `?` leaves the outer key with its own `:` value, and the entry count of
+// every mapping is the one the text has (no key without a value, no extra entry).
+#[rstest]
+#[case::nested_entry_with_an_empty_value("?\n  ? a\n: v\n", "{{'a' => ''} => 'v'}")]
+#[case::nested_entry_with_a_value("?\n  ? a\n  : b\n: v\n", "{{'a' => 'b'} => 'v'}")]
+#[case::nested_entry_with_a_value_and_an_empty_outer_value(
+    "?\n  ? a\n  : b\n:\n",
+    "{{'a' => 'b'} => ''}"
+)]
+#[case::nested_entry_without_an_outer_value("?\n  ? a\n", "{{'a' => ''} => ''}")]
+#[case::nested_entry_before_a_document_end("?\n  ? a\n...\n", "{{'a' => ''} => ''}")]
+#[case::nested_entry_then_an_explicit_key("?\n  ? a\n? b\n", "{{'a' => ''} => '', 'b' => ''}")]
+#[case::nested_entry_then_a_plain_key("?\n  ? a\nb: 1\n", "{{'a' => ''} => '', 'b' => '1'}")]
+#[case::explicit_key_then_a_key_that_holds_two_entries(
+    "? a\n?\n  ? b\n  ? c\n: v\n",
+    "{'a' => '', {'b' => '', 'c' => ''} => 'v'}"
+)]
+#[case::entry_then_a_compact_key_mapping(
+    "a: 1\n? b: 2\n: c\n",
+    "{'a' => '1', {'b' => '2'} => 'c'}"
+)]
+#[case::nested_entry_in_a_sequence_key("?\n  - ? a\n    : b\n: v\n", "{[{'a' => 'b'}] => 'v'}")]
+#[case::nested_entry_in_an_item("- ?\n    ? a\n  : v\n", "[{{'a' => ''} => 'v'}]")]
+#[case::three_levels_of_nested_keys(
+    "? ? ? a\n    : x\n  : y\n: z\n",
+    "{{{'a' => 'x'} => 'y'} => 'z'}"
+)]
+#[case::nested_entry_with_an_alias_value("? &m\n  ? a\n: *m\n", "{{'a' => ''} => *m}")]
+fn nested_explicit_keys_load_to_the_expected_tree(#[case] input: &str, #[case] expected: &str) {
+    assert_eq!(tree(&load_one(input)), expected, "{input:?}");
+}
+
 // LD-1: anchor and tag both flow through the loader when both are present on a scalar.
 //
 // The EventMeta box carries both anchor and tag together; the loader unpacks one box

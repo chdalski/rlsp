@@ -12,6 +12,30 @@ with existing infrastructure.
 
 ---
 
+### A `?` Keeps Its State in the Mapping That Holds It [completed]
+
+**Description:** A `?` nested in the key of another `?` no longer disturbs the outer
+key. `?` then `  ? a` and `: v` is the mapping `{{a: null}: v}` (before, the outer key
+got no value and `v` became the key of an entry with an empty value), and the same
+holds for `? ? a` then `: v`, for `?` then `  - ? a` and `: v`, and for any such
+inner mapping or sequence. A `:` at the column of the outer `?` after an inner mapping
+whose last entry has a value (`?`, `  ? a`, `  : b`, `: v`) is the value of the outer
+key, `{{a: b}: v}`, as the spec reads it; libfyaml reads an empty value and an entry
+with an empty key there (`docs/conformance/design-decisions.md`). A `?` that holds a
+block mapping after an earlier entry loads (`a: 1`, `?`, `  b: 2`, `: v`; `a: 1`,
+`? b: 2`, `: c`), where it reported "wrong indentation". An input that once loaded
+with a line read as text of another node reports an error: a `-` entry below a nested
+`?` (`?`, `  ? a`, `- b` read `- b` as the key `b`, so the `-` was lost) now reports
+"unexpected block sequence entry after a complete node", as `x:`, `  ?`, `- a` does.
+`format_yaml` keeps the text of every such input that loads, and a second format
+changes nothing.
+**Complexity:** Medium
+**Comment:** The state of an explicit key moved from two fields of the parser to the
+`ExplicitKey` phase of the mapping that holds the `?`.
+**Tier:** 1
+
+---
+
 ### A Line of a Flow Plain Scalar May Start With a Property, a Quote, an Alias or an Indicator [completed]
 
 **Description:** A line that continues a plain scalar in a flow collection is text
@@ -879,8 +903,8 @@ supported, including multi-line key content and keys that are
 themselves block sequences or mappings.
 **Complexity:** Medium
 **Comment:** Explicit keys interact with `? ` on the preceding line
-and block sequence indicators — handled via `explicit_key_pending`
-state.
+and block sequence indicators — handled via the `ExplicitKey` mapping
+phase.
 **Tier:** 2
 
 ### §10 Schema Resolution [completed]

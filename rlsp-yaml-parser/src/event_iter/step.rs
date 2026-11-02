@@ -425,8 +425,7 @@ impl<'input> EventIter<'input> {
                                 // the `?` content (YAML 1.2.2 [190]/[185]: the content is
                                 // indented past the `?`), so the empty key cannot take it.
                                 let tags_empty_explicit_key = is_value_indicator
-                                    && self.complex_key_inline == Some(line_indent)
-                                    && self.mapping_lacks_node_before_key(line_indent)
+                                    && self.explicit_key_open_at(line_indent)
                                     && matches!(&self.pending_tag, Some(PendingTag::Standalone(_, span))
                                         if self.column_at(span.start as usize) <= line_indent);
                                 let opens_mapping = is_value_indicator
@@ -1049,9 +1048,11 @@ impl<'input> EventIter<'input> {
                         "invalid content after explicit key: expected ':' or a mapping key",
                     );
                 }
-                Some(&CollectionEntry::Mapping(map_indent, MappingPhase::Key, _))
-                    if line_indent == map_indent =>
-                {
+                Some(&CollectionEntry::Mapping(
+                    map_indent,
+                    MappingPhase::Key | MappingPhase::ExplicitKey,
+                    _,
+                )) if line_indent == map_indent => {
                     let err_pos = line.pos;
                     self.state = IterState::Done;
                     self.lexer.consume_line();
@@ -1180,13 +1181,12 @@ impl<'input> EventIter<'input> {
                 }
                 false
             }
-            // After `?` the line is the key's content, not an entry of the mapping.
-            Some(&CollectionEntry::Mapping(col, MappingPhase::Key, _)) => {
-                line_indent == col && !self.explicit_key_pending
-            }
+            Some(&CollectionEntry::Mapping(col, MappingPhase::Key, _)) => line_indent == col,
             Some(&CollectionEntry::Mapping(col, MappingPhase::AfterExplicitKey, _)) => {
                 line_indent == col
             }
+            // In `ExplicitKey` phase (after `?`) the line is the key's content,
+            // not an entry of the mapping.
             _ => false,
         };
         if at_column && !is_key {

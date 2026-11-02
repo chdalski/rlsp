@@ -318,6 +318,40 @@ failures on Alpine Linux.
 the `:`); `consume_own_key_indicator()` and `handle_mapping_entry()` in the same file (the
 `:` line of an empty key is an entry of its own).
 
+### [189] / [191] — a `:` after an explicit key that is a mapping with a value
+
+**libfyaml behavior** (`fy-tool --testsuite`, 0.9.6): in `?` then `  ? a`, `  : b` and
+`: v`, the `:` at the column of the outer `?` closes the outer entry with an empty value
+and starts an entry of its own: `{{a: b}: null, null: v}`. With the inner mapping
+holding `? a` alone (`?`, `  ? a`, `: v`) the same `:` is the outer value
+(`{{a: null}: v}`). So the reading depends on whether the last inner entry has a value.
+
+**Parser behavior:** the `:` at the column of the outer `?` is the value indicator of
+the outer key in both inputs: `{{a: b}: v}`. The same holds for `? ? a` then `  : b` and
+`: v`, for an inner block mapping (`?`, `  x: 1`, `  ? a`, `  : b`, `: v`), and for an
+inner sequence holding such a mapping (`?`, `  - ? a`, `    : b`, `: v`). A bare `:`
+instead of `: v` gives the outer key an empty value.
+
+**Spec:** [189] `c-l-block-map-explicit-entry(n)` is the key [190] followed by
+[191] `l-block-map-explicit-value(n)` = `s-indent(n) ":" s-l+block-indented(n,block-out)`.
+The inner mapping lies at indent `n+2` or deeper, so its entries need `s-indent(n+2)` and
+the `:` at indent `n` cannot be one of them; the only production that takes it is [191]
+of the outer entry. Nothing in the productions makes the reading depend on the value of
+the inner entry.
+
+**libfyaml issue tracker** (<https://github.com/pantoniou/libfyaml/issues>, searched for
+"explicit key", "nested explicit", "complex key" and "? ?"): no issue about it; the hit
+for "explicit key" is about test failures on Alpine Linux.
+
+**User decision:** follow the spec; libfyaml is not followed.
+
+**Enforcement site:** `MappingPhase::ExplicitKey` and `MappingPhase::AfterExplicitKey` in
+`src/event_iter/state.rs`; `close_collections_at_or_above()` in
+`src/event_iter/base.rs` moves the outer mapping from `ExplicitKey` to
+`AfterExplicitKey` when its key node closes; `handle_mapping_entry()` in
+`src/event_iter/block/mapping.rs` takes the `:` line for the value indicator of the key
+in `AfterExplicitKey` phase.
+
 ---
 
 ## "Should is non-mandatory" Precedent

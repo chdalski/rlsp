@@ -258,8 +258,8 @@ BNF: `c-l-block-map-explicit-entry(n) ::= c-l-block-map-explicit-key(n) ( l-bloc
 
 - **Verdict:** Strict-conformant
 - **Spec (§8.2.2):** "If the `?` indicator is specified, the optional value node must be specified on a separate line, denoted by the `:` indicator."
-- **Implementation:** Explicit key branch in `event_iter/block/mapping.rs` — `?` followed by optional inline key content; absent value produces `e-node` / empty scalar
-- **Tests:** `tests/yaml-test-suite/src/5WE3.yaml`
+- **Implementation:** Explicit key branch in `event_iter/block/mapping.rs` — `?` followed by optional inline key content; absent value produces `e-node` / empty scalar. The state of the entry lives on the mapping that holds the `?`: it is in `MappingPhase::ExplicitKey` from the `?` until its key node is complete, then in `AfterExplicitKey` until the `:` (see `event_iter/state.rs`), so a `?` nested in the key leaves the outer entry untouched and the `:` at the column of the outer `?` is the value of the outer key, also when the key is a mapping whose last entry has a value (a deviation from libfyaml, see [design-decisions.md](design-decisions.md)). A mapping that closes in `ExplicitKey` phase (a dedent, `---`, `...` or the end of the input) gets an empty key and an empty value in `close_collections_at_or_above()` in `event_iter/base.rs`; one that closes in `AfterExplicitKey` phase gets the empty value
+- **Tests:** `tests/yaml-test-suite/src/5WE3.yaml`; `rlsp-yaml-parser/tests/conformance/libfyaml_events.rs`
 
 ### [190] c-l-block-map-explicit-key(n)
 
@@ -267,7 +267,7 @@ BNF: `c-l-block-map-explicit-key(n) ::= c-mapping-key s-l+block-indented(n,BLOCK
 
 - **Verdict:** Strict-conformant
 - **Spec (§8.2.2):** "If the `?` indicator is specified, the optional value node must be specified on a separate line, denoted by the `:` indicator."
-- **Implementation:** `?` followed by whitespace or end-of-line in `event_iter/block/mapping.rs` parsed as explicit key; inline key content prepended as a synthetic line for `s-l+block-indented` handling; a comment after a bare `?` is read by `consume_mapping_entry()` with `comment_in_suffix()` and queued after the key indicator; a key that holds only properties (`? &x`) is closed by the next line at the mapping's column, which is an entry of its own, so `? &x` followed by `&zz : v` and `: v` is the entry `&x` with an empty value, then `&zz` with `v`, then an empty key with `v`: `handle_mapping_entry()` in `event_iter/block/mapping.rs` takes a `:` after properties on the same line (`property_origin_indent` is set) for the `:` of an entry with an empty key, not for the value indicator of the key before it
+- **Implementation:** `?` followed by whitespace or end-of-line in `event_iter/block/mapping.rs` parsed as explicit key; inline key content prepended as a synthetic line for `s-l+block-indented` handling; a comment after a bare `?` is read by `consume_mapping_entry()` with `comment_in_suffix()` and queued after the key indicator; the content of the key may sit on a more indented line or, for a block sequence, at the mapping's column (`handle_sequence_entry()` in `event_iter/block/sequence.rs` opens the sequence in `ExplicitKey` phase at `dash_indent >= col`), and a line at the column of the mapping that is no `-`, `?`, `:` or key is an error in `ExplicitKey` phase (`?` followed by `b` at column 0); a key that holds only properties (`? &x`) is closed by the next line at the mapping's column, which is an entry of its own, so `? &x` followed by `&zz : v` and `: v` is the entry `&x` with an empty value, then `&zz` with `v`, then an empty key with `v`: `handle_mapping_entry()` in `event_iter/block/mapping.rs` takes a `:` after properties on the same line (`property_origin_indent` is set) for the `:` of an entry with an empty key, not for the value indicator of the key before it
 - **Tests:** `tests/yaml-test-suite/src/5WE3.yaml`
 
 ### [191] l-block-map-explicit-value(n)
@@ -276,7 +276,7 @@ BNF: `l-block-map-explicit-value(n) ::= s-indent(n) c-mapping-value s-l+block-in
 
 - **Verdict:** Strict-conformant
 - **Spec (§8.2.2):** "If the `?` indicator is specified, the optional value node must be specified on a separate line, denoted by the `:` indicator."
-- **Implementation:** `consume_explicit_value_line()` in `event_iter/block/mapping.rs` — a line that is solely a `:` value indicator advances the mapping from `AfterExplicitKey` to Value phase (`handle_mapping_entry()` takes a `:` line for the indicator of the key before it only in `AfterExplicitKey` phase; under `Value` the `:` is consumed, so `? a` followed by `:` and `: v` is a second entry with an empty key) and queues the comment after it as an `Event::Comment`; inline value content prepended as a synthetic line. While the mapping is in `AfterExplicitKey` phase (explicit key complete, `:` not yet seen), `finished_node_indent()` in `event_iter/base.rs` makes `step_in_document()` reject any line indented past the mapping, since the value cannot start on the key's continuation line, and `check_node_line_position()` and the scalar validity check reject a node line at the mapping's column that is not `:`, `?` or a key (`? "a"` followed by `[x]`)
+- **Implementation:** `consume_explicit_value_line()` in `event_iter/block/mapping.rs` — a line that is solely a `:` value indicator advances the mapping from `AfterExplicitKey` to Value phase (`handle_mapping_entry()` takes a `:` line for the indicator of the key before it only in `AfterExplicitKey` phase, or in `ExplicitKey` phase when the key is empty (`?` then `: v`); under `Value` the `:` is consumed, so `? a` followed by `:` and `: v` is a second entry with an empty key) and queues the comment after it as an `Event::Comment`; inline value content prepended as a synthetic line. While the mapping is in `AfterExplicitKey` phase (explicit key complete, `:` not yet seen), `finished_node_indent()` in `event_iter/base.rs` makes `step_in_document()` reject any line indented past the mapping, since the value cannot start on the key's continuation line, and `check_node_line_position()` and the scalar validity check reject a node line at the mapping's column that is not `:`, `?` or a key (`? "a"` followed by `[x]`)
 - **Tests:** `tests/yaml-test-suite/src/5WE3.yaml`; `rlsp-yaml-parser/tests/error_reporting.rs` (Group H)
 
 ### [192] ns-l-block-map-implicit-entry(n)
@@ -312,8 +312,8 @@ BNF: `ns-l-compact-mapping(n) ::= ns-l-block-map-entry(n) ( s-indent(n) ns-l-blo
 
 - **Verdict:** Strict-conformant
 - **Spec (§8.2.2):** "A compact in-line notation is also available. This compact notation may be nested inside block sequences and explicit block mapping entries. Note that it is not possible to specify node properties for such a nested mapping."
-- **Implementation:** `handle_mapping_entry()` in `event_iter/block/mapping.rs` — compact mapping opened when a `key: value` pair appears inline after `-` or after `? ` indicator
-- **Tests:** `tests/yaml-test-suite/src/V9D5.yaml` (Spec Example 8.19. Compact Block Mappings); `tests/yaml-test-suite/src/W42U.yaml` (compact mapping case)
+- **Implementation:** `handle_mapping_entry()` in `event_iter/block/mapping.rs` — compact mapping opened when a `key: value` pair appears inline after `-` or after `? ` indicator; a compact mapping that starts with `?` (`? ? a`, `- ?` then a more indented `? a`) is a mapping of its own on the stack with its own `ExplicitKey` phase, and the indentation guard for a mapping key deeper than the enclosing mapping does not apply while the enclosing mapping is in `ExplicitKey` phase (the key's node is still ahead), so `a: 1` then `?` then `  b: 2` loads
+- **Tests:** `tests/yaml-test-suite/src/V9D5.yaml` (Spec Example 8.19. Compact Block Mappings); `tests/yaml-test-suite/src/W42U.yaml` (compact mapping case); `rlsp-yaml-parser/tests/conformance/libfyaml_events.rs`
 
 ### [196] s-l+block-node(n,c)
 
@@ -366,5 +366,5 @@ BNF: `seq-space(n,BLOCK-OUT) ::= l+block-sequence(n-1)` / `seq-space(n,BLOCK-IN)
 
 - **Verdict:** Strict-conformant
 - **Spec (§8.3):** "Since people perceive the `-` indicator as indentation, nested block sequences may be indented by one less space to compensate, except, of course, if nested inside another block sequence (BLOCK-OUT context versus BLOCK-IN context)."
-- **Implementation:** Implemented implicitly in `event_iter/block/sequence.rs` — when `MappingPhase::Value`, `dash_indent >= col` accepted; in `AfterExplicitKey` phase (explicit key complete, `:` not yet seen) and after a mapping value that is already complete, `handle_sequence_entry()` rejects the entry instead (n-1 case); when `CollectionEntry::Sequence`, only `dash_indent > parent_col` opens a new sequence (n case)
+- **Implementation:** Implemented implicitly in `event_iter/block/sequence.rs` — when `MappingPhase::Value` or `MappingPhase::ExplicitKey` (the sequence is the content of a `?`), `dash_indent >= col` accepted; in `AfterExplicitKey` phase (explicit key complete, `:` not yet seen) and after a mapping value that is already complete, `handle_sequence_entry()` rejects the entry instead (n-1 case); when `CollectionEntry::Sequence`, only `dash_indent > parent_col` opens a new sequence (n case)
 - **Tests:** `tests/yaml-test-suite/src/57H4.yaml`; `rlsp-yaml-parser/tests/smoke/sequences.rs`

@@ -40,12 +40,6 @@ pub fn node_signature(node: &Node<Span>) -> String {
     }
     fn tag_of(node: &Node<Span>) -> Option<&str> {
         match node {
-            // The loader leaves the value that an entry of an explicit key lacks
-            // (`? ? a`, the inner entry has no value) without the null tag that
-            // an empty value written out gets (`? a: `); both are null.
-            Node::Scalar {
-                tag: None, value, ..
-            } if value.is_empty() => Some("tag:yaml.org,2002:null"),
             Node::Scalar { tag, .. } | Node::Mapping { tag, .. } | Node::Sequence { tag, .. } => {
                 tag.as_deref()
             }

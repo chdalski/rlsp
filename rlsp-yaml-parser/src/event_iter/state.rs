@@ -29,8 +29,16 @@ pub enum IterState {
 /// What the state machine expects next for an open mapping entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MappingPhase {
-    /// The next node is a key (first half of a pair).
+    /// The next node is a key (first half of a pair).  No `?` is open: the
+    /// mapping has either not started an entry or finished the previous one.
     Key,
+    /// A `?` is consumed and its node is not complete: the next node, if any,
+    /// is the explicit key's content (YAML 1.2.2 [190]).  The state belongs to
+    /// the mapping of the `?`, so a `?` nested in the content leaves it
+    /// untouched.  The content completes the key ([`Self::AfterExplicitKey`]);
+    /// a line that ends the entry first (the next key, a dedent, a document
+    /// boundary) gives the key an empty node.
+    ExplicitKey,
     /// The next node is a value (second half of a pair).  The key's `:` is
     /// consumed: a later `:` line is an entry of its own, never the indicator
     /// of this key.  An alias or flow-collection key consumes its `:` as soon
@@ -40,7 +48,9 @@ pub enum MappingPhase {
     /// value indicator, the next key (empty value), or a dedent.  Unlike
     /// [`Self::Value`], the line after the key cannot carry value content: an
     /// implicit key's value may start on the next line, an explicit key's
-    /// value may not.
+    /// value may not.  A `:` at the column of the mapping is the value
+    /// indicator of this key, also when the key's node is a mapping whose last
+    /// entry has a value (YAML 1.2.2 [189], [191]).
     AfterExplicitKey,
 }
 
@@ -48,6 +58,7 @@ impl MappingPhase {
     /// Whether the mapping has a key and is waiting for the node that follows
     /// it (or for the next key, which then gets an empty value).
     pub const fn awaits_value(self) -> bool {
+        // `ExplicitKey` awaits the key's node, not a value.
         matches!(self, Self::Value | Self::AfterExplicitKey)
     }
 }

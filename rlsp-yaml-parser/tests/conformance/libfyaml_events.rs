@@ -749,6 +749,347 @@ fn render_events_prints_the_notation_of_fy_tool(#[case] input: &str, #[case] exp
     "{a\n b\n c: d, e\n f\n g: h}\n",
     "+STR\n+DOC\n+MAP {}\n=VAL :a b c\n=VAL :d\n=VAL :e f g\n=VAL :h\n-MAP\n-DOC\n-STR\n"
 )]
+// ---- Task 12 -----------------------------------------------------
+#[case::nested_explicit_key_with_an_empty_value(
+    "?\n  ? a\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::inline_nested_explicit_key(
+    "? ? a\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_empty_explicit_key(
+    "?\n  ?\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::inline_nested_empty_explicit_key(
+    "? ?\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::anchor_on_the_outer_explicit_key_of_a_nested_one(
+    "? &a\n  ? a\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP &a\n=VAL :a\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::anchor_on_the_empty_inner_explicit_key(
+    "?\n  ? &a\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL &a :\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::flow_sequence_as_nested_explicit_key(
+    "?\n  ? [a]\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n+SEQ []\n=VAL :a\n-SEQ\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::alias_as_nested_explicit_key(
+    "?\n  ? *x\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=ALI *x\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_in_a_sequence_key(
+    "?\n  - ? a\n: v\n",
+    "+STR\n+DOC\n+MAP\n+SEQ\n+MAP\n=VAL :a\n=VAL :\n-MAP\n-SEQ\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_in_an_inline_sequence_key(
+    "? - ? a\n: v\n",
+    "+STR\n+DOC\n+MAP\n+SEQ\n+MAP\n=VAL :a\n=VAL :\n-MAP\n-SEQ\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_in_a_same_column_sequence_key(
+    "?\n- ? a\n: v\n",
+    "+STR\n+DOC\n+MAP\n+SEQ\n+MAP\n=VAL :a\n=VAL :\n-MAP\n-SEQ\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_in_the_second_item_of_a_sequence_key(
+    "?\n- a\n- ? b\n: v\n",
+    "+STR\n+DOC\n+MAP\n+SEQ\n=VAL :a\n+MAP\n=VAL :b\n=VAL :\n-MAP\n-SEQ\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::explicit_key_nested_in_an_item_with_a_value(
+    "- ?\n    ? a\n  : v\n",
+    "+STR\n+DOC\n+SEQ\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::explicit_key_nested_in_a_mapping_value(
+    "x:\n  ?\n    ? a\n  : v\n",
+    "+STR\n+DOC\n+MAP\n=VAL :x\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::explicit_key_after_an_implicit_entry_in_a_key_mapping(
+    "?\n  a: 1\n  ? b\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :1\n=VAL :b\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::explicit_key_with_a_value_after_a_nested_explicit_key(
+    "?\n  ? a\n  : b\n  ? c\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :b\n=VAL :c\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_under_an_implicit_key_in_a_key(
+    "?\n  x:\n    ? a\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :x\n+MAP\n=VAL :a\n=VAL :\n-MAP\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_in_a_sequence_under_an_implicit_key_in_a_key(
+    "?\n  x:\n  - ? a\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :x\n+SEQ\n+MAP\n=VAL :a\n=VAL :\n-MAP\n-SEQ\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::two_inline_nested_explicit_keys(
+    "?\n  ? ? a\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::two_nested_explicit_keys_over_lines(
+    "?\n  ?\n    ? a\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_with_an_empty_outer_value(
+    "?\n  ? a\n:\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_at_the_end_of_the_input(
+    "?\n  ? a\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_with_a_value_at_the_end_of_the_input(
+    "?\n  ? a\n  : b\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :b\n-MAP\n=VAL :\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_before_a_document_end(
+    "?\n  ? a\n...\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :\n-MAP\n-DOC ...\n-STR\n"
+)]
+#[case::nested_explicit_key_before_a_document_start(
+    "?\n  ? a\n---\nb\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :\n-MAP\n-DOC\n+DOC ---\n=VAL :b\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_before_an_explicit_key(
+    "?\n  ? a\n? b\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :\n=VAL :b\n=VAL :\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_before_a_plain_key(
+    "?\n  ? a\nb: 1\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :\n=VAL :b\n=VAL :1\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_before_an_alias_key(
+    "?\n  ? a\n*x : 1\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :\n=ALI *x\n=VAL :1\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_before_a_flow_key(
+    "?\n  ? a\n[x]: 1\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :\n+SEQ []\n=VAL :x\n-SEQ\n=VAL :1\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_before_an_anchored_empty_key(
+    "?\n  ? a\n&k : v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :\n=VAL &k :\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_in_an_item_before_the_next_item(
+    "- ?\n    ? a\n- b\n",
+    "+STR\n+DOC\n+SEQ\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :\n-MAP\n=VAL :b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::explicit_key_then_a_key_that_holds_a_mapping(
+    "? a\n?\n  b: 1\n",
+    "+STR\n+DOC\n+MAP\n=VAL :a\n=VAL :\n+MAP\n=VAL :b\n=VAL :1\n-MAP\n=VAL :\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::explicit_key_then_a_compact_key_mapping(
+    "? a\n? b: 1\n: v\n",
+    "+STR\n+DOC\n+MAP\n=VAL :a\n=VAL :\n+MAP\n=VAL :b\n=VAL :1\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::entry_then_an_explicit_key_that_holds_a_mapping(
+    "a: 1\n?\n  b: 2\n: v\n",
+    "+STR\n+DOC\n+MAP\n=VAL :a\n=VAL :1\n+MAP\n=VAL :b\n=VAL :2\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::explicit_entry_then_a_compact_key_mapping(
+    "? a\n: b\n? c: d\n: e\n",
+    "+STR\n+DOC\n+MAP\n=VAL :a\n=VAL :b\n+MAP\n=VAL :c\n=VAL :d\n-MAP\n=VAL :e\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::explicit_key_then_a_key_that_holds_an_explicit_key(
+    "? a\n?\n  ? b\n: v\n",
+    "+STR\n+DOC\n+MAP\n=VAL :a\n=VAL :\n+MAP\n=VAL :b\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::entry_then_a_compact_key_mapping(
+    "a: 1\n? b: 2\n: c\n",
+    "+STR\n+DOC\n+MAP\n=VAL :a\n=VAL :1\n+MAP\n=VAL :b\n=VAL :2\n-MAP\n=VAL :c\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::three_inline_nested_explicit_keys_with_an_empty_value(
+    "? ? ? ? a\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :\n-MAP\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::three_nested_empty_explicit_keys(
+    "?\n  ?\n  ?\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :\n=VAL :\n=VAL :\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::four_nested_explicit_keys(
+    "?\n  ?\n    ?\n      ? a\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :\n-MAP\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_then_a_second_one(
+    "? ? a\n  ? b\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :\n=VAL :b\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_then_an_outer_key(
+    "? ? a\n? b\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :\n=VAL :b\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::explicit_key_then_a_key_with_two_nested_ones(
+    "? a\n?\n  ? b\n  ? c\n: v\n",
+    "+STR\n+DOC\n+MAP\n=VAL :a\n=VAL :\n+MAP\n=VAL :b\n=VAL :\n=VAL :c\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::entry_then_a_key_mapping_with_two_entries(
+    "a: 1\n? b: 2\n  c: 3\n: v\n",
+    "+STR\n+DOC\n+MAP\n=VAL :a\n=VAL :1\n+MAP\n=VAL :b\n=VAL :2\n=VAL :c\n=VAL :3\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::item_mapping_then_an_explicit_key_that_holds_a_mapping(
+    "- a: 1\n  ?\n    b: 2\n  : v\n",
+    "+STR\n+DOC\n+SEQ\n+MAP\n=VAL :a\n=VAL :1\n+MAP\n=VAL :b\n=VAL :2\n-MAP\n=VAL :v\n-MAP\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::item_then_an_item_with_an_explicit_key_that_holds_a_mapping(
+    "- x\n- ?\n    a: 1\n  : v\n",
+    "+STR\n+DOC\n+SEQ\n=VAL :x\n+MAP\n+MAP\n=VAL :a\n=VAL :1\n-MAP\n=VAL :v\n-MAP\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_that_holds_an_empty_entry(
+    "? ?\n  : v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :\n=VAL :v\n-MAP\n=VAL :\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_with_a_literal_scalar(
+    "?\n  ? |\n    lit\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL |lit\\n\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::inline_nested_explicit_key_with_a_literal_scalar(
+    "? ? |\n    x\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL |x\\n\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_with_a_multiline_scalar(
+    "?\n  ? a\n    b\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a b\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_with_a_quoted_scalar(
+    "?\n  ? \"a\"\n: 'v'\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL \"a\n=VAL :\n-MAP\n=VAL 'v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_with_a_flow_mapping(
+    "?\n  ? {a: b}\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n+MAP {}\n=VAL :a\n=VAL :b\n-MAP\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::inline_nested_explicit_key_with_a_flow_sequence(
+    "? ? [a, b]\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n+SEQ []\n=VAL :a\n=VAL :b\n-SEQ\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::tag_on_the_outer_explicit_key_of_a_nested_one(
+    "? !!map\n  ? a\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP <tag:yaml.org,2002:map>\n=VAL :a\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::tag_on_the_scalar_of_a_nested_explicit_key(
+    "?\n  ? !!str x\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL <tag:yaml.org,2002:str> :x\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::anchor_on_the_outer_key_and_an_alias_value(
+    "? &m\n  ? a\n: *m\n",
+    "+STR\n+DOC\n+MAP\n+MAP &m\n=VAL :a\n=VAL :\n-MAP\n=ALI *m\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_then_a_sequence_under_an_implicit_key(
+    "?\n  x:\n  - a\n  ? b\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :x\n+SEQ\n=VAL :a\n-SEQ\n=VAL :b\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_with_a_sequence_value(
+    "?\n  ? a\n:\n  - x\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n+SEQ\n=VAL :x\n-SEQ\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_with_a_mapping_value(
+    "?\n  ? a\n:\n  k: x\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n+MAP\n=VAL :k\n=VAL :x\n-MAP\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_then_another_entry(
+    "?\n  ? a\n: v\n? b\n: c\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :v\n=VAL :b\n=VAL :c\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_then_a_plain_entry(
+    "?\n  ? a\n: v\nz: 1\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :v\n=VAL :z\n=VAL :1\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_with_an_empty_value_then_another_entry(
+    "?\n  ? a\n:\n? b\n: c\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :\n=VAL :b\n=VAL :c\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_keys_in_two_documents(
+    "---\n?\n  ? a\n---\n?\n  ? b\n...\n",
+    "+STR\n+DOC ---\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :\n-MAP\n-DOC\n+DOC ---\n+MAP\n+MAP\n=VAL :b\n=VAL :\n-MAP\n=VAL :\n-MAP\n-DOC ...\n-STR\n"
+)]
+#[case::nested_explicit_key_with_an_empty_value_before_a_document_end(
+    "?\n  ? a\n:\n...\n?\n  ? b\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :\n-MAP\n-DOC ...\n+DOC\n+MAP\n+MAP\n=VAL :b\n=VAL :\n-MAP\n=VAL :\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_without_a_line_break(
+    "?\n  ? a",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::inline_nested_explicit_key_without_a_line_break(
+    "? ? a",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_empty_explicit_key_without_a_line_break(
+    "?\n  ?",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :\n=VAL :\n-MAP\n=VAL :\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::inline_nested_empty_explicit_key_without_a_line_break(
+    "? ?",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :\n=VAL :\n-MAP\n=VAL :\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_with_a_bare_colon_at_the_end(
+    "? ? a\n:",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_with_a_value_at_the_end(
+    "? ? a\n: v",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::tag_on_the_root_before_a_nested_explicit_key(
+    "!!map\n? ? a\n: v\n",
+    "+STR\n+DOC\n+MAP <tag:yaml.org,2002:map>\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::anchor_on_the_root_before_a_nested_explicit_key(
+    "&r\n?\n  ? a\n: v\n",
+    "+STR\n+DOC\n+MAP &r\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::tag_after_the_marker_before_a_nested_explicit_key(
+    "--- !!map\n?\n  ? a\n: v\n",
+    "+STR\n+DOC ---\n+MAP <tag:yaml.org,2002:map>\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_with_crlf(
+    "?\r\n  ? a\r\n: v\r\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::nested_explicit_key_with_a_tab_before_the_value(
+    "?\n  ? a\n:\tv\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::explicit_key_as_the_value_of_an_explicit_key(
+    "? a\n: ? b\n  : c\n? d\n: e\n",
+    "+STR\n+DOC\n+MAP\n=VAL :a\n+MAP\n=VAL :b\n=VAL :c\n-MAP\n=VAL :d\n=VAL :e\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::explicit_key_as_the_value_in_an_item(
+    "- ? a\n  : ? b\n- c\n",
+    "+STR\n+DOC\n+SEQ\n+MAP\n=VAL :a\n+MAP\n=VAL :b\n=VAL :\n-MAP\n-MAP\n=VAL :c\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::sequence_with_an_explicit_key_as_the_value(
+    "? a\n: - ? b\n    : c\n? d\n: e\n",
+    "+STR\n+DOC\n+MAP\n=VAL :a\n+SEQ\n+MAP\n=VAL :b\n=VAL :c\n-MAP\n-SEQ\n=VAL :d\n=VAL :e\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::bare_explicit_key_then_a_colon_line(
+    "?\n: v\n",
+    "+STR\n+DOC\n+MAP\n=VAL :\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::bare_explicit_key_with_a_sequence_key(
+    "?\n- a\n: v\n",
+    "+STR\n+DOC\n+MAP\n+SEQ\n=VAL :a\n-SEQ\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::explicit_key_with_a_compact_empty_key(
+    "? : v",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :\n=VAL :v\n-MAP\n=VAL :\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::explicit_key_with_a_block_mapping(
+    "?\n  a: 1\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=VAL :a\n=VAL :1\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::explicit_key_with_a_block_sequence(
+    "?\n  - a\n: v\n",
+    "+STR\n+DOC\n+MAP\n+SEQ\n=VAL :a\n-SEQ\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::explicit_key_with_an_alias_key_entry(
+    "?\n  *x :\n: v\n",
+    "+STR\n+DOC\n+MAP\n+MAP\n=ALI *x\n=VAL :\n-MAP\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::explicit_key_then_an_alias_key(
+    "? a\n? b\n*y : 3\n",
+    "+STR\n+DOC\n+MAP\n=VAL :a\n=VAL :\n=VAL :b\n=VAL :\n=ALI *y\n=VAL :3\n-MAP\n-DOC\n-STR\n"
+)]
 fn parse_events_matches_the_events_of_libfyaml(#[case] input: &str, #[case] expected: &str) {
     assert_eq!(
         render_events(input).as_deref(),
@@ -814,6 +1155,21 @@ fn parse_events_matches_the_events_of_libfyaml(#[case] input: &str, #[case] expe
 #[case::flow_mapping_value_then_an_alias_key("{a: b\n*x : d}\n")]
 #[case::flow_mapping_key_anchor_line_colon_then_a_second_key("{a\n &zz : v\n b: 1}\n")]
 #[case::flow_plain_then_a_colon_and_a_space("[a\n : b]\n")]
+// ---- Task 12 ------------------------------------------------------
+// The verdict "libfyaml reports an error here as well"; `error_reporting.rs`
+// holds the error line of the same inputs.
+#[case::sequence_entry_after_an_empty_explicit_key_in_a_value("x:\n  ?\n- a\n")]
+#[case::flow_sequence_after_an_empty_explicit_key_in_a_value("x:\n  ?\n[a]\n")]
+#[case::sequence_entry_after_a_nested_explicit_key("?\n  ? a\n- b\n")]
+#[case::sequence_entry_after_a_nested_explicit_key_with_a_colon("?\n  ? a\n  :\n- b\n")]
+#[case::sequence_entry_after_a_nested_empty_explicit_key("?\n  ?\n- a\n")]
+#[case::colon_between_the_columns_of_nested_explicit_keys("?\n  ? a\n : v\n")]
+#[case::sequence_entry_after_a_plain_explicit_key("? x\n- a\n")]
+#[case::sequence_entry_after_an_explicit_value("? a\n: b\n- c\n")]
+#[case::sequence_entry_after_a_complete_explicit_key_in_an_item("- ?\n- a\n: v\n")]
+#[case::tab_after_an_inline_explicit_key("?\t? a\n: v\n")]
+#[case::explicit_key_on_the_line_of_a_value("k: ?\n    ? b\n  : c\n")]
+#[case::explicit_key_as_a_value_with_a_deeper_colon("?\n  ? a\n: ? b\n    : c\n")]
 fn parse_events_reports_an_error_where_libfyaml_does(#[case] input: &str) {
     let results: Vec<_> = parse_events(input).collect();
     let first_error = results.iter().position(Result::is_err);

@@ -124,8 +124,6 @@ impl<'input> EventIter<'input> {
             pending_collection_tag_loc: None,
             directive_scope: DirectiveScope::default(),
             root_node_emitted: false,
-            explicit_key_pending: false,
-            complex_key_inline: None,
             property_origin_indent: None,
         }
     }
@@ -156,53 +154,41 @@ impl<'input> EventIter<'input> {
                         MappingPhase::Value | MappingPhase::AfterExplicitKey,
                         _,
                     ) => {
-                        // Mapping closed via dedent while waiting for a value —
-                        // emit empty value scalar first (consumes any pending
-                        // anchor/tag that was on a standalone property line).
+                        // Mapping closed (dedent or document boundary) while
+                        // waiting for a value — emit empty value scalar first
+                        // (consumes any pending anchor/tag that was on a
+                        // standalone property line).
                         self.emit_empty_scalar(pos, InlineProperties::Taken);
                         Event::MappingEnd
                     }
-                    CollectionEntry::Mapping(col, MappingPhase::Key, _) => {
-                        // If an explicit key (`? anchor`, `? inline-scalar`) was
+                    CollectionEntry::Mapping(_, MappingPhase::ExplicitKey, _) => {
+                        // An explicit key (`? anchor`, `? inline-scalar`) was
                         // consumed but neither its key scalar nor its value scalar
-                        // was emitted before the mapping closed via dedent, emit
-                        // both empty scalars now so the mapping is well-formed.
-                        if self.complex_key_inline == Some(col) {
-                            self.emit_empty_scalar(pos, InlineProperties::Taken);
-                            self.queue.push_back((
-                                Event::Scalar {
-                                    value: std::borrow::Cow::Borrowed(""),
-                                    style: ScalarStyle::Plain,
-                                    meta: None,
-                                },
-                                zero_span(pos),
-                            ));
-                            self.complex_key_inline = None;
-                        }
+                        // was emitted before the mapping closed (dedent or
+                        // document boundary), emit both empty scalars now so the
+                        // mapping is well-formed.
+                        self.emit_empty_scalar(pos, InlineProperties::Taken);
+                        self.emit_empty_scalar(pos, InlineProperties::Taken);
                         Event::MappingEnd
                     }
+                    CollectionEntry::Mapping(_, MappingPhase::Key, _) => Event::MappingEnd,
                 };
                 self.queue.push_back((ev, zero_span(pos)));
                 // After closing a collection, update the parent:
                 // - Mapping in Value phase: transition to Key (closed collection
                 //   was the value).
-                // - Mapping in Key phase with complex_key_inline set at this
-                //   indent: transition to Value (closed collection was the key).
+                // - Mapping in ExplicitKey phase: transition to AfterExplicitKey
+                //   (closed collection was the key).
                 // - Sequence: mark current item as completed.
                 match self.coll_stack.last_mut() {
-                    Some(CollectionEntry::Mapping(parent_col, phase, has_had_value)) => {
+                    Some(CollectionEntry::Mapping(_, phase, has_had_value)) => {
                         if phase.awaits_value() {
                             *phase = MappingPhase::Key;
-                        } else if *phase == MappingPhase::Key
-                            && self.complex_key_inline == Some(*parent_col)
-                        {
+                        } else if *phase == MappingPhase::ExplicitKey {
                             // The closed collection was the key of this mapping
                             // (e.g. `? {a: b}\n: val` or `?\n- a\n: val`).
-                            // Transition to the explicit-key-complete phase and
-                            // clear the flag.
                             *phase = MappingPhase::AfterExplicitKey;
                             *has_had_value = true;
-                            self.complex_key_inline = None;
                         }
                     }
                     Some(CollectionEntry::Sequence(_, has_had_item)) => {
@@ -445,18 +431,16 @@ impl<'input> EventIter<'input> {
     ///   complete.  Deeper content is valid only as explicit-key content.
     /// - Mapping in `AfterExplicitKey` phase: an explicit key's value starts at
     ///   its `:` indicator, never on a more indented line.
+    /// - Mapping in `ExplicitKey` phase: none.  The key's node is still ahead,
+    ///   and it may sit on a more indented line.
     ///
     /// Plain-scalar continuation lines are consumed with the scalar, so a line
     /// that reaches the dispatcher past this indent is stray content.
     pub(crate) fn finished_node_indent(&self) -> Option<usize> {
         match self.coll_stack.last() {
-            Some(&CollectionEntry::Mapping(col, MappingPhase::Key, true))
-                if !self.explicit_key_pending =>
-            {
-                Some(col)
-            }
             Some(
                 &(CollectionEntry::Sequence(col, true)
+                | CollectionEntry::Mapping(col, MappingPhase::Key, true)
                 | CollectionEntry::Mapping(col, MappingPhase::AfterExplicitKey, _)),
             ) => Some(col),
             _ => None,
@@ -478,7 +462,8 @@ impl<'input> EventIter<'input> {
     ///
     /// - Mapping in Value phase at indent `n`: the value node must be at col > n.
     /// - Sequence at indent `n`: item content must be at col > n.
-    /// - Mapping in Key phase at indent `n`: a key at col `n` is valid.
+    /// - Mapping in Key or `ExplicitKey` phase at indent `n`: a key, or the
+    ///   content of a bare `?`, at col `n` is valid.
     /// - Root (empty stack): any column is valid.
     pub(crate) fn min_standalone_property_indent(&self) -> usize {
         match self.coll_stack.last() {
@@ -490,7 +475,9 @@ impl<'input> EventIter<'input> {
                 )
                 | CollectionEntry::Sequence(n, _),
             ) => n + 1,
-            Some(CollectionEntry::Mapping(n, MappingPhase::Key, _)) => *n,
+            Some(CollectionEntry::Mapping(n, MappingPhase::Key | MappingPhase::ExplicitKey, _)) => {
+                *n
+            }
             None => 0,
         }
     }

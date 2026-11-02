@@ -5,6 +5,8 @@
 
 #![expect(clippy::unwrap_used, missing_docs, reason = "test code")]
 
+mod support;
+
 use std::fmt::Write;
 use std::time::{Duration, Instant};
 
@@ -631,5 +633,126 @@ fn colon_lines_at_the_end_of_input_leave_no_collection_open() {
         let events = bounded_events(input);
         assert!(events.iter().all(Result::is_ok), "{input:?}");
         assert!(load(input).is_ok(), "{input:?}");
+    }
+}
+
+// ===========================================================================
+// Group J: Explicit keys (`?`) keep their state in their own mapping
+// ===========================================================================
+
+/// Whether every collection of `input` closes where it opened and every
+/// mapping holds an even number of nodes; `None` when `input` has an error.
+fn is_well_formed(input: &str) -> Option<bool> {
+    let events: Result<Vec<_>, _> = parse_events(input)
+        .take(10_000)
+        .map(|item| item.map(|(event, _)| event))
+        .collect();
+    Some(support::check_well_formed(events.ok()?).is_ok())
+}
+
+#[test]
+fn explicit_key_alphabet_strings_end_balanced_or_in_one_error() {
+    const ALPHABET: [&str; 12] = [
+        "?", ":", "-", "a", " ", "\n", "&a", "!t", "*x", "[a]", "---", "...",
+    ];
+    // Every string of up to five tokens.
+    let mut inputs = vec![String::new()];
+    let mut layer = vec![String::new()];
+    for _ in 0..5 {
+        layer = layer
+            .iter()
+            .flat_map(|prefix| ALPHABET.iter().map(move |token| format!("{prefix}{token}")))
+            .collect();
+        inputs.extend(layer.iter().cloned());
+    }
+    for input in &inputs {
+        let events = bounded_events(input);
+        assert!(events.len() < 10_000, "no end in sight for {input:?}");
+        if let Some(position) = events.iter().position(Result::is_err) {
+            assert_eq!(
+                position + 1,
+                events.len(),
+                "events after an error: {input:?}"
+            );
+        }
+        assert_ne!(
+            is_well_formed(input),
+            Some(false),
+            "unbalanced collections or a key without a value: {input:?}"
+        );
+        let _ = load(input);
+    }
+}
+
+/// `depth` nested explicit keys, each on a line of its own and indented past
+/// the one before (`over_lines`), or all on one line.
+fn nested_explicit_keys(depth: usize, over_lines: bool) -> String {
+    if over_lines {
+        let mut input = String::new();
+        for level in 0..depth {
+            writeln!(input, "{}?", " ".repeat(level)).unwrap();
+        }
+        writeln!(input, "{}a", " ".repeat(depth)).unwrap();
+        input
+    } else {
+        format!("{}a\n", "? ".repeat(depth))
+    }
+}
+
+#[rstest]
+#[case::inline(false)]
+#[case::over_lines(true)]
+fn nested_explicit_keys_beyond_the_depth_limit_end_in_one_error(#[case] over_lines: bool) {
+    for depth in [100, 511, 512, 513, 10_000] {
+        let input = nested_explicit_keys(depth, over_lines);
+        let events = bounded_events(&input);
+        assert!(events.len() < 10_000, "no end in sight at depth {depth}");
+        if let Some(position) = events.iter().position(Result::is_err) {
+            assert_eq!(position + 1, events.len(), "events after the error");
+        } else {
+            assert_eq!(is_well_formed(&input), Some(true), "depth {depth}");
+        }
+        if depth == 10_000 {
+            assert!(events.iter().any(Result::is_err), "depth {depth}");
+        }
+    }
+}
+
+#[test]
+fn many_nested_explicit_keys_are_linear() {
+    for entry in ["? a\n", "?\n  ? a\n: v\n", "- ?\n    ? a\n  : v\n"] {
+        let input = entry.repeat(20_000);
+        let start = Instant::now();
+        let events = bounded_events(&input);
+        let elapsed = start.elapsed();
+        assert!(elapsed < Duration::from_secs(30), "took {elapsed:?}");
+        // The budget ends the walk; the parse runs to the end on `load`.
+        assert!(events.iter().all(Result::is_ok), "{entry:?}");
+        assert!(load(&input).is_ok(), "{entry:?}");
+    }
+}
+
+#[test]
+fn nested_explicit_key_state_does_not_reach_the_next_document() {
+    for (input, second_document_keys) in [
+        ("?\n  ? a\n---\nb: 1\n", ["b"]),
+        ("? ? a\n...\n---\nb: 1\n", ["b"]),
+        ("?\n  ? a\n  : c\n---\nb: 1\n", ["b"]),
+    ] {
+        let documents = load(input).unwrap();
+        assert_eq!(documents.len(), 2, "{input:?}");
+        let Node::Mapping { entries, .. } = &documents[1].root else {
+            panic!("second document is no mapping: {input:?}");
+        };
+        let keys: Vec<&str> = entries
+            .iter()
+            .map(|(key, _)| match key {
+                Node::Scalar { value, .. } => value.as_str(),
+                other @ (Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. }) => {
+                    panic!("key is no scalar: {other:?}")
+                }
+            })
+            .collect();
+        assert_eq!(keys, second_document_keys, "{input:?}");
     }
 }

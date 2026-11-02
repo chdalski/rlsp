@@ -107,6 +107,11 @@ impl<'input> EventIter<'input> {
     }
 
     /// Handle a block-sequence dash entry (`-`).
+    ///
+    /// Which mapping phase the `-` meets decides what it is: the content of an
+    /// explicit key (`ExplicitKey`, at the mapping's column or deeper, [190]),
+    /// the value of a key (`Value`, [201] `seq-space`), or an error where the
+    /// mapping's node is complete (`AfterExplicitKey`, `Key` with a value).
     #[expect(
         clippy::too_many_lines,
         reason = "match-on-event-type; splitting would obscure flow"
@@ -127,9 +132,7 @@ impl<'input> EventIter<'input> {
         // after `:` the mapping is not in these states.)
         let after_complete_node = match self.coll_stack.last() {
             Some(&CollectionEntry::Mapping(_, MappingPhase::AfterExplicitKey, _)) => true,
-            Some(&CollectionEntry::Mapping(col, MappingPhase::Key, true)) => {
-                dash_indent >= col && !self.explicit_key_pending
-            }
+            Some(&CollectionEntry::Mapping(col, MappingPhase::Key, true)) => dash_indent >= col,
             _ => false,
         };
         if after_complete_node {
@@ -150,18 +153,17 @@ impl<'input> EventIter<'input> {
         //     seq-spaces case: the sequence is the value of the current key).
         let opens_new = match self.coll_stack.last() {
             None => true,
-            Some(&CollectionEntry::Sequence(col, _)) => dash_indent > col,
-            Some(&CollectionEntry::Mapping(col, MappingPhase::Key, _)) => {
-                // When an explicit key is pending (bare `?` followed by block
-                // sequence content), allow the sequence to open at the same
-                // column as the mapping — the sequence IS the key content.
-                if self.explicit_key_pending {
-                    dash_indent >= col
-                } else {
-                    dash_indent > col
-                }
-            }
-            Some(&CollectionEntry::Mapping(col, MappingPhase::Value, _)) => dash_indent >= col,
+            Some(
+                &(CollectionEntry::Sequence(col, _)
+                | CollectionEntry::Mapping(col, MappingPhase::Key, _)),
+            ) => dash_indent > col,
+            // After a `?` (bare, or with `- ` inline) the sequence may open at
+            // the same column as the mapping — the sequence IS the key content.
+            Some(&CollectionEntry::Mapping(
+                col,
+                MappingPhase::ExplicitKey | MappingPhase::Value,
+                _,
+            )) => dash_indent >= col,
             // Rejected above; an entry cannot open the value of a complete key.
             Some(&CollectionEntry::Mapping(_, MappingPhase::AfterExplicitKey, _)) => false,
         };
@@ -170,13 +172,12 @@ impl<'input> EventIter<'input> {
             // may appear as implicit keys.  If the parent is a mapping in Key phase
             // and we are about to open a new sequence, this is a block sequence
             // where a mapping key is expected: an error.
-            // Exception: when explicit_key_pending is set, the sequence IS the
-            // content of an explicit key (`? \n- seq_key`), which is valid.
+            // The `ExplicitKey` phase is no such parent: there the sequence IS
+            // the content of an explicit key (`? \n- seq_key`), which is valid.
             if matches!(
                 self.coll_stack.last(),
                 Some(&CollectionEntry::Mapping(_, MappingPhase::Key, true))
-            ) && !self.explicit_key_pending
-            {
+            ) {
                 self.state = IterState::Done;
                 return StepResult::Yield(Err(Error::syntax(
                     dash_pos,
@@ -213,8 +214,6 @@ impl<'input> EventIter<'input> {
                     "collection nesting depth exceeds limit".into(),
                 )));
             }
-            // Sequence opening consumes any pending explicit-key context.
-            self.explicit_key_pending = false;
             // Mark the parent sequence (if any) as having started an item.
             if let Some(CollectionEntry::Sequence(_, current_item_started)) =
                 self.coll_stack.last_mut()

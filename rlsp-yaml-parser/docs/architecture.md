@@ -251,8 +251,19 @@ Open block collections are tracked on `coll_stack: Vec<CollectionEntry>`.
 
 - `Sequence(indent_col, has_had_item)` — an open block sequence
 - `Mapping(indent_col, MappingPhase, has_had_value)` — an open block mapping
-  with a phase flag (expecting a key, a value, or — after a complete explicit
-  `?` key — the `:` indicator)
+  with a phase that says what it expects next:
+  - `Key` — a key; no `?` is open
+  - `ExplicitKey` — a `?` is consumed and its node is not complete: the
+    content of the key, or the end of the entry that gives the key an empty node
+  - `AfterExplicitKey` — the explicit key is complete: the `:` indicator, the
+    next key (the value is empty) or a dedent
+  - `Value` — a value; the key's `:` is consumed
+
+  The phase belongs to the mapping of the `?`, not to the parser, so a `?` that
+  a nested mapping consumes leaves the outer `?` as it is, and when the nested
+  mapping closes (a dedent, `---`, `...` or the end of the input) the outer
+  mapping moves from `ExplicitKey` to `AfterExplicitKey`.  A mapping that closes
+  in `ExplicitKey` phase gets an empty key and an empty value.
 
 A sequence item, mapping value, or explicit key holds exactly one node.
 `finished_node_indent()` reports the indent above which the innermost
@@ -282,10 +293,15 @@ last open collection, whatever column that collection started at; the alias arm
 of `step_in_document` does the same for an alias that is the whole root (`*a`).
 Any further content is rejected by the root-node guard in `step_in_document`.
 
-`handle_sequence_entry` rejects a `-` entry when the innermost mapping is in
-`AfterExplicitKey` phase or in `Key` phase with a complete value, and the flow
-and alias handlers reject a second node after the collection or alias on the
-same line (only a comment or the `:` of an implicit key may follow).
+A `-` entry (`handle_sequence_entry`) depends on the innermost mapping.  In
+`ExplicitKey` phase it opens a sequence at the mapping's column or deeper, the
+content of the key (`?` then `- a`).  In `Value` phase it opens the value, at the
+mapping's column or deeper (the `seq-spaces` rule).  In `Key` phase it opens a
+sequence only deeper than the mapping, and an error follows when the mapping
+already has an entry.  In `AfterExplicitKey` phase, and in `Key` phase with a
+complete value, the entry is an error: a mapping holds one node per key.  The
+flow and alias handlers reject a second node after the collection or alias on
+the same line (only a comment or the `:` of an implicit key may follow).
 
 When a new line is less-indented than the top of the stack, collections are
 closed via `close_collections_at_or_above(threshold, pos)`, which pops entries

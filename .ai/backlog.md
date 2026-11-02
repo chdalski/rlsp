@@ -13,7 +13,7 @@ target goes here only after the user has lowered the target.
 - Alias expansion depth: `max_nesting_depth` does not bound the expanded tree in resolved mode; `expand_node`, `Clone`, `Drop` in `loader.rs`; stack-overflow investigation.
 - Iterative loader (`wip/iterative-loader`, adff1074), to discuss with the user; `LoadState::parse_node`; schema queue item 3c.
 - `parse_events` omits the empty scalar in an empty document (14 yaml-test-suite cases expect `=VAL :`); the stream conformance test checks only ok/error; libfyaml comparison.
-- Valid YAML rejected: `a: 1\n? b: 2\n: c\n` (`block/mapping.rs`), `{a: b\n  c\n}\n`, `{a: x\n  y, b: z}`, `[x]\t: 2\n`; libfyaml comparison.
+- Valid YAML rejected: `{a: b\n  c\n}\n`, `{a: x\n  y, b: z}`, `[x]\t: 2\n`; libfyaml comparison.
 - Invalid YAML accepted: `a:\nw\n`, `a:\n[x]\n`, `a: [x]: 2\n`, `a: *y : 2\n`, `&x\n!!str\n&x v\n`, `? ? a\n[x] :\n`, `?\n!!str\nb: 1\n`, `[x]:2\n`, a `]` at the key's column after a quoted item; libfyaml comparison.
 - Inline `--- v` path: `--- v\n# d\nw\n` loses `w`, `--- x\n  y\n` gives two scalars, and `--- x\n  @y\n` (also `,y`, `` `y ``, `%y`) is an error since comment plan Task 11 while libfyaml yields `x @y`; `block` document start handling; libfyaml comparison.
 - A property line before a flow key goes on the key, not the new mapping (`&y\n[x]: 2\n`); libfyaml comparison.
@@ -103,9 +103,11 @@ target goes here only after the user has lowered the target.
 - The first single-line plain scalar is bounded by input size only, not `MAX_SCALAR_LEN`, and blank lines between keys are lost when a value gets fewer lines (`a: x\n  y\n\nb: 1\n`); parser plan Task 6 review.
 - `parse_events` yields no error for `&k\n*a\n` and its variants: it emits the alias and an anchored empty scalar, and only `load()` reports the error, at a position after the last line; `- &k\n  *a\n` still loads as two items; libfyaml errors at the alias; parser plan Task 7 review, for the user's decision.
 - Test cleanup in `src/loader.rs`: `document_of` and the inline `DocumentStart` cases could use `document_start()`, the stray-end cases of `an_event_stream_that_does_not_close_what_it_opened_is_an_error` could assert `Syntax`, and `an_unbalanced_event_stream_is_an_error` could use `assert_syntax_error`; parser plan Task 7 review.
-- `? &a\n  ? a\n: v\n` and `?\n  ? a\n: v\n` make the value `v` a key, with an odd number of nodes, and `format_yaml` prints `v: `; libfyaml reads `v` as the value; parser plan Task 8 review, for the user's decision before the plan closes.
 - `&a !t\n!z [a]:2\n` and `a: &a !t\n  !z [a]:2\n` load since parser plan Task 8 while libfyaml errors, the `[x]:2` family; `&p1\n!q1 |\n  t\n` and `!p1\n&q1 >\n  t\n` load while libfyaml errors, with no property lost; parser plan Task 8 review, for the user's decision.
 - `rlsp-yaml-parser/docs/feature-log.md`: "and so are `&p1` followed by ..." reads awkwardly; parser plan Task 8 review.
 - Test consolidation candidates in `formatter_keeps_comments.rs`: `a_second_colon_in_a_flow_sequence_entry_does_not_load`, `a_missing_comma_in_a_flow_collection_does_not_load`, and `a_block_entry_after_tab_indentation_does_not_load` share a body; parser plan Task 8 test review.
 - `forced_explicit_key` in `mapping_render.rs`: the clause for a collection key with properties after a value without text is no longer needed for the data (`a: !u\n!t [x]: 1\n`, `a: \n!t [x]: 1\n`), so the output stays longer than needed; parser plan Task 10 review.
 - `rlsp-yaml/docs/feature-log.md` does not name the changed formatter output (no `?` on an empty, tagged, or anchored key after an empty value, or on a first key inside a value); parser plan Task 10 review.
+- Explicit keys, differing from libfyaml: `?\n  ?\ta\n: v\n`, `x:\na\n? ?\n`, `- ?\n  !t\n  ? x: 1\n`, `? ?\n  -\n`, and `?\n!t\n- ?\n` load here and error there, and `? ?\n  a\n` and `?\n  ?\n  a\n` error here and load there ([66], [190], [201]); parser plan Task 12 review, for the user's decision.
+- `has_mapping_with_odd_node_count` in `rlsp-yaml/tests/formatter_keeps_text.rs` repeats `check_well_formed` of `rlsp-yaml-parser/tests/support/mod.rs` across the crate boundary; parser plan Task 12 review.
+- `? !!str\n!zz : v\n? &x\n` has no case in `rlsp-yaml/tests/formatter_keeps_data.rs`; parser plan Task 12 review.
