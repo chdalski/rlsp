@@ -6,6 +6,18 @@ pub(in crate::event_iter) fn is_implicit_mapping_line(trimmed: &str) -> bool {
     find_value_indicator_offset(trimmed).is_some()
 }
 
+/// True when `s` starts with a block sequence indicator: a `-` followed by a
+/// space, a tab or the end of `s` ([200] `s-l+block-collection` and [201]
+/// `seq-space` read `-` that way; `-x` and `---` are plain scalar text).
+///
+/// `s` is a line without its indentation, so the `-` is its first byte.  The
+/// callers that refuse a `-` on the line of a node property (`&a - b`,
+/// `!t - b`, `k: - b`) and the one that finds a sequence entry all ask here.
+pub(in crate::event_iter) fn starts_with_block_sequence_indicator(s: &str) -> bool {
+    s.strip_prefix('-')
+        .is_some_and(|after| after.is_empty() || after.starts_with([' ', '\t']))
+}
+
 /// Returns `true` when `s` is a block structure indicator that cannot appear
 /// at tab-based indentation: a block sequence entry (`-` followed by
 /// whitespace or EOL), an explicit key marker (`?` followed by whitespace or
@@ -13,7 +25,10 @@ pub(in crate::event_iter) fn is_implicit_mapping_line(trimmed: &str) -> bool {
 ///
 /// Used to detect tab-as-block-indentation violations (YAML 1.2 §6.1).
 pub(in crate::event_iter) fn is_tab_indented_block_indicator(s: &str) -> bool {
-    s.strip_prefix(['-', '?']).map_or_else(
+    if s.starts_with('-') {
+        return starts_with_block_sequence_indicator(s);
+    }
+    s.strip_prefix('?').map_or_else(
         || is_implicit_mapping_line(s),
         |after| after.is_empty() || after.starts_with([' ', '\t']),
     )
@@ -282,7 +297,8 @@ pub(in crate::event_iter) fn find_value_indicator_offset(trimmed: &str) -> Optio
 mod tests {
     use super::{
         find_value_indicator_offset, inline_contains_mapping_key, is_implicit_key_line,
-        is_implicit_mapping_line, skip_properties,
+        is_implicit_mapping_line, is_tab_indented_block_indicator, skip_properties,
+        starts_with_block_sequence_indicator,
     };
     use rstest::rstest;
 
@@ -509,5 +525,38 @@ mod tests {
         #[case] expected: &str,
     ) {
         assert_eq!(skip_properties(input), expected);
+    }
+
+    #[rstest]
+    #[case::bare_dash_at_the_end("-", true)]
+    #[case::dash_and_space("- b", true)]
+    #[case::dash_and_tab("-\tb", true)]
+    #[case::dash_and_trailing_space("- ", true)]
+    #[case::dash_and_trailing_tab("-\t", true)]
+    #[case::dash_then_empty_entry("- :", true)]
+    #[case::empty_line("", false)]
+    #[case::dash_then_text("-b", false)]
+    #[case::document_marker("--- b", false)]
+    #[case::two_dashes("-- b", false)]
+    #[case::dash_then_hash("-#", false)]
+    #[case::dash_after_text("b -", false)]
+    #[case::explicit_key_indicator("?", false)]
+    #[case::value_indicator(":", false)]
+    #[case::indented_dash_is_not_stripped(" - b", false)]
+    fn starts_with_block_sequence_indicator_cases(#[case] line: &str, #[case] expected: bool) {
+        assert_eq!(starts_with_block_sequence_indicator(line), expected);
+    }
+
+    #[rstest]
+    #[case::sequence_entry("- b", true)]
+    #[case::bare_dash("-", true)]
+    #[case::dash_text_with_colon("-x: v", false)]
+    #[case::explicit_key("? b", true)]
+    #[case::bare_explicit_key("?", true)]
+    #[case::question_text("?x", false)]
+    #[case::implicit_key("k: v", true)]
+    #[case::plain_text("text", false)]
+    fn is_tab_indented_block_indicator_cases(#[case] line: &str, #[case] expected: bool) {
+        assert_eq!(is_tab_indented_block_indicator(line), expected);
     }
 }

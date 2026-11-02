@@ -33,7 +33,7 @@ directives.
 - [x] Task 10: The formatter drops its workarounds for these misreads
 - [x] Task 11: One loop closes collections
 - [x] Task 12: An explicit key keeps its state in its own mapping
-- [ ] Task 13: A `-` after a tag on the same line is an error
+- [x] Task 13: A `-` after a tag on the same line is an error
 - [ ] Task 14: A collection key with an explicit entry prints in block form
 - [ ] Measure every `*.yml` and `*.yaml` file under `/workspace`,
       `/usr/local/cargo/registry`, and `~/.local/share/pnpm`: the number of files that
@@ -262,22 +262,22 @@ that holds a mapping after the first entry. Productions: [189], [190], [191], [1
 An anchor reports this error today, and a tag does not, so `a: !t - :\n` opens a sequence,
 ends it at the `:`, and gives the outer mapping a third node. Productions: [200], [201].
 
-- [ ] These report a syntax error, as libfyaml 0.9.6 does: `!t - b\n`, `--- !t - b\n`,
+- [x] These report a syntax error, as libfyaml 0.9.6 does: `!t - b\n`, `--- !t - b\n`,
       `&a !t - b\n`, `!t\t- b\n`, `!t -\n`, `a: !t - b\n`, `a: !t - :\n`, `: !t - :\n`,
       `a: !t -\n`, `- !t - b\n`, `- !t - :\n`, and `? !t - b\n`
-- [ ] `format_yaml` returns these inputs unchanged
-- [ ] These keep their events: `a: !t\n  - b\n`, `!t\n- b\n`, `!t\n  - b\n`, `- !t\n  - b\n`,
+- [x] `format_yaml` returns these inputs unchanged
+- [x] These keep their events: `a: !t\n  - b\n`, `!t\n- b\n`, `!t\n  - b\n`, `- !t\n  - b\n`,
       `? !t\n  - b\n`, `!t -b\n`, `a: !t -b\n`, and `a: !t --- b\n`
-- [ ] `&a - b\n` and `a: - b\n` keep their errors, and `&a -b\n` and `a: -b\n` keep their events
-- [ ] One function decides whether a line starts with a block sequence indicator, and the anchor
+- [x] `&a - b\n` and `a: - b\n` keep their errors, and `&a -b\n` and `a: -b\n` keep their events
+- [x] One function decides whether a line starts with a block sequence indicator, and the anchor
       branch and the tag branch in `step.rs` and `consume_mapping_entry` call it; one method
       reports the error for both branches
-- [ ] `EXTRA_INPUTS` in `rlsp-yaml/tests/inputs/mod.rs` holds `: !\n?\n! : v\n` in place of
+- [x] `EXTRA_INPUTS` in `rlsp-yaml/tests/inputs/mod.rs` holds `: !\n?\n! : v\n` in place of
       `: !\n?\n! - :`, which no longer loads, so the tagged key after a tag alone stays covered
-- [ ] `libfyaml_events.rs` holds these inputs
-- [ ] `docs/conformance/` names the enforcement site in the entry of [200], and
+- [x] `libfyaml_events.rs` holds these inputs
+- [x] `docs/conformance/` names the enforcement site in the entry of [200], and
       `rlsp-yaml-parser/docs/feature-log.md` tells a reader which inputs now report an error
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 14: A collection key with an explicit entry prints in block form
 

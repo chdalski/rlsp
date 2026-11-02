@@ -86,7 +86,7 @@ pub const EXTRA_INPUTS: &[(&str, &str)] = &[
     ("tags before commas", "[a, !!str , b]\n"),
     (
         "tag alone as a value, then a key with a tag",
-        ": !\n?\n! - :",
+        ": !\n?\n! : v\n",
     ),
     (
         "tag alone as a value, then a key with an anchor",

@@ -648,6 +648,24 @@ fn a_missing_comma_in_a_flow_collection_does_not_load(#[case] input: &str) {
     }
 }
 
+/// A `-` after a tag on the same line is an error; `a: !t - :` once loaded as a
+/// mapping with three nodes, and the formatter wrote text that was not there.
+#[rstest]
+#[case::tag_then_an_entry("!t - b\n")]
+#[case::tag_then_an_entry_in_a_value("a: !t - b\n")]
+#[case::tag_then_an_empty_entry_in_a_value("a: !t - :\n")]
+#[case::tag_then_an_empty_entry_in_an_empty_key(": !t - :\n")]
+#[case::tag_then_a_bare_dash_in_a_value("a: !t -\n")]
+#[case::tag_then_an_empty_entry_in_an_item("- !t - :\n")]
+#[case::tag_then_an_entry_in_an_explicit_key("? !t - b\n")]
+#[case::tag_alone_as_a_value_then_a_key_and_an_entry(": !\n?\n! - :")]
+fn a_dash_after_a_tag_does_not_load(#[case] input: &str) {
+    assert!(load(input).is_err());
+    for option_set in OptionSet::ALL {
+        assert_eq!(format_yaml(input, &option_set.options()), input);
+    }
+}
+
 /// A block entry after a tab that follows the indentation is an error; it was
 /// read at the wrong column, and the lines under it were lost.
 #[rstest]

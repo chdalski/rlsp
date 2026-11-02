@@ -12,6 +12,7 @@ use crate::event::{CollectionStyle, Event, ScalarStyle, make_meta};
 use crate::event_iter::base::InlineProperties;
 use crate::event_iter::line_mapping::{
     find_value_indicator_offset, is_tab_indented_block_indicator,
+    starts_with_block_sequence_indicator,
 };
 use crate::event_iter::state::{
     CollectionEntry, IterState, MappingPhase, PendingAnchor, PendingTag, StepResult,
@@ -34,13 +35,7 @@ impl<'input> EventIter<'input> {
         let dash_indent = line.indent;
         let trimmed = line.content.trim_start_matches(' ');
 
-        if !trimmed.starts_with('-') {
-            return None;
-        }
-        let after_dash = &trimmed[1..];
-        let is_entry =
-            after_dash.is_empty() || after_dash.starts_with(' ') || after_dash.starts_with('\t');
-        if !is_entry {
+        if !starts_with_block_sequence_indicator(trimmed) {
             return None;
         }
 

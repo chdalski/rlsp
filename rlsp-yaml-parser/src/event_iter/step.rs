@@ -9,7 +9,7 @@ use super::base::InlineProperties;
 use super::directive_scope::DirectiveScope;
 use super::line_mapping::{
     inline_contains_mapping_key, is_implicit_key_line, is_tab_indented_block_indicator,
-    skip_properties,
+    skip_properties, starts_with_block_sequence_indicator,
 };
 use super::properties::{scan_anchor_name, scan_tag};
 use super::state::{
@@ -643,6 +643,14 @@ impl<'input> EventIter<'input> {
                                 };
                                 self.lexer.consume_line();
                                 if had_inline {
+                                    // `!tag - item` is invalid like `&anchor - item`.
+                                    if starts_with_block_sequence_indicator(inline) {
+                                        return self.sequence_after_property_error(Pos {
+                                            byte_offset: inline_offset,
+                                            line: line_pos.line,
+                                            column: inline_col,
+                                        });
+                                    }
                                     // If a standalone tag is already pending (for the
                                     // upcoming collection), save it to the collection slot
                                     // so both properties can be delivered simultaneously.
@@ -848,26 +856,15 @@ impl<'input> EventIter<'input> {
                                 }
                                 self.lexer.consume_line();
                                 if had_inline {
-                                    // Detect illegal inline block sequence: `&anchor - item`
-                                    // is invalid — a block sequence indicator cannot appear
-                                    // inline after an anchor property in block context.
-                                    let is_seq = inline.strip_prefix('-').is_some_and(|rest| {
-                                        rest.is_empty()
-                                            || rest.starts_with(' ')
-                                            || rest.starts_with('\t')
-                                    });
-                                    if is_seq {
-                                        self.state = IterState::Done;
-                                        let seq_pos = Pos {
+                                    // `&anchor - item` is invalid: [200] ends the
+                                    // properties at a line break before a block
+                                    // collection.
+                                    if starts_with_block_sequence_indicator(inline) {
+                                        return self.sequence_after_property_error(Pos {
                                             byte_offset: inline_offset,
                                             line: line_pos.line,
                                             column: inline_col,
-                                        };
-                                        return StepResult::Yield(Err(Error::syntax(
-                                    seq_pos,
-                                    "block sequence indicator cannot appear inline after a node property"
-                                        .into(),
-                                )));
+                                        });
                                     }
                                     // Inline content after anchor — anchor applies to the
                                     // inline node (scalar or key), not to any enclosing
@@ -1129,6 +1126,24 @@ impl<'input> EventIter<'input> {
         let close_pos = self.lexer.current_pos();
         self.close_collections_at_or_above(line_indent.saturating_add(1), close_pos);
         !self.queue.is_empty()
+    }
+
+    /// End the stream with the error for a block sequence indicator that stands
+    /// on the line of a node property, `pos` being the `-`.
+    ///
+    /// [200] `s-l+block-collection` takes `s-l-comments` between the properties
+    /// and the collection, so the `-` of `&a - b` or `!t - b` is not a sequence
+    /// entry and not a scalar either: the anchor and the tag branch both end here.
+    ///
+    /// The caller returns the result as it is: an error left unreturned would
+    /// end the stream without one.
+    #[must_use = "the caller returns the error; dropping it ends the stream silently"]
+    fn sequence_after_property_error(&mut self, pos: Pos) -> StepResult<'input> {
+        self.state = IterState::Done;
+        StepResult::Yield(Err(Error::syntax(
+            pos,
+            "block sequence indicator cannot appear inline after a node property".into(),
+        )))
     }
 
     /// Fail on the next line, which is stray content: report `message` at its

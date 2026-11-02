@@ -1090,6 +1090,41 @@ fn render_events_prints_the_notation_of_fy_tool(#[case] input: &str, #[case] exp
     "? a\n? b\n*y : 3\n",
     "+STR\n+DOC\n+MAP\n=VAL :a\n=VAL :\n=VAL :b\n=VAL :\n=ALI *y\n=VAL :3\n-MAP\n-DOC\n-STR\n"
 )]
+// ---- Task 13 -----------------------------------------------------
+#[case::tag_line_then_an_indented_sequence_in_a_value(
+    "a: !t\n  - b\n",
+    "+STR\n+DOC\n+MAP\n=VAL :a\n+SEQ <!t>\n=VAL :b\n-SEQ\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::tag_line_then_a_flush_sequence(
+    "!t\n- b\n",
+    "+STR\n+DOC\n+SEQ <!t>\n=VAL :b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::tag_line_then_an_indented_sequence(
+    "!t\n  - b\n",
+    "+STR\n+DOC\n+SEQ <!t>\n=VAL :b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::tag_line_then_an_indented_sequence_in_an_item(
+    "- !t\n  - b\n",
+    "+STR\n+DOC\n+SEQ\n+SEQ <!t>\n=VAL :b\n-SEQ\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::tag_line_then_an_indented_sequence_in_an_explicit_key(
+    "? !t\n  - b\n",
+    "+STR\n+DOC\n+MAP\n+SEQ <!t>\n=VAL :b\n-SEQ\n=VAL :\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::tag_then_a_dash_without_a_space("!t -b\n", "+STR\n+DOC\n=VAL <!t> :-b\n-DOC\n-STR\n")]
+#[case::tag_then_a_dash_without_a_space_in_a_value(
+    "a: !t -b\n",
+    "+STR\n+DOC\n+MAP\n=VAL :a\n=VAL <!t> :-b\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::tag_then_a_document_marker_look_alike_in_a_value(
+    "a: !t --- b\n",
+    "+STR\n+DOC\n+MAP\n=VAL :a\n=VAL <!t> :--- b\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::anchor_then_a_dash_without_a_space("&a -b\n", "+STR\n+DOC\n=VAL &a :-b\n-DOC\n-STR\n")]
+#[case::dash_without_a_space_in_a_value(
+    "a: -b\n",
+    "+STR\n+DOC\n+MAP\n=VAL :a\n=VAL :-b\n-MAP\n-DOC\n-STR\n"
+)]
 fn parse_events_matches_the_events_of_libfyaml(#[case] input: &str, #[case] expected: &str) {
     assert_eq!(
         render_events(input).as_deref(),
@@ -1170,6 +1205,21 @@ fn parse_events_matches_the_events_of_libfyaml(#[case] input: &str, #[case] expe
 #[case::tab_after_an_inline_explicit_key("?\t? a\n: v\n")]
 #[case::explicit_key_on_the_line_of_a_value("k: ?\n    ? b\n  : c\n")]
 #[case::explicit_key_as_a_value_with_a_deeper_colon("?\n  ? a\n: ? b\n    : c\n")]
+// ---- Task 13 ------------------------------------------------------
+#[case::tag_then_a_sequence_entry("!t - b\n")]
+#[case::tag_then_a_sequence_entry_after_the_marker("--- !t - b\n")]
+#[case::anchor_and_tag_then_a_sequence_entry("&a !t - b\n")]
+#[case::tag_then_a_tab_and_a_sequence_entry("!t\t- b\n")]
+#[case::tag_then_a_bare_dash("!t -\n")]
+#[case::tag_then_a_sequence_entry_in_a_value("a: !t - b\n")]
+#[case::tag_then_an_empty_entry_in_a_value("a: !t - :\n")]
+#[case::tag_then_an_empty_entry_in_an_empty_key(": !t - :\n")]
+#[case::tag_then_a_bare_dash_in_a_value("a: !t -\n")]
+#[case::tag_then_a_sequence_entry_in_an_item("- !t - b\n")]
+#[case::tag_then_an_empty_entry_in_an_item("- !t - :\n")]
+#[case::tag_then_a_sequence_entry_in_an_explicit_key("? !t - b\n")]
+#[case::anchor_then_a_sequence_entry("&a - b\n")]
+#[case::sequence_entry_in_a_value("a: - b\n")]
 fn parse_events_reports_an_error_where_libfyaml_does(#[case] input: &str) {
     let results: Vec<_> = parse_events(input).collect();
     let first_error = results.iter().position(Result::is_err);

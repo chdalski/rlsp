@@ -2595,3 +2595,118 @@ fn comment_error_after_an_open_collection_ends_the_stream(
     );
     assert_eq!(items.iter().filter(|r| r.is_err()).count(), 1, "{input:?}");
 }
+
+// ===========================================================================
+// A block sequence indicator on the line of a node property or of a key
+// ===========================================================================
+
+// The anchor and the tag branch report the same error at the `-`; `column` is
+// counted in characters, `byte_offset` in bytes.
+#[rstest]
+#[case::anchor("&a - b\n", 3, 1, 3)]
+#[case::tag("!t - b\n", 3, 1, 3)]
+#[case::tag_with_a_bare_dash("!t -\n", 3, 1, 3)]
+#[case::tag_with_a_tab("!t\t- b\n", 3, 1, 3)]
+#[case::anchor_then_tag("&a !t - b\n", 6, 1, 6)]
+#[case::tag_then_anchor("!t &a - b\n", 6, 1, 6)]
+#[case::tag_in_a_value("a: !t - b\n", 6, 1, 6)]
+#[case::tag_in_an_item("- !t - b\n", 5, 1, 5)]
+#[case::tag_in_an_explicit_key("? !t - b\n", 5, 1, 5)]
+#[case::tag_after_a_marker("--- !t - b\n", 7, 1, 7)]
+#[case::tag_on_a_later_line("a: 1\nb: !t - c\n", 11, 2, 6)]
+#[case::tag_after_a_multibyte_key("é: !t - b\n", 7, 1, 6)]
+fn a_block_sequence_indicator_after_a_node_property_is_reported_at_the_dash(
+    #[case] input: &str,
+    #[case] byte_offset: usize,
+    #[case] line: usize,
+    #[case] column: usize,
+) {
+    let err = first_error(input).expect("expected a parse error");
+    assert_eq!(err.kind, ErrorKind::Syntax, "{input:?}");
+    assert!(
+        err.message.contains("block sequence indicator"),
+        "{input:?}: {}",
+        err.message
+    );
+    assert_eq!(
+        (err.pos.byte_offset, err.pos.line, err.pos.column),
+        (byte_offset, line, column),
+        "{input:?}"
+    );
+}
+
+#[rstest]
+#[case::dash_in_a_value("a: - b\n", 3, 1, 3)]
+#[case::bare_dash_in_a_value("a: -\n", 3, 1, 3)]
+fn a_block_sequence_indicator_as_an_inline_value_is_reported_at_the_dash(
+    #[case] input: &str,
+    #[case] byte_offset: usize,
+    #[case] line: usize,
+    #[case] column: usize,
+) {
+    let err = first_error(input).expect("expected a parse error");
+    assert_eq!(err.kind, ErrorKind::Syntax, "{input:?}");
+    assert_eq!(
+        (err.pos.byte_offset, err.pos.line, err.pos.column),
+        (byte_offset, line, column),
+        "{input:?}"
+    );
+}
+
+// The error is the last item of the stream and the loader reports it too.
+#[rstest]
+#[case::tag_at_the_end_without_a_break("!t -")]
+#[case::tag_with_a_crlf_break("!t - b\r\n")]
+#[case::bare_dash_with_a_crlf_break("!t -\r\n")]
+#[case::tag_with_a_trailing_space("!t - \n")]
+#[case::tag_with_a_comment("!t - # c\n")]
+#[case::tag_with_a_trailing_tab("!t -\t\n")]
+#[case::tag_and_a_key_after_the_dash("!t - b: c\n")]
+#[case::shorthand_handle("!!str - b\n")]
+#[case::verbatim_tag("!<x> - b\n")]
+#[case::non_specific_tag("! - b\n")]
+#[case::tag_in_a_nested_value("x:\n  a: !t - b\n")]
+#[case::tag_in_a_mapping_item("- a: !t - b\n")]
+#[case::anchor_before_the_tag_in_a_value("a: &x !t - b\n")]
+#[case::anchor_after_the_tag_in_a_value("a: !t &x - b\n")]
+#[case::resolved_handle("%TAG !e! tag:x,2000:\n--- !e!x - b\n")]
+#[case::second_document("--- !t\n- b\n--- !t - c\n")]
+#[case::multibyte_text_before_the_dash("é: !t - b\n")]
+fn a_dash_after_a_tag_ends_the_stream_with_one_error(#[case] input: &str) {
+    let items: Vec<_> = parse_events(input).collect();
+    assert!(
+        items.last().is_some_and(Result::is_err),
+        "{input:?}: {items:?}"
+    );
+    assert_eq!(items.iter().filter(|r| r.is_err()).count(), 1, "{input:?}");
+    assert!(load(input).is_err(), "the loader reads {input:?}");
+}
+
+// A `-` that does not start a sequence entry stays text, after a tag, an
+// anchor or a key; so does a tag without content on its line.
+#[rstest]
+#[case::dash_then_hash("!t -#\n")]
+#[case::dash_then_hash_and_comment("!t -# c\n")]
+#[case::two_dashes("!t -- b\n")]
+#[case::dash_inside_the_scalar("a: !t b - c\n")]
+#[case::tag_inside_the_scalar("a: x !t - b\n")]
+#[case::tag_inside_an_item_scalar("- a !t - b\n")]
+#[case::double_quoted("!t \"- b\"\n")]
+#[case::single_quoted("!t '- b'\n")]
+#[case::literal_content("!t |\n - b\n")]
+#[case::folded_content("!t >\n - b\n")]
+#[case::tag_with_a_comment("!t # - b\n")]
+#[case::tag_and_anchor_lines("!t &a\n- b\n")]
+#[case::anchor_and_tag_lines("&a !t\n- b\n")]
+#[case::tag_and_anchor_with_dash_text("!t &a -b\n")]
+#[case::anchor_and_tag_with_dash_text("&a !t -b\n")]
+#[case::tag_with_a_dash_in_its_name("!t- b\n")]
+#[case::marker_then_a_sequence("--- !t\n- b\n")]
+#[case::flow_sequence_with_dash_text("[!t -b]\n")]
+#[case::flow_mapping_with_dash_text("{a: !t -b}\n")]
+#[case::plain_continuation_line("a: x\n  !t - b\n")]
+fn a_dash_that_is_no_sequence_entry_loads(#[case] input: &str) {
+    let items: Vec<_> = parse_events(input).collect();
+    assert!(items.iter().all(Result::is_ok), "{input:?}: {items:?}");
+    assert!(load(input).is_ok(), "the loader rejects {input:?}");
+}

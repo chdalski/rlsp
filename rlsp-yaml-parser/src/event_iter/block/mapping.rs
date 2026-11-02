@@ -12,6 +12,7 @@ use crate::event::{CollectionStyle, Event, ScalarStyle};
 use crate::event_iter::base::InlineProperties;
 use crate::event_iter::line_mapping::{
     find_value_indicator_offset, is_implicit_mapping_line, is_tab_indented_block_indicator,
+    starts_with_block_sequence_indicator,
 };
 use crate::event_iter::state::{
     CollectionEntry, ConsumedMapping, IterState, MappingPhase, PendingAnchor, PendingTag,
@@ -292,16 +293,10 @@ impl<'input> EventIter<'input> {
             // Detect illegal inline block sequence: `key: - item` is invalid
             // because a block sequence indicator (`-`) cannot appear as an
             // inline value of a block mapping entry — the sequence must start
-            // on a new line.  Only `- `, `-\t`, or bare `-` (at EOL) qualify
-            // as sequence indicators.
-            {
-                let after_dash = value_content.strip_prefix('-');
-                let is_seq_indicator = after_dash.is_some_and(|rest| {
-                    rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t')
-                });
-                if is_seq_indicator {
-                    return ConsumedMapping::InlineImplicitMappingError { pos: value_pos };
-                }
+            // on a new line.  After a tag or an anchor the same holds
+            // (`key: !t - item`); the property branches in `step.rs` refuse it.
+            if starts_with_block_sequence_indicator(value_content) {
+                return ConsumedMapping::InlineImplicitMappingError { pos: value_pos };
             }
 
             let value_synthetic = Line {

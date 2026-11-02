@@ -357,8 +357,8 @@ BNF: `s-l+block-collection(n,c) ::= ( s-separate(n+1,c) c-ns-properties(n+1,c) )
 
 - **Verdict:** Strict-conformant
 - **Spec (§8.3):** "Since people perceive the `-` indicator as indentation, nested block sequences may be indented by one less space to compensate."
-- **Implementation:** `seq-space` rule in `event_iter/block/sequence.rs` — `CollectionEntry::Mapping(col, MappingPhase::Value, _)` allows a sequence to open at `dash_indent >= col`, implementing the one-less-indent compensation for `BLOCK-OUT` context
-- **Tests:** `tests/yaml-test-suite/src/57H4.yaml` (Spec Example 8.22. Block Collection Nodes)
+- **Implementation:** `seq-space` rule in `event_iter/block/sequence.rs` — `CollectionEntry::Mapping(col, MappingPhase::Value, _)` allows a sequence to open at `dash_indent >= col`, implementing the one-less-indent compensation for `BLOCK-OUT` context. The properties end at a line break before the collection (`s-l-comments`), so a `-` entry on the line of an anchor or a tag (`&a - b`, `!t - b`, `a: !t - b`) is an error: `starts_with_block_sequence_indicator()` in `event_iter/line_mapping.rs` decides whether a line starts with the indicator, the anchor and the tag branch of `step_in_document()` in `event_iter/step.rs` ask it of the text after the property and report through `sequence_after_property_error()`, and `consume_mapping_entry()` in `event_iter/block/mapping.rs` asks it of an inline mapping value (`a: - b`). A `-` not followed by a space, a tab or the line end is text (`!t -b`, `!t --- b`)
+- **Tests:** `tests/yaml-test-suite/src/57H4.yaml` (Spec Example 8.22. Block Collection Nodes); `tests/conformance/libfyaml_events.rs` and `tests/error_reporting.rs` (a `-` after a tag or an anchor)
 
 ### [201] seq-space(n,c)
 

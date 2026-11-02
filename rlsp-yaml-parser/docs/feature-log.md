@@ -12,6 +12,23 @@ with existing infrastructure.
 
 ---
 
+### A `-` After a Tag on the Same Line Is an Error [completed]
+
+**Description:** A block sequence entry on the line of a tag reports a syntax error,
+as it already did after an anchor: `!t - b`, `--- !t - b`, `&a !t - b`, `!t -`,
+`a: !t - b`, `a: !t - :`, `- !t - b` and `? !t - b` no longer load. Before, the
+parser opened a sequence there; `a: !t - :` ended it at the `:` and gave the mapping
+a third node, which `format_yaml` then wrote as text that was not in the file. The
+`-` must start its own line: `a: !t` then `  - b` is unchanged, and so is a `-` that
+is text (`!t -b`, `a: !t --- b`).
+**Complexity:** Low
+**Comment:** One predicate decides whether a line starts with a block sequence
+indicator; the anchor branch, the tag branch and the mapping value check ask it, and
+one method reports the error for both property branches.
+**Tier:** 1
+
+---
+
 ### A `?` Keeps Its State in the Mapping That Holds It [completed]
 
 **Description:** A `?` nested in the key of another `?` no longer disturbs the outer
