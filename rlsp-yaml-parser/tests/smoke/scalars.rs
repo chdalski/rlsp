@@ -501,6 +501,9 @@ fn root_plain_scalar_continues_at_any_column(#[case] input: &str, #[case] expect
 #[case::mapping_entry_then_text("a: w\nx\n")]
 #[case::sequence_entry_then_text("- w\nx\n")]
 #[case::bare_dash_at_column_zero("-\nw\n")]
+#[case::bare_dash_comment_at_column_zero_then_text("-\n# c\nw\n")]
+#[case::bare_dash_indented_comment_then_text("-\n  # c\nw\n")]
+#[case::bare_dash_blank_line_then_text("-\n\nw\n")]
 #[case::explicit_key_at_column_zero("?\nw\n")]
 #[case::bare_dash_after_an_entry("- a\n-\nw\n")]
 fn plain_text_at_column_zero_under_a_collection_is_an_error(#[case] input: &str) {

@@ -217,6 +217,23 @@ fn on_small_stack<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
     "a:\n  - !!str\n  # d\nz: 1\n",
     &[("d0.lead:z", "# d")]
 )]
+// A bare dash is an empty item like a tag alone: the comment lines below it
+// belong to what follows, or to a node that continues on a later line.
+#[case::comment_below_bare_dash_before_value("-\n# c\n  b\n", &[("d0.lead:b", "# c")])]
+#[case::comment_below_bare_dash_before_next_item("-\n  # c\n- x\n", &[("d0.lead:x", "# c")])]
+#[case::comment_at_column_zero_below_bare_dash_before_next_item(
+    "-\n# about x\n- x\n",
+    &[("d0.lead:x", "# about x")]
+)]
+#[case::comment_lines_and_blank_lines_below_bare_dash(
+    "-\n\n# c\n\n# d\n- x\n",
+    &[("d0.lead:x", "# c"), ("d0.lead:x", "# d")]
+)]
+#[case::comment_below_last_bare_dash("-\n  # d\n", &[("d0.end", "# d")])]
+#[case::comment_below_last_bare_dash_goes_to_next_key(
+    "a:\n  -\n  # d\nz: 1\n",
+    &[("d0.lead:z", "# d")]
+)]
 #[case::comment_on_the_properties_line_of_a_tag_only_item("- !!str # c\n- x\n", &[("d0.lead:", "# c")])]
 #[case::comment_before_a_node_on_a_later_line(
     "- !!str\n# d\n  v\n- x\n",

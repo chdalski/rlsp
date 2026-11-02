@@ -12,6 +12,26 @@ with existing infrastructure.
 
 ---
 
+### A Bare `-` Looks Past Comment and Blank Lines [completed]
+
+**Description:** The item of a bare `-` is its value when that value starts on the
+first line below the dash that is neither blank nor a comment, and that line is indented
+deeper than the dash; the comment and blank lines before it may have any indent.
+`-` then `# c` then `  b` is one item `b`, with `# c` as its leading comment; it used to
+be an empty item followed by a second item `b`. So are `-`, a blank line, `  b`, and
+`-`, `  # c`, `  - y` (a nested sequence). `-` then `  # c` then `- x`, and `-` then
+`  # d` at the end of the input, are an empty item (and `x`): the empty item used to be
+lost, as the indented comment looked like the item's content. `-` then `# about x` then
+`- x` still keeps its comment with `x`. Every comment reaches the output of
+`format_yaml`, and formatting twice changes nothing. `parse_events` and `load` give the
+events of libfyaml 0.9.6 on these inputs.
+**Complexity:** Low
+**Comment:** YAML 1.2.2 [185] `s-l+block-indented` (`e-node s-l-comments`), [78]
+`l-comment`, [79] `s-l-comments`.
+**Tier:** 1
+
+---
+
 ### A Key Reads Its Own `:` [completed]
 
 **Description:** A `:` line after a key with an empty value is an entry of its own with

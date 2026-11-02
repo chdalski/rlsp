@@ -8,8 +8,11 @@
 use std::fmt::Write;
 use std::time::{Duration, Instant};
 
+use rstest::rstest;
+
 use rlsp_yaml_parser::encoding::decode;
 use rlsp_yaml_parser::loader::{LoadError, LoaderBuilder};
+use rlsp_yaml_parser::node::Node;
 use rlsp_yaml_parser::{load, parse_events};
 
 // ===========================================================================
@@ -480,6 +483,34 @@ fn marker_line_scalar_with_many_continuation_lines_is_linear() {
     let docs = load(&input).unwrap();
     let elapsed = start.elapsed();
     assert_eq!(docs.len(), 1);
+    assert!(elapsed < Duration::from_secs(30), "took {elapsed:?}");
+}
+
+// A bare dash looks past the comment and blank lines below it to the first
+// line that is neither; every run is walked once, so the input stays linear.
+#[rstest]
+#[case::comments_until_end(format!("-\n{}", "# c\n".repeat(200_000)), 1)]
+#[case::comments_before_value(format!("-\n{}  b\n", "# c\n".repeat(200_000)), 1)]
+#[case::comments_before_next_item(format!("-\n{}- x\n", "# c\n".repeat(200_000)), 2)]
+#[case::blank_lines_before_value(format!("-\n{}  b\n", "\n".repeat(200_000)), 1)]
+#[case::space_lines_before_value(format!("-\n{}  b\n", "  \n".repeat(200_000)), 1)]
+#[case::one_very_long_blank_line(format!("-\n{}\n  b\n", " \t".repeat(100_000)), 1)]
+#[case::many_dashes_with_a_comment_each("-\n  # c\n".repeat(100_000), 100_000)]
+#[case::many_dashes_with_blank_lines_each("-\n\n".repeat(200_000), 200_000)]
+#[case::many_bare_dashes("-\n".repeat(300_000), 300_000)]
+#[case::tag_line_comments_before_value(format!("- !!str\n{}  b\n", "# c\n".repeat(200_000)), 1)]
+fn bare_dash_with_long_comment_or_blank_runs_is_linear(
+    #[case] input: String,
+    #[case] items: usize,
+) {
+    let start = Instant::now();
+    let docs = load(&input).unwrap();
+    let elapsed = start.elapsed();
+    assert_eq!(docs.len(), 1);
+    assert!(
+        matches!(&docs[0].root, Node::Sequence { items: found, .. } if found.len() == items),
+        "expected {items} items"
+    );
     assert!(elapsed < Duration::from_secs(30), "took {elapsed:?}");
 }
 

@@ -415,6 +415,18 @@ impl<'input> Lexer<'input> {
         self.buf.peek_first_content_line_after_next()
     }
 
+    /// Peek at the first line that is neither blank nor a comment, the next
+    /// line included, without consuming anything.
+    ///
+    /// Blank means only spaces and tabs; a comment line starts with `#` after
+    /// spaces and tabs (YAML 1.2.2 [78], [79]).  Directive and document-marker
+    /// lines are not skipped.  Returns `None` if no such line remains.
+    #[must_use]
+    pub fn peek_first_node_line(&self) -> Option<Line<'input>> {
+        self.buf
+            .peek_first_line_where(|line| !is_blank_or_comment(line))
+    }
+
     /// Prepend a synthetic line to the front of the buffer.
     ///
     /// Used to re-present inline content extracted from a sequence-entry line
@@ -566,6 +578,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+    use crate::lines::BreakType;
 
     /// True when `line` is blank, comment-only, or a directive (`%`-prefixed).
     ///
@@ -770,6 +783,80 @@ mod tests {
         let mut lex = make_lexer("abc\n");
         let pos = lex.drain_to_end();
         assert_eq!(pos.byte_offset, 4);
+    }
+
+    // -----------------------------------------------------------------------
+    // peek_first_node_line
+    // -----------------------------------------------------------------------
+
+    fn first_node_line(input: &str) -> Option<(String, usize)> {
+        make_lexer(input)
+            .peek_first_node_line()
+            .map(|line| (line.content.to_owned(), line.indent))
+    }
+
+    // The next line is the first candidate; blank and comment lines of any
+    // indent are skipped, and the indent is the node line's own.
+    #[rstest]
+    #[case::next_line_itself("b\n", Some(("b", 0)))]
+    #[case::indented_next_line("  b\n", Some(("  b", 2)))]
+    #[case::comment_then_node("# c\nb\n", Some(("b", 0)))]
+    #[case::indented_comment_then_node("  # c\n  b\n", Some(("  b", 2)))]
+    #[case::deep_comment_then_shallow_node("    # c\nb\n", Some(("b", 0)))]
+    #[case::shallow_comment_then_deep_node("# c\n    b\n", Some(("    b", 4)))]
+    #[case::blank_blank_comment_mix("\n  \n\t\n# c\n\n#d\n  b\n", Some(("  b", 2)))]
+    #[case::tab_before_hash_is_a_comment("\t# c\n  b\n", Some(("  b", 2)))]
+    #[case::tab_after_spaces_is_content(" \tb\n", Some((" \tb", 1)))]
+    #[case::crlf("# c\r\n  b\r\n", Some(("  b", 2)))]
+    #[case::cr_only("# c\r  b\r", Some(("  b", 2)))]
+    #[case::document_marker_is_a_node_line("# c\n---\nb\n", Some(("---", 0)))]
+    #[case::document_end_is_a_node_line("# c\n...\n", Some(("...", 0)))]
+    #[case::directive_is_a_node_line("# c\n%a\n", Some(("%a", 0)))]
+    #[case::nbsp_line_is_content("# c\n\u{a0}\n", Some(("\u{a0}", 0)))]
+    #[case::only_comments_and_blanks("# c\n\n  \n", None)]
+    #[case::comment_without_line_break("# c", None)]
+    #[case::empty_input("", None)]
+    fn first_node_line_skips_blank_and_comment_lines(
+        #[case] input: &str,
+        #[case] expected: Option<(&str, usize)>,
+    ) {
+        assert_eq!(
+            first_node_line(input),
+            expected.map(|(content, indent)| (content.to_owned(), indent))
+        );
+    }
+
+    // Prepended lines come first, then the primed line, then the rest.
+    #[test]
+    fn first_node_line_walks_prepended_lines_before_the_buffer() {
+        let synthetic = |content| Line {
+            content,
+            offset: 0,
+            indent: content.len() - content.trim_start_matches(' ').len(),
+            break_type: BreakType::Lf,
+            pos: Pos::ORIGIN,
+        };
+        let mut lex = make_lexer("# c\nb\n");
+        lex.prepend_inline_line(synthetic("# s"));
+        assert_eq!(lex.peek_first_node_line().map(|l| l.content), Some("b"));
+        lex.prepend_inline_line(synthetic("  s"));
+        assert_eq!(lex.peek_first_node_line().map(|l| l.content), Some("  s"));
+    }
+
+    #[test]
+    fn first_node_line_consumes_nothing() {
+        let mut lex = make_lexer("# c\n\n  b\nd\n");
+        let pos = lex.current_pos();
+        assert_eq!(lex.peek_first_node_line().map(|l| l.content), Some("  b"));
+        assert_eq!(lex.peek_first_node_line().map(|l| l.content), Some("  b"));
+        assert_eq!(lex.current_pos(), pos);
+        assert_eq!(lex.peek_next_line().map(|l| l.content), Some("# c"));
+        let mut contents = Vec::new();
+        while let Some(line) = lex.peek_next_line() {
+            contents.push(line.content);
+            lex.consume_line();
+        }
+        assert_eq!(contents, ["# c", "", "  b", "d"]);
     }
 
     // -----------------------------------------------------------------------

@@ -1302,3 +1302,44 @@ fn length_error_comes_before_character_error(#[case] template: &str) {
 fn long_lines_with_hashes_parse_in_linear_time(#[case] input: String) {
     let _ = parse_events(&input).count();
 }
+
+// -----------------------------------------------------------------------
+// Group H — Comment lines below a bare dash
+// -----------------------------------------------------------------------
+
+// The comments and scalars of `input` in document order, each with its span.
+fn scalars_and_comments_with_spans(input: &str) -> Vec<String> {
+    parse_events(input)
+        .filter_map(|item| {
+            match item.unwrap_or_else(|e| unreachable!("unexpected parse error: {e}")) {
+                (Event::Comment { text }, span) => {
+                    Some(format!("#{text}@{}..{}", span.start, span.end))
+                }
+                (Event::Scalar { value, .. }, span) => {
+                    Some(format!(":{value}@{}..{}", span.start, span.end))
+                }
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+// The comment lines under a bare dash come in source order next to the item's
+// events: before the value they precede, after an empty item they follow it,
+// and a comment above the next entry stays with that entry, not the empty item.
+#[rstest]
+#[case::comment_before_value("-\n  # c\n  b\n", &["# c@4..7", ":b@10..11"])]
+#[case::comment_at_column_zero_before_value("-\n# c\n  b\n", &["# c@2..5", ":b@8..9"])]
+#[case::comment_after_empty_item("-\n  # d\n", &[":@2..2", "# d@4..7"])]
+#[case::comment_above_the_next_entry("-\n# about x\n- x\n", &[":@2..2", "# about x@2..11", ":x@14..15"])]
+#[case::comment_indented_below_empty_item_before_next("-\n  # c\n- x\n", &[":@2..2", "# c@4..7", ":x@10..11"])]
+fn comment_lines_below_a_bare_dash_keep_source_order(
+    #[case] input: &str,
+    #[case] expected: &[&str],
+) {
+    assert_eq!(
+        scalars_and_comments_with_spans(input),
+        expected,
+        "{input:?}"
+    );
+}

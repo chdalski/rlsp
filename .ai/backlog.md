@@ -13,7 +13,6 @@ target goes here only after the user has lowered the target.
 - Flow sequences drop entries after a comment (`[a # c\n  b]` loads as `[a]`) and accept entries without a comma (`["q" "r"]`); `rlsp-yaml-parser/src/event_iter/flow.rs`; libfyaml comparison.
 - Alias expansion depth: `max_nesting_depth` does not bound the expanded tree in resolved mode; `expand_node`, `Clone`, `Drop` in `loader.rs`; stack-overflow investigation.
 - Iterative loader (`wip/iterative-loader`, adff1074), to discuss with the user; `LoadState::parse_node`; schema queue item 3c.
-- `-\n  # d\n` drops the empty item; libfyaml comparison.
 - `parse_events` omits the empty scalar in an empty document (14 yaml-test-suite cases expect `=VAL :`); the stream conformance test checks only ok/error; libfyaml comparison.
 - Valid YAML rejected: `a: 1\n? b: 2\n: c\n` (`block/mapping.rs`), `{a: b\n  c\n}\n`, `{a: x\n  y, b: z}`, `a: !!str\n!!seq [x]: 2\n`, `[x]\t: 2\n`; libfyaml comparison.
 - Invalid YAML accepted: `a:\nw\n`, `a:\n[x]\n`, `a: [x]: 2\n`, `a: *y : 2\n`, `&k\n*a\n`, `&a\n&b [x]\n`, `&x\n!!str\n&x v\n`, `? ? a\n[x] :\n`, `?\n!!str\nb: 1\n`, `[x]:2\n`, a `]` at the key's column after a quoted item; libfyaml comparison.
@@ -60,7 +59,6 @@ target goes here only after the user has lowered the target.
 - The server reads the modeline and suppressions with `str::lines()`, so they have no effect with `line_ending = cr`; comment plan Task 6 security review.
 - The formatter drops `%YAML` and `%TAG` directives, and blank-line pairing then loses every blank line in the rest of the file; comment plan Task 6 security review.
 - Test consolidation candidates: the triple `comment-*` formatter fixtures and two `blank-line-*` fixtures with identical content and no blank line; comment plan Task 6 test review.
-- `-\n# zz\n  a: 1\n` splits into an empty item plus a mapping, while libfyaml gives one mapping item; comment plan Task 7 test review.
 - An own-line comment between `k:` and its scalar value prints after the entry, so a suppression comment there hits the neighbour; comment plan Task 7 security review.
 - `delete_anchor` misindents a block scalar's content lines; comment plan Task 7.
 - `explicit_key_to_doc` is `pub(super)` but only used in its own file; comment plan Task 7 review.
@@ -78,7 +76,6 @@ target goes here only after the user has lowered the target.
 - Flow keys differing from libfyaml: multi-line implicit keys `[ {a: 1,\n b: 2} : v ]` and `[ [a,\n b] : v ]` load here; `[ ? a, b: c ]` yields item `a`; `{ ? {a: b}, c: d }` omits the first entry's empty value; `? ? a` omits the null tag on its empty value, which `data_signature` hides; comment plan Task 11 review.
 - The comment in `handle_plain_scalar_inline` in `lexer.rs` names `*`, `%`, `{`, `[`, which no longer reach it, and the header of `tests/formatter_conformance.rs` says comments at node positions do not print yet; comment plan Task 11 review.
 - Test consolidation candidates: repeated `assert_data_kept` calls in four tests, and the overlap of groups O and P in `tests/smoke/documents.rs`; comment plan Task 11 test review.
-- `-\n# c\n  b\n` splits the item into two (libfyaml gives one), a variant of the `-\n  # d\n` entry that the check filters as not equivalent; comment plan Task 12 review.
 - `{ a: b: c }` and `{ ? a : b : c }` load as `{ a: b, c:  }` while libfyaml reports a missing comma; `a: 1\n? ?\n`, `- :\n  - x\n  ? ?`, and `- \ta: 1` are rejected while libfyaml accepts them; `? \ta\n: \tb` is accepted while libfyaml rejects it; comment plan Task 12 review.
 - A tab after the indentation before a property is valid per [66] and [69] and loads here, while libfyaml rejects it; recorded in `design-decisions.md`, for the user's decision; comment plan Task 12.
 - `validate_unused_anchors` ranges its diagnostic over the anchored node's `loc`, not `&name`, so empty nodes and collections get a later line; other code actions that read that range are suspect; comment plan Task 12.
@@ -98,3 +95,6 @@ target goes here only after the user has lowered the target.
 - `?\n ?\n` and `?\n ? a\n` produce a mapping with an odd number of children, and `a: !t\n ?\n- y\n` and `[x]:\n ?\n- y\n` load a sequence as a key without a value while libfyaml rejects them; parser plan Task 4 review.
 - On an error in the key's own `:` comment (`*a : # \x07`), the alias or flow events queued before it are no longer emitted, because `next()` in `base.rs` clears the queue; error kind and position stay; parser plan Task 4 review.
 - The table `flow_and_alias_keys_after_finished_entry_emit_libfyaml_events` in `tests/error_reporting.rs` has over 170 cases on several subjects; parser plan Task 4 test review.
+- Bare dash, differing from libfyaml: `k:\n-\n \n    \n`, `  k:\n  -\n   \n`, and `k:\n- &a\n-\n  \n` load here and error there; `-\nb\n`, `-\n# c\nw\n`, `-\n  # c\nw\n`, `-\n\nw\n`, `- -\n  b\n`, and `- -\n  # c\n  b\n` error here and load there, and tests pin that per [185] and [197]; parser plan Task 5 review, for the user's decision.
+- `- &a\n  *a\n` emits an alias and an empty `&a` item, while libfyaml errors; `- >\n    \t\n` loads `   \t\n` while libfyaml loads `\t\n`, since a line of spaces and a tab counts as empty for indentation; parser plan Task 5 review.
+- `smoke/sequences.rs` `fast_path_skipped_bare_dash` duplicates `dash_followed_by_newline` in `sequence_empty_item_emits_empty_plain_scalar`; parser plan Task 5 test review.

@@ -1742,6 +1742,173 @@ fn flow_and_alias_keys_after_finished_entry_emit_libfyaml_events(
     );
 }
 
+// A bare `-` is empty unless content follows that is indented more than the
+// dash.  Blank and comment lines are no content whatever their indent, so the
+// first line that is neither decides (YAML 1.2.2 [185], [78], [79]).  Expected
+// values are the events of libfyaml 0.9.6.
+#[rstest]
+#[case::comment_at_column_zero_before_value("-\n# c\n  b\n", "+S :b -S")]
+#[case::comment_before_empty_item_at_end("-\n  # d\n", "+S : -S")]
+#[case::blank_line_before_value("-\n\n  b\n", "+S :b -S")]
+#[case::blank_line_with_spaces_at_end("-\n  \n", "+S : -S")]
+#[case::comment_before_next_item("-\n  # c\n- x\n", "+S : :x -S")]
+#[case::comment_at_column_zero_before_next_item("-\n# about x\n- x\n", "+S : :x -S")]
+#[case::comment_indent_one_before_value("-\n  # c\n b\n", "+S :b -S")]
+#[case::deep_comment_before_next_item("-\n    # c\n- x\n", "+S : :x -S")]
+#[case::indented_dash("  -\n# c\n    b\n", "+S :b -S")]
+#[case::comment_before_sibling_in_nested_sequence("a:\n  -\n  # c\n  - y\n", "+M :a +S : :y -S -M")]
+#[case::comment_and_blank_lines_before_next_item("- a\n-\n  # c\n  # d\n\n- c\n", "+S :a : :c -S")]
+#[case::comment_before_sequence("-\n  # c\n  - y\n", "+S +S :y -S -S")]
+#[case::comment_before_mapping("-\n  # c\n  k: v\n", "+S +M :k :v -M -S")]
+#[case::comment_before_explicit_key("-\n   # c\n   ? k\n", "+S +M :k : -M -S")]
+#[case::comment_before_anchor_line("-\n  # c\n  &a\n- x\n", "+S &a,: :x -S")]
+#[case::tag_on_dash_line_comment_at_column_zero("- !!str\n# c\n  b\n", "+S !!str,:b -S")]
+#[case::anchor_on_dash_line_comment_before_next_item("- &a\n  # c\n- x\n", "+S &a,: :x -S")]
+#[case::tag_on_dash_line_comment_at_end("- !!str\n  # c\n", "+S !!str,: -S")]
+#[case::nested_dash_comment_before_next_item("- -\n  # c\n- x\n", "+S +S : -S :x -S")]
+#[case::nested_in_mapping_comment_before_value("a:\n  -\n  # c\n    b\n", "+M :a +S :b -S -M")]
+#[case::crlf_comment_before_value("-\r\n# c\r\n  b\r\n", "+S :b -S")]
+#[case::crlf_comment_at_end("-\r\n  # c\r\n", "+S : -S")]
+#[case::cr_comment_before_value("-\r# c\r  b\r", "+S :b -S")]
+#[case::tab_comment_before_value("-\n\t# c\n  b\n", "+S :b -S")]
+#[case::tab_line_before_value("-\n\t\n  b\n", "+S :b -S")]
+#[case::tab_line_between_comment_and_value("-\n  # c\n  \t\n  b\n", "+S :b -S")]
+#[case::tab_after_space_is_content("-\n  # c\n \tb\n", "+S :b -S")]
+#[case::comment_without_line_break("-\n  # c", "+S : -S")]
+#[case::comment_without_space("-\n  #c\n", "+S : -S")]
+#[case::space_after_dash("- \n  # c\n- x", "+S : :x -S")]
+#[case::comment_then_document_start("-\n  # c\n---\nb\n", "+S : -S :b")]
+#[case::comment_then_document_end("-\n  # c\n...\n", "+S : -S")]
+#[case::comments_until_end("-\n  # c\n# d\n", "+S : -S")]
+fn bare_dash_decides_by_the_first_line_that_is_no_comment_or_blank(
+    #[case] input: &str,
+    #[case] expected: &str,
+) {
+    assert_eq!(event_shape(input, Tags::Listed), expected, "{input:?}");
+    assert_well_formed(input);
+    assert_eq!(
+        load_shape(input),
+        event_shape(input, Tags::Omitted),
+        "load() of {input:?}"
+    );
+}
+
+// Text after a bare dash that is no content of the item ends the stream with an
+// error, behind a comment line as without one.
+#[rstest]
+#[case::directive_after_comment("-\n  # c\n%a\n")]
+#[case::tab_indented_after_comment("-\n  # c\n\tb\n")]
+#[case::dash_in_dash_with_comment("- -\n  # c\n  b\n")]
+fn bare_dash_followed_by_text_that_is_no_content_is_an_error(#[case] input: &str) {
+    assert!(first_error(input).is_some(), "{input:?}");
+    assert!(
+        matches!(load(input), Err(LoadError::Parse { .. })),
+        "{input:?}"
+    );
+}
+
+// Blank and comment lines between a bare dash and its value change nothing but
+// the comments: the non-comment events stay those of the input without them.
+#[rstest]
+fn lines_between_a_bare_dash_and_its_value_do_not_change_the_events(
+    #[values(
+        "-\n{}  b\n",
+        "-\n{}  - y\n",
+        "-\n{}  k: v\n",
+        "a:\n  -\n{}    b\n",
+        "-\n{}  b\n- x\n",
+        "-\n{}- x\n",
+        "-\n{}"
+    )]
+    template: &str,
+    #[values(
+        "\n",
+        "  \n",
+        "\t\n",
+        "# c\n",
+        " # c\n",
+        "  # c\n",
+        "      # c\n",
+        "\n  \n\t\n# c\n # d\n      # e\n\n"
+    )]
+    lines: &str,
+) {
+    let plain = template.replace("{}", "");
+    let input = template.replace("{}", lines);
+    assert_eq!(
+        event_shape(&input, Tags::Listed),
+        event_shape(&plain, Tags::Listed),
+        "{input:?}"
+    );
+    assert_eq!(
+        load_shape(&input),
+        load_shape(&plain),
+        "load() of {input:?}"
+    );
+}
+
+// A comment line the bare dash looked past is checked when it is read, not when
+// it is skipped: the error is the one the comment has without the dash, at its
+// own position, and it follows the events before it, the empty item included
+// when no content follows the comment.  The cases are as in
+// `bare_dash_decides_by_the_first_line_that_is_no_comment_or_blank`: the node
+// line is more indented than the dash (no empty item) or not (empty item).
+#[rstest]
+#[case::nul_then_next_item("-\n# c\0\n- b\n", "+S :", ErrorKind::InvalidCharacter, (2, 3))]
+#[case::nul_indented_then_next_item("-\n  # c\0\n- b\n", "+S :", ErrorKind::InvalidCharacter, (2, 5))]
+#[case::nul_at_end("-\n# c\0\n", "+S :", ErrorKind::InvalidCharacter, (2, 3))]
+#[case::nul_indented_then_value("-\n  # c\0\n  x\n", "+S", ErrorKind::InvalidCharacter, (2, 5))]
+#[case::nul_at_column_zero_then_value("-\n# c\0\n  x\n", "+S", ErrorKind::InvalidCharacter, (2, 3))]
+#[case::over_limit_then_next_item(
+    &format!("-\n# {}\n- b\n", "x".repeat(MAX_COMMENT_LEN)),
+    "+S :",
+    ErrorKind::Syntax,
+    (2, 0)
+)]
+#[case::over_limit_indented_then_value(
+    &format!("-\n  # {}\n  b\n", "x".repeat(MAX_COMMENT_LEN)),
+    "+S",
+    ErrorKind::Syntax,
+    (2, 2)
+)]
+#[case::over_limit_and_nul_then_next_item(
+    &format!("-\n# {}\0\n- b\n", "x".repeat(MAX_COMMENT_LEN)),
+    "+S :",
+    ErrorKind::Syntax,
+    (2, 0)
+)]
+#[case::over_limit_and_nul_indented_then_value(
+    &format!("-\n  # {}\0\n  b\n", "x".repeat(MAX_COMMENT_LEN)),
+    "+S",
+    ErrorKind::Syntax,
+    (2, 2)
+)]
+fn bad_comment_below_a_bare_dash_is_reported_after_the_events_before_it(
+    #[case] input: &str,
+    #[case] events_before: &str,
+    #[case] kind: ErrorKind,
+    #[case] (line, column): (usize, usize),
+) {
+    let mut shape = Vec::new();
+    let mut error = None;
+    for item in parse_events(input) {
+        match item {
+            Ok((Event::Scalar { value, .. }, _)) => shape.push(format!(":{value}")),
+            Ok((Event::SequenceStart { .. }, _)) => shape.push("+S".to_owned()),
+            Ok(_) => {}
+            Err(e) => {
+                error = Some(e);
+                break;
+            }
+        }
+    }
+    let error = error.unwrap_or_else(|| unreachable!("no error for {input:?}"));
+    assert_eq!(shape.join(" "), events_before, "events before the error");
+    assert_eq!(error.kind, kind);
+    assert_eq!((error.pos.line, error.pos.column), (line, column));
+    assert!(matches!(load(input), Err(LoadError::Parse { .. })));
+}
+
 // A key reads its own `:`: a `:` line after a key whose value is still empty is
 // an entry of its own (an empty key), never the indicator of the key before it,
 // whatever kind that key is.  Expected values are the events of libfyaml 0.9.6

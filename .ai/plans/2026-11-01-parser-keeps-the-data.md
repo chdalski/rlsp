@@ -25,7 +25,7 @@ directives.
 - [x] Task 2: The `--- x` path joins the other marker forms
 - [x] Task 3: A `%` at a node start is an error
 - [x] Task 4: A key reads its own `:`
-- [ ] Task 5: A bare `-` looks past comment lines
+- [x] Task 5: A bare `-` looks past comment lines
 - [ ] Task 6: Flow sequences keep their text
 - [ ] Task 7: The loader rejects a second root node
 - [ ] Task 8: Pin that no text is lost
@@ -114,12 +114,12 @@ indicator. Productions: [191], [192], [194], [96], [106], [154].
 
 Productions: [184], [185], [197], [78], [79], [81].
 
-- [ ] These load with the events of libfyaml 0.9.6: `-\n# c\n  b\n`, `-\n  # d\n`,
+- [x] These load with the events of libfyaml 0.9.6: `-\n# c\n  b\n`, `-\n  # d\n`,
       `-\n\n  b\n`, `-\n  \n`
-- [ ] `-\n# about x\n- x\n` keeps its comment with `x`
-- [ ] Each comment of these inputs reaches the output of `format_yaml`, and a second
+- [x] `-\n# about x\n- x\n` keeps its comment with `x`
+- [x] Each comment of these inputs reaches the output of `format_yaml`, and a second
       format changes nothing
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 6: Flow sequences keep their text
 

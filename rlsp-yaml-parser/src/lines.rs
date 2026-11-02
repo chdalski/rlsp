@@ -239,8 +239,38 @@ impl<'input> LineBuffer<'input> {
     /// per call.
     #[must_use]
     pub(crate) fn peek_first_content_line_after_next(&self) -> Option<Line<'input>> {
-        let is_content =
-            |line: &Line<'input>| !line.content.trim_start_matches([' ', '\t']).is_empty();
+        self.peek_first_line_after_next_where(|line| {
+            !line.content.trim_start_matches([' ', '\t']).is_empty()
+        })
+    }
+
+    /// Peek at the first line, the next one included, for which `is_wanted`
+    /// holds, without consuming anything.
+    ///
+    /// Returns `None` when there is no next line or no line is wanted.  The
+    /// scan stops at the first wanted line, so a run of unwanted lines is
+    /// walked once per call.
+    #[must_use]
+    pub(crate) fn peek_first_line_where(
+        &self,
+        is_wanted: impl Fn(&Line<'input>) -> bool,
+    ) -> Option<Line<'input>> {
+        if let Some(first) = self.peek_next()
+            && is_wanted(first)
+        {
+            return Some(first.clone());
+        }
+        self.peek_first_line_after_next_where(is_wanted)
+    }
+
+    /// Peek at the first line after the next one for which `is_wanted` holds.
+    ///
+    /// Walks the lines in input order: the rest of the prepend queue, the
+    /// primed `next` line, then `remaining`.
+    fn peek_first_line_after_next_where(
+        &self,
+        is_wanted: impl Fn(&Line<'input>) -> bool,
+    ) -> Option<Line<'input>> {
         self.peek_next()?;
         // Lines queued ahead of `remaining`: the rest of the prepend queue and
         // the primed `next` line, unless `next` is itself the line peeked first.
@@ -255,14 +285,14 @@ impl<'input> LineBuffer<'input> {
             .skip(1)
             .cloned()
             .chain(primed_after_prepend)
-            .find(is_content)
+            .find(&is_wanted)
         {
             return Some(line);
         }
         let mut rest = self.remaining;
         let mut pos = self.remaining_pos;
         while let Some((line, after)) = scan_line(rest, pos) {
-            if is_content(&line) {
+            if is_wanted(&line) {
                 return Some(line);
             }
             pos = pos_after_line(&line);

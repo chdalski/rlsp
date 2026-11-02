@@ -452,13 +452,16 @@ impl<'input> EventIter<'input> {
             }
         }
         if !had_inline {
-            // Only emit an empty scalar for a bare `-` when there is no
-            // following indented content that could be the item's value.
-            // If the next line is at an indent strictly greater than
-            // `dash_indent`, it belongs to this sequence item — let the
-            // main loop handle it.  Otherwise the item is truly empty.
-            let next_indent = self.lexer.peek_next_line().map_or(0, |l| l.indent);
-            if next_indent <= dash_indent {
+            // Only emit an empty scalar for a bare `-` when no content
+            // follows that could be the item's value (YAML 1.2.2 [185]
+            // `s-l+block-indented`: `e-node s-l-comments` is the empty form).
+            // Blank and comment lines ([78], [79]) belong to the item whatever
+            // their indent, so the first line that is neither decides: when it
+            // is indented strictly more than `dash_indent` it is the item's
+            // content and the main loop handles it, otherwise the item is
+            // truly empty.
+            let node_indent = self.lexer.peek_first_node_line().map_or(0, |l| l.indent);
+            if node_indent <= dash_indent {
                 let item_pos = self.lexer.current_pos();
                 let pa = self.pending_anchor.take();
                 self.queue.push_back((

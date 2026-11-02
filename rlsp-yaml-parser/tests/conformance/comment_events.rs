@@ -176,6 +176,11 @@ fn comment_sweep_checks_many_candidates_in_the_suite() {
 #[case::tab_before_hash("k:\t# c\n")]
 #[case::multi_line_double_quoted("a: \"x\n  y\" # c\n")]
 #[case::flow_in_block("a: [x, # c\n  y] # d\n")]
+#[case::bare_dash_comment_below_before_value("-\n# c\n  b\n")]
+#[case::bare_dash_comment_below_empty_item("-\n  # d\n")]
+#[case::bare_dash_comment_before_next_item("-\n  # c\n- x\n")]
+#[case::bare_dash_comment_crlf("-\r\n  # c\r\n")]
+#[case::bare_dash_comment_at_end_without_line_break("-\n  # c")]
 #[case::mixed("%YAML 1.2 # a\n---  # b\nk: &x # c\n  - \"q\" # d\n  - | # e\n    t\n... # f\n")]
 fn every_comment_in_explicit_inputs_has_an_event(#[case] yaml: &str) {
     let checked = assert_every_comment_has_an_event(yaml, yaml);

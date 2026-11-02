@@ -46,6 +46,27 @@ const EXTRA_INPUTS: &[(&str, &str)] = &[
     ),
     ("empty explicit keys and values", "?\n:\n?\n:\n"),
     (
+        "comment lines below a bare dash before its value",
+        "-\n# c\n  b\n- x\n",
+    ),
+    (
+        "comment line below a bare dash before the next item",
+        "-\n  # c\n- x\n",
+    ),
+    (
+        "comment and blank lines below the last bare dash",
+        "- a\n-\n  # c\n\n  # d\n",
+    ),
+    (
+        "comment below a bare dash of a nested sequence",
+        "a:\n  -\n  # c\n  - y\nz: 1\n",
+    ),
+    (
+        "comment below a bare dash before a collection",
+        "-\n  # c\n  k: v\n- -\n  # d\n- x\n",
+    ),
+    ("bare dash with a value below", "-\n  b\n- x\n"),
+    (
         "comments at every position of a flow sequence",
         "[ # c1\n  a, # c2\n  # c3\n  [b, # c4\n    c], # c5\n  d # c6\n  # c7\n] # c8\n",
     ),
