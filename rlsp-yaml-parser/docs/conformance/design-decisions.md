@@ -201,6 +201,82 @@ not indentation), except before a flow collection delimiter.
 
 ---
 
+### [82] l-directive — a `%` line inside a document
+
+**Productions:** `c-directive` in `c-indicator` ([22]), `l-directive` ([82]),
+`ns-plain-first` ([126]), `l-directive-document` ([209]), `l-yaml-stream` ([211]).
+
+**libfyaml behavior** (`fy-tool --testsuite`, 0.9.6): warns "Unsupported directive" and skips
+a `%` line wherever it starts a line inside a document: below the marker (`---` then `%a`,
+with or without a node after it), below a tag (`---`, `!t`, `%a`), below a key (`a:` then
+`%b`), after a mapping entry (`a: 1` then `%b`), after a marker-line scalar and comment
+(`--- x # c` then `%y`), below a marker comment (`--- # c` then `%a`), and before a second
+document (`---`, `%a`, `---`, `x`). The line is gone from the events, with no error.
+
+**Parser behavior:** a syntax error at the `%`. A directive is valid only before `---`
+([209], and [211] after a `...`), and `%` is an indicator ([22]) that no plain scalar starts
+with ([126]), so a `%` that starts a line inside a document is neither a directive nor a
+node. Skipping it would delete its text when the formatter rewrites the file. `%` stays
+content where a scalar holds it: a continuation line of a plain scalar (`--- x` then `%y`
+is the scalar `x %y`, as in libfyaml), a line of a block or quoted scalar (`--- |` then
+`%a`), and the directive lines above `---` or after `...` are unchanged. `--- x # c` then
+`%y` is an error as well: the comment ends the scalar, so the `%y` line starts a node
+(libfyaml skips it).
+
+**libfyaml issue tracker** (<https://github.com/pantoniou/libfyaml/issues>, searched for
+"directive", "unsupported directive", "percent line", and "%TAG inside document"): no issue
+about a directive line inside a document.
+
+**Decision:** an error, not libfyaml's warning and skip; recorded in the approved plan
+`2026-11-01-parser-keeps-the-data`.
+
+**Enforcement site:** `is_reserved_plain_start()` in `src/lexer/plain.rs`, called by
+`try_consume_scalar()` in `src/event_iter/base.rs`; the dispatcher's last branch in
+`src/event_iter/step.rs` reports any other unclaimed line as an error.
+
+---
+
+### [1] c-printable — a non-printable character in a plain scalar
+
+**Productions:** `c-printable` ([1]), `nb-char` ([27]), `ns-char` ([34]), `ns-plain-first` ([126]),
+`ns-plain-char` ([130]).
+
+**libfyaml behavior** (`fy-tool --testsuite`, 0.9.6): accepts C0 controls (except NUL), DEL,
+C1 controls and the byte order mark as text of a plain scalar, at the start of a line and
+inside it: `\x07zz` and `key: val\x07ue` give the scalar with the character in it, as do the
+indented forms (`  \x07zz`, `---` then `  \x07zz`, `a:` then `  \x7fzz`, `  \uFEFFzz`). It
+rejects NUL, at the stream level.
+
+**Parser behavior:** an error for every character outside `c-printable`, and for the byte
+order mark ([27], [34]), in a plain scalar that is not an implicit key, wherever it stands,
+NUL included. U+FEFF is inside `c-printable`, but `nb-char` and `ns-char` exclude it, so a
+plain scalar cannot hold it. The spec admits no such character in a scalar, so libfyaml is the wrong side on the character set,
+the same as for comments (see the [75] entry). The column-0 and mid-scalar forms already
+behaved this way. The indented forms (`  \x07zz`, `a:` then `  \x7fzz`, `---` then
+` \t\uFEFFzz`) used to be consumed without an event or an error, so the text vanished from a
+formatted file; they now report "invalid character U+XXXX in document" at the character.
+An implicit key (`\x07b: 2`, `a:` then `  \x07b: 2`, `- \0b: 1`) still takes the character
+into the key without an error, as before; its text is kept, so nothing is lost, but it is
+not yet checked against [1]. That gap is open (see the user decision below). `- \0b: 1`
+differs from libfyaml too, which rejects NUL while the parser loads it.
+
+**libfyaml issue tracker** (<https://github.com/pantoniou/libfyaml/issues>, searched for
+"non-printable", "c-printable", "control character", and "printable"): no issue about
+accepting non-printable characters in a plain scalar; the hits cover anchor names and the
+text length of a folded block scalar.
+
+**User decision (2026-11-01):** keep the error. The parser stays strict per [1]; libfyaml
+differs. The decision covers a non-printable character at the start of a line and inside a
+plain scalar that is not an implicit key. The implicit-key gap above is not decided: it is
+open and goes to the user.
+
+**Enforcement site:** the last branch of `EventIter::step_in_document()` in
+`src/event_iter/step.rs` (indented first character); `Lexer::try_consume_plain_scalar()`
+(first line) and `Lexer::collect_plain_continuations()` (continuation lines) in
+`src/lexer/plain.rs`, through `find_non_c_printable()`.
+
+---
+
 ## "Should is non-mandatory" Precedent
 
 **Established at:** Phase 1, `[83] ns-reserved-directive` (see

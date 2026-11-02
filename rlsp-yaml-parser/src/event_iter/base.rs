@@ -310,7 +310,7 @@ impl<'input> EventIter<'input> {
         let first_byte = if let Some(line) = self.lexer.peek_next_line() {
             let trimmed = line.content.trim_start_matches([' ', '\t']);
             if let Some(ch) = trimmed.chars().next()
-                && is_reserved_plain_start(ch, line.indent > 0)
+                && is_reserved_plain_start(ch)
             {
                 let leading = &line.content[..line.content.len() - trimmed.len()];
                 return Err(Error::syntax(

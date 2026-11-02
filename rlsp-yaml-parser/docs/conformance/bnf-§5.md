@@ -2,7 +2,7 @@
 
 Source: `.ai/audit/2026-04-30-phase1-bnf/reconciliation-§5.md` (64 entries)
 
-**Verdict tally (post-fix):** Strict-conformant: 59, Stricter-than-spec: 3, Not-applicable: 2
+**Verdict tally (post-fix):** Strict-conformant: 56, Stricter-than-spec: 3, Lenient: 3, Not-applicable: 2
 
 ---
 
@@ -34,11 +34,11 @@ BNF: (none — §4 contains no numbered BNF productions)
 
 BNF: `c-printable ::= x09 | x0A | x0D | [x20-x7E] | x85 | [xA0-xD7FF] | [xE000-xFFFD] | [x010000-x10FFFF]`
 
-- **Verdict:** Strict-conformant
+- **Verdict:** Lenient for implicit keys; see "[1] c-printable" in `design-decisions.md`
 - **Spec (§5.1):** "On input, a YAML processor must accept all characters in this printable subset."
-- **Implementation:** `is_c_printable()` in `chars.rs`; `reject_non_printable()` in `lexer.rs` enforces the predicate on literal stream input
+- **Implementation:** `is_c_printable()` in `chars.rs`; `find_non_c_printable()` in `chars.rs` enforces the predicate on plain scalars: `Lexer::try_consume_plain_scalar()` (first line) and `Lexer::collect_plain_continuations()` (continuation lines) in `lexer/plain.rs`, and the last branch of `EventIter::step_in_document()` in `event_iter/step.rs` for the first character of a line. Comments and quoted scalars apply their own predicates ([75], [2]); an implicit key is not checked
 - **Tests:** `chars.rs` unit tests `c_printable_accepts`, `c_printable_rejects`; `rlsp-yaml-parser/tests/conformance/non_printable.rs`
-- **Note:** Previously Lenient — the predicate existed but was not enforced on literal stream characters (only on escape-decoded characters). Fixed in commit `666e2f2` (`fix(rlsp-yaml-parser): reject non-c-printable characters in literal stream input`).
+- **Note:** Previously Lenient — the predicate existed but was not enforced on literal stream characters (only on escape-decoded characters). Fixed in commit `666e2f2` (`fix(rlsp-yaml-parser): reject non-c-printable characters in literal stream input`). One gap remains: a plain scalar that is an implicit key (`\x07b: 2`) takes a non-printable character without an error.
 
 ### [2] nb-json
 
@@ -227,7 +227,7 @@ BNF: `c-indicator ::= c-sequence-entry | c-mapping-key | c-mapping-value | c-col
 
 - **Verdict:** Strict-conformant
 - **Spec (§5.3):** "Indicators are characters that have special semantics."
-- **Implementation:** `is_c_indicator()` in `chars.rs`
+- **Implementation:** `is_c_indicator()` in `chars.rs`. The `%` of `c-directive` is an indicator, so no plain scalar starts with it ([126]): a `%` that starts a line inside a document is a syntax error, not a line the parser skips (see "[82] l-directive — a `%` line inside a document" in `design-decisions.md`; libfyaml skips it with a warning)
 - **Tests:** `chars.rs` unit tests `c_indicator_accepts_all_21_indicator_chars`, `c_indicator_rejects`
 
 ### [23] c-flow-indicator
@@ -270,9 +270,9 @@ BNF: `b-char ::= b-line-feed | b-carriage-return`
 
 BNF: `nb-char ::= c-printable - b-char - c-byte-order-mark`
 
-- **Verdict:** Strict-conformant
+- **Verdict:** Lenient for implicit keys; see "[1] c-printable" in `design-decisions.md`
 - **Spec (§5.4):** "All other characters, including the form feed (x0C), are considered to be non-break characters."
-- **Implementation:** The line splitter in `lines.rs` treats only `['\n', '\r']` as break characters; `reject_non_printable()` in `lexer.rs` enforces c-printable on stream input, which transitively enforces nb-char on non-break positions
+- **Implementation:** The line splitter in `lines.rs` treats only `['\n', '\r']` as break characters; `find_non_c_printable()` in `chars.rs` enforces c-printable where [1] does (see its entry), which transitively enforces nb-char on non-break positions
 - **Tests:** No direct test; transitively covered by all indentation-sensitive yaml-test-suite cases
 - **Note:** Previously Lenient — same root cause as [1] c-printable. Fixed together with [1] in commit `666e2f2`.
 
@@ -334,9 +334,9 @@ BNF: `s-white ::= s-space | s-tab`
 
 BNF: `ns-char ::= nb-char - s-white`
 
-- **Verdict:** Strict-conformant
+- **Verdict:** Lenient for implicit keys; see "[1] c-printable" in `design-decisions.md`
 - **Spec (§5.5):** "The rest of the (printable) non-break characters are considered to be non-space characters."
-- **Implementation:** `is_ns_char()` in `chars.rs`; `reject_non_printable()` enforcement in `lexer.rs` ensures the predicate is honoured on literal stream content
+- **Implementation:** `is_ns_char()` in `chars.rs`; the last branch of `EventIter::step_in_document()` in `event_iter/step.rs` applies it to the first character of an indented line, and `find_non_c_printable()` ([1]) covers the rest of a plain scalar
 - **Tests:** `chars.rs` unit tests `ns_char_accepts`, `ns_char_rejects`
 - **Note:** Previously Lenient — predicate was partially used but not enforced on plain-scalar bodies or quoted-scalar bodies. Fixed together with [1] in commit `666e2f2`.
 

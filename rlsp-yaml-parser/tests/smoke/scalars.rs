@@ -255,7 +255,7 @@ fn single_quoted_scalar_with_trailing_comment_matches_double_quoted_spans() {
 }
 
 // A plain scalar cannot start with an indicator (YAML 1.2.2 [126]
-// `ns-plain-first`).  `,`, `@`, the backtick and an indented `%` are errors, not
+// `ns-plain-first`).  `,`, `@`, the backtick and `%` are errors, not
 // an empty node that drops their text.
 #[rstest]
 #[case::comma_as_a_mapping_value("v: ,\n")]
@@ -316,6 +316,162 @@ fn reserved_indicator_error_points_at_the_indicator() {
         .find_map(Result::err)
         .expect("an error");
     assert_eq!((error.pos.line, error.pos.column), (3, 4));
+}
+
+// A directive is valid only before `---` ([82], [209]), and a `%` cannot start a
+// plain scalar ([126]), so a `%` that starts a line inside a document is an
+// error.  The formatter would delete the line if the parser skipped it.
+#[rstest]
+#[case::below_the_marker("---\n%a\nb: 1\n")]
+#[case::alone_below_the_marker("---\n%a\n")]
+#[case::as_a_key_below_the_marker("---\n%a: b\n")]
+#[case::with_text_below_the_marker("---\n%a b\n")]
+#[case::bare_below_the_marker("---\n%\n")]
+#[case::directive_shape_below_the_marker("---\n%YAML 1.2\n")]
+#[case::two_lines_below_the_marker("---\n%a\n%b\n")]
+#[case::before_a_colon_line("---\n%a\n: b\n")]
+#[case::after_a_blank_line("---\n\n%a\n")]
+#[case::after_a_comment("---\n#c\n%a\nb: 1\n")]
+#[case::below_a_marker_comment("--- # c\n%a\n")]
+#[case::below_a_tag("---\n!t\n%a\n")]
+#[case::below_an_anchor("---\n&a\n%a\n")]
+#[case::below_a_tag_on_the_marker_line("--- !t\n%a\n")]
+#[case::as_a_key_below_a_tag("---\n!t\n%a: b\n")]
+#[case::below_a_key("a:\n%b\n")]
+#[case::below_a_key_with_a_tag("a: !!str\n%x\n")]
+#[case::below_a_key_with_an_anchor("a: &x\n%y\n")]
+#[case::below_a_tag_then_a_key("a: !t\n%b\nc: 1\n")]
+#[case::below_an_explicit_key_colon("? a\n:\n%zz\n")]
+#[case::before_a_second_document("---\n%a\n---\nx\n")]
+#[case::in_an_empty_second_document("---\n---\n%a\n")]
+#[case::after_a_directive("%YAML 1.2\n---\n%a\n")]
+#[case::after_a_bom("\u{feff}---\n%a\n")]
+#[case::tag_directive_below_the_marker("---\n%TAG !e! tag:e,2000:\n!e!x a\n")]
+#[case::tag_directive_below_the_marker_before_a_second_document(
+    "---\n%TAG !e! tag:e,2000:\n---\n!e!x a\n"
+)]
+#[case::crlf_below_the_marker("---\r\n%a\r\n")]
+#[case::crlf_below_a_key("a:\r\n%b\r\n")]
+#[case::crlf_below_a_tag("---\r\n!t\r\n%a\r\n")]
+#[case::last_line_below_the_marker_without_a_newline("---\n%a")]
+fn percent_at_the_start_of_a_line_in_a_document_is_an_error(#[case] input: &str) {
+    assert!(has_error(input), "input: {input:?}");
+}
+
+// These already failed before the `%` rule, through another message; the rule
+// shares their gate, so they stay pinned.
+#[rstest]
+#[case::after_a_mapping_entry("a: 1\n%b\n")]
+#[case::after_a_sequence_entry("- a\n%b\n")]
+#[case::below_an_empty_sequence_entry("-\n%a\n")]
+#[case::below_an_empty_explicit_key("?\n%a\n")]
+#[case::after_an_explicit_key("? a\n%b\n")]
+#[case::after_a_block_scalar_in_a_mapping("a: |\n  x\n%y\n")]
+#[case::after_a_block_scalar_at_the_root("--- |\n  x\n%y\n")]
+#[case::after_a_marker_line_scalar_and_comment("--- x # c\n%y\n")]
+#[case::indented("---\n  %a\n")]
+#[case::last_line_after_an_entry_without_a_newline("a: 1\n%b")]
+#[case::in_a_flow_sequence("[a,\n%b]\n")]
+#[case::in_a_flow_mapping("{a: b,\n%c: d}\n")]
+#[case::alone_in_a_flow_sequence("---\n[\n%a]\n")]
+fn percent_line_that_already_errored_still_errors(#[case] input: &str) {
+    assert!(has_error(input), "input: {input:?}");
+}
+
+// The error points at the `%`, not at the line before it.
+#[rstest]
+#[case::below_the_marker("---\n%a\n", 2, 0)]
+#[case::before_a_key("---\n%a\nb: 1\n", 2, 0)]
+#[case::below_a_tag("---\n!t\n%a\n", 3, 0)]
+#[case::below_a_key("a:\n%b\n", 2, 0)]
+#[case::after_a_blank_line_and_a_comment("---\n\n#c\n%a\n", 4, 0)]
+#[case::crlf("---\r\n%a\r\n", 2, 0)]
+#[case::before_a_second_document("---\n%a\n---\nx\n", 2, 0)]
+#[case::indented("---\n  %a\n", 2, 2)]
+#[case::last_line_below_the_marker_without_a_newline("---\n%a", 2, 0)]
+#[case::last_line_after_an_entry_without_a_newline("a: 1\n%b", 2, 0)]
+fn percent_error_points_at_the_percent(
+    #[case] input: &str,
+    #[case] line: usize,
+    #[case] column: usize,
+) {
+    let error = parse_to_vec(input)
+        .into_iter()
+        .find_map(Result::err)
+        .expect("an error");
+    assert_eq!(
+        (error.pos.line, error.pos.column),
+        (line, column),
+        "input: {input:?}"
+    );
+}
+
+// The error ends the stream before the second document, so the iterator does
+// not deliver the events the skipped line used to let through.
+#[test]
+fn percent_error_ends_the_stream_before_the_next_document() {
+    let events = parse_to_vec("---\n%a\n---\nx\n");
+    let first_error = events.iter().position(Result::is_err).expect("an error");
+    assert_eq!(first_error, 2, "StreamStart, DocumentStart, then the error");
+    assert_eq!(events.len(), 3, "nothing follows the error");
+}
+
+// The events before the error stay, the error is the last item, and nothing
+// follows it: not the second document, and no `DocumentEnd` for the open one.
+#[rstest]
+#[case::inside_the_first_document("---\n%foo: bar\n", 2)]
+#[case::after_a_complete_document("x: 1\n---\n%a: 2\n", 8)]
+#[case::after_a_directive("%a\n---\n%b\n", 2)]
+#[case::after_a_block_scalar_document("a: |\n  x\n---\n%b\n", 8)]
+fn percent_error_is_the_last_item_of_the_stream(#[case] input: &str, #[case] ok_events: usize) {
+    let events = parse_to_vec(input);
+    assert_eq!(events.len(), ok_events + 1, "input: {input:?}");
+    assert!(
+        events[..ok_events].iter().all(Result::is_ok),
+        "input: {input:?}"
+    );
+    assert!(events[ok_events].is_err(), "input: {input:?}");
+}
+
+// Below the marker a `%` line is content only where a scalar continues or a
+// block scalar holds it, and it is a directive after `...`.
+#[rstest]
+#[case::literal_scalar_value("--- |\n%a\n", &["%a\n"])]
+#[case::literal_scalar_on_its_own_line("---\n|\n%a\n", &["%a\n"])]
+#[case::folded_scalar_value("--- >\n%a\n", &["%a\n"])]
+#[case::literal_scalar_after_a_blank_line("--- |\n\n%a\n", &["\n%a\n"])]
+#[case::literal_scalar_in_a_mapping("a: |\n  x\n  %y\n", &["a", "x\n%y\n"])]
+#[case::plain_scalar_continuation_with_a_tag("--- !t x\n%y\n", &["x %y"])]
+#[case::plain_scalar_continuation_below_a_tag("---\n!t x\n%y\n", &["x %y"])]
+#[case::plain_scalar_continuation_below_an_anchor("---\n&a x\n%y\n", &["x %y"])]
+#[case::plain_scalar_continuation_indented("x\n  %y\n", &["x %y"])]
+#[case::plain_scalar_continuation_after_a_directive("%YAML 1.2\n---\nx\n%y\n", &["x %y"])]
+#[case::plain_scalar_continuation_shaped_like_a_directive("---\nx\n%YAML 1.2\n", &["x %YAML 1.2"])]
+#[case::single_quoted_continuation("--- 'a\n%b'\n", &["a %b"])]
+#[case::double_quoted_continuation("---\n\"a\n%b\"\n", &["a %b"])]
+#[case::unknown_directive_after_a_document_end("...\n%a\n---\nx\n", &["x"])]
+#[case::unknown_directive_between_documents("--- x\n...\n%a\n---\ny\n", &["x", "y"])]
+#[case::tag_directive_after_a_document_end("...\n%TAG !e! tag:e,2000:\n---\n!e!x a\n", &["a"])]
+#[case::directive_after_a_block_scalar_document("--- |\n%a\n...\n%b\n---\nz\n", &["%a\n", "z"])]
+fn percent_line_in_a_scalar_or_before_a_marker_is_not_an_error(
+    #[case] input: &str,
+    #[case] expected: &[&str],
+) {
+    assert!(!has_error(input), "input: {input:?}");
+    assert_eq!(
+        scalar_values(&event_variants(input)),
+        expected,
+        "input: {input:?}"
+    );
+}
+
+// The `...` marker closes the document, so the directive error after it is the
+// between-documents one and the `%` rule must not reach it.
+#[rstest]
+#[case::after_a_mapping("a: 1\n...\n%a\n")]
+#[case::after_a_scalar("---\nx\n...\n%a\n")]
+fn directive_without_a_marker_after_a_document_end_is_an_error(#[case] input: &str) {
+    assert!(has_error(input), "input: {input:?}");
 }
 
 // -----------------------------------------------------------------------

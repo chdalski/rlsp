@@ -12,6 +12,27 @@ with existing infrastructure.
 
 ---
 
+### A `%` Line Inside a Document Is an Error [completed]
+
+**Description:** A line that starts with `%` below `---` is a syntax error: `---`
+then `%a` (with or without a node after it), `---`, `!t`, `%a`, `a:` then `%b`,
+`a: 1` then `%b`, `--- # c` then `%a`, and `---`, `%a`, `---`, `x`; so is `--- x # c`
+then `%y`. Before, the parser skipped such a line without a word in most of these
+places, and `format_yaml` deleted it from the file. A directive is valid before
+`---` only, as in `%YAML 1.2` then `---`, or after `...`. A `%` line stays content
+inside a block scalar (`--- |` then `%a`), in a quoted scalar, and as a continuation
+line of a plain scalar (`--- x` then `%y` is the scalar `x %y`). libfyaml 0.9.6 skips
+the `%` line with a warning; the parser reports an error instead, so that no text
+vanishes (see `docs/conformance/design-decisions.md`). A line the block parser does
+not recognise, such as an indented control character, is an error as well, where an
+indented one was skipped before.
+**Complexity:** Low
+**Comment:** YAML 1.2.2 [126] `ns-plain-first`, [22] `c-indicator`, [82]
+`l-directive`, [209] `l-directive-document`, [211] `l-yaml-stream`.
+**Tier:** 1
+
+---
+
 ### A Plain Scalar After `---` Continues Over the Lines Below [completed]
 
 **Description:** `--- x` followed by `  y` loads as the one scalar `x y`, as does
@@ -109,14 +130,14 @@ for the indentation of a block entry.
 
 ### A Plain Scalar Cannot Start With a Reserved Indicator [completed]
 
-**Description:** A node that starts with `,`, `@`, a backtick, or an indented
-`%` is a syntax error: `v: ,`, `- @a`, `` `a: b ``, `a: %b`, `--- ,`, `--- %a`.
+**Description:** A node that starts with `,`, `@`, a backtick, or `%` is a syntax
+error: `v: ,`, `- @a`, `` `a: b ``, `a: %b`, `--- ,`, `--- %a`.
 Before, the parser took the line for an empty node and dropped its text, so
 a file with such a line loaded with that data missing. A file that holds one
 now reports an error at the indicator; libfyaml 0.9.6 rejects them too. The same
 characters inside a scalar, in a continuation line, in a flow collection after
 the first character, in a quoted scalar, or in a comment are content as before.
-A `%` at the start of a line still opens a directive.
+A `%` at the start of a line opens a directive only before `---`.
 **Complexity:** Low
 **Comment:** YAML 1.2.2 [126] `ns-plain-first` excludes the indicators from
 the first character of a plain scalar. The yaml-test-suite and the real files of

@@ -23,7 +23,7 @@ directives.
 - [x] Design review of the approach
 - [x] Task 1: One prepend in the marker handler
 - [x] Task 2: The `--- x` path joins the other marker forms
-- [ ] Task 3: A `%` at a node start is an error
+- [x] Task 3: A `%` at a node start is an error
 - [ ] Task 4: A key reads its own `:`
 - [ ] Task 5: A bare `-` looks past comment lines
 - [ ] Task 6: Flow sequences keep their text
@@ -77,18 +77,20 @@ readers. Productions: [207], [208], [134], [135], [197], [200].
 
 Productions: [126], [22], [82], [209], [211].
 
-- [ ] `---\n%a\nb: 1\n`, `---\n%a\n`, and `a: 1\n%b\n` report a syntax error, and
+- [x] `---\n%a\nb: 1\n`, `---\n%a\n`, and `a: 1\n%b\n` report a syntax error, and
       `format_yaml` returns them unchanged
-- [ ] `--- |\n%a\n` keeps `%a` in its value, and `%YAML 1.2\n---\na: 1\n` still loads
-- [ ] No line of the block dispatcher is consumed without an event or an error
-- [ ] `percent_prefixed_line_inside_explicit_doc_is_treated_as_content` in
+- [x] `--- |\n%a\n` keeps `%a` in its value, and `%YAML 1.2\n---\na: 1\n` still loads
+- [x] No line of the block dispatcher is consumed without an event or an error
+- [x] `  \x07zz\n`, `a:\n  \x7fzz\n`, and `  \uFEFFzz\n` report a syntax error, and
+      `design-decisions.md` records this deviation from libfyaml with [1]
+- [x] `percent_prefixed_line_inside_explicit_doc_is_treated_as_content` in
       `tests/smoke/documents.rs` has a name that says so and asserts the error, and the
       doc comment on `is_blank_or_comment` matches [126]
-- [ ] `docs/conformance/design-decisions.md` records this deviation from libfyaml with
+- [x] `docs/conformance/design-decisions.md` records this deviation from libfyaml with
       its productions, and the entries of [22], [82], and [209] state the behavior
-- [ ] `rlsp-yaml-parser/docs/feature-log.md` tells a reader which inputs now report an
+- [x] `rlsp-yaml-parser/docs/feature-log.md` tells a reader which inputs now report an
       error, and no longer says that a `%` at the start of a line still opens a directive
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 4: A key reads its own `:`
 
@@ -181,6 +183,10 @@ The loader's "skip" arm drops a node event after the root.
 - **`%` at column 0 inside a document is an error:** [126], [82], and [209] allow
   directives only before `---`, and a skipped line would be deleted by the formatter.
   libfyaml warns and skips it. Declined: following libfyaml.
+- **A non-printable character at the start of a line is an error (user decision):**
+  [1] `c-printable` and `ns-char` exclude it, so `  \x07zz\n` reports an error, as it
+  already did at column 0 and inside a scalar. libfyaml loads it as a scalar. Declined:
+  following libfyaml.
 - **The separate `--- x` path goes:** one path for every marker form, and the behavior
   changes in Task 2 all match libfyaml. Declined: patching the path.
 - **A key reads its own `:`, a bare `-` looks past comment lines, and the loader rejects
@@ -195,3 +201,5 @@ The loader's "skip" arm drops a node event after the root.
 
 - Task 3: `--- x # c\n%y\n` reports an error since Task 2 while libfyaml skips the line;
   `design-decisions.md` records it with the other `%` inputs
+- Task 8: `a: !t &a\n  !zz\n` and `---\n!t &a\n!zz\n` report an error, as `a: !t\n  !zz\n`
+  and libfyaml do, instead of dropping the second tag

@@ -2107,6 +2107,45 @@ fn content_after_the_node_on_the_marker_line_does_not_load(#[case] input: &str) 
     );
 }
 
+// A directive is valid only before `---`, so a `%` line inside a document is an
+// error and the loader holds no document with the line dropped.
+#[rstest]
+#[case::below_the_marker_then_a_key("---\n%a\nb: 1\n")]
+#[case::alone_below_the_marker("---\n%a\n")]
+#[case::after_a_mapping_entry("a: 1\n%b\n")]
+#[case::below_a_key("a:\n%b\n")]
+#[case::below_a_tag("---\n!t\n%a\n")]
+fn percent_line_at_the_start_of_a_node_does_not_load(#[case] input: &str) {
+    assert!(
+        matches!(load(input), Err(LoadError::Parse { .. })),
+        "input: {input:?}"
+    );
+}
+
+#[rstest]
+#[case::marker_line("--- |\n%a\n")]
+#[case::own_line("---\n|\n%a\n")]
+fn block_scalar_with_a_percent_line_loads(#[case] input: &str) {
+    let docs = load(input).expect("loads");
+    assert!(
+        matches!(&docs[0].root, Node::Scalar { value, .. } if value == "%a\n"),
+        "input: {input:?}"
+    );
+}
+
+#[test]
+fn percent_line_below_a_marker_line_scalar_continues_the_scalar() {
+    let docs = load("--- x\n%y\n").expect("loads");
+    assert!(matches!(&docs[0].root, Node::Scalar { value, .. } if value == "x %y"));
+}
+
+#[test]
+fn directive_after_a_document_end_still_loads_the_next_document() {
+    let docs = load("--- x\n...\n%a\n---\ny\n").expect("loads");
+    let values: Vec<&str> = docs.iter().map(|doc| scalar_value(&doc.root)).collect();
+    assert_eq!(values, ["x", "y"]);
+}
+
 #[rstest]
 #[case::continuation_line("--- x\n  y\n", "x y", (4, 9))]
 #[case::continuation_at_column_zero("--- x\ny\n", "x y", (4, 7))]

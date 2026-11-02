@@ -335,15 +335,11 @@ pub(super) fn peek_plain_scalar_first_line(buf: &LineBuffer<'_>) -> Option<(usiz
 /// Whether `ch` at the start of a node is an indicator that no plain scalar may
 /// start with ([126] `ns-plain-first`) and that no other construct claims there:
 /// the `,` of a flow collection, the `@` and the backtick, which YAML reserves,
-/// and the `%` of a directive, which is a directive only at the start of a
-/// line (`indented` is `false` there).  The text is an error, not a scalar.
+/// and the `%` of a directive, which is valid only before `---` ([82], [209])
+/// and so never starts a node.  The text is an error, not a scalar.
 #[must_use]
-pub const fn is_reserved_plain_start(ch: char, indented: bool) -> bool {
-    match ch {
-        ',' | '@' | '`' => true,
-        '%' => indented,
-        _ => false,
-    }
+pub const fn is_reserved_plain_start(ch: char) -> bool {
+    matches!(ch, ',' | '@' | '`' | '%')
 }
 
 /// `ns-plain-first(c)` for block context: the first character of a plain scalar.

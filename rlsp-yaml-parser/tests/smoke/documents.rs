@@ -800,27 +800,25 @@ fn unknown_directive_before_explicit_doc_is_skipped() {
 // -----------------------------------------------------------------------
 // Group M — directive-split regression test (IT-41)
 // -----------------------------------------------------------------------
-// Verify that `%`-prefixed lines are treated as content inside a document
-// (InDocument context) and not silently dropped.
+// A directive is valid only before `---`.  A `%`-prefixed line inside an open
+// document (InDocument context) is neither a directive nor content, so it is
+// an error rather than a line the parser drops without a trace.
 
 #[test]
-fn percent_prefixed_line_inside_explicit_doc_is_treated_as_content() {
-    // IT-41: A `%`-prefixed line inside an open document (after `---`) is
-    // regular content, not a directive.  It should be consumed normally
-    // rather than silently dropped.
-    let events = event_variants("---\n%foo: bar\n");
-    assert_eq!(
-        events,
-        [
-            Event::StreamStart,
-            Event::DocumentStart {
-                explicit: true,
-                version: None,
-                tag_directives: vec![]
-            },
-            Event::DocumentEnd { explicit: false },
-            Event::StreamEnd,
-        ]
+fn percent_prefixed_line_inside_explicit_doc_is_an_error() {
+    // IT-41: `---\n%foo: bar\n` once produced an empty document with no sign of
+    // the `%foo: bar` line.
+    let events = parse_to_vec("---\n%foo: bar\n");
+    let error = events
+        .iter()
+        .find_map(|r| r.as_ref().err())
+        .expect("an error");
+    assert_eq!((error.pos.line, error.pos.column), (2, 0));
+    assert!(
+        !events
+            .iter()
+            .any(|r| matches!(r, Ok((Event::DocumentEnd { .. }, _)))),
+        "the document must not end before the error"
     );
 }
 

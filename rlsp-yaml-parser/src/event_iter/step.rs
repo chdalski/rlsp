@@ -306,9 +306,9 @@ impl<'input> EventIter<'input> {
         // mapping keys and plain scalars via `find_value_indicator_offset` /
         // `try_consume_scalar`.
         //
-        // Invariant: the post-match fallthrough always ends with an unconditional
-        // `consume_line()` before returning `StepResult::Continue`, preventing
-        // infinite loops on unrecognised content.
+        // Invariant: the post-match fallthrough ends in `stray_content_error`
+        // when no handler claimed the line.  It sets `Done`, so unrecognised
+        // content cannot loop and is never consumed without an event or an error.
 
         match first_byte {
             // ---- Sequence entry: `- `, `-\t`, or `-\n` (bare dash) ----
@@ -1072,30 +1072,25 @@ impl<'input> EventIter<'input> {
             Ok(None) => {}
         }
 
-        // Check for invalid characters at the start of an unrecognised line.
-        // A line that starts with a character that is neither whitespace nor a
-        // valid YAML ns-char (e.g. NUL U+0000 or mid-stream BOM U+FEFF) is a
-        // parse error.
-        if let Some(line) = self.lexer.peek_next_line() {
-            let first_ch = line.content.chars().next();
-            if let Some(ch) = first_ch
-                && ch != ' '
-                && ch != '\t'
-                && !crate::lexer::is_ns_char(ch)
-            {
-                let err_pos = line.pos;
-                self.state = IterState::Done;
-                self.lexer.consume_line();
-                return StepResult::Yield(Err(Error::syntax(
-                    err_pos,
-                    format!("invalid character U+{:04X} in document", ch as u32),
-                )));
-            }
+        // No construct above claimed the line, so it is an error: consuming it
+        // without an event would delete its text from the document.  A first
+        // character that is neither whitespace nor a valid YAML ns-char (e.g.
+        // NUL U+0000 or mid-stream BOM U+FEFF) gets a message of its own.
+        // Enforcement site for a non-printable first character of a line ([1]);
+        // see `docs/conformance/design-decisions.md`.
+        let first_ch = self
+            .lexer
+            .peek_next_line()
+            .and_then(|line| line.content.trim_start_matches([' ', '\t']).chars().next());
+        match first_ch {
+            Some(ch) if !crate::lexer::is_ns_char(ch) => self.stray_content_error(&format!(
+                "invalid character U+{:04X} in document",
+                ch as u32
+            )),
+            // Defensive: the constructs above claim every line seen so far, so this
+            // keeps the invariant if a later change leaves a line unclaimed.
+            _ => self.stray_content_error("unexpected content in document"),
         }
-
-        // Fallback: unrecognised content line — consume and loop.
-        self.lexer.consume_line();
-        StepResult::Continue
     }
 
     /// Close the collections that are more deeply nested than the next line.

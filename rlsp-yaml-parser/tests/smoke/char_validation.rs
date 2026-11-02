@@ -10,6 +10,8 @@
 //! - **Group IV-C**: Comment body context — c-printable enforced.
 //! - **Group IV-D**: Quoted scalar context (single- and double-quoted) — nb-json
 //!   enforced (broader: rejects only C0 controls except TAB).
+//! - **Group IV-E**: First character of a line in a document — error at the
+//!   character, wherever the indentation puts it.
 
 use rstest::rstest;
 
@@ -331,4 +333,41 @@ fn single_quoted_error_message_identifies_context() {
 #[test]
 fn double_quoted_named_escape_bel_accepted() {
     assert!(!has_error("key: \"val\\aue\"\n"));
+}
+
+// -----------------------------------------------------------------------
+// Group IV-E: Non-printable first character of a line in a document
+// -----------------------------------------------------------------------
+
+// A line whose first character after the indentation is not printable is an
+// error at that character, not a line the parser consumes without a trace.
+#[rstest]
+#[case::bel_indented_at_the_root("  \x07zz\n", 1, 2, "U+0007")]
+#[case::bel_at_column_zero("\x07zz\n", 1, 0, "U+0007")]
+#[case::bel_at_column_zero_below_the_marker("---\n\x07zz\n", 2, 0, "U+0007")]
+#[case::del_indented_below_the_marker("---\n  \x7fzz\n", 2, 2, "U+007F")]
+#[case::bom_after_a_space_and_a_tab("---\n \t\u{feff}zz\n", 2, 2, "U+FEFF")]
+#[case::nul_indented_below_a_key("a:\n  \0zz\n", 2, 2, "U+0000")]
+#[case::del_indented_below_a_key("a:\n  \x7fzz\n", 2, 2, "U+007F")]
+#[case::bom_indented_at_the_root("  \u{feff}zz\n", 1, 2, "U+FEFF")]
+fn non_printable_first_character_of_a_line_is_an_error_at_the_character(
+    #[case] input: &str,
+    #[case] line: usize,
+    #[case] column: usize,
+    #[case] codepoint: &str,
+) {
+    let error = parse_to_vec(input)
+        .into_iter()
+        .find_map(Result::err)
+        .expect("an error");
+    assert_eq!(
+        (error.pos.line, error.pos.column),
+        (line, column),
+        "input: {input:?}"
+    );
+    assert!(
+        error.message.contains(codepoint),
+        "input: {input:?}, message: {}",
+        error.message
+    );
 }

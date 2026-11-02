@@ -99,7 +99,7 @@ impl<'input> Lexer<'input> {
     /// they are yielded as `Event::Comment` by the state machine.
     ///
     /// Use this inside a document body (`InDocument`), where `%`-prefixed lines
-    /// are regular content, not directives.
+    /// are not directives and are not skipped.
     pub fn skip_empty_lines(&mut self) -> Pos {
         loop {
             let skip = self
@@ -345,7 +345,7 @@ impl<'input> Lexer<'input> {
             || inline
                 .chars()
                 .next()
-                .is_some_and(|ch| plain::is_reserved_plain_start(ch, true))
+                .is_some_and(plain::is_reserved_plain_start)
         {
             // These indicators cannot start a plain scalar (YAML 1.2.2 [126]
             // `ns-plain-first`).  A closing bracket has nothing open to close,
@@ -508,8 +508,9 @@ fn is_blank_not_comment(line: &Line<'_>) -> bool {
 
 /// True when `line` is blank (empty or whitespace-only) or comment-only.
 ///
-/// Does **not** treat `%`-prefixed lines as skippable — inside a document body
-/// a `%`-prefixed line is regular content (e.g. `%complete: 50`).
+/// Does **not** treat `%`-prefixed lines as skippable: a directive is valid only
+/// before `---` ([82], [209]), and a `%` line inside a document body is not
+/// content either ([126]), so the caller must report it as an error.
 ///
 /// Used by [`Lexer::has_content`] which must return `false` for both blank
 /// and comment-only lines.
@@ -570,8 +571,8 @@ mod tests {
     ///
     /// Directive lines (`%YAML`, `%TAG`, and unknown `%` directives) are
     /// stream-level metadata that precede `---`.  This predicate is only correct
-    /// to use in the between-documents context; inside a document body `%`-prefixed
-    /// lines are content and must be handled by [`is_blank_or_comment`] instead.
+    /// to use in the between-documents context; inside a document body a `%`-prefixed
+    /// line is not skippable and must be handled by [`is_blank_or_comment`] instead.
     fn is_directive_or_blank_or_comment(line: &Line<'_>) -> bool {
         if is_blank_or_comment(line) {
             return true;
@@ -775,15 +776,14 @@ mod tests {
     // Group F — predicate unit tests (UT-22, UT-23)
     // -----------------------------------------------------------------------
     // Lock in the directive-context split: is_blank_or_comment must NOT skip
-    // `%`-prefixed lines (they are content inside a document body), while
+    // `%`-prefixed lines (inside a document body they are an error), while
     // is_directive_or_blank_or_comment must skip them (BetweenDocs context).
 
     #[test]
     fn is_blank_or_comment_does_not_skip_directive_lines() {
-        // UT-22: Regression — `%`-prefixed lines are content in InDocument.
-        // If this predicate ever starts returning true for `%`-lines, Task 6
-        // scalar events for `%foo: bar` inside a document will be silently
-        // dropped.
+        // UT-22: Regression — `%`-prefixed lines are not skippable in InDocument.
+        // If this predicate ever starts returning true for `%`-lines, the
+        // `%foo: bar` error inside a document will turn back into a silent drop.
         let Some(line) = LineBuffer::new("%foo: bar").consume_next() else {
             unreachable!("LineBuffer produced no line for non-empty input")
         };

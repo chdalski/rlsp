@@ -77,7 +77,7 @@ BNF: `l-directive-document ::= l-directive+ l-explicit-document`
 
 - **Verdict:** Strict-conformant
 - **Spec (§9.1.5):** "A directives document begins with some directives followed by an explicit directives end marker line."
-- **Implementation:** `consume_preamble_between_docs()` in `event_iter/directives.rs` — accumulates `%YAML`/`%TAG` directives into `self.directive_scope`; if directives were accumulated but no `---` follows (EOF, `...`, or bare content), returns an error ("directives must be followed by a '---' document-start marker"); when `---` follows, `DocumentStart` includes the accumulated `version` and `tag_directives`
+- **Implementation:** `consume_preamble_between_docs()` in `event_iter/directives.rs` — accumulates `%YAML`/`%TAG` directives into `self.directive_scope`; if directives were accumulated but no `---` follows (EOF, `...`, or bare content), returns an error ("directives must be followed by a '---' document-start marker"); when `---` follows, `DocumentStart` includes the accumulated `version` and `tag_directives`; the directives of a document stand before its `---`, so a `%` line below the marker is a syntax error and never changes `directive_scope` (`---` then `%TAG !e! tag:e,2000:` and a tag `!e!x` fails; libfyaml skips the line with a warning, see `design-decisions.md`)
 - **Tests:** `tests/yaml-test-suite/src/B63P.yaml` (directive without document — error); `tests/yaml-test-suite/src/2LFX.yaml` (directive + document); `tests/smoke/directives.rs` (directive scope per-document)
 
 ### [210] l-any-document

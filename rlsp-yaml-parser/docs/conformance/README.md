@@ -68,9 +68,10 @@ consistently from §7 onward, inter-auditor disagreement rates fell from 22% (§
 |---------|---------|
 | `Strict-conformant` | The parser's behavior matches what the spec requires or permits. |
 | `Stricter-than-spec` | The parser rejects input the spec admits. The deviation is intentional and documented with a rationale. |
+| `Lenient` | The parser accepts input the spec rejects. The gap is documented in `design-decisions.md` and open. |
 | `Not-applicable` | The entry has no normative obligation on the implementation (descriptive prose or meta-notation for the grammar itself). |
 
-### No Lenient Entries Remain
+### Lenient Entries
 
 The audit initially identified 28 Lenient findings (11 Phase 1 BNF + 17 Phase 2 prose).
 "Lenient" means the parser accepts input the spec rejects. All 28 were addressed:
@@ -87,8 +88,8 @@ The audit initially identified 28 Lenient findings (11 Phase 1 BNF + 17 Phase 2 
   L11 (1 MiB cap bypass), L12–L17 (error-position imprecision) — these were not in scope
   for the current fix batch and remain open in the follow-up queue.
 
-The `Lenient` label is documented here for historical reference; no entries in the
-production tables below carry it.
+Of the Phase 1 productions, only [1], [27] and [34] carry the `Lenient` label again, for
+implicit keys (see "[1] c-printable" in `design-decisions.md`).
 
 ### Non-conformant Finding
 
@@ -109,13 +110,16 @@ After applying fixes, the final tally:
 
 | Verdict | Count |
 |---------|-------|
-| Strict-conformant | 205 |
+| Strict-conformant | 202 |
 | Stricter-than-spec | 5 |
+| Lenient (open) | 3 |
 | Not-applicable | 3 |
 | **Total** | **213** |
 
 Notes:
-- The 11 originally-Lenient productions are now Strict-conformant after fixes.
+- The 11 originally-Lenient productions are now Strict-conformant after fixes, except
+  [1], [27] and [34], which stay Lenient for implicit keys (a non-printable character in an
+  implicit key is accepted; see "[1] c-printable" in `design-decisions.md`).
 - §3 and §4 contribute 2 Not-applicable entries (descriptive prose and meta-notation).
 - [136] `in-flow(n,c)` is Not-applicable (meta-notational context-mapping rule).
 
@@ -163,7 +167,7 @@ for full per-entry reasoning, spec quotes, implementation citations, and test co
 
 | Production | Verdict |
 |------------|---------|
-| [1] c-printable | Strict-conformant |
+| [1] c-printable | Lenient (implicit keys) |
 | [2] nb-json | Strict-conformant |
 | [3] c-byte-order-mark | Strict-conformant |
 | [4] c-sequence-entry | Strict-conformant |
@@ -189,14 +193,14 @@ for full per-entry reasoning, spec quotes, implementation citations, and test co
 | [24] b-line-feed | Strict-conformant |
 | [25] b-carriage-return | Strict-conformant |
 | [26] b-char | Strict-conformant |
-| [27] nb-char | Strict-conformant |
+| [27] nb-char | Lenient (implicit keys) |
 | [28] b-break | Strict-conformant |
 | [29] b-as-line-feed | Strict-conformant |
 | [30] b-non-content | Strict-conformant |
 | [31] s-space | Strict-conformant |
 | [32] s-tab | Strict-conformant |
 | [33] s-white | Strict-conformant |
-| [34] ns-char | Strict-conformant |
+| [34] ns-char | Lenient (implicit keys) |
 | [35] ns-dec-digit | Strict-conformant |
 | [36] ns-hex-digit | Strict-conformant |
 | [37] ns-ascii-letter | Strict-conformant |

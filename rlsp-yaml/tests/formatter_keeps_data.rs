@@ -174,6 +174,8 @@ fn format_default(input: &str) -> String {
 #[case::folded_long_line(
     "a: >\n  one two three four five six seven eight nine ten eleven twelve thirteen fourteen\n  mmmm\n"
 )]
+#[case::root_literal_with_a_percent_line("--- |\n%a\n")]
+#[case::root_literal_with_a_percent_line_on_its_own_line("---\n|\n%a\n")]
 fn block_scalar_keeps_its_value(#[case] input: &str) {
     assert_data_kept_under_every_option_set(input);
 }
@@ -674,9 +676,10 @@ fn string_that_reads_like_a_document_marker_keeps_its_data(#[case] input: &str) 
 
 // ---- root scalars the parser takes from the `---` line ------------------------
 
-// A plain scalar cannot start with these indicators, so the parser reports an
-// error and the formatter returns the text unchanged.  Before, the parser took
-// the text of a `---` line as a scalar, and the line below dropped it.
+// A plain scalar cannot start with these indicators, and no line may start
+// with a non-printable character, so the parser reports an error and the
+// formatter returns the text unchanged.  Before, the parser took the text of a
+// `---` line as a scalar, and the line below dropped it.
 #[rstest]
 #[case::comma("--- ,\n")]
 #[case::comma_then_text("--- ,x\n")]
@@ -687,7 +690,19 @@ fn string_that_reads_like_a_document_marker_keeps_its_data(#[case] input: &str) 
 #[case::comma_as_a_mapping_value("v: ,\n")]
 #[case::at_sign_as_a_sequence_item("- @a\n")]
 #[case::backtick_as_a_key("`a: b\n")]
-fn text_that_starts_with_a_reserved_indicator_is_returned_unchanged(#[case] input: &str) {
+#[case::percent_below_the_marker("---\n%a\nb: 1\n")]
+#[case::percent_only_below_the_marker("---\n%a\n")]
+#[case::percent_then_key_value("---\n%a: b\n")]
+#[case::percent_below_a_tag("---\n!t\n%a\n")]
+#[case::percent_below_a_key("a:\n%b\n")]
+#[case::percent_after_an_entry("a: 1\n%b\n")]
+#[case::percent_before_a_second_document("---\n%a\n---\nx\n")]
+#[case::percent_below_a_marker_comment("--- # c\n%a\n")]
+#[case::bel_indented_at_the_root("  \x07zz\n")]
+#[case::del_indented_below_a_key("a:\n  \x7fzz\n")]
+#[case::bom_indented_at_the_root("  \u{feff}zz\n")]
+#[case::bom_after_a_space_and_a_tab("---\n \t\u{feff}zz\n")]
+fn text_the_parser_rejects_is_returned_unchanged(#[case] input: &str) {
     assert!(load(input).is_err());
     for (label, options) in option_sets() {
         let input = if options.line_ending == LineEnding::Crlf {

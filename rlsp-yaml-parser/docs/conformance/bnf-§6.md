@@ -189,8 +189,8 @@ BNF: `l-directive ::= c-directive ( ns-yaml-directive | ns-tag-directive | ns-re
 
 - **Verdict:** Strict-conformant
 - **Spec (§6.8):** "Directives are instructions to the YAML processor. There is no way to define private directives. Directives are a presentation detail and must not be used to convey content information."
-- **Implementation:** `parse_directive()` in `event_iter/directives.rs` — dispatches on directive name; `is_directive_line()` in `lexer.rs`; the `s-l-comments` part: `consume_preamble_between_docs()` reads the comment on the directive line with `comment_in_suffix()` and queues it as an `Event::Comment`, for `%YAML`, `%TAG` and reserved directives alike
-- **Tests:** `rlsp-yaml-parser/tests/smoke/directives.rs`; `rlsp-yaml-parser/tests/smoke/comments.rs` (cases `yaml_directive`, `tag_directive`, `reserved_directive`)
+- **Implementation:** `parse_directive()` in `event_iter/directives.rs` — dispatches on directive name; `is_directive_line()` in `lexer.rs`; a directive is valid only before `---` or after `...`, so a `%` that starts a line inside a document is a syntax error (`try_consume_scalar()` in `event_iter/base.rs`, see `design-decisions.md`; libfyaml skips the line with a warning); the `s-l-comments` part: `consume_preamble_between_docs()` reads the comment on the directive line with `comment_in_suffix()` and queues it as an `Event::Comment`, for `%YAML`, `%TAG` and reserved directives alike
+- **Tests:** `rlsp-yaml-parser/tests/smoke/directives.rs`; `rlsp-yaml-parser/tests/smoke/comments.rs` (cases `yaml_directive`, `tag_directive`, `reserved_directive`); `rlsp-yaml-parser/tests/smoke/scalars.rs` (`percent_at_the_start_of_a_line_in_a_document_is_an_error`, `percent_error_points_at_the_percent`)
 
 ### [83] ns-reserved-directive
 
