@@ -31,7 +31,10 @@ pub enum IterState {
 pub enum MappingPhase {
     /// The next node is a key (first half of a pair).
     Key,
-    /// The next node is a value (second half of a pair).
+    /// The next node is a value (second half of a pair).  The key's `:` is
+    /// consumed: a later `:` line is an entry of its own, never the indicator
+    /// of this key.  An alias or flow-collection key consumes its `:` as soon
+    /// as it is emitted (`consume_own_key_indicator`).
     Value,
     /// An explicit key (`?`) is complete and the next token must be its `:`
     /// value indicator, the next key (empty value), or a dedent.  Unlike

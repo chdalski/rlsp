@@ -24,7 +24,7 @@ directives.
 - [x] Task 1: One prepend in the marker handler
 - [x] Task 2: The `--- x` path joins the other marker forms
 - [x] Task 3: A `%` at a node start is an error
-- [ ] Task 4: A key reads its own `:`
+- [x] Task 4: A key reads its own `:`
 - [ ] Task 5: A bare `-` looks past comment lines
 - [ ] Task 6: Flow sequences keep their text
 - [ ] Task 7: The loader rejects a second root node
@@ -98,17 +98,17 @@ Productions: [126], [22], [82], [209], [211].
 key still waits for its `:`", so any later `:` line is read as the current key's
 indicator. Productions: [191], [192], [194], [96], [106], [154].
 
-- [ ] These load with the events of libfyaml 0.9.6: `a:\n: c\n`, `b:\n: x\n`, `:\n: c\n`,
+- [x] These load with the events of libfyaml 0.9.6: `a:\n: c\n`, `b:\n: x\n`, `:\n: c\n`,
       `?\n:\n: c\n`, `? a\n:\n: c\n`, `x:\n  : v\n`, `x:\n  :\n    - 1\n`, `a: 1\n[x]:\n: v\n`,
       `a: &y\n&k : v\n`
-- [ ] `*a : v`, `*a :`, `*a : # c`, `[x]: v`, `[x]:`, `[x]: # c`, `&k [x]: v`, `- *a : v`, and
+- [x] `*a : v`, `*a :`, `*a : # c`, `[x]: v`, `[x]:`, `[x]: # c`, `&k [x]: v`, `- *a : v`, and
       the yaml-test-suite cases E76Z and 26DV keep their events, and `[x]:2\n` keeps its
       behavior
-- [ ] No new `MappingPhase` variant exists, and `Value` means only that the `:` is
+- [x] No new `MappingPhase` variant exists, and `Value` means only that the `:` is
       consumed
-- [ ] `docs/conformance/` names the enforcement sites, and
+- [x] `docs/conformance/` names the enforcement sites, and
       `rlsp-yaml-parser/docs/feature-log.md` tells a reader which inputs load differently
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 5: A bare `-` looks past comment lines
 

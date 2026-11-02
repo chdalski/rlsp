@@ -512,3 +512,57 @@ fn many_blank_lines_after_a_marker_line_scalar_do_not_hang() {
     assert_eq!(docs.len(), 1);
     assert!(elapsed < Duration::from_secs(30), "took {elapsed:?}");
 }
+
+// ===========================================================================
+// Group I: A `:` line after a key with an empty value
+// ===========================================================================
+
+#[test]
+fn many_colon_lines_after_empty_values_are_linear() {
+    let input = "a:\n: c\n".repeat(50_000);
+    let start = Instant::now();
+    let events = bounded_events(&input);
+    let elapsed = start.elapsed();
+    assert!(events.iter().all(Result::is_ok));
+    assert!(elapsed < Duration::from_secs(30), "took {elapsed:?}");
+    assert!(load(&input).is_ok());
+}
+
+#[test]
+fn many_colon_lines_after_a_flow_key_terminate_within_the_event_budget() {
+    let input = format!("[x]:\n{}", ":\n".repeat(2_000));
+    let events = bounded_events(&input);
+    assert!(events.len() < 10_000, "no end in sight");
+    assert!(events.iter().all(Result::is_ok));
+}
+
+#[test]
+fn nested_colon_lines_beyond_the_depth_limit_end_in_one_error() {
+    let mut input = String::new();
+    for level in 0..600 {
+        writeln!(input, "{}:", " ".repeat(level)).unwrap();
+    }
+    let events = bounded_events(&input);
+    assert!(events.len() < 10_000, "no end in sight");
+    let position = events
+        .iter()
+        .position(Result::is_err)
+        .expect("depth limit must be reported");
+    assert_eq!(position + 1, events.len(), "events after the error");
+}
+
+#[test]
+fn colon_lines_at_the_end_of_input_leave_no_collection_open() {
+    for input in [
+        "a:\n:",
+        "a:\n:\n",
+        "[x]:\n:",
+        "*a :\n:\n",
+        "a:\n---\n: c",
+        "a:\n...\n: c\n",
+    ] {
+        let events = bounded_events(input);
+        assert!(events.iter().all(Result::is_ok), "{input:?}");
+        assert!(load(input).is_ok(), "{input:?}");
+    }
+}

@@ -531,10 +531,10 @@ impl<'input> EventIter<'input> {
             //    for fresh mappings whose first key node is nested deeper than
             //    the mapping indicator (e.g. V9D5 explicit-key content).
             //    Also skip when a value-indicator line (`: value`) is next
-            //    because it is the value portion of an alias/anchor mapping key
-            //    split across tokens (e.g. `*alias : scalar` in 26DV), or when
-            //    a pending tag or anchor is present (tags prepend synthetic
-            //    inlines at their column — 74H7).
+            //    because it is the content of an explicit key that opens a
+            //    mapping with an empty key (`? : v`), or when a pending tag
+            //    or anchor is present (tags prepend synthetic inlines at
+            //    their column — 74H7).
             match self.coll_stack.last() {
                 Some(&CollectionEntry::Sequence(seq_col, _)) if seq_col == effective_key_indent => {
                     self.state = IterState::Done;
@@ -559,17 +559,13 @@ impl<'input> EventIter<'input> {
                 _ => {}
             }
             // When the next line is a value indicator (`: value`) and an
-            // enclosing mapping is already in Value phase, the synthetic
-            // `: value` line is the value for THAT mapping — not the start
-            // of a new nested mapping.  Route directly to
-            // `consume_explicit_value_line` so we don't open a spurious
-            // inner mapping (E76Z: `*alias : value` where alias was the key).
+            // enclosing mapping waits for the `:` of its explicit key, the
+            // line is the value for THAT mapping — not the start of a new
+            // nested mapping.  Under `Value` the `:` is consumed, so such a
+            // line is an entry of its own (`x:\n  : v`).
             if self.is_value_indicator_line()
-                && let Some(&CollectionEntry::Mapping(
-                    val_col,
-                    MappingPhase::Value | MappingPhase::AfterExplicitKey,
-                    _,
-                )) = self.coll_stack.last()
+                && let Some(&CollectionEntry::Mapping(val_col, MappingPhase::AfterExplicitKey, _)) =
+                    self.coll_stack.last()
                 && val_col <= effective_key_indent
             {
                 return self.explicit_value_step(val_col);
@@ -648,7 +644,7 @@ impl<'input> EventIter<'input> {
 
         // Continuing an existing mapping.
         // Only treat a bare `:` line as an explicit value indicator when the
-        // mapping is already in Value phase (i.e., after an explicit `?` key)
+        // mapping is waiting for the `:` of an explicit `?` key
         // OR when an explicit `? inline-content` key was processed that opened
         // a complex node (sub-mapping or sub-sequence) as the key — in that
         // case the outer mapping stays in Key phase after the complex node closes,
@@ -657,7 +653,7 @@ impl<'input> EventIter<'input> {
         // an implicit empty-key entry (e.g. `: value`) and must fall through to
         // `consume_mapping_entry`.
         let is_in_value_phase = self.coll_stack.last().is_some_and(|top| {
-            matches!(top, CollectionEntry::Mapping(col, MappingPhase::Value | MappingPhase::AfterExplicitKey, _) if *col == effective_key_indent)
+            matches!(top, CollectionEntry::Mapping(col, MappingPhase::AfterExplicitKey, _) if *col == effective_key_indent)
         });
         let has_complex_key_inline = self.complex_key_inline == Some(effective_key_indent)
             && self.coll_stack.last().is_some_and(|top| {
@@ -833,6 +829,26 @@ impl<'input> EventIter<'input> {
             || after_colon.starts_with('\t')
             || after_colon.starts_with('\n')
             || after_colon.starts_with('\r')
+    }
+
+    /// Consume the `:` of the key just emitted when it stands on the key's own
+    /// line.  An alias or flow-collection key leaves its mapping in `Value`
+    /// phase with that `:` still ahead, as the synthetic tail line; consuming
+    /// it now keeps `Value` meaning "the `:` is consumed", so a later `:` line
+    /// is an entry of its own.  The caller guarantees the tail is on the key's
+    /// own line (an alias or flow key that had no `:` after it does not call
+    /// this); a tail that is no indicator (`[x]:2`) is left alone.
+    pub(in crate::event_iter) fn consume_own_key_indicator(&mut self) -> StepResult<'input> {
+        let Some(&CollectionEntry::Mapping(map_col, MappingPhase::Value, _)) =
+            self.coll_stack.last()
+        else {
+            return StepResult::Continue;
+        };
+        if self.is_value_indicator_line() {
+            self.explicit_value_step(map_col)
+        } else {
+            StepResult::Continue
+        }
     }
 
     /// Consume a `: value` line and turn a failure into the step's result.

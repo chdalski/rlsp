@@ -519,6 +519,11 @@ impl<'input> EventIter<'input> {
                                 if self.coll_stack.is_empty() {
                                     self.root_node_emitted = true;
                                 }
+                                if is_value_indicator {
+                                    // The alias is an implicit key: its own `:` follows.
+                                    self.queue.push_back((Event::Alias { name }, alias_span));
+                                    return self.consume_own_key_indicator();
+                                }
                                 return StepResult::Yield(Ok((Event::Alias { name }, alias_span)));
                             }
                         }

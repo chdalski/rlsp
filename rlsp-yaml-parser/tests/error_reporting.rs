@@ -825,6 +825,10 @@ fn scalar_values(input: &str) -> Vec<String> {
 #[case::comment_line_then_key("a: v\n  # d\n  b: 1\n", 3)]
 #[case::nested_comment_line_then_plain("a:\n  b: v\n    # d\n    w\n", 4)]
 #[case::seq_item_comment_line_then_dash("- v\n  # d\n  - w\n", 3)]
+#[case::colon_line_after_alias_without_key_colon("*a\n: v\n", 2)]
+#[case::colon_line_after_flow_without_key_colon("[x]\n: v\n", 2)]
+#[case::indented_colon_line_after_value("a: 1\n  : v\n", 2)]
+#[case::indented_colon_line_after_colon_line("[x]:\n: v\n  : w\n", 3)]
 fn content_after_complete_node_is_a_syntax_error(#[case] input: &str, #[case] stray_line: usize) {
     let err = first_error(input).expect("expected a parse error");
     assert_eq!(err.kind, ErrorKind::Syntax);
@@ -1736,6 +1740,259 @@ fn flow_and_alias_keys_after_finished_entry_emit_libfyaml_events(
         event_shape(input, Tags::Omitted),
         "load() of {input:?}"
     );
+}
+
+// A key reads its own `:`: a `:` line after a key whose value is still empty is
+// an entry of its own (an empty key), never the indicator of the key before it,
+// whatever kind that key is.  Expected values are the events of libfyaml 0.9.6
+// (`fy-tool --testsuite`).
+#[rstest]
+#[case::plain_key("a:\n: c\n", "+M :a : : :c -M")]
+#[case::empty_plain_key(":\n: c\n", "+M : : : :c -M")]
+#[case::bare_explicit_key("?\n:\n: c\n", "+M : : : :c -M")]
+#[case::explicit_key_with_content("? a\n:\n: c\n", "+M :a : : :c -M")]
+#[case::indented_colon_line_nests("x:\n  : v\n", "+M :x +M : :v -M -M")]
+#[case::indented_colon_line_with_sequence_value("x:\n  :\n    - 1\n", "+M :x +M : +S :1 -S -M -M")]
+#[case::flow_key_then_colon_line("a: 1\n[x]:\n: v\n", "+M :a :1 +S :x -S : : :v -M")]
+#[case::anchored_empty_value_then_anchored_key("a: &y\n&k : v\n", "+M :a &y,: &k,: :v -M")]
+#[case::alias_key("*a :\n: v\n", "+M *a : : :v -M")]
+#[case::flow_map_key("{x: 1}:\n: v\n", "+M +M :x :1 -M : : :v -M")]
+#[case::plain_key_after_entry("a: 1\nq:\n: v\n", "+M :a :1 :q : : :v -M")]
+#[case::double_quoted_key_after_entry("a: 1\n\"q\":\n: v\n", "+M :a :1 :q : : :v -M")]
+#[case::single_quoted_key_after_entry("a: 1\n'q':\n: v\n", "+M :a :1 :q : : :v -M")]
+#[case::explicit_key_after_entry("a: 1\n? q\n:\n: v\n", "+M :a :1 :q : : :v -M")]
+#[case::anchored_empty_value_then_colon_line("a: &y\n: v\n", "+M :a &y,: : :v -M")]
+#[case::tagged_empty_value_then_tagged_key("a: !!str\n!!str : v\n", "+M :a !!str,: !!str,: :v -M")]
+#[case::anchored_empty_key_then_colon_line("a: 1\n&k :\n: v\n", "+M :a :1 &k,: : : :v -M")]
+#[case::anchored_empty_value_then_anchored_key_then_entry(
+    "a: &y\n&k : v\n: w\n",
+    "+M :a &y,: &k,: :v : :w -M"
+)]
+#[case::explicit_key_then_flow_key("? a\n[x]:\n: v\n", "+M :a : +S :x -S : : :v -M")]
+#[case::flow_key_in_sequence_item_mapping(
+    "- a: 1\n  [x]:\n  : v\n",
+    "+S +M :a :1 +S :x -S : : :v -M -S"
+)]
+#[case::alias_key_in_sequence_item("- *a :\n  : v\n", "+S +M *a : : :v -M -S")]
+#[case::flow_key_in_sequence_item("- [x]:\n  : v\n", "+S +M +S :x -S : : :v -M -S")]
+#[case::indented_colon_line_in_sequence_item_mapping(
+    "- a:\n    : v\n",
+    "+S +M :a +M : :v -M -M -S"
+)]
+#[case::alias_key_then_indented_colon_line("*a :\n  : v\n", "+M *a +M : :v -M -M")]
+#[case::flow_key_then_indented_colon_line("[x]:\n  : v\n", "+M +S :x -S +M : :v -M -M")]
+#[case::flow_key_in_nested_mapping(
+    "a:\n  b: 1\n  [x]:\n  : v\n",
+    "+M :a +M :b :1 +S :x -S : : :v -M -M"
+)]
+#[case::explicit_key_empty_value_then_indented_colon_line("? a\n:\n  : v\n", "+M :a +M : :v -M -M")]
+#[case::flow_key_then_two_indented_colon_lines(
+    "a: 1\n[x]:\n  : v\n  : w\n",
+    "+M :a :1 +S :x -S +M : :v : :w -M -M"
+)]
+#[case::flow_key_then_indented_colon_line_and_key(
+    "a: 1\n[x]:\n  : v\n  b: w\n",
+    "+M :a :1 +S :x -S +M : :v :b :w -M -M"
+)]
+#[case::colon_lines_chain("a: 1\n[x]:\n:\n: w\n", "+M :a :1 +S :x -S : : : : :w -M")]
+#[case::colon_lines_pair_up("a: 1\n[x]:\n: a\n: b\n", "+M :a :1 +S :x -S : : :a : :b -M")]
+#[case::flow_key_colon_line_then_key("[x]:\n: a\nb: c\n", "+M +S :x -S : : :a :b :c -M")]
+#[case::alias_key_colon_line_then_key("*a :\n: a\nb: c\n", "+M *a : : :a :b :c -M")]
+#[case::colon_lines_after_alias_key("[x]:\n: v\n*a :\n: w\n", "+M +S :x -S : : :v *a : : :w -M")]
+#[case::colon_lines_between_flow_keys(
+    "[x]:\n: v\n: w\n[y]:\n: z\n",
+    "+M +S :x -S : : :v : :w +S :y -S : : :z -M"
+)]
+#[case::colon_line_before_document_start(
+    "[x]:\n: v\n---\n[y]: 1\n",
+    "+M +S :x -S : : :v -M +M +S :y -S :1 -M"
+)]
+#[case::colon_line_before_document_end("[x]:\n: v\n...\n", "+M +S :x -S : : :v -M")]
+#[case::colon_line_value_plain_multiword("[x]:\n: 1 2\n", "+M +S :x -S : : :1 2 -M")]
+#[case::colon_line_value_flow_sequence("[x]:\n: [a]\n", "+M +S :x -S : : +S :a -S -M")]
+#[case::colon_line_value_alias("[x]:\n: *a\n", "+M +S :x -S : : *a -M")]
+#[case::colon_line_value_literal_block("[x]:\n: |\n  t\n", "+M +S :x -S : : :t\\n -M")]
+#[case::colon_line_value_tag("[x]:\n: !!str\n", "+M +S :x -S : : !!str,: -M")]
+#[case::colon_line_value_anchor("[x]:\n: &a v\n", "+M +S :x -S : : &a,:v -M")]
+#[case::colon_line_value_block_sequence("[x]:\n:\n  - a\n", "+M +S :x -S : : +S :a -S -M")]
+#[case::colon_line_value_block_mapping("[x]:\n:\n  b: c\n", "+M +S :x -S : : +M :b :c -M -M")]
+#[case::colon_line_empty_value("[x]:\n:\n", "+M +S :x -S : : : -M")]
+#[case::colon_line_at_end_of_input("[x]:\n: v", "+M +S :x -S : : :v -M")]
+#[case::colon_line_bare_at_end_of_input("[x]:\n:", "+M +S :x -S : : : -M")]
+#[case::comment_after_flow_key_colon("[x]: # c\n: v\n", "+M +S :x -S : : :v -M")]
+#[case::comment_line_between("[x]:\n# c\n: v\n", "+M +S :x -S : : :v -M")]
+#[case::blank_line_between("a: 1\n[x]:\n\n: v\n", "+M :a :1 +S :x -S : : :v -M")]
+#[case::whitespace_line_between("a: 1\n[x]:\n  \n: v\n", "+M :a :1 +S :x -S : : :v -M")]
+#[case::tab_after_flow_key_colon("[x]:\t\n: v\n", "+M +S :x -S : : :v -M")]
+#[case::tab_before_value("[x]:\n:\tv\n", "+M +S :x -S : : :v -M")]
+#[case::space_before_flow_key_colon("[x] :\n: v\n", "+M +S :x -S : : :v -M")]
+#[case::space_after_alias_key_colon("*a : \n: v\n", "+M *a : : :v -M")]
+#[case::tab_after_both_colons("a: 1\n[x]:\t\n:\t\n", "+M :a :1 +S :x -S : : : -M")]
+#[case::both_properties_displaced(
+    "a: &y !!str\n&k !!int : v\n",
+    "+M :a &y,!!str,: &k,!!int,: :v -M"
+)]
+#[case::anchored_key_after_empty_value("a:\n&k : v\n", "+M :a : &k,: :v -M")]
+#[case::alias_key_of_anchored_scalar("x: &y 1\n*y :\n: v\n", "+M :x &y,:1 *y : : :v -M")]
+#[case::alias_key_of_anchored_scalar_then_indented_colon_line(
+    "x: &y 1\n*y :\n  : v\n",
+    "+M :x &y,:1 *y +M : :v -M -M"
+)]
+#[case::colon_without_space_after_two_colon_lines("[x]:\n:\n:v\n", "+M +S :x -S : : ::v -M")]
+#[case::anchored_empty_key_then_indented_colon_line(
+    "a: 1\n&k :\n  : v\n",
+    "+M :a :1 &k,: +M : :v -M -M"
+)]
+#[case::anchored_key_with_comment_then_colon_line(
+    "a: &y\n&k : # c\n: v\n",
+    "+M :a &y,: &k,: : : :v -M"
+)]
+#[case::flow_key_then_colon_line_indented_by_one(
+    "a: 1\n[x]:\n :\n",
+    "+M :a :1 +S :x -S +M : : -M -M"
+)]
+#[case::flow_key_then_bare_colon_line_indented_by_one("[x]:\n :\n", "+M +S :x -S +M : : -M -M")]
+#[case::alias_key_then_bare_colon_line_indented_by_one("*a :\n :\n", "+M *a +M : : -M -M")]
+#[case::flow_key_then_two_nested_bare_colon_lines(
+    "[x]:\n  :\n  :\n",
+    "+M +S :x -S +M : : : : -M -M"
+)]
+fn colon_line_after_empty_value_is_an_entry_of_its_own(
+    #[case] input: &str,
+    #[case] expected: &str,
+) {
+    assert_eq!(event_shape(input, Tags::Listed), expected, "{input:?}");
+    assert_well_formed(input);
+    assert_eq!(
+        load_shape(input),
+        event_shape(input, Tags::Omitted),
+        "load() of {input:?}"
+    );
+}
+
+// A `:` line after a key that has its value, or that is no `:` line, stays as
+// it was: it belongs to the explicit key before it, or is an entry of its own.
+#[rstest]
+#[case::alias_value("a: *z\n: v\n", "+M :a *z : :v -M")]
+#[case::flow_value("a: [q]\n: v\n", "+M :a +S :q -S : :v -M")]
+#[case::alias_value_on_next_line("a:\n  *z\n: v\n", "+M :a *z : :v -M")]
+#[case::flow_value_on_next_line("a:\n  [q]\n: v\n", "+M :a +S :q -S : :v -M")]
+#[case::explicit_alias_value("? a\n: *z\n: v\n", "+M :a *z : :v -M")]
+#[case::explicit_flow_value("? a\n: [q]\n: v\n", "+M :a +S :q -S : :v -M")]
+#[case::alias_key_alias_value("*a : *b\n: v\n", "+M *a *b : :v -M")]
+#[case::flow_key_flow_value("[x]: [y]\n: v\n", "+M +S :x -S +S :y -S : :v -M")]
+#[case::flow_key_alias_value("[x]: *b\n: v\n", "+M +S :x -S *b : :v -M")]
+#[case::alias_key_flow_value("*a : [y]\n: v\n", "+M *a +S :y -S : :v -M")]
+#[case::flow_key_plain_value("[x]: 1\n: v\n", "+M +S :x -S :1 : :v -M")]
+#[case::alias_key_plain_value("*a : 1\n: v\n", "+M *a :1 : :v -M")]
+#[case::plain_key_plain_value("a: 1\n: v\n", "+M :a :1 : :v -M")]
+#[case::plain_key_literal_value("a: |\n  t\n: v\n", "+M :a :t\\n : :v -M")]
+#[case::explicit_alias_key("? *a\n: v\n", "+M *a :v -M")]
+#[case::explicit_flow_key("? [x]\n: v\n", "+M +S :x -S :v -M")]
+#[case::explicit_alias_key_with_colon("? *a :\n: v\n", "+M +M *a : -M :v -M")]
+#[case::explicit_alias_key_with_colon_and_value("? *a : 1\n: v\n", "+M +M *a :1 -M :v -M")]
+#[case::anchored_empty_value_keeps_its_anchor("a: &y\nb: v\n", "+M :a &y,: :b :v -M")]
+#[case::colon_without_space_is_scalar_content("[x]:\n:v\n", "+M +S :x -S ::v -M")]
+#[case::alias_key_with_literal_value("*a : |\n  t\n", "+M *a :t\\n -M")]
+#[case::colon_line_as_explicit_key_content_after_empty_key(
+    ":\n? : :c\n",
+    "+M : : +M : ::c -M : -M"
+)]
+#[case::colon_line_as_explicit_key_content_after_entry("a: 1\n? : v\n", "+M :a :1 +M : :v -M : -M")]
+#[case::colon_line_as_explicit_key_content_at_start("? : v\n", "+M +M : :v -M : -M")]
+#[case::colon_line_as_explicit_key_content_after_empty_value(
+    "a:\n? : v\n",
+    "+M :a : +M : :v -M : -M"
+)]
+fn colon_line_after_a_value_node_keeps_its_events(#[case] input: &str, #[case] expected: &str) {
+    assert_eq!(event_shape(input, Tags::Listed), expected, "{input:?}");
+    assert_well_formed(input);
+}
+
+// A `:` line that no key can own stays an error: an alias or flow collection
+// without a `:` on its own line is no key, and a property line is no key.
+#[rstest]
+#[case::colon_line_after_alias_in_sequence("- *a\n: v\n")]
+#[case::colon_line_after_flow_in_nested_sequence_mapping("- a: 1\n  [x]:\n: v\n")]
+#[case::colon_line_after_property_line("a: 1\n&k\n: v\n")]
+#[case::tab_indented_colon_line_after_flow_key("[x]:\n\t: v\n")]
+#[case::alias_line_before_colon_line("k: 1\n*a\n: c\n")]
+#[case::flow_line_with_comment_before_colon_line("k: 1\n[x] # c\n: z\n")]
+#[case::tagged_flow_line_with_comment_before_colon_line("k: 1\n&p [x] # c\n: z\n")]
+fn colon_line_no_key_can_own_is_a_syntax_error(#[case] input: &str) {
+    let err = first_error(input).expect("expected a parse error");
+    assert_eq!(err.kind, ErrorKind::Syntax, "{input:?}");
+    assert!(load(input).is_err(), "load() of {input:?}");
+}
+
+// The comment of a key's own `:` follows the key and precedes the next node.
+#[rstest]
+#[case::flow_key("[x]: # c\n: v\n", &[" c"])]
+#[case::alias_key("*a : # c\n: v\n", &[" c"])]
+#[case::comment_line_between("[x]:\n# c\n: v\n", &[" c"])]
+#[case::both_colons("[x]: # c\n: # d\n", &[" c", " d"])]
+fn comment_of_a_key_colon_is_kept_once(#[case] input: &str, #[case] comments: &[&str]) {
+    let found: Vec<_> = parse_events(input)
+        .filter_map(|item| match item.unwrap().0 {
+            Event::Comment { text } => Some(text),
+            Event::StreamStart
+            | Event::StreamEnd
+            | Event::Alias { .. }
+            | Event::DocumentStart { .. }
+            | Event::DocumentEnd { .. }
+            | Event::SequenceStart { .. }
+            | Event::SequenceEnd
+            | Event::MappingStart { .. }
+            | Event::MappingEnd
+            | Event::Scalar { .. } => None,
+        })
+        .collect();
+    assert_eq!(found, comments, "{input:?}");
+}
+
+// `a:\n: c\n` is two entries: `a` keeps an empty value and `c` belongs to an
+// empty key, so neither survives only as the other's value.
+#[test]
+fn colon_line_after_empty_value_loads_both_entries() {
+    let docs = load("a:\n: c\n").unwrap();
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("root must be a mapping");
+    };
+    assert_eq!(entries.len(), 2);
+    assert!(matches!(&entries[0].0, Node::Scalar { value, .. } if value == "a"));
+    assert!(matches!(&entries[0].1, Node::Scalar { value, .. } if value.is_empty()));
+    assert!(matches!(&entries[1].0, Node::Scalar { value, .. } if value.is_empty()));
+    assert!(matches!(&entries[1].1, Node::Scalar { value, .. } if value == "c"));
+}
+
+#[test]
+fn anchors_stay_on_the_node_they_precede_around_a_colon_line() {
+    let docs = load("a: &y\n&k : v\n").unwrap();
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("root must be a mapping");
+    };
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].1.anchor(), Some("y"));
+    assert_eq!(entries[1].0.anchor(), Some("k"));
+    assert_eq!(entries[1].1.anchor(), None);
+}
+
+// An alias key resolves to its anchored scalar, and the `:` line after it is an
+// entry of its own.
+#[test]
+fn alias_key_before_colon_line_resolves_to_the_anchored_scalar() {
+    let docs = LoaderBuilder::new()
+        .resolved()
+        .build()
+        .load("x: &y 1\n*y :\n: v\n")
+        .unwrap();
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("root must be a mapping");
+    };
+    assert_eq!(entries.len(), 3);
+    assert!(matches!(&entries[1].0, Node::Scalar { value, .. } if value == "1"));
+    assert!(matches!(&entries[1].1, Node::Scalar { value, .. } if value.is_empty()));
+    assert!(matches!(&entries[2].1, Node::Scalar { value, .. } if value == "v"));
 }
 
 // Properties still pending at `---` or `...` belong to the document they end:

@@ -277,6 +277,49 @@ open and goes to the user.
 
 ---
 
+### [194] c-l-block-map-implicit-value — a block collection on the line of an empty key's `:`
+
+**Productions:** `c-l-block-map-implicit-value(n)` ([194]), `s-l+block-node(n,c)` ([196]),
+`s-l+block-collection(n,c)` ([200]: `s-l-comments` before the sequence or mapping),
+`c-ns-properties` ([96]).
+
+**libfyaml behavior** (`fy-tool --testsuite`, 0.9.6): reads a `:` line without a key as an
+entry with an empty key and accepts a block collection that starts on the same line: `: - b`
+is `{null: [b]}`, `a:` then `: - b` is `{a: null, null: [b]}`; so are `[x]:` then `: - a`,
+`a:` then `: b: c` (`{a: null, null: {b: c}}`), `a:` then `: : v` (`{a: null, null: {null:
+v}}`) and `: ? b`. It reads a property line below a nested entry with an empty key as the
+empty value's property (`*a :`, ` :`, ` &y` is `{*a: {null: &y null}}`). With a key before
+the `:` it rejects `a: - b`, `a: b: c` and `a: ? b`, and accepts `a: : v` (`{a: {null: v}}`).
+
+**Parser behavior:** a syntax error for `: - b`, `: b: c` and `: : v`, with or without a
+key before them ("block node cannot appear as inline value; use a new line or a flow
+node"), and for a property line at a column the value cannot take (`*a :`, ` :`, ` &y`:
+"node property is not indented enough for this context"). The spec reads the `:` line
+without a key as an implicit entry ([192] with `e-node` as key, [194]), whose value is an
+`s-l+block-node`: a block sequence or mapping there needs `s-l-comments` first ([200]), so
+it starts on a line below the `:`, as after `a:` with a key. `: ? b` and `a: ? b` load
+(libfyaml loads the first and rejects the second) although they put a block mapping on the
+`:` line as well: `consume_mapping_entry()` rejects only `- ` and a further `:` in the
+text after the `:`, not `? `. Before this change, a `:` line after an empty value made the
+inputs above load with the wrong pairing (`a:` then `: - b` was `{a: [b]}`, `*a :`,
+` :`, ` &y` was `{*a: &y null}`); now `a:` is `a: null` and the `:` line is an entry of its
+own, as in libfyaml, and the error is the spec's reading of the block collection.
+
+**libfyaml issue tracker** (<https://github.com/pantoniou/libfyaml/issues>, searched for
+"block sequence same line", "compact mapping value indicator", "empty key", "invalid nested
+block mapping", "null key colon", and "explicit value indicator"): no issue about a block
+collection on the line of an empty key's `:`; the one hit for "empty key" is about test
+failures on Alpine Linux.
+
+**User decision:** pending; reported by the lead.
+
+**Enforcement site:** `ConsumedMapping::InlineImplicitMappingError` in
+`consume_mapping_entry()` in `src/event_iter/block/mapping.rs` (block collection after
+the `:`); `consume_own_key_indicator()` and `handle_mapping_entry()` in the same file (the
+`:` line of an empty key is an entry of its own).
+
+---
+
 ## "Should is non-mandatory" Precedent
 
 **Established at:** Phase 1, `[83] ns-reserved-directive` (see

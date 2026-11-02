@@ -12,6 +12,35 @@ with existing infrastructure.
 
 ---
 
+### A Key Reads Its Own `:` [completed]
+
+**Description:** A `:` line after a key with an empty value is an entry of its own with
+an empty key, not the value of the key before it. `a:` followed by `: c` is two entries,
+`a` with an empty value and an empty key with the value `c`; so are `:` then `: c`,
+`?` then `:` then `: c`, `? a` then `:` then `: c`, `a: 1`, `[x]:`, `: v`, and `a: &y`
+then `&k : v` (`&y` stays on the empty value of `a`, `&k` goes to the empty key).
+A `:` line that is indented deeper than the key opens a nested mapping with an empty
+key: `x:` then `  : v` is `x` with the value `{"": v}`, and `? a` then `:` then `  : v`
+is `a` with the value `{"": v}`. Before, the `:` line was read as the indicator of the
+key before it, so `c` or `v` became that key's value, the empty value was lost, and an
+anchor on the second key was dropped; `format_yaml` then wrote the wrong pairing.
+Aliases and flow collections as keys (`*a : v`, `[x]: v`, `&k [x]: v`) load as before.
+A `:` line that no key can own (`*a` then `: v`, `a: 1` then `  : v`) is still an error.
+`parse_events` and `load` give the events of libfyaml 0.9.6 on these inputs, with one
+class of exceptions: a block collection on the line of an empty key's `:` (`a:` then
+`: - b`, `[x]:` then `: - a`, `a:` then `: b: c`, `a:` then `: : v`) and a property line
+below a nested empty-key entry (`*a :`, ` :`, ` &y`) are syntax errors here, where
+libfyaml reads them and the parser used to load them with the wrong pairing (`a:` then
+`: - b` was `{a: [b]}`). The class is in `docs/conformance/design-decisions.md`; the
+user has not decided it yet.
+**Complexity:** Low
+**Comment:** YAML 1.2.2 [191] `l-block-map-explicit-value`, [192]
+`ns-l-block-map-implicit-entry`, [194] `c-l-block-map-implicit-value`, [96]
+`c-ns-properties`, [106] `e-node`, [154] `ns-s-implicit-yaml-key`.
+**Tier:** 1
+
+---
+
 ### A `%` Line Inside a Document Is an Error [completed]
 
 **Description:** A line that starts with `%` below `---` is a syntax error: `---`

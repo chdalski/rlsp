@@ -2217,6 +2217,10 @@ impl<'input> EventIter<'input> {
 
         // Push all accumulated events to the queue.
         self.queue.extend(events);
+        if implicit_key_mapping_indent.is_some() {
+            // The collection is an implicit key: its own `:` follows.
+            return self.consume_own_key_indicator();
+        }
         StepResult::Continue
     }
 }

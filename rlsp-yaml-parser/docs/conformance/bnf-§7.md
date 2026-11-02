@@ -32,7 +32,7 @@ BNF: `e-node ::= e-scalar`
 
 - **Verdict:** Strict-conformant
 - **Spec (§7.2):** "Both the node's properties and node content are optional. This allows for a completely empty node."
-- **Implementation:** `empty_scalar_event()` in `lib.rs` — `e-node` collapses to `e-scalar`; emitted at all sites listed for [105]
+- **Implementation:** `empty_scalar_event()` in `lib.rs` — `e-node` collapses to `e-scalar`; emitted at all sites listed for [105]; the value of a block-mapping key that is followed by a `:` line (`a:` then `: c`) is an `e-node`, emitted by `handle_mapping_entry()` in `event_iter/block/mapping.rs` while the mapping is in `Value` phase
 - **Tests:** `tests/yaml-test-suite/src/FRK4.yaml` (Spec Example 7.3. Completely Empty Flow Nodes)
 
 ### [107] nb-double-char
@@ -552,7 +552,7 @@ BNF: `ns-s-implicit-yaml-key(c) ::= ns-flow-yaml-node(0,c) s-separate-in-line? /
 
 - **Verdict:** Strict-conformant
 - **Spec (§7.4.3):** "To limit the amount of lookahead required, the `:` indicator must appear at most 1024 Unicode characters beyond the start of the key. In addition, the key is restricted to a single line."
-- **Implementation:** Single-line restriction and 1024-Unicode-character limit both enforced in `event_iter/flow.rs`; plain YAML-key and quoted JSON-key forms share the same check. The key's start offset and its `?` flag are kept per open flow collection (`key_stack`, one `FlowKey` per `FlowFrame`), so the `:` of an implicit key inside a key does not end the exemption of an explicit `? ` key around it (`{ ? {a: 1, b: <1100 characters>}: v }` is valid), and a collection or alias in key position starts the key
+- **Implementation:** Single-line restriction and 1024-Unicode-character limit both enforced in `event_iter/flow.rs`; plain YAML-key and quoted JSON-key forms share the same check. The key's start offset and its `?` flag are kept per open flow collection (`key_stack`, one `FlowKey` per `FlowFrame`), so the `:` of an implicit key inside a key does not end the exemption of an explicit `? ` key around it (`{ ? {a: 1, b: <1100 characters>}: v }` is valid), and a collection or alias in key position starts the key. A flow collection that is a block-mapping key has its own `:` consumed at the end of `handle_flow_collection()` through `consume_own_key_indicator()` (`event_iter/block/mapping.rs`) when the `:` stands on the key's line
 - **Tests:** `rlsp-yaml-parser/tests/implicit_key_length.rs` (groups A–N, H5–H8, and P)
 
 ### [155] c-s-implicit-json-key(c)
