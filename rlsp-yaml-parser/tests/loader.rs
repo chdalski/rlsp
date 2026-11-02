@@ -2236,3 +2236,91 @@ fn explicit_core_tag_on_a_collection_keeps_its_span() {
     let span = node.tag_loc().unwrap();
     assert_eq!(span.end - span.start, 5);
 }
+
+// ---------------------------------------------------------------------------
+// A plain scalar over blank lines in a flow collection (YAML 1.2.2 [71], [74])
+// ---------------------------------------------------------------------------
+
+#[test]
+fn flow_sequence_item_over_a_blank_line_loads_with_a_line_feed() {
+    let Node::Sequence { items, .. } = load_one("[a\n\n  b]\n") else {
+        panic!("expected a root sequence");
+    };
+    let values: Vec<_> = items.iter().map(scalar_value).collect();
+    assert_eq!(values, ["a\nb"]);
+}
+
+#[test]
+fn flow_mapping_key_over_a_blank_line_loads_with_a_line_feed() {
+    let Node::Mapping { entries, .. } = load_one("{a\n\n b: 1}\n") else {
+        panic!("expected a root mapping");
+    };
+    assert_eq!(entries.len(), 1);
+    assert_eq!(scalar_value(&entries[0].0), "a\nb");
+    assert_eq!(scalar_value(&entries[0].1), "1");
+}
+
+#[test]
+fn flow_sequence_in_a_block_mapping_over_a_blank_line_loads_with_a_line_feed() {
+    let Node::Mapping { entries, .. } = load_one("x: [a\n\n  b]\n") else {
+        panic!("expected a root mapping");
+    };
+    let Node::Sequence { items, .. } = &entries[0].1 else {
+        panic!("expected a sequence value");
+    };
+    assert_eq!(scalar_value(&items[0]), "a\nb");
+}
+
+#[test]
+fn flow_sequence_as_an_explicit_block_key_over_a_blank_line_loads_with_a_line_feed() {
+    let Node::Mapping { entries, .. } = load_one("? [a\n\n  b]\n: v\n") else {
+        panic!("expected a root mapping");
+    };
+    let Node::Sequence { items, .. } = &entries[0].0 else {
+        panic!("expected a sequence key");
+    };
+    assert_eq!(scalar_value(&items[0]), "a\nb");
+    assert_eq!(scalar_value(&entries[0].1), "v");
+}
+
+#[test]
+fn flow_pair_value_over_a_blank_line_loads_with_a_line_feed() {
+    let Node::Sequence { items, .. } = load_one("[a: b\n\n c]\n") else {
+        panic!("expected a root sequence");
+    };
+    let Node::Mapping { entries, .. } = &items[0] else {
+        panic!("expected a single-pair mapping");
+    };
+    assert_eq!(scalar_value(&entries[0].0), "a");
+    assert_eq!(scalar_value(&entries[0].1), "b\nc");
+}
+
+#[rstest]
+#[case::int_like("[1\n\n 2]\n")]
+#[case::bool_like("[true\n\n false]\n")]
+fn flow_plain_scalar_over_a_blank_line_is_a_string_in_the_core_schema(#[case] input: &str) {
+    let Node::Sequence { items, .. } = load_resolved_one(input) else {
+        panic!("expected a root sequence");
+    };
+    let Node::Scalar { tag, .. } = &items[0] else {
+        panic!("expected a scalar item");
+    };
+    assert_eq!(tag.as_deref(), Some("tag:yaml.org,2002:str"));
+}
+
+#[test]
+fn flow_plain_scalar_over_a_blank_line_keeps_its_anchor() {
+    let Node::Sequence { items, .. } = load_one("[&x a\n\n b]\n") else {
+        panic!("expected a root sequence");
+    };
+    assert_eq!(scalar_value(&items[0]), "a\nb");
+    assert_eq!(items[0].anchor(), Some("x"));
+}
+
+#[rstest]
+#[case::after_a_comment("[a # c\n  b]\n")]
+#[case::after_a_comment_line("[a\n # c\n b]\n")]
+#[case::in_a_mapping("{a # c\n b: 1}\n")]
+fn flow_plain_scalar_on_the_line_after_a_comment_is_an_error(#[case] input: &str) {
+    assert!(load(input).is_err(), "{input:?}");
+}

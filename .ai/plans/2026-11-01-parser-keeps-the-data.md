@@ -26,7 +26,7 @@ directives.
 - [x] Task 3: A `%` at a node start is an error
 - [x] Task 4: A key reads its own `:`
 - [x] Task 5: A bare `-` looks past comment lines
-- [ ] Task 6: Flow sequences keep their text
+- [x] Task 6: Flow sequences keep their text
 - [ ] Task 7: The loader rejects a second root node
 - [ ] Task 8: Pin that no text is lost
 - [ ] Task 9: The formatter drops its workarounds for these misreads
@@ -123,13 +123,13 @@ Productions: [184], [185], [197], [78], [79], [81].
 
 ### Task 6: Flow sequences keep their text
 
-- [ ] `[a # c\n  b]\n` reports a syntax error, as libfyaml does
-- [ ] `[a\n\n  b]\n` loads the value `a\nb`, the same events as libfyaml 0.9.6
-- [ ] `format_yaml` keeps the value of `[a\n\n  b]\n`, and a second format changes nothing
-- [ ] `docs/conformance/` names the enforcement sites, and
+- [x] `[a # c\n  b]\n` reports a syntax error, as libfyaml does
+- [x] `[a\n\n  b]\n` loads the value `a\nb`, the same events as libfyaml 0.9.6
+- [x] `format_yaml` keeps the value of `[a\n\n  b]\n`, and a second format changes nothing
+- [x] `docs/conformance/` names the enforcement sites, and
       `rlsp-yaml-parser/docs/feature-log.md` tells a reader which inputs load differently
       or report an error
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 7: The loader rejects a second root node
 

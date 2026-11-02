@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
-// End-to-end tests for the 1 MiB quoted-scalar length cap.
+// End-to-end tests for the 1 MiB scalar length cap on quoted scalars and on
+// plain scalars that span lines in a flow collection.
 // Covers double-quoted (borrow path) and single-quoted (borrow and owned paths)
 // via both `parse_events()` and `load()`.
 
@@ -146,4 +147,47 @@ fn d1_max_scalar_len_constant_is_one_mib() {
         MAX_SCALAR_LEN, 1_048_576,
         "MAX_SCALAR_LEN must be exactly 1 MiB (1_048_576 bytes)"
     );
+}
+
+// ===========================================================================
+// Group — plain scalar over several lines in a flow collection
+// ===========================================================================
+
+#[test]
+fn flow_plain_continuation_at_limit_parses_clean() {
+    // "a" + " " + (MAX_SCALAR_LEN - 2) × 'b' is exactly MAX_SCALAR_LEN bytes.
+    let continuation = "b".repeat(MAX_SCALAR_LEN - 2);
+    let input = format!("[a\n {continuation}]\n");
+    assert!(parses_clean(&input));
+}
+
+#[test]
+fn flow_plain_continuation_over_limit_is_an_error() {
+    let continuation = "b".repeat(MAX_SCALAR_LEN - 1);
+    let input = format!("[a\n {continuation}]\n");
+    let msg = first_error_message(&input).unwrap();
+    assert!(msg.contains("maximum allowed length"), "{msg}");
+    assert!(load(&input).is_err());
+}
+
+#[test]
+fn flow_plain_blank_lines_at_limit_parse_clean() {
+    // "a" + (MAX_SCALAR_LEN - 2) line feeds + "b" is exactly MAX_SCALAR_LEN bytes;
+    // the first line break after `a` is not a blank line.
+    let input = format!("[a{} b]\n", "\n".repeat(MAX_SCALAR_LEN - 1));
+    assert!(parses_clean(&input));
+}
+
+#[test]
+fn flow_plain_blank_lines_over_limit_are_an_error() {
+    let input = format!("[a{} b]\n", "\n".repeat(MAX_SCALAR_LEN));
+    let msg = first_error_message(&input).unwrap();
+    assert!(msg.contains("maximum allowed length"), "{msg}");
+    assert!(load(&input).is_err());
+}
+
+#[test]
+fn flow_plain_many_short_continuation_lines_over_limit_are_an_error() {
+    let input = format!("[a{}]\n", "\n b".repeat(MAX_SCALAR_LEN / 2));
+    assert!(has_parse_error(&input));
 }

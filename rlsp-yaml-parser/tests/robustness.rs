@@ -559,6 +559,42 @@ fn many_colon_lines_after_empty_values_are_linear() {
     assert!(load(&input).is_ok());
 }
 
+/// The scalar values of `input`; the test fails on the first parse error.
+fn scalar_values_of(input: &str) -> Vec<String> {
+    parse_events(input)
+        .filter_map(|item| {
+            let (event, _) = item.unwrap();
+            if let rlsp_yaml_parser::Event::Scalar { value, .. } = event {
+                Some(value.into_owned())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+#[test]
+fn many_flow_plain_continuation_lines_are_linear() {
+    let input = format!("[a{}]\n", "\n\n b".repeat(50_000));
+    let start = Instant::now();
+    let values = scalar_values_of(&input);
+    let elapsed = start.elapsed();
+    assert!(elapsed < Duration::from_secs(30), "took {elapsed:?}");
+    assert_eq!(values.len(), 1);
+    assert_eq!(values[0].len(), 1 + 50_000 * 2);
+}
+
+#[test]
+fn many_blank_lines_in_a_flow_plain_scalar_fold_to_as_many_line_feeds() {
+    // The first line break ends the line of `a`; the rest are blank lines.
+    let input = format!("[a{} b]\n", "\n".repeat(200_001));
+    let values = scalar_values_of(&input);
+    assert_eq!(values.len(), 1);
+    assert_eq!(values[0].len(), 1 + 200_000 + 1);
+    assert!(values[0].starts_with("a\n\n"));
+    assert!(values[0].ends_with("\n\nb"));
+}
+
 #[test]
 fn many_colon_lines_after_a_flow_key_terminate_within_the_event_budget() {
     let input = format!("[x]:\n{}", ":\n".repeat(2_000));

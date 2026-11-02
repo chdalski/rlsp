@@ -87,7 +87,7 @@ BNF: `b-l-trimmed(n,c) ::= b-non-content l-empty(n,c)+`
 
 - **Verdict:** Strict-conformant
 - **Spec (§6.5):** "If a line break is followed by an empty line, it is trimmed; the first line break is discarded and the rest are retained as content."
-- **Implementation:** `collect_double_quoted_continuations()` in `lexer/quoted.rs` — blank lines accumulated in `pending_blanks`; when a non-blank line follows, N blank lines produce N literal newlines (originating break discarded, empty-line breaks retained)
+- **Implementation:** `collect_double_quoted_continuations()` in `lexer/quoted.rs` — blank lines accumulated in `pending_blanks`; when a non-blank line follows, N blank lines produce N literal newlines (originating break discarded, empty-line breaks retained); the continuation of a plain scalar in a flow collection does the same with `blank_lines_before` in `handle_flow_collection()` (`event_iter/flow.rs`)
 - **Tests:** `rlsp-yaml-parser/tests/smoke/quoted_scalars.rs`
 
 ### [72] b-as-space
@@ -96,7 +96,7 @@ BNF: `b-as-space ::= b-break`
 
 - **Verdict:** Strict-conformant
 - **Spec (§6.5):** "Otherwise (the following line is not empty), the line break is converted to a single space (x20)."
-- **Implementation:** `owned.push(' ')` in `lexer/quoted.rs` when `pending_blanks == 0` and `line_continuation` is false; same for single-quoted continuation folds
+- **Implementation:** `owned.push(' ')` in `lexer/quoted.rs` when `pending_blanks == 0` and `line_continuation` is false; same for single-quoted continuation folds; a flow plain scalar continuation with no blank line before it pushes the space in `handle_flow_collection()` (`event_iter/flow.rs`)
 - **Tests:** `rlsp-yaml-parser/tests/smoke/quoted_scalars.rs`
 
 ### [73] b-l-folded(n,c)
@@ -114,8 +114,8 @@ BNF: `s-flow-folded(n) ::= s-separate-in-line? b-l-folded(n,FLOW-IN) s-flow-line
 
 - **Verdict:** Strict-conformant
 - **Spec (§6.5):** "Folding in flow styles provides more relaxed semantics. Once all such spaces have been discarded, all line breaks are folded without exception."
-- **Implementation:** `try_consume_single_quoted()` / `try_consume_double_quoted()` in `lexer/quoted.rs` — trailing whitespace trimmed from each partial line before fold; leading whitespace trimmed from each continuation line; fold space or newline inserted between
-- **Tests:** `rlsp-yaml-parser/tests/smoke/quoted_scalars.rs`
+- **Implementation:** `try_consume_single_quoted()` / `try_consume_double_quoted()` in `lexer/quoted.rs` — trailing whitespace trimmed from each partial line before fold; leading whitespace trimmed from each continuation line; fold space or newline inserted between. The continuation of a plain scalar in a flow collection folds in `handle_flow_collection()` (`event_iter/flow.rs`): one line break to a space, n blank lines (`blank_lines_before`) to n line feeds, leading whitespace of the continuation line skipped by the whitespace loop, trailing whitespace excluded by `scan_plain_line_flow()`
+- **Tests:** `rlsp-yaml-parser/tests/smoke/quoted_scalars.rs`; flow plain scalars: `rlsp-yaml-parser/tests/smoke/flow_collections.rs` (`a_flow_plain_scalar_folds_blank_lines_to_line_feeds`, `a_flow_plain_scalar_over_blank_lines_equals_libfyaml`)
 
 ### [75] c-nb-comment-text
 

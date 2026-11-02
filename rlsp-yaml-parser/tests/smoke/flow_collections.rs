@@ -1258,6 +1258,9 @@ fn properties_before_a_comma_or_a_closing_delimiter_are_an_empty_node(
 /// The parser accepted them, and `{ a: 2 !u2 { } }` loaded to data that no
 /// output of the formatter has.  Positions equal those of libfyaml
 /// (`fy-tool --testsuite`, 0.9.6).
+/// So does a plain scalar on the line after a comment: a comment ends the plain
+/// scalar before it ([135] `ns-plain-multi-line` has no place for one), and the
+/// parser dropped that line.
 #[rstest]
 #[case::mapping_after_a_plain_value("{ a: b { } }\n", 7, "mapping")]
 #[case::mapping_after_a_quoted_value("{ a: \"q\" { } }\n", 9, "mapping")]
@@ -1274,6 +1277,19 @@ fn properties_before_a_comma_or_a_closing_delimiter_are_an_empty_node(
     26,
     "mapping"
 )]
+#[case::plain_item_after_a_comment("[a # c\n  b]\n", 9, "sequence")]
+#[case::plain_item_after_a_comment_line("[a\n # c\n b]\n", 9, "sequence")]
+#[case::plain_item_after_a_comment_and_a_blank_line("[a # c\n\n b]\n", 9, "sequence")]
+#[case::plain_item_after_a_comment_and_two_blank_lines("[a # c\n\n\n b]\n", 10, "sequence")]
+#[case::plain_item_after_a_blank_line_and_a_comment_line("[a\n\n # c\n b]\n", 10, "sequence")]
+#[case::plain_key_after_a_comment("{a # c\n b: 1}\n", 8, "mapping")]
+#[case::plain_item_after_a_pair_and_a_comment("[a: b # c\n c]\n", 11, "sequence")]
+#[case::plain_item_after_an_item_and_a_comment("[a, b # c\n c]\n", 11, "sequence")]
+#[case::plain_key_after_a_value_and_a_comment("{a: b # c\n c: d}\n", 11, "mapping")]
+#[case::plain_item_after_a_comment_in_a_block_sequence("- [a # c\n  b]\n", 11, "sequence")]
+#[case::plain_item_after_a_comment_in_a_block_mapping("x: [a # c\n b]\n", 11, "sequence")]
+#[case::plain_item_after_a_comment_in_a_nested_sequence("[[a # c\n b]]\n", 9, "sequence")]
+#[case::plain_item_after_a_comment_on_a_continuation("[a\n\n  b #c\n  d]\n", 13, "sequence")]
 fn a_flow_collection_after_a_complete_entry_needs_a_comma(
     #[case] input: &str,
     #[case] error_offset: usize,
@@ -1441,4 +1457,140 @@ fn pairs_with_properties_and_question_marks_in_flow_collections_equal_libfyaml(
 fn a_flow_entry_that_libfyaml_rejects_is_an_error(#[case] input: &str) {
     assert!(has_error(input), "{input:?}");
     assert!(rlsp_yaml_parser::load(input).is_err(), "{input:?}");
+}
+
+// -----------------------------------------------------------------------
+// A plain scalar over blank lines and comments in flow collections
+// -----------------------------------------------------------------------
+
+/// A plain scalar that continues after blank lines folds each of them to a line
+/// feed, and a line break with none folds to a space (YAML 1.2.2 [71]
+/// `b-l-trimmed`, [72] `b-as-space`, [74] `s-flow-folded`).  Before, every
+/// continuation folded to a space and `[a\n\n  b]` loaded `a b`.  Values equal
+/// those of libfyaml (`fy-tool --testsuite`, 0.9.6).
+#[rstest]
+#[case::one_blank_line("[a\n\n  b]\n", &["a\nb"])]
+#[case::two_blank_lines("[a\n\n\n b]\n", &["a\n\nb"])]
+#[case::four_blank_lines("[a\n\n\n\n\n b]\n", &["a\n\n\n\nb"])]
+#[case::blank_line_of_space_and_tab("[a\n \t\n  b]\n", &["a\nb"])]
+#[case::blank_line_of_a_tab("[a\n\t\n  b]\n", &["a\nb"])]
+#[case::blank_line_with_crlf("[a\r\n\r\n  b]\r\n", &["a\nb"])]
+#[case::two_blank_lines_with_crlf("[a\r\n\r\n\r\n b]\r\n", &["a\n\nb"])]
+#[case::trailing_space_before_the_break("[a \n\n b]\n", &["a\nb"])]
+#[case::trailing_spaces_before_a_single_break("[a  \n  b]\n", &["a b"])]
+#[case::four_byte_characters("[😀\n\n 😀]\n", &["😀\n😀"])]
+#[case::inner_spaces_stay("[a b\n\n c d]\n", &["a b\nc d"])]
+#[case::chained_continuations("[a\n\n b\n c\n\n\n d]\n", &["a\nb c\n\nd"])]
+#[case::blank_lines_before_a_new_entry_after_a_comma("[a,\n\n b\n c]\n", &["a", "b c"])]
+#[case::continuation_then_a_new_entry("[a\n\n b, c\n d]\n", &["a\nb", "c d"])]
+#[case::multibyte("[é\n\n ü]\n", &["é\nü"])]
+#[case::hash_inside_the_scalar("[a#b\n\n c]\n", &["a#b\nc"])]
+#[case::comment_after_the_continuation("[a\n\n b # c\n, d]\n", &["a\nb", "d"])]
+#[case::blank_lines_before_the_end("[a\n\n]\n", &["a"])]
+#[case::blank_lines_before_a_comma("[a\n\n, b]\n", &["a", "b"])]
+#[case::single_pair_value("[a: b\n\n c]\n", &["a", "b\nc"])]
+#[case::value_in_a_nested_sequence("{a: [b\n\n c]}\n", &["a", "b\nc"])]
+#[case::comma_ends_the_scalar("[a,\n\n b]\n", &["a", "b"])]
+#[case::comma_ends_the_scalar_in_a_mapping("{a: b,\n\n c: d}\n", &["a", "b", "c", "d"])]
+fn a_flow_plain_scalar_folds_blank_lines_to_line_feeds(
+    #[case] input: &str,
+    #[case] expected: &[&str],
+) {
+    let events = evs(input);
+    assert_eq!(scalar_values(&events), expected, "{input:?}");
+}
+
+/// The folded scalar is still a plain scalar.
+#[test]
+fn a_flow_plain_scalar_over_a_blank_line_keeps_the_plain_style() {
+    assert!(evs("[a\n\n  b]\n").iter().any(|e| matches!(
+        e,
+        Event::Scalar {
+            style: ScalarStyle::Plain,
+            ..
+        }
+    )));
+}
+
+/// The events of these inputs equal those of libfyaml: the folded scalar is a
+/// key, a value, or an item, at every nesting.
+#[rstest]
+#[case::item("[a\n\n  b]\n", "+SEQ [] =VAL :a\nb -SEQ")]
+#[case::mapping_key("{a\n\n b: 1}\n", "+MAP {} =VAL :a\nb =VAL :1 -MAP")]
+#[case::pair_key("[a\n\n b: 1]\n", "+SEQ [] +MAP {} =VAL :a\nb =VAL :1 -MAP -SEQ")]
+#[case::explicit_key("{? a\n\n b: c}\n", "+MAP {} =VAL :a\nb =VAL :c -MAP")]
+#[case::pair_key_and_value_on_a_later_line(
+    "[a\n\n  b:\n  c]\n",
+    "+SEQ [] +MAP {} =VAL :a\nb =VAL :c -MAP -SEQ"
+)]
+#[case::pair_key_and_value(
+    "[a\n\n  b: c\n\n  d]\n",
+    "+SEQ [] +MAP {} =VAL :a\nb =VAL :c\nd -MAP -SEQ"
+)]
+#[case::in_a_block_mapping_value("x: [a\n\n  b]\n", "+MAP =VAL :x +SEQ [] =VAL :a\nb -SEQ -MAP")]
+#[case::in_a_block_sequence("- [a\n\n b]\n", "+SEQ +SEQ [] =VAL :a\nb -SEQ -SEQ")]
+#[case::in_an_explicit_block_key(
+    "? [a\n\n  b]\n: v\n",
+    "+MAP +SEQ [] =VAL :a\nb -SEQ =VAL :v -MAP"
+)]
+#[case::after_an_earlier_entry(
+    "{a: 1, b\n\n c: 2}\n",
+    "+MAP {} =VAL :a =VAL :1 =VAL :b\nc =VAL :2 -MAP"
+)]
+fn a_flow_plain_scalar_over_blank_lines_equals_libfyaml(
+    #[case] input: &str,
+    #[case] expected: &str,
+) {
+    assert_eq!(fy_shape(input), expected, "{input:?}");
+}
+
+/// A comment before a `,`, a `:` or the end leaves the scalar before it whole.
+#[rstest]
+#[case::comment_before_a_comma("[a # c\n, b]\n", &["a", "b"])]
+#[case::comment_before_the_end("[a # c\n]\n", &["a"])]
+#[case::comment_line_before_the_end("[a\n# c\n]\n", &["a"])]
+#[case::comment_after_the_last_item("[a, b # c\n]\n", &["a", "b"])]
+#[case::comment_before_the_colon_of_a_mapping_key("{a # c\n : 1}\n", &["a", "1"])]
+#[case::comment_after_a_key_before_the_end("{a # c\n}\n", &["a", ""])]
+#[case::comment_after_a_value_before_a_comma("{a: b # c\n , c}\n", &["a", "b", "c", ""])]
+#[case::comment_after_an_explicit_key("{? a # c\n : b}\n", &["a", "b"])]
+#[case::comment_after_the_colon("{a: # c\n b}\n", &["a", "b"])]
+#[case::comment_after_a_continuation("[a\n b # c\n]\n", &["a b"])]
+fn a_comment_leaves_the_flow_plain_scalar_before_it_whole(
+    #[case] input: &str,
+    #[case] expected: &[&str],
+) {
+    let events = evs(input);
+    assert_eq!(scalar_values(&events), expected, "{input:?}");
+}
+
+/// A comment between a key and its `:` is an error in a sequence, as in
+/// libfyaml: the key of a single pair is on one line.
+#[test]
+fn a_comment_between_a_pair_key_and_its_colon_in_a_sequence_is_an_error() {
+    let input = "[a # c\n : b]\n";
+    let error = parse_events(input).find_map(Result::err);
+    assert_eq!(error.map(|e| e.pos.byte_offset), Some(8), "{input:?}");
+}
+
+/// Quoted scalars fold blank lines as before.
+#[rstest]
+#[case::double_quoted("[\"a\n\n b\"]\n", "a\nb")]
+#[case::single_quoted("['a\n\n b']\n", "a\nb")]
+fn a_quoted_flow_scalar_is_unchanged_by_the_plain_scalar_fold(
+    #[case] input: &str,
+    #[case] expected: &str,
+) {
+    let events = evs(input);
+    assert_eq!(scalar_values(&events), [expected], "{input:?}");
+}
+
+/// A plain scalar does not continue a quoted one: it is another entry, and that
+/// needs its `,`.
+#[rstest]
+#[case::after_a_double_quoted_scalar("[\"a\"\n\n b]\n")]
+#[case::after_a_single_quoted_scalar("['a'\n\n b]\n")]
+fn a_plain_scalar_after_a_quoted_flow_scalar_needs_a_comma(#[case] input: &str) {
+    let error = parse_events(input).find_map(Result::err);
+    assert_eq!(error.map(|e| e.pos.byte_offset), Some(7), "{input:?}");
 }

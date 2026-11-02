@@ -95,7 +95,8 @@ pub const MAX_RESOLVED_TAG_LEN: usize = MAX_TAG_LEN;
 /// This limit applies uniformly to both single-quoted and double-quoted scalars,
 /// on both the borrow path (no-escape, zero-copy) and the owned path (escapes or
 /// multi-line).  It also covers accumulated length across continuation lines in
-/// multi-line double-quoted scalars.
+/// multi-line double-quoted scalars and in plain scalars that span lines in a
+/// flow collection.
 ///
 /// Exceeding this limit returns an [`crate::Error`], not a panic.
 pub const MAX_SCALAR_LEN: usize = 1_048_576;

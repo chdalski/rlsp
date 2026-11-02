@@ -19,7 +19,7 @@ use super::state::{
 use crate::error::Error;
 use crate::event::{CollectionStyle, Event, ScalarStyle, make_meta};
 use crate::lexer::scan_plain_line_flow;
-use crate::limits::MAX_COLLECTION_DEPTH;
+use crate::limits::{MAX_COLLECTION_DEPTH, MAX_SCALAR_LEN};
 use crate::pos::{Pos, Span};
 use crate::{EventIter, empty_scalar_event, zero_span};
 
@@ -338,6 +338,11 @@ impl<'input> EventIter<'input> {
         let mut implicit_key_mapping_indent: Option<usize> = None;
         // Current byte offset within `cur_content`.
         let mut pos_in_line: usize = leading;
+        // How many blank lines directly precede the line being read.  A plain
+        // scalar that continues after them folds each into a line feed
+        // (YAML 1.2.2 [71] `b-l-trimmed`); with none, the line break folds to a
+        // space ([72] `b-as-space`), both through [74] `s-flow-folded`.
+        let mut blank_lines_before: usize = 0;
         // Standalone properties before a flow collection at the column of a
         // mapping that lacks a node there (`a: &y\n[x]: 1`, `? &y\n[x]: 1`) belong
         // to that empty node if the collection turns out to be a key.  Only the
@@ -486,6 +491,17 @@ impl<'input> EventIter<'input> {
                             return StepResult::Yield(Err(e));
                         }
                     }
+                    // A comment ends the plain scalar before it: [135]
+                    // `ns-plain-multi-line` has no place for one between its lines,
+                    // so the next line starts a new entry, and that needs its `,`
+                    // ([138], [141]).
+                    if let Some(
+                        FlowFrame::Sequence { last_was_plain, .. }
+                        | FlowFrame::Mapping { last_was_plain, .. },
+                    ) = flow_stack.last_mut()
+                    {
+                        *last_was_plain = false;
+                    }
                     pos_in_line = cur_content.len();
                 } else {
                     break;
@@ -496,6 +512,11 @@ impl<'input> EventIter<'input> {
             // End of line — consume and advance.
             // ----------------------------------------------------------------
             if pos_in_line >= cur_content.len() {
+                blank_lines_before = if cur_content.trim_matches([' ', '\t']).is_empty() {
+                    blank_lines_before + 1
+                } else {
+                    0
+                };
                 self.lexer.consume_line();
 
                 if flow_stack.is_empty() {
@@ -1925,10 +1946,13 @@ impl<'input> EventIter<'input> {
                     let slice = &cur_content[pos_in_line..];
                     let scanned = scan_plain_line_flow(slice);
                     if !scanned.is_empty() {
-                        // Extend the most-recently-emitted scalar event with a
-                        // line-fold (space) and the continuation content.
-                        // The span grows to the last content byte of the continuation.
-                        if let Some((
+                        // Extend the most-recently-emitted scalar event with the
+                        // folded line break and the continuation content.  The span
+                        // grows to the last content byte of the continuation.
+                        let blank_lines = blank_lines_before;
+                        blank_lines_before = 0;
+                        let continuation_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
+                        let Some((
                             Event::Scalar {
                                 value,
                                 style: ScalarStyle::Plain,
@@ -1936,15 +1960,35 @@ impl<'input> EventIter<'input> {
                             },
                             span,
                         )) = events.last_mut()
-                        {
-                            let extended = format!("{value} {scanned}");
-                            *value = Cow::Owned(extended);
-                            *span = span.with_end(abs_pos(
-                                cur_base_pos,
-                                cur_content,
-                                pos_in_line + scanned.len(),
-                            ));
+                        else {
+                            // `last_was_plain` is set right after a plain scalar event
+                            // only; consuming the line without extending it would drop
+                            // its text.
+                            self.state = IterState::Done;
+                            return StepResult::Yield(Err(Error::syntax(
+                                continuation_pos,
+                                "plain scalar continuation has no scalar to extend".into(),
+                            )));
+                        };
+                        if value.len() + blank_lines.max(1) + scanned.len() > MAX_SCALAR_LEN {
+                            self.state = IterState::Done;
+                            return StepResult::Yield(Err(Error::syntax(
+                                continuation_pos,
+                                "scalar exceeds maximum allowed length (1 MiB)".into(),
+                            )));
                         }
+                        let text = value.to_mut();
+                        if blank_lines == 0 {
+                            text.push(' ');
+                        } else {
+                            text.extend(std::iter::repeat_n('\n', blank_lines));
+                        }
+                        text.push_str(scanned);
+                        *span = span.with_end(abs_pos(
+                            cur_base_pos,
+                            cur_content,
+                            pos_in_line + scanned.len(),
+                        ));
                         pos_in_line += scanned.len();
                         // Update last_token_line to this line so the DK4H
                         // multi-line implicit-key check remains anchored to the
@@ -2035,7 +2079,7 @@ impl<'input> EventIter<'input> {
                             self.state = IterState::Done;
                             return StepResult::Yield(Err(Error::syntax(
                                 err_pos,
-                                "missing comma between flow mapping entries".into(),
+                                "missing comma in flow mapping".into(),
                             )));
                         }
                         Some(FlowFrame::Sequence {
@@ -2048,7 +2092,7 @@ impl<'input> EventIter<'input> {
                             self.state = IterState::Done;
                             return StepResult::Yield(Err(Error::syntax(
                                 err_pos,
-                                "missing comma between flow sequence entries".into(),
+                                "missing comma in flow sequence".into(),
                             )));
                         }
                         _ => {}

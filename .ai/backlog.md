@@ -10,7 +10,6 @@ target goes here only after the user has lowered the target.
 
 ## Open
 
-- Flow sequences drop entries after a comment (`[a # c\n  b]` loads as `[a]`) and accept entries without a comma (`["q" "r"]`); `rlsp-yaml-parser/src/event_iter/flow.rs`; libfyaml comparison.
 - Alias expansion depth: `max_nesting_depth` does not bound the expanded tree in resolved mode; `expand_node`, `Clone`, `Drop` in `loader.rs`; stack-overflow investigation.
 - Iterative loader (`wip/iterative-loader`, adff1074), to discuss with the user; `LoadState::parse_node`; schema queue item 3c.
 - `parse_events` omits the empty scalar in an empty document (14 yaml-test-suite cases expect `=VAL :`); the stream conformance test checks only ok/error; libfyaml comparison.
@@ -18,7 +17,7 @@ target goes here only after the user has lowered the target.
 - Invalid YAML accepted: `a:\nw\n`, `a:\n[x]\n`, `a: [x]: 2\n`, `a: *y : 2\n`, `&k\n*a\n`, `&a\n&b [x]\n`, `&x\n!!str\n&x v\n`, `? ? a\n[x] :\n`, `?\n!!str\nb: 1\n`, `[x]:2\n`, a `]` at the key's column after a quoted item; libfyaml comparison.
 - Inline `--- v` path: `--- v\n# d\nw\n` loses `w`, `--- x\n  y\n` gives two scalars, and `--- x\n  @y\n` (also `,y`, `` `y ``, `%y`) is an error since comment plan Task 11 while libfyaml yields `x @y`; `block` document start handling; libfyaml comparison.
 - A property line before a flow key goes on the key, not the new mapping (`&y\n[x]: 2\n`); libfyaml comparison.
-- `[a\n\n  b]` loads as `"a b"`, should fold to `"a\nb"`; `- a\0\n- b\n` yields events after the error (`block/sequence.rs`); BOM in a plain scalar errors here and loads in libfyaml; libfyaml comparison.
+- `- a\0\n- b\n` yields events after the error (`block/sequence.rs`); BOM in a plain scalar errors here and loads in libfyaml; libfyaml comparison.
 - Multi-line quoted scalars end their span after the line break (`try_consume_single_quoted`, `try_consume_double_quoted` in `lexer/quoted.rs`), so their value tokens have a wrong length (`classify_scalar_node`); span plan, comment plan Task 7.
 - Block-scalar code action moves a trailing comment and trailing spaces into the literal value (`editing/code_actions/block_scalar.rs`); span plan.
 - `REGEX_CACHE` unbounded and `validate_schema` on the async executor (`src/schema/pattern.rs`); schema queue.
@@ -98,3 +97,6 @@ target goes here only after the user has lowered the target.
 - Bare dash, differing from libfyaml: `k:\n-\n \n    \n`, `  k:\n  -\n   \n`, and `k:\n- &a\n-\n  \n` load here and error there; `-\nb\n`, `-\n# c\nw\n`, `-\n  # c\nw\n`, `-\n\nw\n`, `- -\n  b\n`, and `- -\n  # c\n  b\n` error here and load there, and tests pin that per [185] and [197]; parser plan Task 5 review, for the user's decision.
 - `- &a\n  *a\n` emits an alias and an empty `&a` item, while libfyaml errors; `- >\n    \t\n` loads `   \t\n` while libfyaml loads `\t\n`, since a line of spaces and a tab counts as empty for indentation; parser plan Task 5 review.
 - `smoke/sequences.rs` `fast_path_skipped_bare_dash` duplicates `dash_followed_by_newline` in `sequence_empty_item_emits_empty_plain_scalar`; parser plan Task 5 test review.
+- Flow plain scalars misplace data: `[a\n &x b]` loads `["a b", &x null]`, `[a\n\n !t b]` loads `["a\nb", !t ""]`, and `[a\n "b"]`, `[a\n\n 'b']`, `[a\n *x]` load two entries without a comma, while libfyaml reads one plain scalar ([130], [134]); parser plan Task 6 review, for the user's decision.
+- Flow, differing from libfyaml: `{k: v\n w}` and `{a: b\n\n c}` error here ([135], [141]); `{a\n b}` has no trailing null event; `[? a # c\n :b]` errors here since parser plan Task 6 ([126], [127], [138]); `k: [a\n\nb]` and `[a\n\n\tb]` error here; `[a\n\n - b]` and `[a\n\n |b]` error here; `[a\n\n b: 1]` loads a pair against [154], as libfyaml does; parser plan Task 6 review, for the user's decision.
+- The first single-line plain scalar is bounded by input size only, not `MAX_SCALAR_LEN`, and blank lines between keys are lost when a value gets fewer lines (`a: x\n  y\n\nb: 1\n`); parser plan Task 6 review.

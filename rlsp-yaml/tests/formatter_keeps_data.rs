@@ -532,6 +532,51 @@ fn invalid_marker_line_is_returned_unchanged(#[case] input: &str) {
     assert_eq!(format_default(input), input);
 }
 
+// ---- plain scalars over blank lines and comments in flow collections ---------
+
+#[rstest]
+#[case::item("[a\n\n  b]\n")]
+#[case::item_over_two_blank_lines("[a\n\n\n b]\n")]
+#[case::chained_continuations("[a\n\n b\n c\n\n\n d]\n")]
+#[case::mapping_key("{a\n\n b: 1}\n")]
+#[case::pair_key("[a\n\n b: 1]\n")]
+#[case::explicit_key("{? a\n\n b: c}\n")]
+#[case::pair_value("[a: b\n\n c]\n")]
+#[case::in_a_block_mapping("x: [a\n\n  b]\n")]
+#[case::as_an_explicit_block_key("? [a\n\n  b]\n: v\n")]
+#[case::item_before_an_item("[a \n\n b, c]\n")]
+fn flow_plain_scalar_over_blank_lines_keeps_its_data(#[case] input: &str) {
+    assert_data_kept_under_every_option_set(input);
+}
+
+#[test]
+fn flow_plain_scalar_over_a_blank_line_is_written_with_its_line_feed() {
+    assert_eq!(format_default("[a\n\n  b]\n"), "[\"a\\nb\"]\n");
+}
+
+#[rstest]
+#[case::plain_item_after_a_comment("[a # c\n  b]\n")]
+#[case::plain_key_after_a_comment("{a # c\n b: 1}\n")]
+#[case::in_a_block_mapping("x: [a # c\n b]\n")]
+#[case::after_a_continuation("[a\n\n  b #c\n  d]\n")]
+fn plain_scalar_after_a_comment_in_a_flow_collection_is_returned_unchanged(#[case] input: &str) {
+    assert!(load(input).is_err());
+    assert_eq!(format_default(input), input);
+}
+
+#[rstest]
+#[case::comment_before_a_comma("[a # c\n, b]\n")]
+#[case::comment_after_a_comma("[a, # c\n b]\n")]
+#[case::comment_after_a_continuation("[a\n\n b # c\n]\n")]
+#[case::comment_before_the_colon_of_a_mapping_key("{a # c\n : 1}\n")]
+fn comment_in_a_flow_collection_is_kept_once(#[case] input: &str) {
+    for (label, options) in option_sets() {
+        let output = format_yaml(input, &options);
+        assert_eq!(output.matches("# c").count(), 1, "{label}: {output:?}");
+        assert_data_kept(input, &options, label);
+    }
+}
+
 // ---- keys that must stay distinct under duplicate-key removal ----------------
 
 #[rstest]

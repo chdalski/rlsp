@@ -219,6 +219,10 @@ fn single_line_plain_scalar_span_ignores_trailing_blank_lines() {
 #[case::crlf_line_breaks("[a\r\n  b\r\n]\r\n", &[(1, 7)])]
 #[case::trailing_whitespace_on_continuation("[a\n  b  \n]\n", &[(1, 6)])]
 #[case::comment_on_continuation_line("[a\n  b # c\n]\n", &[(1, 6)])]
+#[case::two_blank_lines_between_lines("[a\n\n\n  b\n]\n", &[(1, 8)])]
+#[case::blank_line_with_crlf("[a\r\n\r\n  b\r\n]\r\n", &[(1, 9)])]
+#[case::blank_line_in_a_mapping_key("{a\n\n b: 1}\n", &[(1, 6), (8, 9)])]
+#[case::comment_after_a_blank_line_continuation("[a\n\n  b # c\n]\n", &[(1, 7)])]
 #[case::flow_in_block_mapping("k: [a\n  b]\nm: 1\n", &[(0, 1), (4, 9), (11, 12), (14, 15)])]
 fn flow_multiline_plain_scalar_span_ends_at_last_content_byte(
     #[case] input: &str,

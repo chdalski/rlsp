@@ -12,6 +12,35 @@ with existing infrastructure.
 
 ---
 
+### A Plain Scalar in a Flow Collection Keeps Its Blank Lines and Ends at a Comment [completed]
+
+**Description:** A plain scalar that continues over blank lines in a flow
+collection keeps them as line feeds: `[a`, a blank line, `  b]` loads the value
+`a\nb` (two blank lines give two line feeds in between), where it loaded `a b`
+before. This holds for items of flow sequences, for keys, and for the value of a
+single pair in a flow sequence (`[a: b`, a blank line, ` c]`), also inside block
+collections. A value in a flow mapping does not continue over lines: `{a: b`, a
+blank line, ` c}` reports an error, as it did before. A comment ends the plain scalar before it: in
+`[a # c` followed by `  b]`, and in `{a # c` followed by ` b: 1}`, `b` is an entry
+without the `,` before it, and the parser reports "missing comma in flow
+sequence" or "in flow mapping", as libfyaml 0.9.6 does, at the same position.
+Before, it loaded `[a]` and `{a: 1}` and dropped the text after the comment
+without an error, so `format_yaml` deleted it from the file; now `format_yaml`
+leaves such a file unchanged, and writes the value `a\nb` of the first form as
+`["a\nb"]`. The same error now reads "missing comma in flow sequence" (or "in flow
+mapping") for a plain scalar after a complete entry (`[ "q" b ]`), where it read
+"missing comma between flow sequence entries". A plain scalar that spans lines in
+a flow collection is now limited to `MAX_SCALAR_LEN` and is built in linear time.
+**Complexity:** Low
+**Comment:** YAML 1.2.2 [71] `b-l-trimmed`, [72] `b-as-space`, [74] `s-flow-folded`
+and [135] `ns-plain-multi-line`: no comment sits between the lines of a plain
+scalar, and n blank lines fold to n line feeds. Other inputs where the parser and
+libfyaml still differ on a plain scalar over several lines in a flow collection
+(`{k: v` then ` w}`, `[a` then ` "b"]`) are not covered by this entry.
+**Tier:** 1
+
+---
+
 ### A Bare `-` Looks Past Comment and Blank Lines [completed]
 
 **Description:** The item of a bare `-` is its value when that value starts on the
@@ -545,7 +574,8 @@ inputs from untrusted sources. All limits return structured
 - `MAX_SCALAR_LEN` (1 048 576 = 1 MiB) — quoted scalar length for both
   single-quoted and double-quoted styles; applied uniformly on the
   borrow path (no escapes), the escape-decode (owned) path, and
-  accumulated multi-line length; prevents DoS via unbounded scalar
+  accumulated multi-line length; it also bounds a plain scalar that
+  spans lines in a flow collection; prevents DoS via unbounded scalar
   allocation.
 **Complexity:** Low
 **Comment:** All limits are generous for real-world YAML (Kubernetes
