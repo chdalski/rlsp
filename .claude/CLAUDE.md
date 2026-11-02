@@ -686,6 +686,10 @@ When the **reviewer messages you directly** with approval
    with `ListAgents`, which no longer lists an exited
    teammate, rather than waiting for the
    `shutdown_response` messages: they can reach you late.
+   Start a background timer of two minutes with the
+   requests, and run `ListAgents` when it ends: exit
+   messages can stay out, and no other event wakes you. A
+   prior user had to report "alle weg" several times.
    A plain-text
    message, even one that names `shutdown_request`, leaves
    the teammate alive: it needs the request ID the
@@ -801,7 +805,9 @@ forwarding, and mark any forwarded intermediate state as such.
 not start `sleep` timers to wait for a teammate: a timer
 only delays noticing a stall that the idle notification
 already shows — prior sessions lost over ten minutes per
-stall that way.
+stall that way. The one exception is the timer for shutdown
+exits (After Reviewer Approval step 6), because an exit
+sends no idle notification.
 
 **If the developer appears unresponsive:**
 1. Send a status check via `SendMessage`
