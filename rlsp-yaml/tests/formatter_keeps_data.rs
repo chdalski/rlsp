@@ -17,6 +17,7 @@ use rlsp_yaml::editing::editor_config::LineEnding;
 use rlsp_yaml::editing::formatter::{YamlFormatOptions, format_yaml};
 use rlsp_yaml::server::YamlVersion;
 use rlsp_yaml_parser::load;
+use rlsp_yaml_parser::node::Node;
 use rstest::rstest;
 
 // ---- helpers ----------------------------------------------------------------
@@ -555,10 +556,49 @@ fn flow_plain_scalar_over_a_blank_line_is_written_with_its_line_feed() {
 }
 
 #[rstest]
+#[case::anchor("[a\n &x b]\n")]
+#[case::tag_over_a_blank_line("[a\n\n !t b]\n")]
+#[case::double_quote("[a\n \"b\"]\n")]
+#[case::single_quote_over_a_blank_line("[a\n\n 'b']\n")]
+#[case::alias("[a\n *x]\n")]
+#[case::dash_over_a_blank_line("[a\n\n - b]\n")]
+#[case::pipe_over_a_blank_line("[a\n\n |b]\n")]
+#[case::question_mark("[a\n ? b]\n")]
+#[case::anchor_line_and_alias_line("[a\n &x b\n\n *y c]\n")]
+#[case::mapping_key_with_an_anchor("{a\n &x b: 1}\n")]
+#[case::mapping_key_over_three_lines("{a\n b\n &x c: d}\n")]
+#[case::mapping_key_without_a_value("{a\n b}\n")]
+#[case::mapping_key_continued_by_a_colon("{a\n :x}\n")]
+#[case::pair_key_with_a_double_quote("[a\n \"b\": 1]\n")]
+#[case::pair_key_with_an_alias("[a\n *x: 1]\n")]
+#[case::explicit_key_with_an_anchor("{? a\n &x b : c}\n")]
+#[case::in_a_block_mapping("x: [a\n  &x b]\n")]
+#[case::after_an_anchor("[&x a\n &y b]\n")]
+fn flow_plain_scalar_continued_by_a_token_start_keeps_its_data(#[case] input: &str) {
+    assert_data_kept_under_every_option_set(input);
+}
+
+#[test]
+fn flow_plain_scalar_continued_by_an_anchor_is_written_as_text() {
+    let output = format_default("[a\n &x b]\n");
+    let docs = load(&output).unwrap();
+    let Node::Sequence { items, .. } = &docs[0].root else {
+        panic!("expected a sequence: {output:?}");
+    };
+    assert_eq!(items.len(), 1, "{output:?}");
+    assert!(
+        matches!(&items[0], Node::Scalar { value, .. } if value == "a &x b"),
+        "{output:?}"
+    );
+    assert_eq!(items[0].anchor(), None, "{output:?}");
+}
+
+#[rstest]
 #[case::plain_item_after_a_comment("[a # c\n  b]\n")]
 #[case::plain_key_after_a_comment("{a # c\n b: 1}\n")]
 #[case::in_a_block_mapping("x: [a # c\n b]\n")]
 #[case::after_a_continuation("[a\n\n  b #c\n  d]\n")]
+#[case::before_an_anchor_line("[a # c\n  &x b]\n")]
 fn plain_scalar_after_a_comment_in_a_flow_collection_is_returned_unchanged(#[case] input: &str) {
     assert!(load(input).is_err());
     assert_eq!(format_default(input), input);
@@ -568,6 +608,7 @@ fn plain_scalar_after_a_comment_in_a_flow_collection_is_returned_unchanged(#[cas
 #[case::comment_before_a_comma("[a # c\n, b]\n")]
 #[case::comment_after_a_comma("[a, # c\n b]\n")]
 #[case::comment_after_a_continuation("[a\n\n b # c\n]\n")]
+#[case::comment_after_a_continuation_with_a_property("[a\n &x b # c\n]\n")]
 #[case::comment_before_the_colon_of_a_mapping_key("{a # c\n : 1}\n")]
 fn comment_in_a_flow_collection_is_kept_once(#[case] input: &str) {
     for (label, options) in option_sets() {

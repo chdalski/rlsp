@@ -231,3 +231,23 @@ fn check_tag_loc_invariant(node: &Node) {
         Node::Scalar { .. } | Node::Alias { .. } => {}
     }
 }
+
+// TL-11: a tag on a continuation line is text and keeps the position of the
+// scalar's own tag
+#[test]
+fn tl_11_tag_on_a_continuation_line_leaves_the_tag_loc_of_the_scalar() {
+    // "[!t a\n !u b]\n"
+    //  '!t' starts at byte 1
+    let docs = load("[!t a\n !u b]\n").unwrap();
+    let Node::Sequence { items, .. } = &docs[0].root else {
+        panic!("expected root Sequence");
+    };
+    assert_eq!(items.len(), 1);
+    let Node::Scalar { tag, value, .. } = &items[0] else {
+        panic!("expected Scalar");
+    };
+    assert_eq!(tag.as_deref(), Some("!t"));
+    assert_eq!(value, "a !u b");
+    let loc = items[0].tag_loc().expect("tag_loc of !t");
+    assert_eq!((loc.start, loc.end), (1, 3));
+}

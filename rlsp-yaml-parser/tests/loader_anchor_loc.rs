@@ -191,3 +191,19 @@ fn al_9_anchor_loc_invariant_holds_for_all_nodes_in_complex_document() {
             .expect("anchor_loc invariant must hold for all nodes");
     }
 }
+
+// AL-10: a property on a continuation line is text and keeps the position of the
+// scalar's own anchor
+#[test]
+fn al_10_anchor_on_a_continuation_line_leaves_the_anchor_loc_of_the_scalar() {
+    // "[&x a\n &y b]\n"
+    //  '&x' starts at byte 1
+    let docs = load("[&x a\n &y b]\n").unwrap();
+    let Node::Sequence { items, .. } = &docs[0].root else {
+        panic!("expected root Sequence");
+    };
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].anchor(), Some("x"));
+    let loc = items[0].anchor_loc().expect("anchor_loc of &x");
+    assert_eq!((loc.start, loc.end), (1, 3));
+}

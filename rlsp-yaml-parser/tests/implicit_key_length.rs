@@ -781,3 +781,42 @@ fn long_text_before_a_key_is_not_counted_into_it(#[case] template: &str) {
     let input = with_item(template);
     assert!(parses_clean(&input), "input: {template}");
 }
+
+// ===========================================================================
+// Group Q: A key that goes on over a line break
+// ===========================================================================
+// The line break and the text on the next line count into the key like any other
+// character, so the limit sits at the same place whatever the next line starts
+// with: a property, a quote, an alias, or an indicator.
+
+/// A key text of `total` characters: ten `a`, a line break, one space, `lead`,
+/// then `b` to fill up.
+fn continued_key(lead: &str, total: usize) -> String {
+    let filler = total - (10 + 2 + lead.chars().count());
+    format!("{}\n {lead}{}", "a".repeat(10), "b".repeat(filler))
+}
+
+#[rstest]
+#[case::flow_mapping("{KEY: v}")]
+#[case::flow_sequence("[KEY: v]")]
+fn continued_key_of_1024_characters_parses_clean(
+    #[values("", "&x ", "!t ", "*x ", "\"q\" ", "'q' ", "- ", "? ", "| ", "> ")] lead: &str,
+    #[case] template: &str,
+) {
+    let input = template.replace("KEY", &continued_key(lead, 1_024));
+    assert!(parses_clean(&input), "input: {input:?}");
+    assert!(load(&input).is_ok(), "input: {input:?}");
+}
+
+#[rstest]
+#[case::flow_mapping("{KEY: v}")]
+#[case::flow_sequence("[KEY: v]")]
+fn continued_key_of_1025_characters_is_an_error(
+    #[values("", "&x ", "!t ", "*x ", "\"q\" ", "'q' ", "- ", "? ", "| ", "> ")] lead: &str,
+    #[case] template: &str,
+) {
+    let input = template.replace("KEY", &continued_key(lead, 1_025));
+    let message = first_error_message(&input).expect("an error");
+    assert!(message.contains("1024"), "message: {message}");
+    assert!(load(&input).is_err(), "input: {input:?}");
+}

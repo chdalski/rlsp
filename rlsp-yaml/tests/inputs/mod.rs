@@ -209,6 +209,19 @@ pub const EXTRA_INPUTS: &[(&str, &str)] = &[
         "comments between the parts of a flow sequence pair",
         "[ ? # c1\n  !t # c2\n  : # c3\n  a # c4\n]\n",
     ),
+    (
+        "flow sequence item over several lines",
+        "[a\n  b\n  c, d]\n",
+    ),
+    (
+        "flow mapping keys over several lines",
+        "{a\n  b: 1, c\n  d: 2}\n",
+    ),
+    (
+        "flow sequence item continued by an anchor and an alias",
+        "[a\n  &x b\n\n  *y c]\n",
+    ),
+    ("flow mapping key continued by a quote", "{a\n  \"b\": 1}\n"),
 ];
 
 /// The scalar key of 1000 U+2028 characters: escaping it makes it longer than

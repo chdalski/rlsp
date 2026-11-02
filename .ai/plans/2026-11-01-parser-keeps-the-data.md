@@ -29,7 +29,7 @@ directives.
 - [x] Task 6: Flow sequences keep their text
 - [x] Task 7: The loader rejects a second root node
 - [x] Task 8: Pin that no text is lost
-- [ ] Task 9: A flow plain scalar reads its continuation lines as text
+- [x] Task 9: A flow plain scalar reads its continuation lines as text
 - [ ] Task 10: The formatter drops its workarounds for these misreads
 - [ ] Measure every `*.yml` and `*.yaml` file under `/workspace`,
       `/usr/local/cargo/registry`, and `~/.local/share/pnpm`: the number of files that
@@ -173,14 +173,14 @@ A continuation line of a plain scalar in a flow collection is read as a new toke
 it starts with a property, a quote, an alias, or an indicator, so the text lands in a
 different place or the input is rejected. Productions: [130], [134], [135].
 
-- [ ] These load with the events of libfyaml 0.9.6, one plain scalar each: `[a\n &x b]\n`,
+- [x] These load with the events of libfyaml 0.9.6, one plain scalar each: `[a\n &x b]\n`,
       `[a\n\n !t b]\n`, `[a\n "b"]\n`, `[a\n\n 'b']\n`, `[a\n *x]\n`, `[a\n\n - b]\n`,
       `[a\n\n |b]\n`, and `{a\n &x b: 1}\n`
-- [ ] `format_yaml` keeps their values, and a second format changes nothing
-- [ ] `libfyaml_events.rs` holds these inputs, and the sweep of Task 8 reports 0
-- [ ] `docs/conformance/` names the enforcement sites, and
+- [x] `format_yaml` keeps their values, and a second format changes nothing
+- [x] `libfyaml_events.rs` holds these inputs, and the sweep of Task 8 reports 0
+- [x] `docs/conformance/` names the enforcement sites, and
       `rlsp-yaml-parser/docs/feature-log.md` tells a reader which inputs load differently
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 10: The formatter drops its workarounds for these misreads
 

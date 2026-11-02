@@ -12,6 +12,45 @@ with existing infrastructure.
 
 ---
 
+### A Line of a Flow Plain Scalar May Start With a Property, a Quote, an Alias or an Indicator [completed]
+
+**Description:** A line that continues a plain scalar in a flow collection is text
+of the scalar, whatever it starts with. `[a` followed by ` &x b]` loads the one
+scalar `a &x b` (before, `a b` and an empty scalar with the anchor `x`, so the
+text `b` sat on the first scalar and the anchor on a node of its own), `[a`, a
+blank line, ` !t b]` the scalar `a\n!t b`, `[a` followed by ` "b"]` the scalar
+`a "b"` (before, two scalars), `[a` followed by ` *x]` the scalar `a *x` (before,
+the scalar `a` and an alias), and `[a`, a blank line, ` - b]` or ` |b]` the
+scalar `a\n- b` or `a\n|b` (before, an error); `?`, `>`, a lone `!`, `&` or `*`
+and a `-` or `?` before the end of the line or a `,` read the same way. In a key,
+`{a` followed by ` &x b: 1}` is the mapping with the key `a &x b` (before, the
+key `a b` and the anchor `x` on the value), and so is `[a` followed by
+` "b": 1]` for the key of a single pair; a flow mapping key that goes on over a
+line and ends at `}` (`{a` followed by ` b}`) now has an empty value, as before a
+`,`, and a key may go on over a third line (`{a`, ` b`, ` c: d}` is the key
+`a b c`; it reported an error before). The properties of such a line are no properties: `[&x a` followed by
+` &y b]` is the scalar `a &y b` with the anchor `x` only. A line that starts with
+`:` and a character that is no separator belongs to the text of a flow mapping
+key too (`{a` followed by ` :x}` is the key `a :x` with an empty value, where it
+was the entry `a: x`). A flow indicator (`,`, `[`, `]`, `{`, `}`) and a comment
+still end the scalar, and a `: ` at the start of the line is the `:` of the entry.
+A quote or an alias at the start of the line after the value of a flow mapping
+entry (`{a: b` followed by `"c": d}`) reports "missing comma in flow mapping"
+where it loaded the entries `a: b` and `c: d`. `format_yaml` keeps the text of
+every such input, and a second format changes nothing.
+**Complexity:** Low
+**Comment:** YAML 1.2.2 [130] `ns-plain-char` (any `ns-char` that is no flow
+indicator, so the indicators `-`, `?`, `:`, `|`, `>`, `&`, `*`, `!`, `'`, `"`
+and `%` are text on a continuation line), [134] `s-ns-plain-next-line` and [135]
+`ns-plain-multi-line`. libfyaml 0.9.6 reads these inputs as above. A value in a
+flow mapping still does not continue over lines (`{k: v` followed by ` w}` and
+`{a: b` followed by ` &x c}` report an error, libfyaml loads `b w` and `b &x c`):
+that is open on `.ai/backlog.md`. Inputs that fed this entry are in
+`rlsp-yaml-parser/tests/conformance/libfyaml_events.rs`.
+**Tier:** 1
+
+---
+
 ### Properties Keep Their Node [completed]
 
 **Description:** A line of properties and a key at the column of a `?` no longer

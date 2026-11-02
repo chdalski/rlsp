@@ -17,6 +17,11 @@
 // the behavior it had before (the parser loads it, libfyaml reports an error;
 // open on `.ai/backlog.md`).
 
+#![expect(
+    clippy::literal_string_with_formatting_args,
+    reason = "a flow mapping in an input looks like a format argument"
+)]
+
 use std::fmt::Write as _;
 
 use rlsp_yaml_parser::{CollectionStyle, Event, EventMeta, ScalarStyle, load, parse_events};
@@ -363,6 +368,387 @@ fn render_events_prints_the_notation_of_fy_tool(#[case] input: &str, #[case] exp
     "!p1\n&q1 k: v\n",
     "+STR\n+DOC\n+MAP <!p1>\n=VAL &q1 :k\n=VAL :v\n-MAP\n-DOC\n-STR\n"
 )]
+// ---- Task 9 ------------------------------------------------------
+#[case::flow_plain_continued_by_an_anchor(
+    "[a\n &x b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a &x b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_a_tag_over_a_blank_line(
+    "[a\n\n !t b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a\\n!t b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_a_double_quote(
+    "[a\n \"b\"]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a \"b\"\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_a_single_quote_over_a_blank_line(
+    "[a\n\n 'b']\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a\\n'b'\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_an_alias(
+    "[a\n *x]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a *x\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_a_dash_over_a_blank_line(
+    "[a\n\n - b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a\\n- b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_a_dash(
+    "[a\n - b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a - b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_a_pipe_over_a_blank_line(
+    "[a\n\n |b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a\\n|b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_a_fold_indicator(
+    "[a\n >x]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a >x\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_a_question_mark(
+    "[a\n ? b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a ? b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_a_lone_bang(
+    "[a\n !]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a !\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_a_lone_ampersand(
+    "[a\n &]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a &\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_a_lone_star(
+    "[a\n *]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a *\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_a_pipe_at_line_end(
+    "[a\n |\n b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a | b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_a_fold_indicator_at_line_end(
+    "[a\n >\n b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a > b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_a_dash_at_line_end(
+    "[a\n -\n b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a - b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_a_dash_before_a_comma(
+    "[a\n -, b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a -\n=VAL :b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_a_question_mark_before_a_comma(
+    "[a\n ?, b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a ?\n=VAL :b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_an_anchor_before_a_comma(
+    "[a\n &x, b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a &x\n=VAL :b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_an_alias_before_a_comma(
+    "[a\n *x, b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a *x\n=VAL :b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_an_undefined_tag_handle(
+    "[a\n !t!u b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a !t!u b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_a_broken_verbatim_tag(
+    "[a\n !<tag b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a !<tag b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_a_verbatim_tag(
+    "[a\n !<tag:x> b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a !<tag:x> b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_an_anchor_name_with_a_colon(
+    "[a\n &x:b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a &x:b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_an_alias_name_with_a_colon(
+    "[a\n *x:b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a *x:b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_a_quote_and_a_colon(
+    "[a\n \"b\":c]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a \"b\":c\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_an_empty_quote_and_text(
+    "[a\n \"\" b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a \"\" b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_an_alias_and_text(
+    "[a\n *x b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a *x b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_an_escaped_single_quote(
+    "[a\n 'it''s']\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a 'it''s'\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_an_unterminated_double_quote(
+    "[a\n \"b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a \"b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_an_unterminated_single_quote(
+    "[a\n 'b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a 'b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_a_quote_holding_a_comma(
+    "[a\n \"b,c\"]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a \"b\n=VAL :c\"\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_an_anchor_and_trailing_space(
+    "[a\n &x b ]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a &x b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_a_quote_and_trailing_space(
+    "[a\n \"b\" ]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a \"b\"\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_an_anchor_in_multibyte_text(
+    "[é\n &x ü]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :é &x ü\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_two_anchor_lines(
+    "[a\n &x b\n &y c]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a &x b &y c\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_an_anchor_line_and_an_alias_line_over_a_blank_line(
+    "[a\n &x b\n\n *y c]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a &x b\\n*y c\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_an_alias_line_then_text(
+    "[a\n *x\n c]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a *x c\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_an_anchor_line_then_text(
+    "[a\n &x\n b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a &x b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_an_anchor_over_two_blank_lines(
+    "[a\n\n\n &x b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a\\n\\n&x b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_an_anchor_over_a_whitespace_line(
+    "[a\n \n\n &x b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a\\n\\n&x b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_an_anchor_after_a_tab(
+    "[a\n  \t &x b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a &x b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_continued_by_an_anchor_then_the_closing_bracket_line(
+    "[a\n &x b\n]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a &x b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_with_an_anchor_continued_by_an_anchor(
+    "[&x a\n &y b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL &x :a &y b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_with_a_tag_continued_by_a_tag(
+    "[!t a\n !u b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL <!t> :a !u b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_entry_after_a_comma_keeps_its_anchor(
+    "[a, &x b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a\n=VAL &x :b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_entry_on_the_line_after_a_comma_keeps_its_anchor(
+    "[a,\n &x b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a\n=VAL &x :b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_entry_after_a_comma_and_a_blank_line_keeps_its_anchor(
+    "[a,\n\n &x b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a\n=VAL &x :b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_entry_after_a_comma_line_keeps_its_anchor(
+    "[a\n, &x b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a\n=VAL &x :b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_entry_after_a_comma_line_keeps_its_quote(
+    "[a\n, \"b\"]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a\n=VAL \"b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_first_item_on_its_own_line_keeps_its_anchor(
+    "[\n &x b]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL &x :b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_first_item_on_its_own_line_keeps_its_quote(
+    "[\n \"b\"]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL \"b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_first_item_on_its_own_line_keeps_its_alias(
+    "[\n *x]\n",
+    "+STR\n+DOC\n+SEQ []\n=ALI *x\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_anchor_line_then_a_quote(
+    "[&x\n \"b\"]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL &x \"b\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_continuation_then_a_comma(
+    "[a\n &x b, c]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a &x b\n=VAL :c\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_continuation_then_a_comma_and_an_anchored_entry(
+    "[a\n &x b, &y c]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a &x b\n=VAL &y :c\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_continuation_then_a_comma_line_and_an_anchored_entry(
+    "[a\n &x b,\n &y c]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a &x b\n=VAL &y :c\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_plain_then_a_comma_and_an_anchored_entry(
+    "[a\n b, &x c]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a b\n=VAL &x :c\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_second_entry_continued_by_an_anchor(
+    "[a, b\n &x c, d]\n",
+    "+STR\n+DOC\n+SEQ []\n=VAL :a\n=VAL :b &x c\n=VAL :d\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_pair_value_on_the_next_line_keeps_its_anchor(
+    "[a:\n &x b]\n",
+    "+STR\n+DOC\n+SEQ []\n+MAP {}\n=VAL :a\n=VAL &x :b\n-MAP\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_mapping_value_on_the_next_line_keeps_its_anchor(
+    "{a:\n &x b}\n",
+    "+STR\n+DOC\n+MAP {}\n=VAL :a\n=VAL &x :b\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::flow_mapping_colon_line_then_an_anchored_value(
+    "{a\n : &x b}\n",
+    "+STR\n+DOC\n+MAP {}\n=VAL :a\n=VAL &x :b\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::flow_mapping_entry_after_a_comma_line_keeps_its_anchor(
+    "{a: b,\n &x c: d}\n",
+    "+STR\n+DOC\n+MAP {}\n=VAL :a\n=VAL :b\n=VAL &x :c\n=VAL :d\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::flow_mapping_key_continued_by_an_anchor(
+    "{a\n &x b: 1}\n",
+    "+STR\n+DOC\n+MAP {}\n=VAL :a &x b\n=VAL :1\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::flow_mapping_key_continued_by_an_anchor_before_a_spaced_colon(
+    "{a\n &x b : v}\n",
+    "+STR\n+DOC\n+MAP {}\n=VAL :a &x b\n=VAL :v\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::flow_pair_key_continued_by_an_anchor(
+    "[a\n &x b: 1]\n",
+    "+STR\n+DOC\n+SEQ []\n+MAP {}\n=VAL :a &x b\n=VAL :1\n-MAP\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_pair_key_continued_by_a_double_quote(
+    "[a\n \"b\": 1]\n",
+    "+STR\n+DOC\n+SEQ []\n+MAP {}\n=VAL :a \"b\"\n=VAL :1\n-MAP\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_mapping_key_continued_by_a_double_quote(
+    "{a\n \"b\": 1}\n",
+    "+STR\n+DOC\n+MAP {}\n=VAL :a \"b\"\n=VAL :1\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::flow_mapping_key_continued_by_an_alias(
+    "{a\n *x: 1}\n",
+    "+STR\n+DOC\n+MAP {}\n=VAL :a *x\n=VAL :1\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::flow_pair_key_continued_by_an_alias(
+    "[a\n *x: 1]\n",
+    "+STR\n+DOC\n+SEQ []\n+MAP {}\n=VAL :a *x\n=VAL :1\n-MAP\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_mapping_key_continued_by_a_question_mark(
+    "{a\n ? b: 1}\n",
+    "+STR\n+DOC\n+MAP {}\n=VAL :a ? b\n=VAL :1\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::flow_mapping_key_continued_by_a_quote_and_text(
+    "{a\n \"b\" c: 1}\n",
+    "+STR\n+DOC\n+MAP {}\n=VAL :a \"b\" c\n=VAL :1\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::flow_pair_key_continued_by_an_anchor_with_a_continued_value(
+    "[a\n &x b: 1\n c]\n",
+    "+STR\n+DOC\n+SEQ []\n+MAP {}\n=VAL :a &x b\n=VAL :1 c\n-MAP\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_pair_value_continued_by_an_anchor(
+    "[a: b\n &x c]\n",
+    "+STR\n+DOC\n+SEQ []\n+MAP {}\n=VAL :a\n=VAL :b &x c\n-MAP\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_pair_key_continued_by_an_anchor_then_an_entry(
+    "[a\n &x b: 1, c]\n",
+    "+STR\n+DOC\n+SEQ []\n+MAP {}\n=VAL :a &x b\n=VAL :1\n-MAP\n=VAL :c\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_mapping_key_continued_by_an_anchor_then_a_key_continued_by_a_quote(
+    "{a\n &x b: 1, c\n \"d\": 2}\n",
+    "+STR\n+DOC\n+MAP {}\n=VAL :a &x b\n=VAL :1\n=VAL :c \"d\"\n=VAL :2\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::flow_pair_key_continued_by_a_quote_holding_a_colon(
+    "[a\n \"b: c\"]\n",
+    "+STR\n+DOC\n+SEQ []\n+MAP {}\n=VAL :a \"b\n=VAL :c\"\n-MAP\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_mapping_key_continued_by_an_anchor_without_a_value(
+    "{a\n &x b}\n",
+    "+STR\n+DOC\n+MAP {}\n=VAL :a &x b\n=VAL :\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::flow_mapping_key_continued_without_a_value(
+    "{a\n b}\n",
+    "+STR\n+DOC\n+MAP {}\n=VAL :a b\n=VAL :\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::flow_mapping_key_continued_by_a_colon_and_text(
+    "{a\n :x}\n",
+    "+STR\n+DOC\n+MAP {}\n=VAL :a :x\n=VAL :\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::flow_mapping_key_continued_by_a_colon_and_text_before_a_comma(
+    "{a\n :x, e: f}\n",
+    "+STR\n+DOC\n+MAP {}\n=VAL :a :x\n=VAL :\n=VAL :e\n=VAL :f\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::flow_mapping_explicit_key_continued_by_an_anchor(
+    "{? a\n &x b : c}\n",
+    "+STR\n+DOC\n+MAP {}\n=VAL :a &x b\n=VAL :c\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::flow_sequence_explicit_key_continued_by_an_anchor(
+    "[? a\n &x b]\n",
+    "+STR\n+DOC\n+SEQ []\n+MAP {}\n=VAL :a &x b\n=VAL :\n-MAP\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_pair_key_continued_by_an_anchor_line_and_a_colon(
+    "[a\n &zz : v\n b]\n",
+    "+STR\n+DOC\n+SEQ []\n+MAP {}\n=VAL :a &zz\n=VAL :v b\n-MAP\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_pair_key_continued_by_a_tag_line_and_a_colon(
+    "[a\n !zz : v\n b]\n",
+    "+STR\n+DOC\n+SEQ []\n+MAP {}\n=VAL :a !zz\n=VAL :v b\n-MAP\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_nested_sequence_continued_by_an_anchor(
+    "[[a\n &x b]]\n",
+    "+STR\n+DOC\n+SEQ []\n+SEQ []\n=VAL :a &x b\n-SEQ\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::flow_mapping_value_sequence_continued_by_an_anchor(
+    "{k: [b\n &x c]}\n",
+    "+STR\n+DOC\n+MAP {}\n=VAL :k\n+SEQ []\n=VAL :b &x c\n-SEQ\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::block_sequence_flow_item_continued_by_an_anchor(
+    "- [a\n  &x b]\n- c\n",
+    "+STR\n+DOC\n+SEQ\n+SEQ []\n=VAL :a &x b\n-SEQ\n=VAL :c\n-SEQ\n-DOC\n-STR\n"
+)]
+#[case::block_mapping_flow_value_continued_by_an_anchor(
+    "a: [b\n  &x c]\nd: 1\n",
+    "+STR\n+DOC\n+MAP\n=VAL :a\n+SEQ []\n=VAL :b &x c\n-SEQ\n=VAL :d\n=VAL :1\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::flow_mapping_key_over_three_lines(
+    "{a\n b\n c: d}\n",
+    "+STR\n+DOC\n+MAP {}\n=VAL :a b c\n=VAL :d\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::flow_mapping_key_over_three_lines_with_an_anchor(
+    "{a\n b\n &x c: d}\n",
+    "+STR\n+DOC\n+MAP {}\n=VAL :a b &x c\n=VAL :d\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::flow_mapping_key_over_three_lines_without_a_value(
+    "{a\n b\n c}\n",
+    "+STR\n+DOC\n+MAP {}\n=VAL :a b c\n=VAL :\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::flow_mapping_key_over_three_lines_ending_in_a_quote(
+    "{a\n b\n \"c\": d}\n",
+    "+STR\n+DOC\n+MAP {}\n=VAL :a b \"c\"\n=VAL :d\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::flow_mapping_key_over_three_lines_ending_in_a_colon_and_text(
+    "{a\n b\n :c}\n",
+    "+STR\n+DOC\n+MAP {}\n=VAL :a b :c\n=VAL :\n-MAP\n-DOC\n-STR\n"
+)]
+#[case::flow_mapping_keys_over_three_lines_each(
+    "{a\n b\n c: d, e\n f\n g: h}\n",
+    "+STR\n+DOC\n+MAP {}\n=VAL :a b c\n=VAL :d\n=VAL :e f g\n=VAL :h\n-MAP\n-DOC\n-STR\n"
+)]
 fn parse_events_matches_the_events_of_libfyaml(#[case] input: &str, #[case] expected: &str) {
     assert_eq!(
         render_events(input).as_deref(),
@@ -408,6 +794,26 @@ fn parse_events_matches_the_events_of_libfyaml(#[case] input: &str, #[case] expe
 #[case::anchored_value_then_anchored_flow_sequence("a:\n  &p1\n  &q1 [y]\n")]
 #[case::anchored_item_then_anchored_flow_sequence("- &p1\n  &q1 [y]\n")]
 #[case::anchored_explicit_key_then_anchored_flow_sequence("? &p1\n  &q1 [y]\n")]
+// ---- Task 9 ------------------------------------------------------
+#[case::flow_plain_comment_then_an_anchor_line("[a\n # c\n &x b]\n")]
+#[case::flow_plain_comment_then_an_anchor("[a #c\n &x b]\n")]
+#[case::flow_plain_anchor_line_comment_then_text("[a\n &x b # c\n d]\n")]
+#[case::flow_plain_then_an_anchored_sequence("[a\n &x [b]]\n")]
+#[case::flow_plain_then_an_aliased_sequence("[a\n *x [b]]\n")]
+#[case::flow_plain_then_an_anchored_mapping("[a\n &x {b}]\n")]
+#[case::flow_plain_then_an_anchor_line_and_a_sequence("[a\n &x\n[b]]\n")]
+#[case::flow_quote_then_an_anchored_line("[\"a\"\n &x b]\n")]
+#[case::flow_alias_then_a_quoted_line("[*x\n \"b\"]\n")]
+#[case::flow_sequence_then_a_quoted_line("[[a]\n \"b\"]\n")]
+#[case::flow_nested_continued_sequence_then_an_anchored_line("[[a\n b]\n &x c]\n")]
+#[case::flow_mapping_then_an_anchored_line("[{a: b}\n &x c]\n")]
+#[case::flow_mapping_quoted_value_then_an_anchored_line("{a: \"b\"\n &x c}\n")]
+#[case::flow_mapping_value_then_an_anchored_key("{a: b\n &x c: d}\n")]
+#[case::flow_mapping_value_then_a_quoted_key("{a: b\n\"c\": d}\n")]
+#[case::flow_mapping_value_then_a_single_quoted_key("{a: b\n'c': d}\n")]
+#[case::flow_mapping_value_then_an_alias_key("{a: b\n*x : d}\n")]
+#[case::flow_mapping_key_anchor_line_colon_then_a_second_key("{a\n &zz : v\n b: 1}\n")]
+#[case::flow_plain_then_a_colon_and_a_space("[a\n : b]\n")]
 fn parse_events_reports_an_error_where_libfyaml_does(#[case] input: &str) {
     let results: Vec<_> = parse_events(input).collect();
     let first_error = results.iter().position(Result::is_err);

@@ -215,33 +215,26 @@ impl<'input> EventIter<'input> {
             explicit: bool,
         }
 
-        /// The error for a collection, property or `?` that starts a new entry
-        /// right after a complete one in `frame`, with no `,` between (YAML 1.2.2
-        /// [138] `ns-s-flow-seq-entries`, [141] `ns-s-flow-map-entries`).  After
-        /// a plain scalar a property or `?` may belong to its next line, so
-        /// `continues_plain` says whether the token could continue it.
-        const fn missing_comma_message(
-            frame: Option<&FlowFrame>,
-            continues_plain: bool,
-        ) -> Option<&'static str> {
+        /// The error for a collection, property, quote, alias or `?` that starts a
+        /// new entry right after a complete one in `frame`, with no `,` between
+        /// (YAML 1.2.2 [138] `ns-s-flow-seq-entries`, [141]
+        /// `ns-s-flow-map-entries`); `{ a: b { } }` has none.  A line that goes on
+        /// with the plain scalar before it never gets here (`[a\n &x b]`): the
+        /// branches of those tokens stand back for it.  A line after the value of a
+        /// flow mapping entry is no continuation, so `{a: b\n &x c}` needs its `,`.
+        const fn missing_comma_message(frame: Option<&FlowFrame>) -> Option<&'static str> {
             match frame {
                 // A key without its `:` counts as a complete entry too (`{ "q" a }`).
                 Some(FlowFrame::Mapping {
                     has_value: true,
                     after_colon: false,
-                    last_was_plain,
                     ..
-                }) if !(*last_was_plain && continues_plain) => {
-                    Some("missing comma in flow mapping")
-                }
+                }) => Some("missing comma in flow mapping"),
                 Some(FlowFrame::Sequence {
                     has_value: true,
                     after_colon: false,
-                    last_was_plain,
                     ..
-                }) if !(*last_was_plain && continues_plain) => {
-                    Some("missing comma in flow sequence")
-                }
+                }) => Some("missing comma in flow sequence"),
                 _ => None,
             }
         }
@@ -582,7 +575,7 @@ impl<'input> EventIter<'input> {
                 // entry before it (YAML 1.2.2 [138] `ns-s-flow-seq-entries`, [141]
                 // `ns-s-flow-map-entries`); `{ a: b { } }` has none.  The same
                 // check for a plain scalar is below.
-                if let Some(message) = missing_comma_message(flow_stack.last(), false) {
+                if let Some(message) = missing_comma_message(flow_stack.last()) {
                     self.state = IterState::Done;
                     return StepResult::Yield(Err(Error::syntax(open_pos, message.into())));
                 }
@@ -731,6 +724,7 @@ impl<'input> EventIter<'input> {
                         '}',
                         FlowFrame::Mapping {
                             phase,
+                            key_continuation,
                             explicit_key_pending,
                             ..
                         },
@@ -744,6 +738,10 @@ impl<'input> EventIter<'input> {
                             events.push(
                                 pending_node.unwrap_or_else(|| (empty_scalar_event(), close_span)),
                             );
+                            events.push((empty_scalar_event(), close_span));
+                        } else if phase == FlowMappingPhase::Key && key_continuation {
+                            // A key that went on over a line break has no `:` yet, so
+                            // its value is empty, as before a `,`.
                             events.push((empty_scalar_event(), close_span));
                         } else if phase == FlowMappingPhase::Value {
                             // If mapping is in Value phase (key emitted, no value yet),
@@ -1147,9 +1145,59 @@ impl<'input> EventIter<'input> {
             }
 
             // ----------------------------------------------------------------
+            // Does `ch` continue the plain scalar before it?
+            //
+            // A plain scalar goes on over a line break with any `ns-plain-char`
+            // ([134] `s-ns-plain-next-line`, [130] `ns-plain-char`), so a line
+            // that starts with a property, a quote, an alias, or an indicator
+            // like `-`, `?`, `|`, `>` is text of that scalar, not a new token
+            // (`[a\n &x b]` is the one scalar `a &x b`).  The branches for those
+            // characters below stand back for such a line; the continuation
+            // block reads it.  Only a flow indicator (`,`, `[`, `]`, `{`, `}`),
+            // a comment, and a `:` before a separator end the scalar there.
+            //
+            // For a flow mapping, a scalar continues only as a key: the phase
+            // moved on to Value when it was emitted, or went back to Key when a
+            // line already continued it (`key_continuation`).  A value scalar
+            // ends at its line, and the next entry needs its `,` — the reading
+            // `{k: v\n w}` is open on `.ai/backlog.md`.
+            // ----------------------------------------------------------------
+            let is_ns_plain_char_continuation = matches!(
+                flow_stack.last(),
+                Some(
+                    FlowFrame::Mapping {
+                        last_was_plain: true,
+                        phase: FlowMappingPhase::Value,
+                        ..
+                    } | FlowFrame::Mapping {
+                        last_was_plain: true,
+                        key_continuation: true,
+                        ..
+                    } | FlowFrame::Sequence {
+                        last_was_plain: true,
+                        ..
+                    }
+                )
+            ) && !matches!(
+                ch,
+                ',' | '[' | ']' | '{' | '}' | '#'
+            ) && (ch != ':' || {
+                // `:` is a valid continuation char only when NOT followed by
+                // a separator (space, tab, flow indicator, or end-of-line).
+                cur_content[pos_in_line + 1..]
+                    .chars()
+                    .next()
+                    .is_some_and(|nc| !matches!(nc, ' ' | '\t' | ',' | '[' | ']' | '{' | '}'))
+            });
+            let line_starts_with_continuation = is_ns_plain_char_continuation
+                && cur_content[..pos_in_line]
+                    .trim_matches([' ', '\t'])
+                    .is_empty();
+
+            // ----------------------------------------------------------------
             // Block scalar indicators forbidden in flow context
             // ----------------------------------------------------------------
-            if ch == '|' || ch == '>' {
+            if (ch == '|' || ch == '>') && !line_starts_with_continuation {
                 let err_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
                 self.state = IterState::Done;
                 return StepResult::Yield(Err(Error::syntax(
@@ -1169,7 +1217,7 @@ impl<'input> EventIter<'input> {
             // non-separator character is a valid plain-scalar start (e.g. `-x`
             // or `-1` are legal plain scalars in flow context).
             // ----------------------------------------------------------------
-            if ch == '-' {
+            if ch == '-' && !line_starts_with_continuation {
                 let after = &cur_content[pos_in_line + 1..];
                 let next_c = after.chars().next();
                 if next_c.is_none_or(|c| matches!(c, ' ' | '\t')) {
@@ -1189,12 +1237,12 @@ impl<'input> EventIter<'input> {
             // starting exactly at the quote character, call the method, then
             // re-sync `cur_content` / `cur_base_pos` from the buffer.
             // ----------------------------------------------------------------
-            if ch == '\'' || ch == '"' {
+            if (ch == '\'' || ch == '"') && !line_starts_with_continuation {
                 // `remaining` borrows from `cur_content` which borrows from `'input`.
                 // We capture it before touching the lexer buffer.
                 let remaining: &'input str = &cur_content[pos_in_line..];
                 let cur_abs_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
-                if let Some(message) = missing_comma_message(flow_stack.last(), true) {
+                if let Some(message) = missing_comma_message(flow_stack.last()) {
                     self.state = IterState::Done;
                     return StepResult::Yield(Err(Error::syntax(cur_abs_pos, message.into())));
                 }
@@ -1363,7 +1411,7 @@ impl<'input> EventIter<'input> {
             // ----------------------------------------------------------------
             // Explicit key indicator `?` in flow mappings and sequences
             // ----------------------------------------------------------------
-            if ch == '?' {
+            if ch == '?' && !line_starts_with_continuation {
                 let next_ch = cur_content[pos_in_line + 1..].chars().next();
                 if next_ch.is_none_or(|c| matches!(c, ' ' | '\t' | '\n' | '\r')) {
                     // A `?` starts an entry, so it needs the `,` after a complete one
@@ -1398,7 +1446,7 @@ impl<'input> EventIter<'input> {
                     } else if second_in_mapping_entry {
                         Some("missing comma in flow mapping")
                     } else {
-                        missing_comma_message(flow_stack.last(), true)
+                        missing_comma_message(flow_stack.last())
                     };
                     if let Some(message) = missing_comma {
                         self.state = IterState::Done;
@@ -1455,7 +1503,8 @@ impl<'input> EventIter<'input> {
                 //   (c) in a flow mapping in Value phase — the key was already
                 //       emitted, so `:` can be adjacent to the value (YAML 1.2
                 //       §7.4.2 `c-ns-flow-map-separator` allows non-whitespace after
-                //       the separator colon)
+                //       the separator colon) — but not after a plain key, whose
+                //       next line starts with `:x` as text ([130] `ns-plain-char`)
                 let is_standard_sep =
                     next_ch.is_none_or(|c| matches!(c, ' ' | '\t' | ',' | ']' | '}' | '\n' | '\r'));
                 let is_adjacent_json_sep = !is_standard_sep
@@ -1473,6 +1522,7 @@ impl<'input> EventIter<'input> {
                         Some(FlowFrame::Mapping {
                             phase: FlowMappingPhase::Value,
                             after_colon: false,
+                            last_was_plain: false,
                             ..
                         })
                     );
@@ -1688,9 +1738,9 @@ impl<'input> EventIter<'input> {
             // ----------------------------------------------------------------
             // Tag `!tag`, `!!tag`, `!<uri>`, or `!` in flow context
             // ----------------------------------------------------------------
-            if ch == '!' {
+            if ch == '!' && !line_starts_with_continuation {
                 let bang_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
-                if let Some(message) = missing_comma_message(flow_stack.last(), true) {
+                if let Some(message) = missing_comma_message(flow_stack.last()) {
                     self.state = IterState::Done;
                     return StepResult::Yield(Err(Error::syntax(bang_pos, message.into())));
                 }
@@ -1768,10 +1818,10 @@ impl<'input> EventIter<'input> {
             // ----------------------------------------------------------------
             // Anchor `&name` in flow context
             // ----------------------------------------------------------------
-            if ch == '&' {
+            if ch == '&' && !line_starts_with_continuation {
                 let after_amp = &cur_content[pos_in_line + 1..];
                 let amp_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
-                if let Some(message) = missing_comma_message(flow_stack.last(), true) {
+                if let Some(message) = missing_comma_message(flow_stack.last()) {
                     self.state = IterState::Done;
                     return StepResult::Yield(Err(Error::syntax(amp_pos, message.into())));
                 }
@@ -1810,10 +1860,10 @@ impl<'input> EventIter<'input> {
             // ----------------------------------------------------------------
             // Alias `*name` in flow context
             // ----------------------------------------------------------------
-            if ch == '*' {
+            if ch == '*' && !line_starts_with_continuation {
                 let after_star = &cur_content[pos_in_line + 1..];
                 let star_pos = abs_pos(cur_base_pos, cur_content, pos_in_line);
-                if let Some(message) = missing_comma_message(flow_stack.last(), true) {
+                if let Some(message) = missing_comma_message(flow_stack.last()) {
                     self.state = IterState::Done;
                     return StepResult::Yield(Err(Error::syntax(star_pos, message.into())));
                 }
@@ -1906,42 +1956,6 @@ impl<'input> EventIter<'input> {
             // `#` after whitespace — a comment start, not a continuation char.
             // ----------------------------------------------------------------
             {
-                // For flow MAPPINGS: a plain scalar may continue a key only when
-                // the phase is currently Value — meaning the previous scalar was
-                // a KEY (Key→Value phase advance was done when emitting it).  A
-                // VALUE scalar (phase Value→Key) must NOT continue: the next line
-                // is a new key that requires a preceding comma.
-                // For flow SEQUENCES: `last_was_plain` alone is enough (single-pair
-                // implicit mapping keys can span lines, and regular sequence items
-                // can also continue, though commas terminate them).
-                let frame_last_was_plain = matches!(
-                    flow_stack.last(),
-                    Some(
-                        FlowFrame::Mapping {
-                            last_was_plain: true,
-                            phase: FlowMappingPhase::Value,
-                            ..
-                        } | FlowFrame::Sequence {
-                            last_was_plain: true,
-                            ..
-                        }
-                    )
-                );
-                // `ns-plain-char` check: ch must not be a flow terminator, `:` (alone),
-                // or `#` (comment start after whitespace, which is the only `#` we can
-                // see here since whitespace was consumed).
-                let is_ns_plain_char_continuation = frame_last_was_plain
-                    && !matches!(ch, ',' | '[' | ']' | '{' | '}' | '#')
-                    && (ch != ':' || {
-                        let after = &cur_content[pos_in_line + 1..];
-                        let next_c = after.chars().next();
-                        // `:` is a valid continuation char only when NOT followed by
-                        // a separator (space, tab, flow indicator, or end-of-line).
-                        next_c.is_some_and(|nc| {
-                            !matches!(nc, ' ' | '\t' | ',' | '[' | ']' | '{' | '}')
-                        })
-                    });
-
                 if is_ns_plain_char_continuation {
                     let slice = &cur_content[pos_in_line..];
                     let scanned = scan_plain_line_flow(slice);

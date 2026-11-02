@@ -8,6 +8,7 @@
 #![expect(missing_docs, reason = "test code")]
 
 use rlsp_yaml_parser::{MAX_SCALAR_LEN, load, parse_events};
+use rstest::rstest;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -190,4 +191,31 @@ fn flow_plain_blank_lines_over_limit_are_an_error() {
 fn flow_plain_many_short_continuation_lines_over_limit_are_an_error() {
     let input = format!("[a{}]\n", "\n b".repeat(MAX_SCALAR_LEN / 2));
     assert!(has_parse_error(&input));
+}
+
+#[rstest]
+#[case::anchor("&")]
+#[case::tag("!")]
+#[case::alias("*")]
+#[case::double_quote("\"")]
+#[case::single_quote("'")]
+#[case::pipe("|")]
+#[case::fold(">")]
+#[case::dash("-")]
+#[case::question_mark("?")]
+fn flow_plain_continuation_starting_with_an_indicator_stops_at_the_limit(#[case] lead: &str) {
+    // "a" + " " + `lead` + (MAX_SCALAR_LEN - 3) × 'b' is exactly MAX_SCALAR_LEN bytes.
+    let at_limit = format!("[a\n {lead}{}]\n", "b".repeat(MAX_SCALAR_LEN - 3));
+    assert!(parses_clean(&at_limit));
+    let over_limit = format!("[a\n {lead}{}]\n", "b".repeat(MAX_SCALAR_LEN - 2));
+    let msg = first_error_message(&over_limit).unwrap();
+    assert!(msg.contains("maximum allowed length"), "{msg}");
+    assert!(load(&over_limit).is_err());
+}
+
+#[test]
+fn flow_plain_many_short_property_lines_over_limit_are_an_error() {
+    let input = format!("[a{}]\n", "\n &".repeat(MAX_SCALAR_LEN / 2));
+    let msg = first_error_message(&input).unwrap();
+    assert!(msg.contains("maximum allowed length"), "{msg}");
 }

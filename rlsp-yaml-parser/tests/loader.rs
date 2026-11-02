@@ -2361,3 +2361,80 @@ fn a_second_root_node_is_a_syntax_error(#[case] input: &str) {
 fn one_node_per_document_still_loads(#[case] input: &str) {
     assert!(load(input).is_ok(), "{input:?}");
 }
+
+/// A line of a flow plain scalar that starts with a property, a quote, or an
+/// alias is text of the scalar: the AST holds one plain scalar without
+/// properties.
+#[rstest]
+#[case::anchor("[a\n &x b]\n", "a &x b")]
+#[case::tag("[a\n !t b]\n", "a !t b")]
+#[case::alias("[a\n *x]\n", "a *x")]
+#[case::double_quote("[a\n \"b\"]\n", "a \"b\"")]
+#[case::single_quote("[a\n 'b']\n", "a 'b'")]
+#[case::dash_over_a_blank_line("[a\n\n - b]\n", "a\n- b")]
+#[case::pipe_over_a_blank_line("[a\n\n |b]\n", "a\n|b")]
+fn flow_plain_scalar_continued_by_a_token_start_is_one_plain_scalar(
+    #[case] input: &str,
+    #[case] expected: &str,
+) {
+    let Node::Sequence { items, .. } = load_one(input) else {
+        panic!("expected a sequence for {input:?}");
+    };
+    assert_eq!(items.len(), 1, "{input:?}");
+    assert!(
+        matches!(
+            &items[0],
+            Node::Scalar { value, style: ScalarStyle::Plain, .. } if value == expected
+        ),
+        "{input:?}: {:?}",
+        items[0]
+    );
+    assert_eq!(items[0].anchor(), None, "{input:?}");
+}
+
+#[test]
+fn flow_mapping_key_continued_by_an_anchor_is_one_plain_key() {
+    let Node::Mapping { entries, .. } = load_one("{a\n &x b: 1}\n") else {
+        panic!("expected a mapping");
+    };
+    assert_eq!(entries.len(), 1);
+    assert!(
+        matches!(
+            &entries[0].0,
+            Node::Scalar { value, style: ScalarStyle::Plain, .. } if value == "a &x b"
+        ),
+        "{:?}",
+        entries[0].0
+    );
+    assert_eq!(entries[0].0.anchor(), None);
+}
+
+/// A `&x` inside the text registers no anchor, so a later `*x` has none to
+/// resolve; and a scalar's own anchor stays on it when a line goes on with `*x`.
+#[test]
+fn flow_continuation_registers_no_anchor_and_makes_no_alias() {
+    let result = LoaderBuilder::new()
+        .resolved()
+        .build()
+        .load("[a\n &x b, *x]\n");
+    assert!(
+        matches!(result, Err(LoadError::UndefinedAlias { ref name, .. }) if name == "x"),
+        "{result:?}"
+    );
+
+    let docs = LoaderBuilder::new()
+        .resolved()
+        .build()
+        .load("[&x a\n *x]\n")
+        .unwrap();
+    let Node::Sequence { items, .. } = &docs[0].root else {
+        panic!("expected a sequence");
+    };
+    assert_eq!(items.len(), 1);
+    assert!(
+        matches!(&items[0], Node::Scalar { value, .. } if value == "a *x"),
+        "{:?}",
+        items[0]
+    );
+    assert_eq!(items[0].anchor(), Some("x"));
+}

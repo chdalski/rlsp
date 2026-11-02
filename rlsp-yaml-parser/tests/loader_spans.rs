@@ -419,6 +419,10 @@ fn loader_indented_comment_line_is_leading_of_next_item() {
 #[case::sequence_item_three_lines("[a\n  b\n  c\n]\n", 1, 10)]
 #[case::sequence_item_blank_line_between("[a\n\n  b\n]\n", 1, 7)]
 #[case::sequence_item_multibyte("[é\n  ü\n]\n", 1, 8)]
+#[case::sequence_item_continued_by_an_anchor("[a\n &x b\n]\n", 1, 8)]
+#[case::sequence_item_continued_by_a_quote("[a\n \"b\"\n]\n", 1, 7)]
+#[case::sequence_item_continued_by_an_alias_and_space("[a\n *x ]\n", 1, 6)]
+#[case::sequence_item_continued_by_an_anchor_multibyte("[é\n &x ü\n]\n", 1, 10)]
 fn loader_flow_multiline_plain_scalar_loc_ends_at_last_content_byte(
     #[case] input: &str,
     #[case] scalar_start: u32,
@@ -458,4 +462,21 @@ fn loader_flow_multiline_plain_key_and_following_entry_spans() {
         panic!("expected Scalar");
     };
     assert_eq!((loc.start, loc.end), (8, 9));
+}
+
+/// A flow mapping key that goes on with a property keeps the span of its text,
+/// and the value after it its own.
+#[test]
+fn loader_flow_key_continued_by_an_anchor_spans() {
+    let docs = load("{a\n &x b: 1}\n").unwrap();
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping");
+    };
+    let (Node::Scalar { loc: key, .. }, Node::Scalar { loc: value, .. }) =
+        (&entries[0].0, &entries[0].1)
+    else {
+        panic!("expected scalar key and value");
+    };
+    assert_eq!((key.start, key.end), (1, 8));
+    assert_eq!((value.start, value.end), (10, 11));
 }
