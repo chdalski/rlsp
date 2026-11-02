@@ -31,6 +31,9 @@ directives.
 - [x] Task 8: Pin that no text is lost
 - [x] Task 9: A flow plain scalar reads its continuation lines as text
 - [x] Task 10: The formatter drops its workarounds for these misreads
+- [ ] Task 11: One loop closes collections
+- [ ] Task 12: An explicit key keeps its state in its own mapping
+- [ ] Task 13: A collection key with an explicit entry prints in block form
 - [ ] Measure every `*.yml` and `*.yaml` file under `/workspace`,
       `/usr/local/cargo/registry`, and `~/.local/share/pnpm`: the number of files that
       loaded at the plan's first commit, no longer load, and load in libfyaml 0.9.6 is 0,
@@ -197,6 +200,81 @@ different place or the input is rejected. Productions: [130], [134], [135].
       forms
 - [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
+### Task 11: One loop closes collections
+
+`close_all_collections` in `rlsp-yaml-parser/src/event_iter/base.rs` repeats
+`close_collections_at_or_above`, and Task 12 changes both. Behavior is unchanged.
+
+- [ ] `close_all_collections` holds no loop of its own and closes through
+      `close_collections_at_or_above`
+- [ ] The yaml-test-suite conformance tests, `tests/conformance/libfyaml_events.rs`, and the
+      sweep in `rlsp-yaml/tests/formatter_keeps_text.rs` pass with their assertions unchanged
+- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+
+### Task 12: An explicit key keeps its state in its own mapping
+
+`complex_key_inline` holds one column, and a nested `?` overwrites the column of the outer
+key, so the outer key's `:` starts a new entry and its value becomes a key. A stale
+`explicit_key_pending` accepts a key without `?`, and the indentation guard rejects a `?`
+that holds a mapping after the first entry. Productions: [189], [190], [191], [192], [195].
+
+- [ ] These load with the events of libfyaml 0.9.6: `?\n  ? a\n: v\n`, `? ? a\n: v\n`,
+      `?\n  ?\n: v\n`, `? ?\n: v\n`, `? &a\n  ? a\n: v\n`, `?\n  ? &a\n: v\n`,
+      `?\n  ? [a]\n: v\n`, `?\n  ? *x\n: v\n`, `?\n  - ? a\n: v\n`, `? - ? a\n: v\n`,
+      `?\n- ? a\n: v\n`, `?\n- a\n- ? b\n: v\n`, `- ?\n    ? a\n  : v\n`,
+      `x:\n  ?\n    ? a\n  : v\n`, `?\n  a: 1\n  ? b\n: v\n`,
+      `?\n  ? a\n  : b\n  ? c\n: v\n`, `?\n  x:\n    ? a\n: v\n`,
+      `?\n  x:\n  - ? a\n: v\n`, `?\n  ? ? a\n: v\n`, `?\n  ?\n    ? a\n: v\n`, and
+      `?\n  ? a\n:\n`
+- [ ] These give the outer key its empty value, with the events of libfyaml 0.9.6:
+      `?\n  ? a\n`, `?\n  ? a\n  : b\n`, `?\n  ? a\n...\n`, `?\n  ? a\n---\n`,
+      `?\n  ? a\n? b\n`, `?\n  ? a\nb: 1\n`, `?\n  ? a\n*x : 1\n`, `?\n  ? a\n[x]: 1\n`,
+      `?\n  ? a\n&k : v\n`, and `- ?\n    ? a\n- b\n`
+- [ ] `?\n  ? a\n  : b\n: v\n`, `? ? a\n  : b\n: v\n`, `?\n  x: 1\n  ? a\n  : b\n: v\n`, and
+      `?\n  - ? a\n    : b\n: v\n` load `v` as the outer key's value, and `?\n  ? a\n  : b\n:\n`
+      loads an empty value, as Decisions says; `design-decisions.md` records this deviation
+      from libfyaml with [189] and [191]
+- [ ] `x:\n  ?\n- a\n` and `x:\n  ?\n[a]\n` report a syntax error, as libfyaml does
+- [ ] These load with the events of libfyaml 0.9.6: `? a\n?\n  b: 1\n`, `? a\n? b: 1\n: v\n`,
+      `a: 1\n?\n  b: 2\n: v\n`, `? a\n: b\n? c: d\n: e\n`, `? a\n?\n  ? b\n: v\n`, and
+      `a: 1\n? b: 2\n: c\n`
+- [ ] These keep their behavior: `?\nb\n` and `? a\n? b\n*y : 3\n` keep their errors, and
+      `?\n: v\n`, `?\n- a\n: v\n`, `? !!str\n!zz : v\n? &x\n`, `? : v`, `?\n  a: 1\n: v\n`,
+      `?\n  - a\n: v\n`, and `?\n  *x :\n: v\n` keep their events
+- [ ] `complex_key_inline` and `explicit_key_pending` in `src/lib.rs` are gone, the field of
+      the same name in `FlowFrame::Mapping` stays,
+      `MappingPhase::ExplicitKey` means that a `?` is consumed and its node is not complete,
+      and `Key` means only that no `?` is open
+- [ ] `libfyaml_events.rs` holds the inputs that match libfyaml, and `format_yaml` keeps the
+      data of every input of this task that loads, with a second format changing nothing
+- [ ] For every input and variant of the sweep in `formatter_keeps_text.rs` that loads, every
+      mapping in `parse_events` has an even number of child nodes: the number of failures is 0
+- [ ] `docs/conformance/` names the enforcement sites, `rlsp-yaml-parser/docs/feature-log.md`
+      no longer names a removed field, and it tells a reader which inputs load differently
+      or report an error
+- [ ] `rlsp-yaml-parser/docs/architecture.md` states the mapping phases, and the rule for a
+      `-` entry, as the code has them
+- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+
+### Task 13: A collection key with an explicit entry prints in block form
+
+`flow_comments.rs` turns such a key into a flow collection because the parser read the `:`
+after it as a new entry. Task 12 removes that misread.
+
+- [ ] `holds_explicit_entry` and `block_mapping_after_first` are gone, and no formatter
+      comment, test name, or test comment says the parser cannot read these keys
+- [ ] `? ? a\n  : b\n: v\n` and `x: 1\n? a: 1\n: v\n` print unchanged, and comments inside
+      such a key stay on their nodes
+- [ ] A key the input writes in flow style stays flow, and `keep_flow_key` keeps its behavior
+- [ ] `rlsp-yaml/tests/formatter_keeps_comments.rs`, `formatter_keeps_data.rs`, and
+      `formatter_keeps_text.rs` pass, and the tests that pinned the flow form expect the block
+      form
+- [ ] `rlsp-yaml/docs/configuration.md` and `rlsp-yaml/docs/feature-log.md` no longer say that
+      these keys stay flow or that the parser cannot read them, the comment sentence in
+      `configuration.md` states where comments inside a key print now, and the feature log
+      tells a reader that these keys keep their block form
+- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+
 ## Non-Goals
 
 - `format_yaml` keeping `%YAML` and `%TAG` directives
@@ -230,6 +308,26 @@ different place or the input is rejected. Productions: [130], [134], [135].
 - **A flow plain scalar that misplaces its text is in this plan (user decision):** the
   Goal covers misplaced data, though the text survives and the sweep cannot see it.
   Declined: a separate plan afterwards.
+- **A nested `?` in an explicit key is in this plan (user decision):** the value becomes a
+  key, which is the Goal's class. Declined: a separate plan after this one.
+- **`MappingPhase::ExplicitKey` replaces `complex_key_inline` and `explicit_key_pending`
+  (user decision):** the state moves to the mapping it belongs to, and the two adjacent
+  defects go with it. The variant declined for Task 4 meant that a finished key waits for its
+  `:` and added a state; this one removes two fields. Declined: a `Vec` of open `?` columns,
+  a second stack that leaves the adjacent defects.
+- **The spec decides `?\n  ? a\n  : b\n: v\n` (user decision):** [189] and [191] make a `:`
+  right after the `?` node its value. libfyaml 0.9.6 reads an empty value and then an entry
+  with an empty key, though it reads `?\n  ? a\n: v\n` as one entry; its issue tracker does
+  not hold this. Declined: following libfyaml.
+- **Task 11 keeps behavior:** the shared loop also writes `has_had_item` on a parent sequence,
+  which is popped right after, and `root_node_emitted`, which the `---` and `...` paths reset
+  before the next document and which is not read after the end of the stream.
+- **Task 13 prints block form (user decision):** a shape whose block form does not reload to
+  the same data is a formatter defect that Task 13 fixes; a parser misread with a cause outside
+  Tasks 2 to 12 stops the task and goes to the user. Declined: leaving the workaround on the
+  backlog.
+- **The sweep's scope stays Tasks 2 to 12:** a failure of the even-node count whose cause Task
+  12 does not name goes to the user like a loss the sweep finds.
 
 ## Task Notes
 
@@ -239,3 +337,6 @@ different place or the input is rejected. Productions: [130], [134], [135].
   and libfyaml do, instead of dropping the second tag
 - Task 8: `[x]:2\n` stays outside the table, because Task 4 keeps its behavior where
   libfyaml errors; Task 4's tests pin it
+- Task 12: `step.rs` near line 1052 must match `ExplicitKey` too, or `?\nb\n` stops reporting
+  an error; the compiler does not force this site. `block/mapping.rs` near line 547 and
+  `block/sequence.rs` near line 130 keep matching only `Key`
