@@ -267,7 +267,7 @@ BNF: `c-l-block-map-explicit-key(n) ::= c-mapping-key s-l+block-indented(n,BLOCK
 
 - **Verdict:** Strict-conformant
 - **Spec (§8.2.2):** "If the `?` indicator is specified, the optional value node must be specified on a separate line, denoted by the `:` indicator."
-- **Implementation:** `?` followed by whitespace or end-of-line in `event_iter/block/mapping.rs` parsed as explicit key; inline key content prepended as a synthetic line for `s-l+block-indented` handling; a comment after a bare `?` is read by `consume_mapping_entry()` with `comment_in_suffix()` and queued after the key indicator
+- **Implementation:** `?` followed by whitespace or end-of-line in `event_iter/block/mapping.rs` parsed as explicit key; inline key content prepended as a synthetic line for `s-l+block-indented` handling; a comment after a bare `?` is read by `consume_mapping_entry()` with `comment_in_suffix()` and queued after the key indicator; a key that holds only properties (`? &x`) is closed by the next line at the mapping's column, which is an entry of its own, so `? &x` followed by `&zz : v` and `: v` is the entry `&x` with an empty value, then `&zz` with `v`, then an empty key with `v`: `handle_mapping_entry()` in `event_iter/block/mapping.rs` takes a `:` after properties on the same line (`property_origin_indent` is set) for the `:` of an entry with an empty key, not for the value indicator of the key before it
 - **Tests:** `tests/yaml-test-suite/src/5WE3.yaml`
 
 ### [191] l-block-map-explicit-value(n)

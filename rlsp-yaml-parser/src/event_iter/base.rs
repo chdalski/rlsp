@@ -67,6 +67,32 @@ impl<'input> EventIter<'input> {
         make_meta(anchor, anchor_loc, tag, tag_loc)
     }
 
+    /// Take the properties of the block mapping that a key line opens: the ones
+    /// displaced into the collection slots and a standalone property line above
+    /// the key (`&node\n&k key: v`, `!t &a\n!zz [y]: v`).  The inline properties
+    /// of the key line stay pending, for the key.
+    pub(crate) fn take_block_mapping_meta(&mut self) -> Option<Box<EventMeta<'input>>> {
+        let (anchor, anchor_loc) = if let Some(name) = self.pending_collection_anchor.take() {
+            (Some(name), self.pending_collection_anchor_loc.take())
+        } else if matches!(self.pending_anchor, Some(PendingAnchor::Standalone(..))) {
+            let loc = self.pending_anchor.map(PendingAnchor::loc);
+            let name = self.pending_anchor.take().map(PendingAnchor::name);
+            (name, loc)
+        } else {
+            (None, None)
+        };
+        let (tag, tag_loc) = if let Some(tag) = self.pending_collection_tag.take() {
+            (Some(tag), self.pending_collection_tag_loc.take())
+        } else if matches!(self.pending_tag, Some(PendingTag::Standalone(..))) {
+            let pending = self.pending_tag.take();
+            let loc = pending.as_ref().map(PendingTag::loc);
+            (pending.map(PendingTag::into_cow), loc)
+        } else {
+            (None, None)
+        };
+        make_meta(anchor, anchor_loc, tag, tag_loc)
+    }
+
     /// Emit an empty plain scalar at `pos` that takes the pending properties
     /// (see `take_node_meta`).
     pub(crate) fn emit_empty_scalar(&mut self, pos: Pos, inline: InlineProperties) {

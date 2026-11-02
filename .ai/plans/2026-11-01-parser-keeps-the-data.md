@@ -28,8 +28,9 @@ directives.
 - [x] Task 5: A bare `-` looks past comment lines
 - [x] Task 6: Flow sequences keep their text
 - [x] Task 7: The loader rejects a second root node
-- [ ] Task 8: Pin that no text is lost
-- [ ] Task 9: The formatter drops its workarounds for these misreads
+- [x] Task 8: Pin that no text is lost
+- [ ] Task 9: A flow plain scalar reads its continuation lines as text
+- [ ] Task 10: The formatter drops its workarounds for these misreads
 - [ ] Measure every `*.yml` and `*.yaml` file under `/workspace`,
       `/usr/local/cargo/registry`, and `~/.local/share/pnpm`: the number of files that
       loaded at the plan's first commit, no longer load, and load in libfyaml 0.9.6 is 0,
@@ -141,22 +142,47 @@ The loader's "skip" arm drops a node event after the root.
 
 ### Task 8: Pin that no text is lost
 
-- [ ] A sweep in `rlsp-yaml/tests/formatter_keeps_text.rs` inserts, for each
+- [x] `? &x\n&zz : v\n: v\n`, `? !!str\n!zz : v\n? &x\n`, and `- ? &d\n  &zz : v\n` load with
+      the events of libfyaml 0.9.6: the key that holds only properties gets an empty
+      value, and the next line is a new entry
+- [x] `&zz\n&a4 !!map\nk: v\n` and `---\n&zz\n&a4 !!map\nk: v\n` report a syntax error, as
+      libfyaml does, and `&a4 !!map\n&a5 !!str key5: value4\n` keeps loading as the
+      yaml-test-suite case 9KAX expects
+- [x] A sweep in `rlsp-yaml/tests/formatter_keeps_text.rs` inserts, for each
       yaml-test-suite, corpus, and `EXTRA_INPUTS` input and each line, a line with a
       unique token in the forms `zzN`, `%zzN`, `&zzN : v`, `!zzN : v`, and `&zzN`, at
       column 0, the line's own indent, and that indent plus 2. For every variant that
       loads, the token is in the loaded data and in the output of `format_yaml`: the
       number of failures is 0
-- [ ] A failure whose input the criteria of Tasks 2 to 7 do not name stops the task
-      and goes to the user, as Decisions says
-- [ ] `rlsp-yaml-parser/tests/conformance/libfyaml_events.rs` holds a table of the
-      inputs of Tasks 2, 4, 5, and 6 with their expected outcome: the events recorded
+- [x] A failure whose cause the criteria of Tasks 2 to 9 do not name stops the task
+      and goes to the user, as Decisions says; a failure on a flow continuation line
+      is Task 9's, and the 0 holds once Task 9 is in
+- [x] `rlsp-yaml-parser/tests/conformance/libfyaml_events.rs` holds a table of the
+      inputs of Tasks 2, 4, 5, and 6 and of this task with their expected outcome: the events recorded
       from `fy-tool` 0.9.6, or "error" where it reports one. `parse_events` matches each.
       The inputs of Task 3 are outside the table, because they deviate from libfyaml
       and Task 3 pins their errors
+- [x] `docs/conformance/` names the enforcement sites, and
+      `rlsp-yaml-parser/docs/feature-log.md` tells a reader which inputs load differently
+      or report an error
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
+
+### Task 9: A flow plain scalar reads its continuation lines as text
+
+A continuation line of a plain scalar in a flow collection is read as a new token when
+it starts with a property, a quote, an alias, or an indicator, so the text lands in a
+different place or the input is rejected. Productions: [130], [134], [135].
+
+- [ ] These load with the events of libfyaml 0.9.6, one plain scalar each: `[a\n &x b]\n`,
+      `[a\n\n !t b]\n`, `[a\n "b"]\n`, `[a\n\n 'b']\n`, `[a\n *x]\n`, `[a\n\n - b]\n`,
+      `[a\n\n |b]\n`, and `{a\n &x b: 1}\n`
+- [ ] `format_yaml` keeps their values, and a second format changes nothing
+- [ ] `libfyaml_events.rs` holds these inputs, and the sweep of Task 8 reports 0
+- [ ] `docs/conformance/` names the enforcement sites, and
+      `rlsp-yaml-parser/docs/feature-log.md` tells a reader which inputs load differently
 - [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
-### Task 9: The formatter drops its workarounds for these misreads
+### Task 10: The formatter drops its workarounds for these misreads
 
 - [ ] `!t : 1` after an empty value prints without `?`, `Lead.value_indicator` and the
       `value_indicator` parameter of `holds_explicit_entry` are gone, and the clause
@@ -193,9 +219,17 @@ The loader's "skip" arm drops a node event after the root.
   a second root node.** Declined: a new `MappingPhase` variant, which touches about 15
   match sites and adds a state instead of removing a meaning.
 - **`[a # c\n  b]` and `[a\n\n  b]` are in this plan:** the same class of wrong reading.
-- **A loss the sweep of Task 8 finds outside this plan's inputs goes to the user:** the
-  plan stops for a revision, because the sweep may reach further than the inputs known
+- **A loss the sweep of Task 8 finds with a cause outside Tasks 2 to 9 goes to the
+  user:** the plan stops for a revision, because the sweep may reach further than the inputs known
   today. The target stays 0.
+- **The sweep's first finds are in this plan (user decision):** `? &x\n&zz : v` and
+  `&zz\n&a4 !!map`. Declined: lowering the target with known exceptions.
+- **A second anchor or tag for one node reports an error, and properties above a key
+  with its own properties go to the mapping (review of Task 8):** `&p1\n&q1 [y]\n`
+  dropped an anchor, which the sweep does not see, because only its token counts.
+- **A flow plain scalar that misplaces its text is in this plan (user decision):** the
+  Goal covers misplaced data, though the text survives and the sweep cannot see it.
+  Declined: a separate plan afterwards.
 
 ## Task Notes
 
@@ -203,3 +237,5 @@ The loader's "skip" arm drops a node event after the root.
   `design-decisions.md` records it with the other `%` inputs
 - Task 8: `a: !t &a\n  !zz\n` and `---\n!t &a\n!zz\n` report an error, as `a: !t\n  !zz\n`
   and libfyaml do, instead of dropping the second tag
+- Task 8: `[x]:2\n` stays outside the table, because Task 4 keeps its behavior where
+  libfyaml errors; Task 4's tests pin it

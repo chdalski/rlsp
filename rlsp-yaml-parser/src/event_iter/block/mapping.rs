@@ -8,7 +8,7 @@
 //! `consume_explicit_value_line`.
 
 use crate::error::Error;
-use crate::event::{CollectionStyle, Event, ScalarStyle, make_meta};
+use crate::event::{CollectionStyle, Event, ScalarStyle};
 use crate::event_iter::base::InlineProperties;
 use crate::event_iter::line_mapping::{
     find_value_indicator_offset, is_implicit_mapping_line, is_tab_indented_block_indicator,
@@ -607,35 +607,11 @@ impl<'input> EventIter<'input> {
             // mapping (YAML test suite 9KAX).  The pending anchor/tag stays on
             // `self.pending_anchor`/`self.pending_tag` and is consumed by
             // `consume_mapping_entry` when it emits the key scalar.
-            let (mapping_anchor, mapping_anchor_loc) =
-                if let Some(name) = self.pending_collection_anchor.take() {
-                    (Some(name), self.pending_collection_anchor_loc.take())
-                } else if matches!(self.pending_anchor, Some(PendingAnchor::Standalone(_, _))) {
-                    let loc = self.pending_anchor.map(PendingAnchor::loc);
-                    let name = self.pending_anchor.take().map(PendingAnchor::name);
-                    (name, loc)
-                } else {
-                    (None, None)
-                };
-            let (mapping_tag, mapping_tag_loc) =
-                if let Some(tag) = self.pending_collection_tag.take() {
-                    (Some(tag), self.pending_collection_tag_loc.take())
-                } else if matches!(self.pending_tag, Some(PendingTag::Standalone(..))) {
-                    let pt = self.pending_tag.take();
-                    let loc = pt.as_ref().map(PendingTag::loc);
-                    (pt.map(PendingTag::into_cow), loc)
-                } else {
-                    (None, None)
-                };
+            let meta = self.take_block_mapping_meta();
             self.queue.push_back((
                 Event::MappingStart {
                     style: CollectionStyle::Block,
-                    meta: make_meta(
-                        mapping_anchor,
-                        mapping_anchor_loc,
-                        mapping_tag,
-                        mapping_tag_loc,
-                    ),
+                    meta,
                 },
                 zero_span(key_pos),
             ));
@@ -659,7 +635,15 @@ impl<'input> EventIter<'input> {
             && self.coll_stack.last().is_some_and(|top| {
                 matches!(top, CollectionEntry::Mapping(col, MappingPhase::Key, _) if *col == effective_key_indent)
             });
-        if (is_in_value_phase || has_complex_key_inline) && self.is_value_indicator_line() {
+        // A `:` after properties on the same physical line (`&zz : v`) is the
+        // `:` of an entry of its own, whose key is empty and has those
+        // properties; only a line that starts with the `:` is the value
+        // indicator of the explicit key.
+        let value_line_follows_properties = self.property_origin_indent.is_some();
+        if (is_in_value_phase || has_complex_key_inline)
+            && !value_line_follows_properties
+            && self.is_value_indicator_line()
+        {
             let in_key_phase = self.coll_stack.last().is_some_and(|top| {
                 matches!(top, CollectionEntry::Mapping(col, MappingPhase::Key, _) if *col == effective_key_indent)
             });

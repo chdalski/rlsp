@@ -9,6 +9,7 @@
 //   comment_events — every comment is an `Event::Comment`
 //   comment_storage — every comment event is stored in the loader AST
 //   plain_scalar_comments — no plain scalar holds a comment, both APIs
+//   libfyaml_events — inputs that once lost text, against `fy-tool` 0.9.6
 
 #![expect(
     clippy::unwrap_used,
@@ -19,6 +20,7 @@
 
 pub mod comment_events;
 pub mod comment_storage;
+pub mod libfyaml_events;
 pub mod loader;
 pub mod plain_scalar_comments;
 pub mod stream;

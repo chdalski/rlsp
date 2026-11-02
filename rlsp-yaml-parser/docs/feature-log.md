@@ -12,6 +12,44 @@ with existing infrastructure.
 
 ---
 
+### Properties Keep Their Node [completed]
+
+**Description:** A line of properties and a key at the column of a `?` no longer
+loses text. `? &x` followed by `&zz : v` and `: v` loads the entries `&x` with an
+empty value, `&zz` with `v`, and an empty key with `v`, as libfyaml 0.9.6 does;
+before, `&zz` was dropped and `v` became the value of `&x`. The same holds for a
+tag (`? !!str` followed by `!zz : v`) and for a key in a sequence item (`- ? &d`
+followed by `  &zz : v`). `?` followed by `&zz : v` is read as an empty entry,
+then `&zz` with `v`, where `&zz` was the anchor of the empty key before.
+
+A second anchor or tag for one node reports an error where one of the two was
+dropped: `&zz` followed by `&a4 !!map` (the first was dropped) or `&a4 !!str x`
+(the second), `a: &zz` followed by `  &a4 !!map`, `a: &a !t` followed by
+`  &b zz`, and `a: !t &a` followed by `  !zz` (also after `---`). The same holds
+for `&p1` followed by `&q1 [y]`, `&q1 {y: z}`, `&q1 |` or `&q1 >`, and for `&p1`
+followed by `!q2 &q1 [y]`: they loaded with `&p1` and without `&q1`. `&zz`
+followed by `&a4 !!str k: v` and `&a4 !!map` followed by `&a5 !!str key5: value4`
+keep loading: the second properties belong to the key.
+
+The properties above a flow-collection key that has properties of its own now
+belong to its mapping, as above a plain key: `!t &a` followed by `!zz [y]: v` is
+the mapping `&a !t` with the key `!zz [y]`, as in libfyaml, and so are `&p1`
+followed by `!q1 [y]: v`, which put both on the key before. Above a
+flow-collection key without properties of its own (`&a` followed by `[a]: b`)
+they stay on the key; that is open on `.ai/backlog.md`. `format_yaml` leaves a
+file with such an error unchanged.
+**Complexity:** Low
+**Comment:** YAML 1.2.2 [96] `c-ns-properties` (a node has at most one anchor and
+one tag), [190] `c-l-block-map-explicit-key` and [192]
+`ns-l-block-map-implicit-entry` (the key of a `?` entry holds only its own
+properties, and the entry after it starts at the mapping's column). libfyaml 0.9.6
+reports "missing document start", "two anchors for a single value" or "did not find
+expected key" for the errors and reads the entries as above. Inputs that fed this
+entry are in `rlsp-yaml-parser/tests/conformance/libfyaml_events.rs`.
+**Tier:** 1
+
+---
+
 ### `load` Reports an Error for a Second Root Node [completed]
 
 **Description:** `load` ends with an error when the event stream holds a node

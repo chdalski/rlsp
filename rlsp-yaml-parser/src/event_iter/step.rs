@@ -8,8 +8,8 @@
 use super::base::InlineProperties;
 use super::directive_scope::DirectiveScope;
 use super::line_mapping::{
-    find_value_indicator_offset, inline_contains_mapping_key, is_implicit_key_line,
-    is_tab_indented_block_indicator, skip_properties,
+    inline_contains_mapping_key, is_implicit_key_line, is_tab_indented_block_indicator,
+    skip_properties,
 };
 use super::properties::{scan_anchor_name, scan_tag};
 use super::state::{
@@ -602,15 +602,19 @@ impl<'input> EventIter<'input> {
                                     line_pos.column + leading + tag_token_bytes + spaces;
                                 // Duplicate tags on the same node are an error.
                                 // Exception: if the existing tag is collection-level
-                                // (Standalone variant) and the new tag has inline content
-                                // that is (or contains) a mapping key line, they apply to
-                                // different nodes (collection vs. key scalar).
-                                if self.pending_tag.is_some() {
-                                    let is_different_node = matches!(
-                                        self.pending_tag,
-                                        Some(PendingTag::Standalone(..))
-                                    ) && had_inline
-                                        && inline_contains_mapping_key(inline);
+                                // (Standalone variant, or displaced into the collection
+                                // slot by an anchor that followed it: `!t &a`) and the new
+                                // tag has inline content that is (or contains) a mapping
+                                // key line, they apply to different nodes (collection vs.
+                                // key scalar).
+                                if self.pending_tag.is_some()
+                                    || self.pending_collection_tag.is_some()
+                                {
+                                    let existing_is_collection_level =
+                                        !matches!(self.pending_tag, Some(PendingTag::Inline(..)));
+                                    let is_different_node = existing_is_collection_level
+                                        && had_inline
+                                        && is_implicit_key_line(inline);
                                     if !is_different_node {
                                         self.state = IterState::Done;
                                         return StepResult::Yield(Err(Error::syntax(
@@ -650,6 +654,18 @@ impl<'input> EventIter<'input> {
                                             displaced.as_ref().map(PendingTag::loc);
                                         self.pending_collection_tag =
                                             displaced.map(PendingTag::into_cow);
+                                    }
+                                    // A standalone anchor above (`&a` below `!t`) is the
+                                    // collection's as well: the inline tag is the key's.
+                                    if matches!(
+                                        self.pending_anchor,
+                                        Some(PendingAnchor::Standalone(..))
+                                    ) {
+                                        let displaced = self.pending_anchor.take();
+                                        self.pending_collection_anchor =
+                                            displaced.map(PendingAnchor::name);
+                                        self.pending_collection_anchor_loc =
+                                            displaced.map(PendingAnchor::loc);
                                     }
                                     self.pending_tag =
                                         Some(PendingTag::Inline(resolved_tag, tag_span));
@@ -785,10 +801,11 @@ impl<'input> EventIter<'input> {
                                 // collection tag is pending — both this and the existing anchor
                                 // are for the same item-level node.
                                 //
-                                // Case 2: existing anchor is standalone (Standalone variant)
+                                // Case 2: existing anchor is standalone (Standalone variant) or
+                                // sits in the collection slot (`&a !t`, whose tag is standalone)
                                 // and the new anchor has inline content that is NOT a collection
-                                // opener ([, {) or property (!, &) — both anchors apply to the
-                                // same scalar node.
+                                // opener ([, {) or a mapping key — both anchors apply to the
+                                // same node.
                                 let amp_pos2 = amp_pos;
                                 let has_standalone_tag =
                                     matches!(self.pending_tag, Some(PendingTag::Standalone(..)));
@@ -798,30 +815,21 @@ impl<'input> EventIter<'input> {
                                 ) && !has_standalone_tag
                                 {
                                     true
-                                } else if matches!(
+                                } else if (matches!(
                                     self.pending_anchor,
                                     Some(PendingAnchor::Standalone(..))
-                                ) && had_inline
-                                    && !has_standalone_tag
+                                ) || self.pending_collection_anchor.is_some())
+                                    && had_inline
                                 {
                                     // The existing anchor is collection-level, but the new anchor
-                                    // has inline content.  If that content is a mapping key line
-                                    // (contains `: ` etc.), the new anchor is for the key and the
+                                    // has inline content.  If that content is a key line (a plain,
+                                    // quoted, alias or flow-collection key, with or without
+                                    // properties of its own), the new anchor is for the key and the
                                     // existing anchor is for the mapping — different nodes, no error.
-                                    // If the inline is a plain scalar (no key indicator), both
-                                    // anchors apply to the same scalar node — error.
-                                    let first_ch = inline.chars().next();
-                                    // If inline starts with a collection/property opener, treat as
-                                    // different node — no error.
-                                    let starts_with_opener = matches!(
-                                        first_ch,
-                                        Some('[' | '{' | '!' | '&' | '*' | '|' | '>')
-                                    );
-                                    // If inline contains a mapping key indicator (`: `), the new
-                                    // anchor is for a key — different node from the collection.
-                                    let is_mapping_key =
-                                        find_value_indicator_offset(inline).is_some();
-                                    !starts_with_opener && !is_mapping_key
+                                    // Anything else (a plain scalar, a flow collection or an alias
+                                    // that is no key, a block scalar header, properties alone) is
+                                    // the node of the older anchor too, and one anchor would be lost.
+                                    !is_implicit_key_line(inline)
                                 } else {
                                     // Two anchor lines in a row (`&y` then `&k`, also with a
                                     // tag line between) annotate the same node: the next
@@ -889,6 +897,16 @@ impl<'input> EventIter<'input> {
                                             displaced.map(PendingAnchor::name);
                                         self.pending_collection_anchor_loc =
                                             displaced.map(PendingAnchor::loc);
+                                    }
+                                    // A standalone tag above (`!t` below `&a`) is the
+                                    // collection's as well: the inline anchor is the key's.
+                                    if matches!(self.pending_tag, Some(PendingTag::Standalone(..)))
+                                    {
+                                        let displaced = self.pending_tag.take();
+                                        self.pending_collection_tag_loc =
+                                            displaced.as_ref().map(PendingTag::loc);
+                                        self.pending_collection_tag =
+                                            displaced.map(PendingTag::into_cow);
                                     }
                                     self.pending_anchor =
                                         Some(PendingAnchor::Inline(name, anchor_span));

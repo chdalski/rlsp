@@ -39,7 +39,8 @@ tempfile = "3.27.0"
 tiny_http = "0.12"
 tower = "0.5"
 
-# Used by the stack-cache canary in src/schema.rs, which compiles only here.
+# Used by the stack-cache canary in src/schema.rs, which compiles only here, and
+# by the address-space limit of tests/formatter_keeps_text.rs.
 [target.'cfg(all(target_os = "linux", target_env = "gnu"))'.dev-dependencies]
 rustix = { version = "1", features = ["process"] }
 

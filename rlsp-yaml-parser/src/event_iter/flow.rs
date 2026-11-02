@@ -2210,21 +2210,13 @@ impl<'input> EventIter<'input> {
         if let Some(map_col) = implicit_key_mapping_indent
             && self.settle_before_key(map_col, first_line_pos)
         {
-            let mapping_anchor = self.pending_collection_anchor.take();
-            let mapping_anchor_loc = self.pending_collection_anchor_loc.take();
-            let mapping_tag = self.pending_collection_tag.take();
-            let mapping_tag_loc = self.pending_collection_tag_loc.take();
+            let meta = self.take_block_mapping_meta();
             events.insert(
                 0,
                 (
                     Event::MappingStart {
                         style: crate::event::CollectionStyle::Block,
-                        meta: make_meta(
-                            mapping_anchor,
-                            mapping_anchor_loc,
-                            mapping_tag,
-                            mapping_tag_loc,
-                        ),
+                        meta,
                     },
                     zero_span(first_line_pos),
                 ),
