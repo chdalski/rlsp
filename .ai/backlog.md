@@ -117,3 +117,4 @@ target goes here only after the user has lowered the target.
 - The doc comment on `settle_collection_styles` in `rlsp-yaml/src/editing/formatter/flow_comments.rs` writes `enforce_block`, which is no longer a parameter there; parser plan Task 14 review.
 - A comment before the `:` of an inner entry of a block key has no pinned placement in `rlsp-yaml/tests/formatter_keeps_comments.rs`; parser plan Task 14 review.
 - A core tag `!!map` on a block key is dropped on format, with the same data; parser plan Task 14 review.
+- Dependabot's security update for `minimatch` in `rlsp-yaml/integrations/vscode` fails with `security_update_not_possible` (latest resolvable 9.0.9, lowest non-vulnerable 11.0.1); the run on the parser plan's push.

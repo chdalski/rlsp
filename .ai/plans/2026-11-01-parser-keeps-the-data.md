@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-11-02)
 **Created:** 2026-11-01
 
 # The Parser Reads the Data of Every Input
@@ -35,12 +35,12 @@ directives.
 - [x] Task 12: An explicit key keeps its state in its own mapping
 - [x] Task 13: A `-` after a tag on the same line is an error
 - [x] Task 14: A collection key with an explicit entry prints in block form
-- [ ] Measure every `*.yml` and `*.yaml` file under `/workspace`,
+- [x] Measure every `*.yml` and `*.yaml` file under `/workspace`,
       `/usr/local/cargo/registry`, and `~/.local/share/pnpm`: the number of files that
       loaded at the plan's first commit, no longer load, and load in libfyaml 0.9.6 is 0,
       apart from files whose error is the `%` at a node start of Task 3, which are
       listed in the report to the user
-- [ ] Push to `main` and confirm the full CI matrix is green
+- [x] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
