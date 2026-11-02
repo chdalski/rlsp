@@ -12,6 +12,29 @@ with existing infrastructure.
 
 ---
 
+### `load` Reports an Error for a Second Root Node [completed]
+
+**Description:** `load` ends with an error when the event stream holds a node
+after the root of a document, or outside any document, where it used to skip the
+node and drop its text. A pending anchor followed by an alias on the next line is
+such an input: `&k` then `*a`, `--- &k` then `*a`, `---` then `&k` then `*a`,
+`&k # c` then `*a`, and `x: &k` then `*a` (the alias at the root column or
+indented) now report an error; they loaded before as the alias alone, without
+the anchor. An anchored empty item or value followed by an alias as an entry of its own
+(`- &k` then `- *a`, `x: &k` then `y: *a`) loads as before. `parse_events` still
+yields the same events for these inputs, and the error carries the position of
+the empty scalar after the alias, which can lie on the line after the last one.
+`format_yaml` leaves a file with such an input unchanged.
+**Complexity:** Low
+**Comment:** YAML 1.2.2 [207] `l-bare-document` (one block node per document) and
+[104] `c-ns-alias-node` (§7.1: an alias node does not specify properties). libfyaml
+0.9.6 reports "unexpected alias" at the alias for all of these inputs. The
+parser still accepts `- &k` then `  *a` (an alias with a pending anchor inside a
+collection) and loads it as two items.
+**Tier:** 1
+
+---
+
 ### A Plain Scalar in a Flow Collection Keeps Its Blank Lines and Ends at a Comment [completed]
 
 **Description:** A plain scalar that continues over blank lines in a flow

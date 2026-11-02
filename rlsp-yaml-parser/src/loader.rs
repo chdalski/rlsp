@@ -467,13 +467,21 @@ impl<'opt> LoadState<'opt> {
                     let mut end_comments = std::mem::take(&mut self.pending_leading);
                     end_comments.extend(consume_leading_comments(&mut stream)?);
 
-                    // A closing event here closes nothing: the root is complete.
-                    let stray_end = match stream.peek() {
-                        Some(Ok((Event::MappingEnd | Event::SequenceEnd, end))) => Some(*end),
-                        _ => None,
-                    };
-                    if let Some(end) = stray_end {
-                        return Err(self.unbalanced_end(end));
+                    // The root is complete.  A closing event here closes
+                    // nothing, and a node here is a second root that the
+                    // document has no place for.
+                    match stream.peek() {
+                        Some(Ok((Event::MappingEnd | Event::SequenceEnd, end))) => {
+                            return Err(self.unbalanced_end(*end));
+                        }
+                        Some(Ok((
+                            Event::Scalar { .. }
+                            | Event::Alias { .. }
+                            | Event::MappingStart { .. }
+                            | Event::SequenceStart { .. },
+                            at,
+                        ))) => return Err(self.misplaced_node(*at)),
+                        _ => {}
                     }
 
                     // Consume DocumentEnd if present and capture its explicit flag.
@@ -502,9 +510,23 @@ impl<'opt> LoadState<'opt> {
                 Some((Event::Comment { text }, _)) => {
                     outside_comments.push(with_hash_prefix(text));
                 }
-                Some(_) => {
-                    // Any other stray event outside a document — skip.
-                }
+                // These carry no text, so skipping them loses nothing.
+                Some((
+                    Event::StreamStart
+                    | Event::DocumentEnd { .. }
+                    | Event::MappingEnd
+                    | Event::SequenceEnd,
+                    _,
+                )) => {}
+                // A node outside a document has no document to hold it, and
+                // skipping it would drop its text from the result.
+                Some((
+                    Event::Scalar { .. }
+                    | Event::Alias { .. }
+                    | Event::MappingStart { .. }
+                    | Event::SequenceStart { .. },
+                    at,
+                )) => return Err(self.misplaced_node(at)),
             }
         }
 
@@ -821,6 +843,18 @@ impl<'opt> LoadState<'opt> {
         LoadError::Parse {
             pos: span_start_to_pos(end.start, &self.line_index),
             message: "closing event does not match the open collection".into(),
+            kind: ErrorKind::Syntax,
+        }
+    }
+
+    /// The error for a node event that has no place in the document: one after
+    /// the root, or one outside any document.  The parser emits such a stream
+    /// only for input it should have rejected; skipping the node would drop its
+    /// text from the result without a trace.
+    fn misplaced_node(&self, at: Span) -> LoadError {
+        LoadError::Parse {
+            pos: span_start_to_pos(at.start, &self.line_index),
+            message: "node outside the document root".into(),
             kind: ErrorKind::Syntax,
         }
     }
@@ -1442,6 +1476,204 @@ mod tests {
             Event::SequenceEnd,
         ]);
         assert!(load_events(events).is_ok());
+    }
+
+    fn scalar_of(value: &'static str) -> Event<'static> {
+        Event::Scalar {
+            value: Cow::Borrowed(value),
+            style: ScalarStyle::Plain,
+            meta: None,
+        }
+    }
+
+    fn document_start() -> Event<'static> {
+        Event::DocumentStart {
+            explicit: false,
+            version: None,
+            tag_directives: Vec::new(),
+        }
+    }
+
+    fn assert_syntax_error(result: &std::result::Result<Vec<Document<Span>>, LoadError>) {
+        assert!(
+            matches!(
+                result,
+                Err(LoadError::Parse {
+                    kind: ErrorKind::Syntax,
+                    ..
+                })
+            ),
+            "{result:?}"
+        );
+    }
+
+    /// A node after the root is a second root.  Skipping it would drop its text
+    /// from the result, so the loader ends with an error instead.  The check
+    /// peeks: an alias that nothing defines is still reported as a misplaced
+    /// node, not as an undefined alias.
+    #[rstest]
+    #[case::scalar_root_then_scalar(vec![scalar_of("a"), scalar_of("b")])]
+    #[case::scalar_root_then_alias(vec![scalar_of("a"), Event::Alias { name: "nope" }])]
+    #[case::scalar_root_then_mapping_start(vec![scalar_of("a"), start_of(CollectionStyle::Flow, true)])]
+    #[case::scalar_root_then_sequence_start(vec![scalar_of("a"), start_of(CollectionStyle::Flow, false)])]
+    #[case::alias_root_then_scalar(vec![Event::Alias { name: "x" }, scalar_of("b")])]
+    #[case::mapping_root_then_scalar(vec![
+        start_of(CollectionStyle::Block, true),
+        scalar_of("k"),
+        scalar_of("v"),
+        Event::MappingEnd,
+        scalar_of("b"),
+    ])]
+    #[case::sequence_root_then_mapping(vec![
+        start_of(CollectionStyle::Block, false),
+        scalar_of("a"),
+        Event::SequenceEnd,
+        start_of(CollectionStyle::Block, true),
+        Event::MappingEnd,
+    ])]
+    #[case::empty_sequence_root_then_alias(vec![
+        start_of(CollectionStyle::Flow, false),
+        Event::SequenceEnd,
+        Event::Alias { name: "x" },
+    ])]
+    #[case::comment_between_the_roots(vec![
+        scalar_of("a"),
+        Event::Comment { text: " c" },
+        scalar_of("b"),
+    ])]
+    #[case::three_roots(vec![scalar_of("a"), scalar_of("b"), scalar_of("c")])]
+    fn a_second_root_after_the_root_is_an_error(#[case] body: Vec<Event<'static>>) {
+        assert_syntax_error(&load_events(document_of(body)));
+    }
+
+    /// A node that no document holds is dropped by no path: not after the
+    /// document's end, not before the first document, and not when the document
+    /// has no end event.
+    #[rstest]
+    #[case::scalar_after_document_end(vec![
+        Event::StreamStart,
+        document_start(),
+        scalar_of("a"),
+        Event::DocumentEnd { explicit: false },
+        scalar_of("b"),
+        Event::StreamEnd,
+    ])]
+    #[case::sequence_start_after_document_end(vec![
+        Event::StreamStart,
+        document_start(),
+        scalar_of("a"),
+        Event::DocumentEnd { explicit: false },
+        start_of(CollectionStyle::Flow, false),
+        Event::StreamEnd,
+    ])]
+    #[case::alias_after_document_end(vec![
+        Event::StreamStart,
+        document_start(),
+        scalar_of("a"),
+        Event::DocumentEnd { explicit: false },
+        Event::Alias { name: "x" },
+        Event::StreamEnd,
+    ])]
+    #[case::scalar_before_the_first_document(vec![
+        Event::StreamStart,
+        scalar_of("a"),
+        Event::StreamEnd,
+    ])]
+    #[case::scalar_after_a_comment_outside_documents(vec![
+        Event::StreamStart,
+        document_start(),
+        scalar_of("a"),
+        Event::DocumentEnd { explicit: false },
+        Event::Comment { text: " c" },
+        scalar_of("b"),
+        Event::StreamEnd,
+    ])]
+    #[case::second_root_without_a_document_end(vec![
+        Event::StreamStart,
+        document_start(),
+        scalar_of("a"),
+        scalar_of("b"),
+        Event::StreamEnd,
+    ])]
+    #[case::second_document_with_a_second_root(vec![
+        Event::StreamStart,
+        document_start(),
+        scalar_of("a"),
+        Event::DocumentEnd { explicit: false },
+        document_start(),
+        scalar_of("b"),
+        scalar_of("c"),
+        Event::DocumentEnd { explicit: false },
+        Event::StreamEnd,
+    ])]
+    fn a_node_that_no_document_holds_is_an_error(#[case] events: Vec<Event<'static>>) {
+        assert_syntax_error(&load_events(events));
+    }
+
+    /// The new checks reject node events only: a stream with one root per
+    /// document still loads.
+    #[rstest]
+    #[case::two_documents(vec![
+        Event::StreamStart,
+        document_start(),
+        scalar_of("a"),
+        Event::DocumentEnd { explicit: false },
+        document_start(),
+        scalar_of("b"),
+        Event::DocumentEnd { explicit: false },
+        Event::StreamEnd,
+    ], 2)]
+    #[case::empty_document_then_another(vec![
+        Event::StreamStart,
+        document_start(),
+        Event::DocumentEnd { explicit: false },
+        document_start(),
+        scalar_of("b"),
+        Event::DocumentEnd { explicit: false },
+        Event::StreamEnd,
+    ], 2)]
+    #[case::comment_after_the_root(document_of(vec![
+        scalar_of("a"),
+        Event::Comment { text: " c" },
+    ]), 1)]
+    #[case::root_without_a_document_end(vec![
+        Event::StreamStart,
+        document_start(),
+        scalar_of("a"),
+        Event::StreamEnd,
+    ], 1)]
+    fn a_stream_with_one_root_per_document_loads(
+        #[case] events: Vec<Event<'static>>,
+        #[case] documents: usize,
+    ) {
+        let result = load_events(events);
+        assert!(
+            matches!(&result, Ok(docs) if docs.len() == documents),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn a_comment_after_the_root_stays_with_its_document() {
+        let docs = load_events(document_of(vec![
+            scalar_of("a"),
+            Event::Comment { text: " c" },
+        ]))
+        .unwrap();
+        assert_eq!(docs[0].end_comments, vec!["# c".to_owned()]);
+    }
+
+    #[test]
+    fn an_explicit_document_end_is_kept() {
+        let docs = load_events(vec![
+            Event::StreamStart,
+            document_start(),
+            scalar_of("a"),
+            Event::DocumentEnd { explicit: true },
+            Event::StreamEnd,
+        ])
+        .unwrap();
+        assert!(docs[0].explicit_end);
     }
 
     #[test]

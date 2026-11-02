@@ -13,6 +13,7 @@
 use rstest::rstest;
 
 use rlsp_yaml_parser::CollectionStyle;
+use rlsp_yaml_parser::ErrorKind;
 use rlsp_yaml_parser::ScalarStyle;
 use rlsp_yaml_parser::loader::{LoadError, LoaderBuilder, load};
 use rlsp_yaml_parser::node::Node;
@@ -2323,4 +2324,40 @@ fn flow_plain_scalar_over_a_blank_line_keeps_its_anchor() {
 #[case::in_a_mapping("{a # c\n b: 1}\n")]
 fn flow_plain_scalar_on_the_line_after_a_comment_is_an_error(#[case] input: &str) {
     assert!(load(input).is_err(), "{input:?}");
+}
+
+/// An anchor on its own line, followed by an alias on the next line, reaches the
+/// loader as an alias and then an anchored empty scalar.  At the root, the
+/// scalar is a second node in a document that holds one (YAML 1.2.2 [207]).
+/// Skipping it dropped its text without a trace; `load` reports an error, as
+/// libfyaml does for an alias that follows properties (§7.1: an alias node
+/// has no properties).
+#[rstest]
+#[case::anchor_line_then_alias("&k\n*a\n")]
+#[case::anchor_on_the_marker_line_then_alias("--- &k\n*a\n")]
+#[case::anchor_after_the_marker_then_alias("---\n&k\n*a\n")]
+#[case::anchor_and_comment_then_alias("&k # c\n*a\n")]
+#[case::mapping_value_anchor_then_alias_at_the_root_column("x: &k\n*a\n")]
+#[case::mapping_value_anchor_then_indented_alias("x: &k\n  *a\n")]
+fn a_second_root_node_is_a_syntax_error(#[case] input: &str) {
+    let result = load(input);
+    assert!(
+        matches!(
+            result,
+            Err(LoadError::Parse {
+                kind: ErrorKind::Syntax,
+                ..
+            })
+        ),
+        "{input:?}: {result:?}"
+    );
+}
+
+/// The same tokens as entries of their own load as before.
+#[rstest]
+#[case::anchored_empty_item_then_alias_item("- &k\n- *a\n")]
+#[case::anchored_empty_value_then_alias_value("x: &k\ny: *a\n")]
+#[case::alias_as_the_root_of_the_next_document("&a x\n---\n*a\n")]
+fn one_node_per_document_still_loads(#[case] input: &str) {
+    assert!(load(input).is_ok(), "{input:?}");
 }

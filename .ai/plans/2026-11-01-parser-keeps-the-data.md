@@ -27,7 +27,7 @@ directives.
 - [x] Task 4: A key reads its own `:`
 - [x] Task 5: A bare `-` looks past comment lines
 - [x] Task 6: Flow sequences keep their text
-- [ ] Task 7: The loader rejects a second root node
+- [x] Task 7: The loader rejects a second root node
 - [ ] Task 8: Pin that no text is lost
 - [ ] Task 9: The formatter drops its workarounds for these misreads
 - [ ] Measure every `*.yml` and `*.yaml` file under `/workspace`,
@@ -135,9 +135,9 @@ Productions: [184], [185], [197], [78], [79], [81].
 
 The loader's "skip" arm drops a node event after the root.
 
-- [ ] `load()` returns an error for an event stream with a node event after the root,
+- [x] `load()` returns an error for an event stream with a node event after the root,
       and a test builds such a stream
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 8: Pin that no text is lost
 
