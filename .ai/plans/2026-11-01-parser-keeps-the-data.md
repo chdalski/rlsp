@@ -30,7 +30,7 @@ directives.
 - [x] Task 7: The loader rejects a second root node
 - [x] Task 8: Pin that no text is lost
 - [x] Task 9: A flow plain scalar reads its continuation lines as text
-- [ ] Task 10: The formatter drops its workarounds for these misreads
+- [x] Task 10: The formatter drops its workarounds for these misreads
 - [ ] Measure every `*.yml` and `*.yaml` file under `/workspace`,
       `/usr/local/cargo/registry`, and `~/.local/share/pnpm`: the number of files that
       loaded at the plan's first commit, no longer load, and load in libfyaml 0.9.6 is 0,
@@ -184,18 +184,18 @@ different place or the input is rejected. Productions: [130], [134], [135].
 
 ### Task 10: The formatter drops its workarounds for these misreads
 
-- [ ] `!t : 1` after an empty value prints without `?`, `Lead.value_indicator` and the
+- [x] `!t : 1` after an empty value prints without `?`, `Lead.value_indicator` and the
       `value_indicator` parameter of `holds_explicit_entry` are gone, and the clause
       `prints_no_text(previous) && has_properties(key)` applies only to collection keys
-- [ ] `is_empty_key`, `key_needs_space_before_colon`, `may_exceed_implicit_key_limit`,
+- [x] `is_empty_key`, `key_needs_space_before_colon`, `may_exceed_implicit_key_limit`,
       `reads_as_another_node_on_its_own_line`, and the
       `lead.properties && is_collection(key)` clause keep their behavior
-- [ ] No formatter comment, test comment, or fixture description says the parser reads
+- [x] No formatter comment, test comment, or fixture description says the parser reads
       `--- - a` or `--- ... x` as a scalar
-- [ ] `rlsp-yaml/tests/formatter_keeps_comments.rs`, `formatter_keeps_data.rs`, and the
+- [x] `rlsp-yaml/tests/formatter_keeps_comments.rs`, `formatter_keeps_data.rs`, and the
       new sweep pass, and the fixtures in `tests/fixtures/formatter/` expect the shorter
       forms
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ## Non-Goals
 

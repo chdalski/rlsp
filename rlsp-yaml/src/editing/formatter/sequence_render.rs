@@ -130,7 +130,6 @@ fn sequence_item_parts<'a>(item: &'a Node<Span>, options: &YamlFormatOptions) ->
                 options,
                 Lead {
                     properties: !prefix.is_empty(),
-                    value_indicator: false,
                 },
             );
             above.extend(first_above);

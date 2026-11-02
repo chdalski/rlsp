@@ -92,6 +92,16 @@ pub const EXTRA_INPUTS: &[(&str, &str)] = &[
         "tag alone as a value, then a key with an anchor",
         "a: !!str\n&x b: 1\n",
     ),
+    ("empty value, then a key with a tag", "a:\n!t : 1\n"),
+    (
+        "tag alone as a value, then an anchored empty key",
+        "a: !t\n&x : 1\n",
+    ),
+    ("tagged empty key first in a value", "k:\n  !t : 1\n"),
+    (
+        "anchored empty key first in an anchored value",
+        "k: &m\n  &x : 1\n",
+    ),
     ("flow key with a tagged mapping value", "? : ! {{}}"),
     (
         "scalar that ends in a colon in a flow mapping",

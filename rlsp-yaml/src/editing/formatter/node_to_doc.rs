@@ -209,9 +209,8 @@ fn render_node(
                     // Values that contain characters which cannot appear in a plain scalar
                     // at all — control characters, backslashes, or embedded newlines —
                     // must be emitted as double-quoted with proper escaping.  So
-                    // must a root scalar that the parser reads from the `---` line
-                    // and that reads as something else on a line of its own
-                    // (`--- ... x`, `--- - a`).
+                    // must a scalar that reads as something else on a line of its
+                    // own (`... x`, `- a`).
                     if quote_empty && value.is_empty() {
                         Printed::Quoted(text("\"\""))
                     } else if requires_double_quoting(value)
@@ -314,7 +313,6 @@ fn render_node(
             let lead = Lead {
                 properties: mapping_render::collection_properties(node.anchor(), tag.as_deref())
                     .is_some(),
-                value_indicator: false,
             };
             let Entry { above, doc } =
                 mapping_render::mapping_to_parts(entries, *style, options, lead);

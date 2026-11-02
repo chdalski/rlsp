@@ -167,8 +167,7 @@ pub(super) fn needs_quoting(s: &str, version: YamlVersion) -> bool {
 /// Whether `s` begins with the indicator of a block entry, `-`, `?` or `:` alone
 /// or followed by a space or tab (YAML 1.2.2 [126] `ns-plain-first`: such an
 /// indicator starts a plain scalar only when a plain-safe character follows).
-/// The parser reads `--- - a` as the plain scalar `- a`; printed on a line of its
-/// own it starts a sequence.
+/// Printed on a line of its own, `- a` starts a sequence.
 fn starts_with_entry_indicator(s: &str) -> bool {
     s.strip_prefix(['-', '?', ':'])
         .is_some_and(|rest| rest.is_empty() || rest.starts_with([' ', '\t']))
@@ -186,9 +185,8 @@ fn starts_with_document_marker(s: &str) -> bool {
 }
 
 /// Whether a plain scalar with the value `s`, printed on a line of its own, is
-/// read as something else than a scalar.  The parser takes such text as the
-/// plain scalar of a `---` line (`--- - a`, `--- ... x`), where the lines below
-/// it are read otherwise: a block entry, or a document marker.
+/// read as something else than a scalar: a block entry (`- a`), or a document
+/// marker (`... x`).
 pub(super) fn reads_as_another_node_on_its_own_line(s: &str) -> bool {
     starts_with_document_marker(s) || starts_with_entry_indicator(s)
 }

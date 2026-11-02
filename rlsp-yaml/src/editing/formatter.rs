@@ -2646,19 +2646,19 @@ mod tests {
         "!t : &y\n  - 1\n",
         "!t : &y\n  - 1\n"
     )]
-    #[case::tagged_empty_key_after_an_empty_value_is_explicit(
+    #[case::tagged_empty_key_after_an_empty_value_is_implicit(
         "{ a, !t : 1, # c\n}\n",
-        "a: \n? !t\n: 1  # c\n"
+        "a: \n!t : 1  # c\n"
     )]
-    #[case::empty_key_after_an_empty_value_is_explicit(
+    #[case::empty_key_after_an_empty_value_is_implicit(
         "{ # c\n a, : x, c: 1}\n",
-        "# c\na: \n?\n: x\nc: 1\n"
+        "# c\na: \n: x\nc: 1\n"
     )]
-    #[case::explicit_tagged_empty_key_after_an_empty_value_stays_explicit(
+    #[case::explicit_tagged_empty_key_after_an_empty_value_prints_implicit(
         "a:\n? !t\n: 1\nb: 2\n",
-        "a: \n? !t\n: 1\nb: 2\n"
+        "a: \n!t : 1\nb: 2\n"
     )]
-    #[case::explicit_empty_key_after_an_empty_value_stays_explicit("a:\n?\n: x\n", "a: \n?\n: x\n")]
+    #[case::explicit_empty_key_after_an_empty_value_prints_implicit("a:\n?\n: x\n", "a: \n: x\n")]
     #[case::tagged_empty_key_after_a_value_stays_implicit("a: 1\n!t : 2\n", "a: 1\n!t : 2\n")]
     #[case::sequence_key_with_a_comment_stays_flow_with_the_comment_above_the_entry(
         "{ [ # c\n a ]: v }\n",

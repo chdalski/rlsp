@@ -729,16 +729,16 @@ fn every_pinned_input_admits_a_variant() {
     "--- !t\n...\n---\ny\n",
     "---\n!t\n...\n---\ny\n"
 )]
-#[case::empty_key_and_value_under_a_key(OptionSet::Default, "a: ?\n", "a:\n  ?\n  :\n")]
+#[case::empty_key_and_value_under_a_key(OptionSet::Default, "a: ?\n", "a:\n  :\n")]
 #[case::empty_key_and_value_in_an_explicit_entry(
     OptionSet::Default,
     "k:\n  ? \n  : \n",
-    "k:\n  ?\n  :\n"
+    "k:\n  :\n"
 )]
 #[case::empty_key_and_value_with_comments(
     OptionSet::Default,
     "k:\n  ? # a\n  : # b\n",
-    "k:\n  # a\n  # b\n  ?\n  :\n"
+    "k:\n  # a\n  :  # b\n"
 )]
 #[case::tag_on_an_empty_item_of_an_indented_sequence(
     OptionSet::IndentlessSequences,
@@ -750,9 +750,9 @@ fn every_pinned_input_admits_a_variant() {
     "- !!str # c\n- # d\n- x\n",
     "# c\n- !!str\n# d\n- \n- x\n"
 )]
-#[case::empty_explicit_entries(OptionSet::Default, "?\n:\n?\n:\n", ":\n?\n:\n")]
+#[case::empty_explicit_entries(OptionSet::Default, "?\n:\n?\n:\n", ":\n:\n")]
 #[case::anchor_on_an_empty_explicit_key(OptionSet::Default, "? &x\n: v\n", "&x : v\n")]
-#[case::tag_on_an_empty_explicit_key(OptionSet::Default, "? !!str\n? &x\n", "!!str : \n? &x\n:\n")]
+#[case::tag_on_an_empty_explicit_key(OptionSet::Default, "? !!str\n? &x\n", "!!str : \n&x : \n")]
 #[case::dash_marker_of_a_compact_mapping(
     OptionSet::TabWidthFour,
     "- a: 1\n  b: 2\n",

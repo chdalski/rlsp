@@ -193,8 +193,6 @@ pub(super) fn prepend_collection_properties(
 pub(super) struct Lead {
     /// The mapping's anchor or tag is printed there.
     pub(super) properties: bool,
-    /// The mapping is the value of an entry, and the line ends in its `:`.
-    pub(super) value_indicator: bool,
 }
 
 /// Convert a YAML mapping to Doc, branching on block vs flow style.
@@ -248,9 +246,7 @@ pub(super) fn mapping_to_parts<'a>(
 /// read as the comments of the collection.
 ///
 /// `lead` tells what the first entry follows: the mapping's properties, where a
-/// first key that is a collection would take them, and the `:` of the entry whose
-/// value the mapping is, where a first key with no text reads as part of that
-/// value (see `forced_explicit_key`).
+/// first key that is a collection would take them (see `forced_explicit_key`).
 pub(super) fn block_mapping_parts<'a>(
     entries: &'a [(Node<Span>, Node<Span>)],
     options: &YamlFormatOptions,
@@ -262,9 +258,6 @@ pub(super) fn block_mapping_parts<'a>(
             .iter()
             .zip(previous_values)
             .map(|((key, value), previous)| {
-                // A key with no text right after a value with none reads as the
-                // value's own properties and content (`a:` followed by `!t : 1`
-                // reads as `a: !t 1`).
                 let explicit_key = forced_explicit_key(previous, key, lead);
                 entry_to_parts(key, value, options, explicit_key)
             }),
@@ -274,33 +267,30 @@ pub(super) fn block_mapping_parts<'a>(
 
 /// Whether an entry prints with `? ` although its key does not need it
 /// (see `block_mapping_parts`): `previous` is the value of the entry before it,
-/// `None` for the first entry, whose key may sit below its mapping's properties
-/// or the `:` of its mapping's entry (`x:` followed by `: v` reads as `x: v`).
+/// `None` for the first entry, whose key may sit below its mapping's properties.
+/// Only a collection key is forced.  Below the properties of its mapping, the
+/// parser attaches the properties on the line above `[b]: 1` to the key (`!m`
+/// above it is the key's tag, not the mapping's).  After a value with no text, a
+/// collection key with properties keeps `? ` so that its properties stay apart
+/// from the value's; the shorter form reads the same.
 pub(super) fn forced_explicit_key(
     previous: Option<&Node<Span>>,
     key: &Node<Span>,
     lead: Lead,
 ) -> bool {
     previous.map_or_else(
-        || (lead.properties && is_collection(key)) || (lead.value_indicator && prints_no_text(key)),
-        // A value that is its properties alone takes the properties that
-        // start the next line, so the next key must not start with any.
-        |previous| prints_no_text(previous) && (prints_no_text(key) || has_properties(key)),
+        || lead.properties && is_collection(key),
+        |previous| prints_no_text(previous) && is_collection_with_properties(key),
     )
 }
 
-/// Whether `node` prints an anchor or a tag before its text.  A core tag that
-/// the printed form of a non-empty scalar implies is not printed, so it does not
-/// count: the decision must be the same for the output as for the source.
-fn has_properties(node: &Node<Span>) -> bool {
+/// Whether `node` is a collection that prints an anchor or a tag.
+fn is_collection_with_properties(node: &Node<Span>) -> bool {
     match node {
-        Node::Scalar { tag, .. } => {
-            node.anchor().is_some() || tag.as_deref().is_some_and(|t| !is_core_schema_tag(t))
-        }
         Node::Mapping { tag, .. } | Node::Sequence { tag, .. } => {
             collection_properties(node.anchor(), tag.as_deref()).is_some()
         }
-        Node::Alias { .. } => false,
+        Node::Scalar { .. } | Node::Alias { .. } => false,
     }
 }
 
@@ -654,7 +644,6 @@ pub(super) fn explicit_key_to_doc<'a>(
                 let colon_prefix = collection_colon(":", value.anchor(), tag.as_deref());
                 let lead = Lead {
                     properties: collection_properties(value.anchor(), tag.as_deref()).is_some(),
-                    value_indicator: true,
                 };
                 let Entry { above, doc } = mapping_to_parts(entries, *style, options, lead);
                 // A comment after the colon reads back as a comment of the first
@@ -725,7 +714,6 @@ fn explicit_key_parts<'a>(key: &'a Node<Span>, options: &YamlFormatOptions) -> E
         } if !entries.is_empty() && is_block(*style) => {
             let lead = Lead {
                 properties: collection_properties(key.anchor(), tag.as_deref()).is_some(),
-                value_indicator: false,
             };
             let Entry { above, doc } = block_mapping_parts(entries, options, lead);
             Entry {
@@ -774,10 +762,10 @@ pub(super) struct Entry<'a> {
 /// line has a comment of its own.  A caller that puts text before the entry
 /// (the `- ` of a sequence item) prints these above that text.
 ///
-/// `explicit_key` forces the explicit form `? key` for a key that would
-/// otherwise be read wrongly: a collection key below the properties of its
-/// mapping (`[]: v` is taken for the key's properties), and a key with no text
-/// after a value with none (see `block_mapping_parts`).
+/// `explicit_key` forces the explicit form `? key` where `forced_explicit_key`
+/// says so: a collection key below the properties of its mapping (`[]: v` is
+/// taken for the key's properties), and a collection key with properties after a
+/// value with no text.
 pub(super) fn entry_to_parts<'a>(
     key: &'a Node<Span>,
     value: &'a Node<Span>,
@@ -840,7 +828,6 @@ pub(super) fn entry_to_parts<'a>(
             let colon = collection_colon(bare_colon, value.anchor(), tag.as_deref());
             let lead = Lead {
                 properties: collection_properties(value.anchor(), tag.as_deref()).is_some(),
-                value_indicator: true,
             };
             concat(vec![
                 key_doc,

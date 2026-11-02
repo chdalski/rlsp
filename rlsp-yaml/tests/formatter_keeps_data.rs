@@ -147,6 +147,46 @@ fn format_default(input: &str) -> String {
     format_yaml(input, &YamlFormatOptions::default())
 }
 
+/// The root node of `yaml` as text written out by hand in the tests: scalars as
+/// `'value'`, preceded by their anchor (`&a `) and by their tag unless the Core
+/// schema gives it; mappings as `{key=>value, ..}`, sequences as `[item, ..]`,
+/// aliases as `*name`.  It lets a test state what the output means, instead of
+/// comparing the output with the input through the same loader.
+#[expect(clippy::expect_used, reason = "test helper")]
+fn shape_of(yaml: &str) -> String {
+    fn walk(node: &Node<rlsp_yaml_parser::Span>) -> String {
+        let anchor = node
+            .anchor()
+            .map_or_else(String::new, |name| format!("&{name} "));
+        let tag = match node {
+            Node::Scalar { tag, .. } | Node::Mapping { tag, .. } | Node::Sequence { tag, .. } => {
+                tag.as_deref()
+                    .filter(|tag| !tag.starts_with("tag:yaml.org,2002:"))
+                    .map_or_else(String::new, |tag| format!("{tag} "))
+            }
+            Node::Alias { .. } => String::new(),
+        };
+        let body = match node {
+            Node::Scalar { value, .. } => format!("'{value}'"),
+            Node::Alias { name, .. } => format!("*{name}"),
+            Node::Mapping { entries, .. } => {
+                let entries: Vec<String> = entries
+                    .iter()
+                    .map(|(key, value)| format!("{}=>{}", walk(key), walk(value)))
+                    .collect();
+                format!("{{{}}}", entries.join(", "))
+            }
+            Node::Sequence { items, .. } => {
+                let items: Vec<String> = items.iter().map(walk).collect();
+                format!("[{}]", items.join(", "))
+            }
+        };
+        format!("{anchor}{tag}{body}")
+    }
+    let docs = load(yaml).expect("the text must load");
+    walk(&docs.first().expect("the text must hold a document").root)
+}
+
 // ---- block scalars ----------------------------------------------------------
 
 #[rstest]
@@ -320,6 +360,150 @@ fn empty_string_key_stays_an_empty_string(#[case] input: &str, #[case] expected:
 #[case::as_a_flow_mapping_key_and_alias_value("{&a : *a}\n")]
 #[case::empty_string("- &a \"\"\n- &b ''\n")]
 fn anchor_on_an_empty_scalar_stays(#[case] input: &str) {
+    assert_data_kept_under_every_option_set(input);
+}
+
+// A key with no text, or with properties, reads as its own entry wherever it
+// stands, so it prints without `? ` after a value with no text and as the first
+// key of a mapping that is the value of an entry.  An alias key never needed
+// `? ` there.
+#[rstest]
+#[case::tagged_empty_key("a:\n!t : 1\n", "a: \n!t : 1\n", "{'a'=>'', !t ''=>'1'}")]
+#[case::anchored_empty_key("a:\n&x : 1\n", "a: \n&x : 1\n", "{'a'=>'', &x ''=>'1'}")]
+#[case::empty_key("a:\n: 1\n", "a: \n: 1\n", "{'a'=>'', ''=>'1'}")]
+#[case::tagged_scalar_key("a:\n!t b: 1\n", "a: \n!t b: 1\n", "{'a'=>'', !t 'b'=>'1'}")]
+#[case::anchored_scalar_key("a:\n&y b: 1\n", "a: \n&y b: 1\n", "{'a'=>'', &y 'b'=>'1'}")]
+#[case::tagged_empty_key_after_a_tagged_value(
+    "a: !t\n!u : 1\n",
+    "a: !t\n!u : 1\n",
+    "{'a'=>!t '', !u ''=>'1'}"
+)]
+#[case::anchored_empty_key_after_a_tagged_value(
+    "a: !t\n&x : 1\n",
+    "a: !t\n&x : 1\n",
+    "{'a'=>!t '', &x ''=>'1'}"
+)]
+#[case::anchored_empty_key_after_an_anchored_value(
+    "a: &y\n&x : 1\n",
+    "a: &y\n&x : 1\n",
+    "{'a'=>&y '', &x ''=>'1'}"
+)]
+#[case::anchored_scalar_key_after_a_tagged_value(
+    "a: !t\n&x b: 1\n",
+    "a: !t\n&x b: 1\n",
+    "{'a'=>!t '', &x 'b'=>'1'}"
+)]
+#[case::tagged_empty_key_after_a_quoted_empty_value(
+    "a: !!str \"\"\n!t : 1\n",
+    "a: !!str \"\"\n!t : 1\n",
+    "{'a'=>'', !t ''=>'1'}"
+)]
+#[case::tagged_empty_key_with_an_empty_value(
+    "a:\n!t :\nb: 1\n",
+    "a: \n!t : \nb: 1\n",
+    "{'a'=>'', !t ''=>'', 'b'=>'1'}"
+)]
+#[case::two_tagged_empty_keys(
+    "a:\n!t : 1\n!u : 2\n",
+    "a: \n!t : 1\n!u : 2\n",
+    "{'a'=>'', !t ''=>'1', !u ''=>'2'}"
+)]
+#[case::tagged_empty_key_first_in_a_value(
+    "k:\n  !t : 1\n",
+    "k:\n  !t : 1\n",
+    "{'k'=>{!t ''=>'1'}}"
+)]
+#[case::anchored_empty_key_first_in_a_value(
+    "k:\n  &x : 1\n",
+    "k:\n  &x : 1\n",
+    "{'k'=>{&x ''=>'1'}}"
+)]
+#[case::empty_key_first_in_a_value("k:\n  : 1\n", "k:\n  : 1\n", "{'k'=>{''=>'1'}}")]
+#[case::empty_key_first_in_an_anchored_value(
+    "k: &m\n  : 1\n",
+    "k: &m\n  : 1\n",
+    "{'k'=>&m {''=>'1'}}"
+)]
+#[case::tagged_empty_key_first_in_an_anchored_value(
+    "k: &m\n  !t : 1\n",
+    "k: &m\n  !t : 1\n",
+    "{'k'=>&m {!t ''=>'1'}}"
+)]
+#[case::empty_key_first_in_a_value_in_a_sequence(
+    "- k:\n    : 1\n",
+    "- k:\n    : 1\n",
+    "[{'k'=>{''=>'1'}}]"
+)]
+#[case::empty_key_first_in_the_value_of_an_explicit_entry(
+    "? a\n: \n  : 1\n",
+    "a:\n  : 1\n",
+    "{'a'=>{''=>'1'}}"
+)]
+#[case::tagged_empty_key_later_in_a_value(
+    "k:\n  a:\n  !t : 2\n",
+    "k:\n  a: \n  !t : 2\n",
+    "{'k'=>{'a'=>'', !t ''=>'2'}}"
+)]
+#[case::alias_key_after_an_anchored_empty_value(
+    "x: &z v\na: &y\n*z : 1\n",
+    "x: &z v\na: &y\n*z : 1\n",
+    "{'x'=>&z 'v', 'a'=>&y '', *z=>'1'}"
+)]
+fn key_with_no_text_prints_without_a_question_mark(
+    #[case] input: &str,
+    #[case] expected: &str,
+    #[case] shape: &str,
+) {
+    assert_eq!(format_default(input), expected);
+    assert_eq!(shape_of(expected), shape);
+    assert_data_kept_under_every_option_set(input);
+}
+
+// The option that removes duplicate keys keeps one of the two, so it is left out.
+#[test]
+fn two_empty_keys_in_a_value_stay_two_entries() {
+    let input = "k:\n  : 1\n  : 2\n";
+    assert_eq!(format_default(input), input);
+    assert_eq!(shape_of(input), "{'k'=>{''=>'1', ''=>'2'}}");
+    for (label, options) in option_sets() {
+        if !options.format_remove_duplicate_keys {
+            assert_data_kept(input, &options, label);
+        }
+    }
+}
+
+// A collection key with properties after a value with none, or below the
+// properties of its mapping, keeps `? `.
+#[rstest]
+#[case::tagged_sequence_key("a:\n!t [x] : 1\n", "a: \n? !t [x]\n: 1\n", "{'a'=>'', !t ['x']=>'1'}")]
+#[case::anchored_mapping_key(
+    "a:\n&x {p: 1} : 1\n",
+    "a: \n? &x { p: 1 }\n: 1\n",
+    "{'a'=>'', &x {'p'=>'1'}=>'1'}"
+)]
+#[case::key_below_the_properties_of_its_mapping(
+    "k: &m\n  ? [a]\n  : 1\n",
+    "k: &m\n  ? [a]\n  : 1\n",
+    "{'k'=>&m {['a']=>'1'}}"
+)]
+fn collection_key_with_properties_keeps_its_question_mark(
+    #[case] input: &str,
+    #[case] expected: &str,
+    #[case] shape: &str,
+) {
+    assert_eq!(format_default(input), expected);
+    assert_eq!(shape_of(expected), shape);
+    assert_data_kept_under_every_option_set(input);
+}
+
+#[rstest]
+#[case::empty_key_in_a_flow_mapping("k: {: 1}\n")]
+#[case::tagged_empty_key_in_a_flow_mapping("k: {!t : 1}\n")]
+#[case::flow_mapping_in_a_flow_sequence("[a, {: 1}]\n")]
+#[case::empty_key_first_in_a_block_mapping_key("? k:\n    : 1\n: v\n")]
+#[case::tagged_empty_key_first_in_a_block_mapping_key("? k:\n    !t : 1\n: v\n")]
+#[case::tagged_sequence_key_in_a_block_mapping_key("? a:\n  !t [x] : 1\n: v\n")]
+fn key_with_no_text_in_a_collection_keeps_its_data(#[case] input: &str) {
     assert_data_kept_under_every_option_set(input);
 }
 
@@ -760,12 +944,11 @@ fn string_that_reads_like_a_document_marker_keeps_its_data(#[case] input: &str) 
     assert_data_kept_under_every_option_set(input);
 }
 
-// ---- root scalars the parser takes from the `---` line ------------------------
+// ---- text the parser rejects --------------------------------------------------
 
 // A plain scalar cannot start with these indicators, and no line may start
 // with a non-printable character, so the parser reports an error and the
-// formatter returns the text unchanged.  Before, the parser took the text of a
-// `---` line as a scalar, and the line below dropped it.
+// formatter returns the text unchanged rather than drop it.
 #[rstest]
 #[case::comma("--- ,\n")]
 #[case::comma_then_text("--- ,x\n")]
