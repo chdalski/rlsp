@@ -34,7 +34,7 @@ directives.
 - [x] Task 11: One loop closes collections
 - [x] Task 12: An explicit key keeps its state in its own mapping
 - [x] Task 13: A `-` after a tag on the same line is an error
-- [ ] Task 14: A collection key with an explicit entry prints in block form
+- [x] Task 14: A collection key with an explicit entry prints in block form
 - [ ] Measure every `*.yml` and `*.yaml` file under `/workspace`,
       `/usr/local/cargo/registry`, and `~/.local/share/pnpm`: the number of files that
       loaded at the plan's first commit, no longer load, and load in libfyaml 0.9.6 is 0,
@@ -284,19 +284,19 @@ ends it at the `:`, and gives the outer mapping a third node. Productions: [200]
 `flow_comments.rs` turns such a key into a flow collection because the parser read the `:`
 after it as a new entry. Task 12 removes that misread.
 
-- [ ] `holds_explicit_entry` and `block_mapping_after_first` are gone, and no formatter
+- [x] `holds_explicit_entry` and `block_mapping_after_first` are gone, and no formatter
       comment, test name, or test comment says the parser cannot read these keys
-- [ ] `? ? a\n  : b\n: v\n` and `x: 1\n? a: 1\n: v\n` print unchanged, and comments inside
-      such a key stay on their nodes
-- [ ] A key the input writes in flow style stays flow, and `keep_flow_key` keeps its behavior
-- [ ] `rlsp-yaml/tests/formatter_keeps_comments.rs`, `formatter_keeps_data.rs`, and
+- [x] `? ? [a]\n  : x\n:\n` and `x: 1\n? a: 1\n: v\n` print unchanged, `? ? a\n  : b\n: v\n` prints
+      `? a: b\n: v\n`, and comments inside such a key stay on their nodes
+- [x] A key the input writes in flow style stays flow, and `keep_flow_key` keeps its behavior
+- [x] `rlsp-yaml/tests/formatter_keeps_comments.rs`, `formatter_keeps_data.rs`, and
       `formatter_keeps_text.rs` pass, and the tests that pinned the flow form expect the block
       form
-- [ ] `rlsp-yaml/docs/configuration.md` and `rlsp-yaml/docs/feature-log.md` no longer say that
+- [x] `rlsp-yaml/docs/configuration.md` and `rlsp-yaml/docs/feature-log.md` no longer say that
       these keys stay flow or that the parser cannot read them, the comment sentence in
       `configuration.md` states where comments inside a key print now, and the feature log
       tells a reader that these keys keep their block form
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ## Non-Goals
 
@@ -360,6 +360,9 @@ after it as a new entry. Task 12 removes that misread.
 - **`?\n  ? a\n---\nb\n` stands for `?\n  ? a\n---\n` (Task 12 review):** libfyaml adds an empty
   root scalar for a trailing `---`, as it does for `---\n` alone, which the parser does not, and
   this deviation is not this task's.
+- **`? ? a\n  : b\n: v\n` prints `? a: b\n: v\n`, and `? ? [a]\n  : x\n:\n` shows the unchanged nested
+  form:** the plan named the first as unchanged, and the formatter already prints its inner entry
+  in the shorter form with the same data.
 - **`? a\n? b\n*y : 3\n` keeps its events, not an error (Task 12 test list):** the plan named it
   as an error, and it loads at the baseline and in libfyaml 0.9.6.
 

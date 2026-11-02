@@ -169,10 +169,7 @@ fn settle_documents(
                 dedup::dedup_mapping_keys(&mut doc.root, options.yaml_version);
             }
             mapping_render::spell_collection_tags(&mut doc.root);
-            flow_comments::settle_collection_styles(
-                &mut doc.root,
-                options.format_enforce_block_style,
-            );
+            flow_comments::settle_collection_styles(&mut doc.root);
             quote_block_scalars_with_indent_indicator(
                 &mut doc.root,
                 false,
@@ -2288,12 +2285,10 @@ mod tests {
         );
     }
 
-    // A mapping key after the first entry has no block form the parser reads
-    // (`x: 1`, then `? a: 1`, then `: v`), and neither has a key that holds an
-    // entry written with `? ` (`? ? a`), so a flow collection key stays flow and
-    // its comments are printed above the entry.  The enforce-block-style option
-    // prints every collection in block style, these keys too, and is left out
-    // here.
+    // A key written in flow style stays flow, whatever block collections
+    // surround it, and its comments are printed above the entry: a key is one
+    // line after the `? `, which has no place for a comment.  The
+    // enforce-block-style option leaves flow keys alone and is left out here.
     #[rstest]
     #[case::mapping_key_after_the_first_entry("{ x: 1, { # c\n a: 1}: v }\n")]
     #[case::mapping_key_with_nested_comments("{ x: 1, { # c\n a: 1, b: [ # d\n 2]}: v, y: 2 }\n")]

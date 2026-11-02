@@ -190,6 +190,34 @@ pub const EXTRA_INPUTS: &[(&str, &str)] = &[
         "comments in explicit keys that hold explicit keys",
         "? # c\n  ? a # d\n  # e\n: v # f\n",
     ),
+    (
+        "comments in a block mapping key after the first entry",
+        "x: 1\n? a: 1 # c1\n  b: 2 # c2\n: v # c3\n",
+    ),
+    (
+        "comments in a sequence key after the first entry",
+        "x: 1\n? - a # ia\n  - b # ib\n: v\n",
+    ),
+    (
+        "comment on the question mark of a block mapping key",
+        "x: 1\n? # lead\n  a: 1 # t\n  b: 2\n: v\n",
+    ),
+    (
+        "comment on the properties line of a block mapping key",
+        "x: 1\n? &k # c\n  a: 1\n: v\n",
+    ),
+    (
+        "comments in a key that holds an explicit entry in a sequence key",
+        "x: 1\n? # c0\n  - ? [a] # c1\n    : x # c2\n: v # c3\n",
+    ),
+    (
+        "comment in a flow key inside a block mapping key",
+        "x: 1\n? a: 1\n  ? [b, # c\n     d]\n  : x\n: v\n",
+    ),
+    (
+        "comment in a flow key at the start of a block mapping key",
+        "x: 1\n? ? [b, # c\n     d]\n  : x\n: v\n",
+    ),
     // Found by the generated inputs of the plan's fuzz probes.
     ("flow key with an empty key and a tagged value", "? ? : !\n"),
     (

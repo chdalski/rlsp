@@ -588,17 +588,18 @@ fn empty_item_of_a_flow_sequence_prints_its_empty_string(
 // ---- collection keys --------------------------------------------------------
 
 #[rstest]
-#[case::default(YamlFormatOptions::default(), "? { [a]: x }\n:\n")]
-#[case::enforce_block_style(
-    YamlFormatOptions { format_enforce_block_style: true, ..YamlFormatOptions::default() },
-    "? { [a]: x }\n:\n"
-)]
-fn mapping_key_that_holds_an_explicit_entry_prints_as_a_flow_mapping(
+#[case::default(YamlFormatOptions::default())]
+#[case::enforce_block_style(YamlFormatOptions {
+    format_enforce_block_style: true,
+    ..YamlFormatOptions::default()
+})]
+fn mapping_key_that_holds_an_explicit_entry_prints_in_block_form(
     #[case] options: YamlFormatOptions,
-    #[case] expected: &str,
 ) {
     let input = "? [a]: x\n";
+    let expected = "? ? [a]\n  : x\n:\n";
     assert_eq!(format_yaml(input, &options), expected);
+    assert_eq!(shape_of(expected), "{{['a']=>'x'}=>''}");
     assert_data_kept(input, &options, "key");
     assert_data_kept_under_every_option_set(input);
 }
@@ -620,21 +621,251 @@ fn flow_collection_key_stays_flow_under_enforce_block_style(
 }
 
 #[rstest]
-#[case::mapping_in_a_mapping_key("? a:\n    [b]: c\n: d\n")]
-#[case::sequence_key_holding_an_explicit_entry("? - [b]: c\n: d\n")]
-#[case::empty_item_in_a_key_turned_flow("? - [x]: !!str null\n  - 5\n  -\n:\n")]
-#[case::several_entries("? [a]: x\n  [b]: y\n")]
-#[case::as_a_mapping_value_key("k:\n  ? [a]: x\n")]
-#[case::second_key_of_a_mapping("z: 1\n? [a]: x\n")]
-#[case::block_scalar_inside("? a: 1\n  [b]: |\n    lit\n: v\n")]
-#[case::comments_inside("? a: 1 # c1\n  [b]: x # c2\n: v # c3\n")]
-fn collection_key_that_the_parser_cannot_read_in_block_form_keeps_its_data(#[case] input: &str) {
+#[case::mapping_after_the_first_entry(
+    "x: 1\n? a: 1\n: v\n",
+    "x: 1\n? a: 1\n: v\n",
+    "{'x'=>'1', {'a'=>'1'}=>'v'}"
+)]
+#[case::mapping_with_two_entries_after_the_first_entry(
+    "x: 1\n? a: 1\n  b: 2\n: v\n",
+    "x: 1\n? a: 1\n  b: 2\n: v\n",
+    "{'x'=>'1', {'a'=>'1', 'b'=>'2'}=>'v'}"
+)]
+#[case::sequence_after_the_first_entry(
+    "x: 1\n? - a\n  - b\n: v\n",
+    "x: 1\n? - a\n  - b\n: v\n",
+    "{'x'=>'1', ['a', 'b']=>'v'}"
+)]
+#[case::mapping_after_the_first_entry_in_a_value(
+    "k:\n  x: 1\n  ? a: 1\n  : v\n",
+    "k:\n  x: 1\n  ? a: 1\n  : v\n",
+    "{'k'=>{'x'=>'1', {'a'=>'1'}=>'v'}}"
+)]
+#[case::mapping_after_the_first_entry_in_a_sequence_item(
+    "- x: 1\n  ? a: 1\n  : v\n",
+    "- x: 1\n  ? a: 1\n  : v\n",
+    "[{'x'=>'1', {'a'=>'1'}=>'v'}]"
+)]
+#[case::mapping_as_the_first_entry_in_a_sequence_item(
+    "- ? a: 1\n  : v\n",
+    "- ? a: 1\n  : v\n",
+    "[{{'a'=>'1'}=>'v'}]"
+)]
+#[case::two_mappings_after_the_first_entry(
+    "x: 1\n? a: 1\n: v\ny: 2\n? b: 2\n: w\n",
+    "x: 1\n? a: 1\n: v\ny: 2\n? b: 2\n: w\n",
+    "{'x'=>'1', {'a'=>'1'}=>'v', 'y'=>'2', {'b'=>'2'}=>'w'}"
+)]
+#[case::sequence_key_that_holds_an_explicit_entry(
+    "? - [b]: c\n: d\n",
+    "? - ? [b]\n    : c\n: d\n",
+    "{[{['b']=>'c'}]=>'d'}"
+)]
+#[case::two_explicit_entries_in_a_key_after_the_first_entry(
+    "x: 1\n? [a]: x\n  [b]: y\n: v\n",
+    "x: 1\n? ? [a]\n  : x\n  ? [b]\n  : y\n: v\n",
+    "{'x'=>'1', {['a']=>'x', ['b']=>'y'}=>'v'}"
+)]
+#[case::key_that_holds_an_explicit_entry_below_the_anchor_of_the_root(
+    "&m\nx: 1\n? [a]: 1\n: v\n",
+    "&m\nx: 1\n? ? [a]\n  : 1\n: v\n",
+    "&m {'x'=>'1', {['a']=>'1'}=>'v'}"
+)]
+#[case::nested_explicit_key_with_a_scalar_key_prints_compact(
+    "? ? a\n  : b\n: v\n",
+    "? a: b\n: v\n",
+    "{{'a'=>'b'}=>'v'}"
+)]
+#[case::nested_explicit_key_with_a_flow_key_is_a_fixed_point(
+    "? ? [a]\n  : x\n:\n",
+    "? ? [a]\n  : x\n:\n",
+    "{{['a']=>'x'}=>''}"
+)]
+#[case::anchor_on_a_mapping_key(
+    "x: 1\n? &k\n  a: 1\n: v\n",
+    "x: 1\n? &k\n  a: 1\n: v\n",
+    "{'x'=>'1', &k {'a'=>'1'}=>'v'}"
+)]
+#[case::tag_on_a_mapping_key(
+    "x: 1\n? !t\n  a: 1\n: v\n",
+    "x: 1\n? !t\n  a: 1\n: v\n",
+    "{'x'=>'1', !t {'a'=>'1'}=>'v'}"
+)]
+#[case::anchor_and_tag_on_a_sequence_key(
+    "x: 1\n? &k !t\n  - a\n: v\n",
+    "x: 1\n? &k !t\n  - a\n: v\n",
+    "{'x'=>'1', &k !t ['a']=>'v'}"
+)]
+#[case::properties_on_the_root_and_on_its_first_key(
+    "&m\n? &k\n  a: 1\n: v\n",
+    "&m\n? &k\n  a: 1\n: v\n",
+    "&m {&k {'a'=>'1'}=>'v'}"
+)]
+#[case::core_tag_on_a_mapping_key_is_dropped(
+    "x: 1\n? !!map\n  a: 1\n: v\n",
+    "x: 1\n? a: 1\n: v\n",
+    "{'x'=>'1', {'a'=>'1'}=>'v'}"
+)]
+#[case::block_scalars_in_a_mapping_key_stay_block_scalars(
+    "x: 1\n? a: |\n    lit\n  b: >\n    fold\n: v\n",
+    "x: 1\n? a: |\n    lit\n  b: >\n    fold\n: v\n",
+    "{'x'=>'1', {'a'=>'lit\n', 'b'=>'fold\n'}=>'v'}"
+)]
+#[case::block_scalar_in_a_mapping_key_as_the_first_entry(
+    "? a: |\n    lit\n  b: 2\n: v\n",
+    "? a: |\n    lit\n  b: 2\n: v\n",
+    "{{'a'=>'lit\n', 'b'=>'2'}=>'v'}"
+)]
+fn collection_key_prints_in_block_form(
+    #[case] input: &str,
+    #[case] expected: &str,
+    #[case] shape: &str,
+) {
+    assert_eq!(format_default(input), expected);
+    assert_eq!(
+        format_yaml(input, &options(|o| o.format_enforce_block_style = true)),
+        expected
+    );
+    assert_eq!(shape_of(expected), shape);
     assert_data_kept_under_every_option_set(input);
+}
+
+#[rstest]
+#[case::sequence_value(
+    "x: 1\n? a: [1, 2]\n: v\n",
+    "x: 1\n? a: [1, 2]\n: v\n",
+    "x: 1\n? a:\n    - 1\n    - 2\n: v\n"
+)]
+#[case::mapping_and_sequence_values(
+    "x: 1\n? a: {b: 1}\n  c: [d]\n: v\n",
+    "x: 1\n? a: { b: 1 }\n  c: [d]\n: v\n",
+    "x: 1\n? a:\n    b: 1\n  c:\n    - d\n: v\n"
+)]
+fn flow_value_in_a_block_key_follows_the_enforce_block_style_option(
+    #[case] input: &str,
+    #[case] by_default: &str,
+    #[case] enforced: &str,
+) {
+    assert_eq!(format_default(input), by_default);
+    assert_eq!(
+        format_yaml(input, &options(|o| o.format_enforce_block_style = true)),
+        enforced
+    );
+    assert_data_kept_under_every_option_set(input);
+}
+
+#[test]
+fn flow_items_of_a_sequence_key_keep_their_data_under_every_option_set() {
+    assert_data_kept_under_every_option_set("x: 1\n? - {a: 1}\n  - [b]\n: v\n");
+}
+
+#[rstest]
+#[case::flow_mapping_after_the_first_entry("x: 1\n{a: 1}: v\n", "x: 1\n? { a: 1 }\n: v\n")]
+#[case::flow_mapping_with_a_question_mark("x: 1\n? {a: 1}\n: v\n", "x: 1\n? { a: 1 }\n: v\n")]
+#[case::flow_sequence_after_the_first_entry("x: 1\n[a, b]: v\n", "x: 1\n? [a, b]\n: v\n")]
+#[case::flow_mapping_as_the_first_entry("{a: 1}: v\n", "? { a: 1 }\n: v\n")]
+#[case::flow_key_inside_a_block_key(
+    "x: 1\n? a: 1\n  ? [b]\n  : y\n: v\n",
+    "x: 1\n? a: 1\n  ? [b]\n  : y\n: v\n"
+)]
+fn flow_collection_key_keeps_its_flow_style(#[case] input: &str, #[case] expected: &str) {
+    assert_eq!(format_default(input), expected);
+    assert_eq!(
+        format_yaml(input, &options(|o| o.format_enforce_block_style = true)),
+        expected
+    );
+    assert_data_kept_under_every_option_set(input);
+}
+
+#[rstest]
+#[case::comments_after_the_values(
+    "x: 1\n? a: 1 # c1\n  b: 2 # c2\n: v # c3\n",
+    "x: 1\n? a: 1  # c1\n  b: 2  # c2\n: v  # c3\n"
+)]
+#[case::comments_after_the_items_of_a_sequence_key(
+    "x: 1\n? - a # ia\n  - b # ib\n: v\n",
+    "x: 1\n? - a  # ia\n  - b  # ib\n: v\n"
+)]
+#[case::comment_on_its_own_line_between_entries(
+    "x: 1\n? a: 1\n  # inner own line\n  b: 2\n: v\n",
+    "x: 1\n? a: 1\n  # inner own line\n  b: 2\n: v\n"
+)]
+#[case::comment_above_the_key(
+    "x: 1\n# above key\n? a: 1\n: v\n",
+    "x: 1\n# above key\n? a: 1\n: v\n"
+)]
+#[case::comment_on_the_question_mark_line(
+    "x: 1\n? # lead\n  a: 1 # t\n  b: 2\n: v\n",
+    "x: 1\n# lead\n? a: 1  # t\n  b: 2\n: v\n"
+)]
+#[case::comment_on_the_properties_line(
+    "x: 1\n? &k # c\n  a: 1\n: v\n",
+    "x: 1\n# c\n? &k\n  a: 1\n: v\n"
+)]
+#[case::comments_in_a_nested_explicit_entry(
+    "? # c0\n  ? [a] # c1\n  : x # c2\n: v # c3\n",
+    "# c0\n? ? [a]  # c1\n  : x  # c2\n: v  # c3\n"
+)]
+#[case::comments_in_a_nested_explicit_entry_in_a_sequence_key(
+    "x: 1\n? # c0\n  - ? [a] # c1\n    : x # c2\n: v # c3\n",
+    "x: 1\n# c0\n? - ? [a]  # c1\n    : x  # c2\n: v  # c3\n"
+)]
+#[case::comment_in_a_flow_key_inside_the_key(
+    "x: 1\n? a: 1\n  ? [b, # c\n     d]\n  : x\n: v\n",
+    "x: 1\n? a: 1\n  # c\n  ? [b, d]\n  : x\n: v\n"
+)]
+#[case::comment_in_a_flow_key_at_the_start_of_the_key(
+    "x: 1\n? ? [b, # c\n     d]\n  : x\n: v\n",
+    "x: 1\n# c\n? ? [b, d]\n  : x\n: v\n"
+)]
+#[case::comment_in_a_flow_key_of_the_mapping(
+    "x: 1\n? { a: 1, # c\n    b: 2 }\n: v\n",
+    "x: 1\n# c\n? { a: 1, b: 2 }\n: v\n"
+)]
+fn comments_inside_a_collection_key_print_where_their_nodes_print(
+    #[case] input: &str,
+    #[case] expected: &str,
+) {
+    assert_eq!(format_default(input), expected);
+    assert_data_kept_under_every_option_set(input);
+}
+
+#[test]
+fn key_inside_a_block_key_whose_printed_form_exceeds_an_implicit_key_keeps_its_question_mark() {
+    // 600 characters in the input, 1200 once each U+2028 is written as `\L`.
+    let long = "\u{2028}".repeat(600);
+    let input = format!("x: 1\n? \"{long}\": 1\n  y: 2\n: v\n");
+    assert!(load(&input).is_ok(), "the input must load");
+    assert_data_kept_under_every_option_set(&input);
+}
+
+#[test]
+fn duplicate_block_keys_with_comments_keep_their_comments() {
+    let input = "x: 1\n? a: 1 # c1\n  b: 2\n: v # c2\n? a: 1 # c3\n  b: 2\n: w # c4\n";
+    let options = options(|o| o.format_remove_duplicate_keys = true);
+    let output = format_yaml(input, &options);
+    assert!(load(&output).is_ok(), "the output must load: {output:?}");
+    for comment in ["# c1", "# c2", "# c3", "# c4"] {
+        assert_eq!(
+            output.matches(comment).count(),
+            1,
+            "{comment} in {output:?}"
+        );
+    }
+    assert_eq!(format_yaml(&output, &options), output);
 }
 
 // ---- explicit keys that hold explicit keys ----------------------------------
 
 #[rstest]
+#[case::mapping_in_a_mapping_key("? a:\n    [b]: c\n: d\n")]
+#[case::sequence_key_holding_an_explicit_entry("? - [b]: c\n: d\n")]
+#[case::empty_item_in_a_sequence_key("? - [x]: !!str null\n  - 5\n  -\n:\n")]
+#[case::several_entries("? [a]: x\n  [b]: y\n")]
+#[case::as_a_mapping_value_key("k:\n  ? [a]: x\n")]
+#[case::second_key_of_a_mapping("z: 1\n? [a]: x\n")]
+#[case::block_scalar_inside("? a: 1\n  [b]: |\n    lit\n: v\n")]
+#[case::comments_inside("? a: 1 # c1\n  [b]: x # c2\n: v # c3\n")]
 #[case::nested_explicit_key_with_an_empty_value("?\n  ? a\n: v\n")]
 #[case::inline_nested_explicit_key("? ? a\n: v\n")]
 #[case::nested_empty_explicit_key("?\n  ?\n: v\n")]
@@ -1186,6 +1417,19 @@ fn collection_keys_nested_as_deep_as_the_parser_accepts_keep_their_data() {
                 ["  ".repeat(depth), line.to_string()]
             })
             .collect();
+        assert_data_kept_under_every_option_set(&input);
+    });
+}
+
+#[rstest]
+#[case::mappings_in_mapping_keys(|levels| format!("{}a\n", "? ".repeat(levels)))]
+#[case::sequences_in_a_sequence_key(|levels| format!("? {}a\n", "- ".repeat(levels - 1)))]
+#[case::mappings_and_sequences_in_turn(|levels| format!("{}a\n", "? - ".repeat(levels / 2)))]
+fn explicit_keys_nested_as_deep_as_the_parser_accepts_keep_their_data(
+    #[case] build: fn(usize) -> String,
+) {
+    on_large_stack(move || {
+        let input = build(rlsp_yaml_parser::MAX_COLLECTION_DEPTH - 1);
         assert_data_kept_under_every_option_set(&input);
     });
 }

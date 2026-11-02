@@ -201,7 +201,7 @@ When `true`, the formatter converts all flow-style collections to block style du
 
 When `false` (the default), the formatter preserves the original style — block collections stay block and flow collections stay flow.
 
-Keys are the exception. A flow collection used as a key (`{a: 1}: v`, `[a]: v`) stays flow, and so does a collection key that holds an entry written with `?` at any depth (`? [a]: x` is printed as `? { [a]: x }`), because the parser does not read the block form of these keys in every position, and the data would change. The comments inside such a key are printed on their own lines above the entry.
+Keys are the exception. A flow collection used as a key (`{a: 1}: v`, `[a]: v`) stays flow, and the comments inside it are printed on their own lines above the entry. A block collection used as a key keeps its block form, also when it holds an entry written with `?` (`? [a]: x` is printed as `? ? [a]`, then `: x`, then `:`), and the comments inside it stay on their nodes.
 
 When enabled, the "Convert block to flow style" code action is suppressed — the formatter would revert the conversion on save.
 

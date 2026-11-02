@@ -114,3 +114,6 @@ target goes here only after the user has lowered the target.
 - Properties before an inline collection, differing from libfyaml: `!t ? b`, `&a ? b`, `a: !t ? b`, `a: !t ? :`, `a: !t b: c`, `a: &x b: c`, and `!é b` load here and error there ([200]); parser plan Task 13 review, for the user's decision.
 - `a_dash_after_a_tag_does_not_load` in `rlsp-yaml/tests/formatter_keeps_comments.rs` does not pin `--- !t - b`, `&a !t - b`, `!t\t- b`, `!t -`, and `- !t - b`, and `: !\n?\n! : v\n` is not in `libfyaml_events.rs`; parser plan Task 13 review.
 - `anchor_followed_by_inline_dash_returns_error` in `rlsp-yaml-parser/tests/smoke/anchors_and_aliases.rs` is a weaker duplicate of the `&a - b` case in `tests/error_reporting.rs`, and `tests/smoke/probe_dispatch.rs` refers to it; removal candidate, parser plan Task 13 review.
+- The doc comment on `settle_collection_styles` in `rlsp-yaml/src/editing/formatter/flow_comments.rs` writes `enforce_block`, which is no longer a parameter there; parser plan Task 14 review.
+- A comment before the `:` of an inner entry of a block key has no pinned placement in `rlsp-yaml/tests/formatter_keeps_comments.rs`; parser plan Task 14 review.
+- A core tag `!!map` on a block key is dropped on format, with the same data; parser plan Task 14 review.

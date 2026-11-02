@@ -273,11 +273,7 @@ pub(super) fn block_mapping_parts<'a>(
 /// above it is the key's tag, not the mapping's).  After a value with no text, a
 /// collection key with properties keeps `? ` so that its properties stay apart
 /// from the value's; the shorter form reads the same.
-pub(super) fn forced_explicit_key(
-    previous: Option<&Node<Span>>,
-    key: &Node<Span>,
-    lead: Lead,
-) -> bool {
+fn forced_explicit_key(previous: Option<&Node<Span>>, key: &Node<Span>, lead: Lead) -> bool {
     previous.map_or_else(
         || lead.properties && is_collection(key),
         |previous| prints_no_text(previous) && is_collection_with_properties(key),
@@ -479,7 +475,7 @@ fn exceeds_implicit_key_limit(key: &Node<Span>, options: &YamlFormatOptions) -> 
 /// sequence or mapping indicators in the surrounding context).
 ///
 /// An empty scalar key is handled separately (emitted as `: value` with no `?`).
-pub(super) const fn needs_explicit_key(key: &Node<Span>) -> bool {
+const fn needs_explicit_key(key: &Node<Span>) -> bool {
     match key {
         // Empty flow collections are safe as inline implicit keys.
         Node::Mapping { entries, .. } if entries.is_empty() => false,
