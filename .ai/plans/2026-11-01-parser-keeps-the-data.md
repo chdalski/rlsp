@@ -31,7 +31,7 @@ directives.
 - [x] Task 8: Pin that no text is lost
 - [x] Task 9: A flow plain scalar reads its continuation lines as text
 - [x] Task 10: The formatter drops its workarounds for these misreads
-- [ ] Task 11: One loop closes collections
+- [x] Task 11: One loop closes collections
 - [ ] Task 12: An explicit key keeps its state in its own mapping
 - [ ] Task 13: A collection key with an explicit entry prints in block form
 - [ ] Measure every `*.yml` and `*.yaml` file under `/workspace`,
@@ -205,11 +205,11 @@ different place or the input is rejected. Productions: [130], [134], [135].
 `close_all_collections` in `rlsp-yaml-parser/src/event_iter/base.rs` repeats
 `close_collections_at_or_above`, and Task 12 changes both. Behavior is unchanged.
 
-- [ ] `close_all_collections` holds no loop of its own and closes through
+- [x] `close_all_collections` holds no loop of its own and closes through
       `close_collections_at_or_above`
-- [ ] The yaml-test-suite conformance tests, `tests/conformance/libfyaml_events.rs`, and the
+- [x] The yaml-test-suite conformance tests, `tests/conformance/libfyaml_events.rs`, and the
       sweep in `rlsp-yaml/tests/formatter_keeps_text.rs` pass with their assertions unchanged
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 12: An explicit key keeps its state in its own mapping
 
@@ -340,3 +340,5 @@ after it as a new entry. Task 12 removes that misread.
 - Task 12: `step.rs` near line 1052 must match `ExplicitKey` too, or `?\nb\n` stops reporting
   an error; the compiler does not force this site. `block/mapping.rs` near line 547 and
   `block/sequence.rs` near line 130 keep matching only `Key`
+- Task 12: the comments in `close_collections_at_or_above` that say "closed via dedent" also
+  cover document boundaries since Task 11, and they say so

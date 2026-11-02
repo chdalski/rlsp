@@ -248,75 +248,11 @@ impl<'input> EventIter<'input> {
 
     /// Push close events for all open collections (document-end).
     ///
-    /// If a mapping is in Value phase when it closes, an empty plain scalar is
-    /// emitted first to satisfy the pending key that had no inline value —
-    /// **unless** the previous closed item was a collection (sequence or
-    /// mapping), which was itself the value.  After each closed collection,
-    /// the parent mapping (if any) is advanced from Value to Key phase.
+    /// Every collection has an indent `>= 0`, so this is the dedent close with
+    /// the lowest threshold: the same empty-value and parent-phase handling
+    /// applies at a document boundary and at a dedent.
     pub(crate) fn close_all_collections(&mut self, pos: Pos) {
-        while let Some(top) = self.coll_stack.pop() {
-            let ev = match top {
-                CollectionEntry::Sequence(_, _) => {
-                    // If a standalone tag or anchor was set for a sequence item but
-                    // no scalar followed before the sequence closed at document end,
-                    // emit a null scalar now (e.g. `- !!str` as the last item).
-                    if self.has_pending_properties() {
-                        self.emit_empty_scalar(pos, InlineProperties::Taken);
-                    }
-                    Event::SequenceEnd
-                }
-                CollectionEntry::Mapping(
-                    _,
-                    MappingPhase::Value | MappingPhase::AfterExplicitKey,
-                    _,
-                ) => {
-                    // Mapping closed while waiting for a value — emit empty value.
-                    // Consume any pending anchor/tag so standalone properties
-                    // at end of doc are properly attached to the empty value.
-                    self.emit_empty_scalar(pos, InlineProperties::Taken);
-                    Event::MappingEnd
-                }
-                CollectionEntry::Mapping(col, MappingPhase::Key, _) => {
-                    // If an explicit key (`? anchor`, `? inline-scalar`) was
-                    // consumed but neither its key scalar nor its value scalar
-                    // was emitted before the mapping closed at document end,
-                    // emit both empty scalars so the mapping is well-formed.
-                    if self.complex_key_inline == Some(col) {
-                        self.emit_empty_scalar(pos, InlineProperties::Taken);
-                        self.queue.push_back((
-                            Event::Scalar {
-                                value: std::borrow::Cow::Borrowed(""),
-                                style: ScalarStyle::Plain,
-                                meta: None,
-                            },
-                            zero_span(pos),
-                        ));
-                        self.complex_key_inline = None;
-                    }
-                    Event::MappingEnd
-                }
-            };
-            self.queue.push_back((ev, zero_span(pos)));
-            // After closing any collection, update the parent mapping phase:
-            // - Value phase → Key phase: the closed collection was the value.
-            // - Key phase with complex_key_inline: the closed collection was
-            //   the key (e.g. `? {a: b}` or `?\n- a\n`); advance to the
-            //   explicit-key-complete phase and clear the flag so the pending
-            //   `:` (or close) emits the empty value correctly.
-            if let Some(CollectionEntry::Mapping(parent_col, phase, has_had_value)) =
-                self.coll_stack.last_mut()
-            {
-                if phase.awaits_value() {
-                    *phase = MappingPhase::Key;
-                } else if *phase == MappingPhase::Key
-                    && self.complex_key_inline == Some(*parent_col)
-                {
-                    *phase = MappingPhase::AfterExplicitKey;
-                    *has_had_value = true;
-                    self.complex_key_inline = None;
-                }
-            }
-        }
+        self.close_collections_at_or_above(0, pos);
     }
 
     /// Try to consume a scalar from the current lexer position.
