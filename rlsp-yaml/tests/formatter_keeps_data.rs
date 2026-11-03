@@ -17,7 +17,7 @@ use rlsp_yaml::editing::editor_config::LineEnding;
 use rlsp_yaml::editing::formatter::{YamlFormatOptions, format_yaml};
 use rlsp_yaml::server::YamlVersion;
 use rlsp_yaml_parser::node::Node;
-use rlsp_yaml_parser::{LoaderBuilder, load};
+use rlsp_yaml_parser::{DEFAULT_MAX_NESTING_DEPTH, LoaderBuilder, load};
 use rstest::rstest;
 
 // ---- helpers ----------------------------------------------------------------
@@ -1573,8 +1573,8 @@ fn final_line_break_is_removed_in_a_text_nested_beyond_the_default_limit() {
 // ---- nesting depth on the stack of a test thread -----------------------------
 
 /// The nesting the formatter holds on the stack of a test thread, in levels of
-/// collections.
-const FORMATTED_DEPTH: usize = 256;
+/// collections: the default limit, which every option set takes.
+const FORMATTED_DEPTH: usize = DEFAULT_MAX_NESTING_DEPTH;
 
 /// One block mapping inside the other, each level on a line of its own.
 fn block_mappings(levels: usize) -> String {
@@ -1664,8 +1664,30 @@ fn nesting_at_the_formatted_depth_keeps_its_data_on_the_stack_of_a_test_thread(
         !loads_with_limit(FORMATTED_DEPTH - 1),
         "the input is not as deep as the limit"
     );
+    assert_eq!(
+        YamlFormatOptions::default().max_nesting_depth,
+        FORMATTED_DEPTH,
+        "the option sets must run at the default limit"
+    );
     on_stack(TEST_THREAD_STACK, move || {
         assert_data_kept_under_every_option_set(&input);
+    });
+}
+
+// Both shapes change their text when they are formatted, so an output equal to
+// the input means that the text was not loaded.
+#[rstest]
+#[case::flow_sequences(flow_sequences)]
+#[case::flow_mappings(flow_mappings)]
+fn default_options_format_the_default_depth_and_leave_one_level_deeper_alone(
+    #[case] build: fn(usize) -> String,
+) {
+    on_stack(TEST_THREAD_STACK, move || {
+        let options = YamlFormatOptions::default();
+        let at_limit = build(DEFAULT_MAX_NESTING_DEPTH);
+        assert_ne!(format_yaml(&at_limit, &options), at_limit);
+        let over_limit = build(DEFAULT_MAX_NESTING_DEPTH + 1);
+        assert_eq!(format_yaml(&over_limit, &options), over_limit);
     });
 }
 

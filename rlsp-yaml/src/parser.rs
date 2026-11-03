@@ -6,11 +6,6 @@ use rlsp_yaml_parser::loader::LoaderBuilder;
 use rlsp_yaml_parser::node::Document;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 
-/// Maximum mapping/sequence nesting depth accepted by the parser.
-/// Chosen to be deep enough for real-world YAML while staying well within
-/// the default thread stack size.
-const MAX_NESTING_DEPTH: usize = 256;
-
 /// The result of parsing a YAML text buffer.
 pub struct ParseResult {
     /// Successfully parsed YAML documents.
@@ -22,12 +17,7 @@ pub struct ParseResult {
 /// Parse YAML text, returning documents and any parse diagnostics.
 #[must_use]
 pub fn parse_yaml(text: &str) -> ParseResult {
-    match LoaderBuilder::new()
-        .lossless()
-        .max_nesting_depth(MAX_NESTING_DEPTH)
-        .build()
-        .load(text)
-    {
+    match LoaderBuilder::new().lossless().build().load(text) {
         Ok(documents) => ParseResult {
             documents,
             diagnostics: Vec::new(),
@@ -91,6 +81,7 @@ pub fn parse_yaml(text: &str) -> ParseResult {
 mod tests {
     use std::fmt::Write as _;
 
+    use rlsp_yaml_parser::DEFAULT_MAX_NESTING_DEPTH;
     use rlsp_yaml_parser::node::Node;
     use rstest::rstest;
 
@@ -345,20 +336,20 @@ mod tests {
         }
     }
 
-    /// Parses 260 nesting levels, which exceeds `MAX_NESTING_DEPTH`, on a thread
-    /// with a 2 MiB stack: the limit must hold before the recursive loader
-    /// overflows that stack, and a fixed size keeps the test independent of the
-    /// test runner's thread.
-    fn parse_beyond_the_nesting_limit() -> ParseResult {
+    /// Parses `levels` nested block mappings, one key per line, on a thread with
+    /// a 2 MiB stack: the limit must hold before the recursive loader overflows
+    /// that stack, and a fixed size keeps the test independent of the test
+    /// runner's thread.
+    fn parse_nested_mappings(levels: usize) -> ParseResult {
         std::thread::Builder::new()
             .stack_size(2 * 1024 * 1024)
-            .spawn(|| {
+            .spawn(move || {
                 let mut text = String::new();
-                for i in 0..260usize {
+                for i in 0..levels - 1 {
                     let indent = "  ".repeat(i);
                     writeln!(text, "{indent}level{i}:").unwrap();
                 }
-                let leaf_indent = "  ".repeat(260);
+                let leaf_indent = "  ".repeat(levels - 1);
                 writeln!(text, "{leaf_indent}leaf: value").unwrap();
                 parse_yaml(&text)
             })
@@ -368,10 +359,17 @@ mod tests {
     }
 
     #[test]
-    fn parse_yaml_nesting_depth_limit_produces_diagnostic() {
-        let result = parse_beyond_the_nesting_limit();
+    fn parse_yaml_loads_the_default_nesting_depth() {
+        let result = parse_nested_mappings(DEFAULT_MAX_NESTING_DEPTH);
 
-        // NestingDepthLimitExceeded now carries the position of the triggering node
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.documents.len(), 1);
+    }
+
+    #[test]
+    fn parse_yaml_nesting_depth_limit_produces_diagnostic() {
+        let result = parse_nested_mappings(DEFAULT_MAX_NESTING_DEPTH + 1);
+
         assert!(
             !result.diagnostics.is_empty(),
             "expected diagnostic for deep nesting"
@@ -383,22 +381,18 @@ mod tests {
     }
 
     #[test]
-    fn parse_yaml_nesting_depth_limit_diagnostic_has_non_origin_position() {
-        // Before this fix, NestingDepthLimitExceeded mapped to Pos::ORIGIN so the
-        // diagnostic was always on line 0. After the fix the variant carries the
-        // position of the node that exceeded the limit, which for 260 levels of
-        // nesting is approximately line 256 (0-based in LSP).
-        let result = parse_beyond_the_nesting_limit();
+    fn parse_yaml_nesting_depth_limit_diagnostic_is_at_the_level_over_the_limit() {
+        // The diagnostic carries the position of the node that exceeded the
+        // limit, not the start of the text: the mapping over the limit starts
+        // on the line after the keys of the levels below it, indented by two
+        // columns per level.
+        let result = parse_nested_mappings(DEFAULT_MAX_NESTING_DEPTH + 1);
 
-        assert!(
-            !result.diagnostics.is_empty(),
-            "expected diagnostic for deep nesting"
-        );
-        assert!(
-            result.diagnostics[0].range.start.line >= 255,
-            "diagnostic should be on or after line 255 (the triggering nesting level), \
-             got line {}",
-            result.diagnostics[0].range.start.line
+        assert_eq!(result.diagnostics.len(), 1);
+        let start = result.diagnostics[0].range.start;
+        assert_eq!(
+            (start.line as usize, start.character as usize),
+            (DEFAULT_MAX_NESTING_DEPTH, 2 * DEFAULT_MAX_NESTING_DEPTH)
         );
     }
 

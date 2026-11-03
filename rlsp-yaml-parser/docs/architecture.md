@@ -646,7 +646,7 @@ separate per-type limit would allow nesting 512 sequences inside 512 mappings
 
 | Option | Default | Guards against |
 |--------|---------|----------------|
-| `max_nesting_depth` | 512 | Stack exhaustion from deeply nested collections |
+| `max_nesting_depth` | 256 | Stack exhaustion from deeply nested collections when loading without alias expansion |
 | `max_anchors` | 10 000 | Unbounded anchor-map memory growth |
 | `max_expanded_nodes` | 1 000 000 | Alias bombs (Billion Laughs); resolved mode only |
 
@@ -705,10 +705,14 @@ The loader's `parse_node` is recursive (matching tree structure), but its depth
 is bounded by `max_nesting_depth`. Each level holds the small frames of
 `parse_node` and of the collection loop; everything bigger lives in
 `#[inline(never)]` helpers that return before the recursion goes deeper, so a
-debug build, the build with the largest frames, loads the depth that the
-default `max_nesting_depth` allows on a 2 MiB stack. The one recursion outside that bound is the `Comment` arm of
-`begin_node`, which adds at most one level per value position because it drains
-the whole comment run before recursing.
+debug build, the build with the largest frames, loads the default
+`max_nesting_depth` (256) on a 2 MiB stack. A higher limit needs a stack to
+match, and `MAX_COLLECTION_DEPTH` holds whatever the limit. The limit guards
+the stack when loading without alias expansion: in resolved mode alias
+expansion can build trees deeper than the limit, and it does not bound code
+that walks the loaded tree. The one recursion outside that bound is the
+`Comment` arm of `begin_node`, which adds at most one level per value position
+because it drains the whole comment run before recursing.
 
 ### Lossless mode as the default
 

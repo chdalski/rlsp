@@ -583,7 +583,15 @@ fn a_comment_below_a_deep_chain_of_collections_reaches_what_follows(
     #[case] input: String,
     #[case] expected_places: Vec<(&'static str, &'static str)>,
 ) {
-    let found = on_small_stack(move || places(&input));
+    let found = on_small_stack(move || {
+        comment_places(
+            &LoaderBuilder::new()
+                .max_nesting_depth(512)
+                .build()
+                .load(&input)
+                .unwrap(),
+        )
+    });
     assert_eq!(found, expected(&expected_places));
 }
 

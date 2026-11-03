@@ -37,7 +37,7 @@ server gets a setting `maxNestingDepth` with a default of 256 and a range of 1 t
 - [x] Task 4: Pin the color and code action responses
 - [x] Task 5: Code actions and colors read the stored AST
 - [x] Task 6: The formatter takes the nesting limit as an option
-- [ ] Task 7: The default nesting limit is 256
+- [x] Task 7: The default nesting limit is 256
 - [ ] Task 8: The server setting `maxNestingDepth`
 - [ ] Task 9: The server holds both ends of the setting
 - [ ] Push to `main` and confirm the full CI matrix is green
@@ -137,21 +137,21 @@ final-newline check; all three use one limit.
 
 ### Task 7: The default nesting limit is 256
 
-- [ ] `rlsp-yaml-parser` exports one constant for the default nesting limit, 256, and
+- [x] `rlsp-yaml-parser` exports one constant for the default nesting limit, 256, and
       `LoaderOptions::default`, `YamlFormatOptions::default`, and `rlsp-yaml/src/parser.rs` use
       it; the constant of `parser.rs` is gone
-- [ ] `load()` with default options reports `NestingDepthLimitExceeded` at 257 levels and loads
+- [x] `load()` with default options reports `NestingDepthLimitExceeded` at 257 levels and loads
       256, and a test pins the default
-- [ ] `parse_yaml(text)` loads at the default, and the tests and benchmarks that call it are
+- [x] `parse_yaml(text)` loads at the default, and the tests and benchmarks that call it are
       unchanged
-- [ ] No comment or test names the removed constant of `parser.rs` or states its value
-- [ ] The docs of the limit in `loader.rs`, `rlsp-yaml-parser/README.md`, and
+- [x] No comment or test names the removed constant of `parser.rs` or states its value
+- [x] The docs of the limit in `loader.rs`, `rlsp-yaml-parser/README.md`, and
       `rlsp-yaml-parser/docs/architecture.md` state 256, say that it guards the stack when
       loading without alias expansion, and no longer say that it fits the stack on every build
       regardless of depth
-- [ ] Both `docs/feature-log.md` files tell a reader that `load()`, `format_yaml`, and YAML
+- [x] Both `docs/feature-log.md` files tell a reader that `load()`, `format_yaml`, and YAML
       embedded in strings now stop at 256 levels by default
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 8: The server setting `maxNestingDepth`
 
@@ -255,3 +255,7 @@ A stack overflow on a tokio worker ends the whole server.
   once the default is 256
 - Task 8: a value out of range takes the default with a warning, as Decisions says; it is not
   clamped
+- Task 9: the debug test's `didOpen` also validates against a schema whose `contentSchema` loads YAML
+  embedded in a string of 256 levels, since that load runs below the schema validator's frames
+- Task 8: `rlsp-yaml/docs/configuration.md` no longer says that embedded `contentSchema` content is
+  validated at full depth, since it stops at the default nesting limit

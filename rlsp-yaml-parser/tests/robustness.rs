@@ -383,7 +383,12 @@ fn nested_collection_keys_load_on_a_two_mib_stack(
 ) {
     let input = format!("{}leaf\n", opener.repeat(repeats));
     let (collections, leaf) = on_stack(TWO_MIB, move || {
-        let docs = mode.builder().build().load(&input).unwrap();
+        let docs = mode
+            .builder()
+            .max_nesting_depth(512)
+            .build()
+            .load(&input)
+            .unwrap();
         let mut node = &docs[0].root;
         let mut collections = 0;
         loop {
@@ -422,7 +427,7 @@ fn an_alias_of_a_deep_anchored_collection_expands_on_a_two_mib_stack() {
 }
 
 #[rstest]
-fn the_limit_holds_on_a_two_mib_stack(
+fn the_default_limit_holds_on_a_two_mib_stack(
     #[values(
         Nesting::BlockMappings,
         Nesting::BlockSequences,
@@ -432,10 +437,9 @@ fn the_limit_holds_on_a_two_mib_stack(
     nesting: Nesting,
 ) {
     let (at_limit, over_limit) = on_stack(TWO_MIB, move || {
-        let loader = LoaderBuilder::new().max_nesting_depth(256).build();
         (
-            loader.load(&nesting.input(256)).map(|docs| docs.len()),
-            loader.load(&nesting.input(257)),
+            load(&nesting.input(256)).map(|docs| docs.len()),
+            load(&nesting.input(257)),
         )
     });
     assert_eq!(at_limit.unwrap(), 1);
@@ -507,6 +511,7 @@ fn a_parse_error_deep_in_the_tree_is_returned_unchanged(
 ) {
     let result = on_stack(TWO_MIB, move || {
         LoaderBuilder::new()
+            .max_nesting_depth(512)
             .build()
             .load(&input)
             .map(|docs| docs.len())

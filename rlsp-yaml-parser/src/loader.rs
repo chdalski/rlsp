@@ -14,8 +14,9 @@
 //!   carries none of the anchor's comments.
 //!
 //! Security controls (all active in both modes unless noted):
-//! - `max_nesting_depth` — caps sequence/mapping nesting to prevent stack
-//!   exhaustion (default 512).
+//! - `max_nesting_depth` — caps sequence/mapping nesting, which bounds the
+//!   recursion of loading without alias expansion (default
+//!   [`DEFAULT_MAX_NESTING_DEPTH`], 256).
 //! - `max_anchors` — caps distinct anchor registrations to bound anchor-map
 //!   memory (default 10 000).
 //! - `max_expanded_nodes` — caps total nodes produced by alias expansion in
@@ -38,6 +39,7 @@ use std::sync::Arc;
 
 use crate::error::{Error, ErrorKind};
 use crate::event::{Event, EventMeta, ScalarStyle};
+use crate::limits::MAX_COLLECTION_DEPTH;
 use crate::node::{Document, Node, NodeMeta};
 use crate::pos::{LineIndex, Pos, Span};
 use crate::schema::{CollectionKind, Schema, resolve_collection, resolve_scalar};
@@ -193,7 +195,16 @@ pub enum LoadMode {
 #[derive(Debug, Clone)]
 pub struct LoaderOptions {
     /// Maximum mapping/sequence nesting depth before returning
-    /// [`LoadError::NestingDepthLimitExceeded`] (default: 512).
+    /// [`LoadError::NestingDepthLimitExceeded`] (default:
+    /// [`DEFAULT_MAX_NESTING_DEPTH`], 256).
+    ///
+    /// The loader recurses once per level, so the limit guards the stack when
+    /// loading without alias expansion: the default loads on a 2 MiB thread in
+    /// a debug build, the build with the largest frames.  A higher value needs
+    /// a stack to match, and the event parser's own cap
+    /// ([`crate::MAX_COLLECTION_DEPTH`]) holds whatever this value.  The limit
+    /// does not bound the tree that alias expansion builds in
+    /// [`LoadMode::Resolved`], nor code that walks the loaded tree.
     pub max_nesting_depth: usize,
     /// Maximum number of distinct anchor names per document before returning
     /// [`LoadError::AnchorCountLimitExceeded`] (default: 10 000).
@@ -210,10 +221,22 @@ pub struct LoaderOptions {
     pub schema: Schema,
 }
 
+/// The nesting depth that [`LoaderOptions::default`] allows.
+///
+/// A document nested one level deeper makes [`load`] return
+/// [`LoadError::NestingDepthLimitExceeded`].  Callers that default their own
+/// nesting limit take it from here, so that all of them agree.
+pub const DEFAULT_MAX_NESTING_DEPTH: usize = 256;
+
+const _: () = assert!(
+    DEFAULT_MAX_NESTING_DEPTH <= MAX_COLLECTION_DEPTH,
+    "a default above the event parser's cap would never be reached"
+);
+
 impl Default for LoaderOptions {
     fn default() -> Self {
         Self {
-            max_nesting_depth: 512,
+            max_nesting_depth: DEFAULT_MAX_NESTING_DEPTH,
             max_anchors: 10_000,
             max_expanded_nodes: 1_000_000,
             mode: LoadMode::Lossless,
@@ -1518,8 +1541,14 @@ mod tests {
     fn load_events(
         events: Vec<Event<'static>>,
     ) -> std::result::Result<Vec<Document<Span>>, LoadError> {
-        let options = LoaderOptions::default();
-        let mut state = LoadState::new(&options, "");
+        load_events_with(&LoaderOptions::default(), events)
+    }
+
+    fn load_events_with(
+        options: &LoaderOptions,
+        events: Vec<Event<'static>>,
+    ) -> std::result::Result<Vec<Document<Span>>, LoadError> {
+        let mut state = LoadState::new(options, "");
         let span = Span { start: 0, end: 0 };
         let stream: Box<dyn Iterator<Item = std::result::Result<(Event<'_>, Span), Error>>> =
             Box::new(events.into_iter().map(move |event| Ok((event, span))));
@@ -1665,7 +1694,13 @@ mod tests {
         let mut events = vec![Event::StreamStart, document_start()];
         events.extend((0..300).map(|level| start_of(CollectionStyle::Block, level % 2 == 0)));
         events.push(Event::StreamEnd);
-        let result = on_stack(TWO_MIB, move || load_events(events));
+        let result = on_stack(TWO_MIB, move || {
+            let options = LoaderOptions {
+                max_nesting_depth: 512,
+                ..LoaderOptions::default()
+            };
+            load_events_with(&options, events)
+        });
         assert!(
             matches!(result, Err(LoadError::UnexpectedEndOfStream)),
             "{result:?}"

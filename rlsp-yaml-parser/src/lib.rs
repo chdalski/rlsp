@@ -24,7 +24,9 @@ pub mod schema;
 pub use error::{Error, ErrorKind};
 pub use event::{Chomp, CollectionStyle, Event, EventMeta, ScalarStyle};
 pub use lines::{BreakType, Line, LineBuffer};
-pub use loader::{LoadError, LoadMode, Loader, LoaderBuilder, LoaderOptions, load};
+pub use loader::{
+    DEFAULT_MAX_NESTING_DEPTH, LoadError, LoadMode, Loader, LoaderBuilder, LoaderOptions, load,
+};
 pub use node::{Document, Node};
 pub use pos::{LineIndex, Pos, Span};
 pub use schema::{ResolvedTag, Schema};

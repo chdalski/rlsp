@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-use rlsp_yaml_parser::{Loader, LoaderBuilder, LoaderOptions};
+use rlsp_yaml_parser::{DEFAULT_MAX_NESTING_DEPTH, Loader, LoaderBuilder};
 
 use crate::editing::editor_config::LineEnding;
 use crate::server::YamlVersion;
@@ -44,7 +44,7 @@ pub struct YamlFormatOptions {
     /// text nested deeper comes back unchanged.  The parser's own cap
     /// (`MAX_COLLECTION_DEPTH`) holds whatever this value: it lowers the limit
     /// and cannot raise that cap.  Not a formatting style: it has no fixture
-    /// key.  Default: the loader's default limit.
+    /// key.  Default: `DEFAULT_MAX_NESTING_DEPTH`, the loader's default limit.
     pub max_nesting_depth: usize,
 }
 
@@ -92,13 +92,15 @@ impl Default for YamlFormatOptions {
             format_indent_sequences: true,
             line_ending: LineEnding::Lf,
             insert_final_newline: true,
-            max_nesting_depth: LoaderOptions::default().max_nesting_depth,
+            max_nesting_depth: DEFAULT_MAX_NESTING_DEPTH,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use rlsp_yaml_parser::LoaderOptions;
+
     use super::*;
 
     // A1: format_enforce_block_style defaults to false.

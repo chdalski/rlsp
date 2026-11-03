@@ -96,7 +96,7 @@ resolved modes unless noted.
 
 | Option | Default | Guards against |
 |--------|---------|----------------|
-| `max_nesting_depth` | 512 | Stack exhaustion from deeply nested collections |
+| `max_nesting_depth` | 256 | Stack exhaustion from deeply nested collections when loading without alias expansion |
 | `max_anchors` | 10 000 | Unbounded anchor-map memory growth |
 | `max_expanded_nodes` | 1 000 000 | Alias bombs (Billion Laughs); resolved mode only |
 

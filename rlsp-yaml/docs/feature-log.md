@@ -31,6 +31,15 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### Nesting Stops at 256 Levels by Default [completed]
+
+**Date:** 2026-11-03
+**Description:** `format_yaml` and YAML embedded in strings (`contentSchema`) now stop at 256 levels of nesting by default, as loading a document already did; before, they stopped at 512. A text nested 257 levels deep comes back from the formatter unchanged, and an embedded YAML string that deep reports "Decoded content ... could not be parsed as YAML" (`schemaContentSchema`).
+**Complexity:** Low
+**Tier:** 1
+
+---
+
 ### The Formatter Keeps the Data of a File [completed]
 
 **Date:** 2026-10-31

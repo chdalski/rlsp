@@ -488,6 +488,7 @@ pub(super) fn validate_numeric_constraints(
 
 #[cfg(test)]
 mod tests {
+    use rlsp_yaml_parser::DEFAULT_MAX_NESTING_DEPTH;
     use rstest::rstest;
     use tower_lsp::lsp_types::DiagnosticSeverity;
 
@@ -1455,6 +1456,27 @@ mod tests {
             result.iter().any(|d| code_of(d) == "schemaContentSchema"),
             "unparseable decoded YAML should produce schemaContentSchema: {result:?}"
         );
+    }
+
+    // Embedded YAML takes the loader's default nesting limit, whatever limit the
+    // server loads documents with.
+    #[rstest]
+    #[case::at_the_default_depth(DEFAULT_MAX_NESTING_DEPTH, 0)]
+    #[case::one_level_deeper(DEFAULT_MAX_NESTING_DEPTH + 1, 1)]
+    fn content_schema_yaml_is_parsed_up_to_the_default_depth(
+        #[case] levels: usize,
+        #[case] unparseable: usize,
+    ) {
+        let schema = content_schema_with_sub(None, None, JsonSchema::default());
+        let text = format!("\"{}x{}\"", "[".repeat(levels), "]".repeat(levels));
+        let docs = parse_docs(&text);
+        let result =
+            validate_schema(&docs, &ParsedSchema::new(schema), true, YamlVersion::V1_2).diagnostics;
+        let reported = result
+            .iter()
+            .filter(|d| code_of(d) == "schemaContentSchema")
+            .count();
+        assert_eq!(reported, unparseable, "{result:?}");
     }
 
     // TE test 14: empty content with contentSchema
