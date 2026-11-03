@@ -66,6 +66,7 @@ share a parent line with one sub-item each.
 
 ## Tests
 
+- `document_symbol_request` in `rlsp-yaml/tests/lsp_lifecycle/nesting_depth.rs` duplicates the helper in `navigation.rs`; nesting plan Task 9 test review.
 - Kubernetes detection tests reach the real network without the FakeProxy (`tests/lsp_lifecycle/kubernetes_detection.rs`); new API groups need `BUILTIN_DOTTED_GROUPS` entries; validate-kubernetes-schema-url plan.
 - "after Restart Server" integration test has no baseline assertion (`settings-sync.test.ts`); VS Code settings-sync plan.
 - Expand the test corpus beyond the 4 seed files (`rlsp-yaml/tests/corpus`); corpus plan.
