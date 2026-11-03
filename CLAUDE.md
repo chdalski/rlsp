@@ -142,6 +142,8 @@ Formatter settings flow through three locations that must stay in sync:
 |----------------|-----------|-----------|
 | `YamlFormatOptions` in `src/editing/formatter/options.rs` | VS Code `package.json` + `config.ts`, fixture files in `tests/fixtures/formatter/` | Any setting added, renamed, or removed |
 
+`max_nesting_depth` is a stack guard, not a formatting style: it gets no fixture key.
+
 ## References
 
 <!-- Agents: add authoritative sources used to make implementation decisions. One line each. -->

@@ -63,8 +63,9 @@ pub fn format_subtree(
 
 /// Format a YAML document string.
 ///
-/// Returns the formatted text. If the input fails to parse, returns the
-/// original text unchanged so the caller never loses content.
+/// Returns the formatted text. If the input fails to parse, or is nested
+/// deeper than `options.max_nesting_depth`, returns the original text
+/// unchanged so the caller never loses content.
 ///
 /// Every comment reaches the output from the AST: the loader stores the
 /// comments around a document's root in the document (before `---`, after
@@ -78,7 +79,7 @@ pub fn format_subtree(
 pub fn format_yaml(text_input: &str, options: &YamlFormatOptions) -> String {
     // The parser preserves scalar styles (plain, quoted, block) and tags natively.
     // No special configuration needed — every scalar carries its original style.
-    let documents: Vec<Document<Span>> = match rlsp_yaml_parser::load(text_input) {
+    let documents: Vec<Document<Span>> = match options.loader().load(text_input) {
         Ok(docs) => docs,
         Err(_) => return text_input.to_string(),
     };
@@ -103,7 +104,7 @@ pub fn format_yaml(text_input: &str, options: &YamlFormatOptions) -> String {
 
     // Blank lines are not in the AST; copy them from the input.
     // restore_blank_lines always produces LF output with a trailing newline.
-    result = blank_lines::restore_blank_lines(text_input, &source_blocks, &result);
+    result = blank_lines::restore_blank_lines(text_input, &source_blocks, &result, options);
 
     // Apply line-ending substitution: replace all LF with the requested terminator.
     // restore_blank_lines produces only LF, so this replace is safe (no CR complications).
@@ -122,7 +123,7 @@ pub fn format_yaml(text_input: &str, options: &YamlFormatOptions) -> String {
     // its line break, and with it its value, when nothing follows.
     if !options.insert_final_newline {
         let stripped = strip_final_terminator(&result, options.line_ending);
-        if blank_lines::same_content(stripped, &documents) {
+        if blank_lines::same_content(stripped, &documents, options) {
             result.truncate(stripped.len());
         }
     }
@@ -318,7 +319,7 @@ fn strip_blank_line_indent(rendered: &str) -> String {
 mod tests {
     use proptest::prelude::*;
     use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
-    use rlsp_yaml_parser::CollectionStyle;
+    use rlsp_yaml_parser::{CollectionStyle, LoaderBuilder};
     use rstest::rstest;
 
     use super::*;
@@ -1866,6 +1867,11 @@ mod tests {
     /// The shape of the data of `yaml`: structure, scalar values, aliases,
     /// anchors and tags; not spans, styles or comments.
     fn data_signature(yaml: &str) -> String {
+        data_signature_within(yaml, YamlFormatOptions::default().max_nesting_depth)
+    }
+
+    /// `data_signature` of a `yaml` that loads within `max_nesting_depth`.
+    fn data_signature_within(yaml: &str, max_nesting_depth: usize) -> String {
         fn walk(node: &Node<Span>, out: &mut String) {
             let props = format!("&{:?} !{:?}", node.anchor(), node_tag(node));
             match node {
@@ -1901,7 +1907,10 @@ mod tests {
             }
         }
         let mut out = String::new();
-        for doc in rlsp_yaml_parser::load(yaml).expect("test input must parse") {
+        let loader = LoaderBuilder::new()
+            .max_nesting_depth(max_nesting_depth)
+            .build();
+        for doc in loader.load(yaml).expect("test input must parse") {
             walk(&doc.root, &mut out);
             out.push('\n');
         }
@@ -1923,13 +1932,14 @@ mod tests {
     fn assert_comments_kept(yaml: &str, opts: &YamlFormatOptions, label: &str) {
         let output = format_yaml(yaml, opts);
         let context = format!("{label}: input {yaml:?}, output {output:?}");
+        let limit = opts.max_nesting_depth;
         assert!(
-            rlsp_yaml_parser::load(&output).is_ok(),
+            opts.loader().load(&output).is_ok(),
             "output does not load: {context}"
         );
         assert_eq!(
-            data_signature(&output),
-            data_signature(yaml),
+            data_signature_within(&output, limit),
+            data_signature_within(yaml, limit),
             "data differs: {context}"
         );
         let (before, after) = (comment_texts(yaml), comment_texts(&output));
@@ -2371,13 +2381,79 @@ mod tests {
             .spawn(move || {
                 let levels = rlsp_yaml_parser::MAX_COLLECTION_DEPTH - 1;
                 let input = format!("{} # c\n 1{}\n", open.repeat(levels), close.repeat(levels));
-                let output = format_yaml(&input, &default_opts());
+                let opts = YamlFormatOptions {
+                    max_nesting_depth: rlsp_yaml_parser::MAX_COLLECTION_DEPTH,
+                    ..default_opts()
+                };
+                let output = format_yaml(&input, &opts);
                 assert!(!output.contains(['[', '{']), "style did not change");
-                assert_comments_kept(&input, &default_opts(), "default");
+                assert_comments_kept(&input, &opts, "limit 512");
             })
             .expect("the thread starts")
             .join()
             .expect("the formatter handles the deepest nesting the parser accepts");
+    }
+
+    // ---- Group: the nesting limit ----
+
+    fn with_limit(max_nesting_depth: usize) -> YamlFormatOptions {
+        YamlFormatOptions {
+            max_nesting_depth,
+            ..default_opts()
+        }
+    }
+
+    // A text at the limit is formatted, the same text one level deeper is not.
+    // The deeper text does format when the limit allows it, so it is the limit
+    // that leaves it alone.
+    #[rstest]
+    #[case::flow_sequences("[ [ [ x ] ] ]\n", "[[[x]]]\n", "[ [ [ [ x ] ] ] ]\n")]
+    #[case::flow_mappings(
+        "{a: {b: {c: 1}}}\n",
+        "{ a: { b: { c: 1 } } }\n",
+        "{a: {b: {c: {d: 1}}}}\n"
+    )]
+    #[case::block_mappings(
+        "a:\n  b:\n    c:   1\n",
+        "a:\n  b:\n    c: 1\n",
+        "a:\n  b:\n    c:\n      d:   1\n"
+    )]
+    fn text_at_the_limit_is_formatted_and_one_level_deeper_comes_back_unchanged(
+        #[case] at_the_limit: &str,
+        #[case] formatted: &str,
+        #[case] one_level_deeper: &str,
+    ) {
+        assert_eq!(format_yaml(at_the_limit, &with_limit(3)), formatted);
+        assert_eq!(
+            format_yaml(one_level_deeper, &with_limit(3)),
+            one_level_deeper
+        );
+        assert_ne!(
+            format_yaml(one_level_deeper, &with_limit(4)),
+            one_level_deeper
+        );
+    }
+
+    #[test]
+    fn text_over_the_limit_comes_back_byte_for_byte_whatever_the_other_options() {
+        let input = "a:\r\n  b:\r\n    c:\r\n      d:   1\r\n";
+        let opts = YamlFormatOptions {
+            line_ending: LineEnding::Cr,
+            insert_final_newline: false,
+            ..with_limit(3)
+        };
+        assert_eq!(format_yaml(input, &opts), input);
+    }
+
+    #[rstest]
+    #[case::mapping("a:   1\n", "a:   1\n")]
+    #[case::sequence("- a\n", "- a\n")]
+    #[case::scalar("a", "a\n")]
+    fn limit_zero_formats_only_documents_without_collections(
+        #[case] input: &str,
+        #[case] expected: &str,
+    ) {
+        assert_eq!(format_yaml(input, &with_limit(0)), expected);
     }
 
     #[test]

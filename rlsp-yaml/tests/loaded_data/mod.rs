@@ -7,7 +7,7 @@
 use std::fmt::Write as _;
 
 use rlsp_yaml_parser::node::Node;
-use rlsp_yaml_parser::{Span, load};
+use rlsp_yaml_parser::{LoaderBuilder, LoaderOptions, Span};
 
 /// The data of `node`: structure, scalar values, tags, anchors and aliases; not
 /// spans, styles or comments.
@@ -53,8 +53,17 @@ pub fn node_signature(node: &Node<Span>) -> String {
 
 /// The data of `yaml` (see `node_signature`).  `None` when `yaml` does not load.
 pub fn data_signature(yaml: &str) -> Option<String> {
+    data_signature_within(yaml, LoaderOptions::default().max_nesting_depth)
+}
+
+/// The data of `yaml` (see `node_signature`).  `None` when `yaml` does not load
+/// within `max_nesting_depth`.
+pub fn data_signature_within(yaml: &str, max_nesting_depth: usize) -> Option<String> {
+    let loader = LoaderBuilder::new()
+        .max_nesting_depth(max_nesting_depth)
+        .build();
     let mut out = String::new();
-    for doc in load(yaml).ok()? {
+    for doc in loader.load(yaml).ok()? {
         out.push_str(&node_signature(&doc.root));
         out.push('\n');
     }

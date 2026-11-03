@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 
+use rlsp_yaml_parser::{Loader, LoaderBuilder, LoaderOptions};
+
 use crate::editing::editor_config::LineEnding;
 use crate::server::YamlVersion;
 
@@ -37,6 +39,13 @@ pub struct YamlFormatOptions {
     pub line_ending: LineEnding,
     /// Whether to append a trailing newline to the output. Default: `true`.
     pub insert_final_newline: bool,
+    /// Deepest nesting of collections the formatter loads.  The loader and the
+    /// renderers recurse once per level, so the limit protects the stack; a
+    /// text nested deeper comes back unchanged.  The parser's own cap
+    /// (`MAX_COLLECTION_DEPTH`) holds whatever this value: it lowers the limit
+    /// and cannot raise that cap.  Not a formatting style: it has no fixture
+    /// key.  Default: the loader's default limit.
+    pub max_nesting_depth: usize,
 }
 
 /// The least indentation that keeps a nested block collection under the first
@@ -44,6 +53,16 @@ pub struct YamlFormatOptions {
 const MIN_INDENT_WIDTH: usize = 2;
 
 impl YamlFormatOptions {
+    /// The loader the formatter reads every text with, the input and its own
+    /// output alike: lossless, with the nesting limit of the options.  One
+    /// definition for all loads, so that they cannot disagree on what a text is.
+    pub(super) fn loader(&self) -> Loader {
+        LoaderBuilder::new()
+            .lossless()
+            .max_nesting_depth(self.max_nesting_depth)
+            .build()
+    }
+
     /// Spaces per indent level in the output.  `tab_width` below the width of
     /// `- ` would put the continuation lines of a compact collection left of its
     /// first entry, which reads as other data.
@@ -73,6 +92,7 @@ impl Default for YamlFormatOptions {
             format_indent_sequences: true,
             line_ending: LineEnding::Lf,
             insert_final_newline: true,
+            max_nesting_depth: LoaderOptions::default().max_nesting_depth,
         }
     }
 }
@@ -85,6 +105,14 @@ mod tests {
     #[test]
     fn format_enforce_block_style_defaults_to_false() {
         assert!(!YamlFormatOptions::default().format_enforce_block_style);
+    }
+
+    #[test]
+    fn default_max_nesting_depth_is_the_loader_default() {
+        assert_eq!(
+            YamlFormatOptions::default().max_nesting_depth,
+            LoaderOptions::default().max_nesting_depth
+        );
     }
 
     // A1: format_remove_duplicate_keys defaults to false.

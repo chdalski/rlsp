@@ -36,7 +36,7 @@ server gets a setting `maxNestingDepth` with a default of 256 and a range of 1 t
 - [x] Task 3: One builder for the server's format options
 - [x] Task 4: Pin the color and code action responses
 - [x] Task 5: Code actions and colors read the stored AST
-- [ ] Task 6: The formatter takes the nesting limit as an option
+- [x] Task 6: The formatter takes the nesting limit as an option
 - [ ] Task 7: The default nesting limit is 256
 - [ ] Task 8: The server setting `maxNestingDepth`
 - [ ] Task 9: The server holds both ends of the setting
@@ -124,16 +124,16 @@ the `DocumentStore` holds; each extra parse would need the limit too. Behavior i
 `format_yaml` loads the text at three sites, the main load, the blank-line restore, and the
 final-newline check; all three use one limit.
 
-- [ ] `YamlFormatOptions` has a nesting limit with the library default as its default, and all
+- [x] `YamlFormatOptions` has a nesting limit with the library default as its default, and all
       three loads in the formatter use it
-- [ ] A text deeper than the limit comes back unchanged, and a test at the limit plus one and at
+- [x] A text deeper than the limit comes back unchanged, and a test at the limit plus one and at
       the limit pins it
-- [ ] The tests that format 400 or more levels pass the limit 512, and each uses an input whose
+- [x] The tests that format 400 or more levels pass the limit 512, and each uses an input whose
       formatted form differs from its text and asserts that the output differs from the input, so
       the fallback for a text deeper than the limit cannot pass them
-- [ ] The fixture tests in `tests/fixtures/formatter/` pass unchanged, and no fixture key is added
+- [x] The fixture tests in `tests/fixtures/formatter/` pass unchanged, and no fixture key is added
       for the limit
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 7: The default nesting limit is 256
 
@@ -236,6 +236,9 @@ A stack overflow on a tokio worker ends the whole server.
   handoff, and no larger stack for the new test.
 - **Gate demands of Task 3:** tests through all three handlers pin every format setting and the
   editorconfig fallbacks, and they pass against the code before the refactor.
+- **Gate demands of Task 6:** each load site of the formatter has a mutation check, the field has a
+  doc comment and one shared loader serves all three loads, and the root `CLAUDE.md` Settings Sync
+  section says that the limit gets no fixture key.
 
 ## Task Notes
 
@@ -246,3 +249,9 @@ A stack overflow on a tokio worker ends the whole server.
   `a_comment_below_a_deep_chain_of_collections_reaches_what_follows` in `tests/loader_comments.rs`,
   `a_stream_that_ends_deep_inside_collections_is_an_error` in `src/loader.rs`) pass the limit 512
   explicitly and keep their depth
+- Task 7: a test runs `format_yaml` with the default `YamlFormatOptions` at the default limit on a
+  2 MiB thread in a debug build, for the shape with the least margin
+- Task 7: the limit tests of Task 6 in `formatter.rs` and `formatter_keeps_data.rs` pass unchanged
+  once the default is 256
+- Task 8: a value out of range takes the default with a warning, as Decisions says; it is not
+  clamped

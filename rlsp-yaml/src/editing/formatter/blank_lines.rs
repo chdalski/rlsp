@@ -19,6 +19,8 @@ use std::slice::Iter;
 use rlsp_yaml_parser::node::{Document, Node};
 use rlsp_yaml_parser::{LineIndex, ScalarStyle, Span};
 
+use super::YamlFormatOptions;
+
 /// A non-blank line of the original text, with the blank line that preceded it.
 struct SourceLine {
     /// The line without its comment, trimmed.  Empty for a comment-only line.
@@ -189,8 +191,9 @@ pub(super) fn restore_blank_lines(
     original: &str,
     source_blocks: &[Range<usize>],
     formatted: &str,
+    options: &YamlFormatOptions,
 ) -> String {
-    let Ok(formatted_documents) = rlsp_yaml_parser::load(formatted) else {
+    let Ok(formatted_documents) = options.loader().load(formatted) else {
         return with_final_newline(&formatted.lines().collect::<Vec<_>>());
     };
     let formatted_blocks = block_scalar_lines(&formatted_documents);
@@ -213,7 +216,7 @@ pub(super) fn restore_blank_lines(
     }
 
     let restored = with_final_newline(&result_lines);
-    if same_content(&restored, &formatted_documents) {
+    if same_content(&restored, &formatted_documents, options) {
         restored
     } else {
         with_final_newline(&formatted.lines().collect::<Vec<_>>())
@@ -227,7 +230,11 @@ pub(super) fn restore_blank_lines(
 /// safe whatever the drift: when it fails, the formatter's own output stands.
 /// The same check guards the removal of the final line break, which ends the
 /// value of a last `|+` scalar.
-pub(super) fn same_content(restored: &str, documents: &[Document<Span>]) -> bool {
+pub(super) fn same_content(
+    restored: &str,
+    documents: &[Document<Span>],
+    options: &YamlFormatOptions,
+) -> bool {
     fn shape(node: &Node<Span>, out: &mut Vec<String>) {
         match node {
             Node::Scalar { value, .. } => out.push(format!("={value}")),
@@ -257,7 +264,10 @@ pub(super) fn same_content(restored: &str, documents: &[Document<Span>]) -> bool
         }
         out
     };
-    rlsp_yaml_parser::load(restored).is_ok_and(|loaded| shape_of(&loaded) == shape_of(documents))
+    options
+        .loader()
+        .load(restored)
+        .is_ok_and(|loaded| shape_of(&loaded) == shape_of(documents))
 }
 
 /// Join `output_lines` with `\n` and end the result with a newline.
@@ -282,8 +292,54 @@ mod tests {
 
     /// `restore_blank_lines` for an `original` that loads.
     fn restore(original: &str, formatted: &str) -> String {
+        restore_with(original, formatted, &YamlFormatOptions::default())
+    }
+
+    fn restore_with(original: &str, formatted: &str, options: &YamlFormatOptions) -> String {
         let documents = rlsp_yaml_parser::load(original).expect("test input must parse");
-        restore_blank_lines(original, &block_scalar_lines(&documents), formatted)
+        restore_blank_lines(
+            original,
+            &block_scalar_lines(&documents),
+            formatted,
+            options,
+        )
+    }
+
+    fn with_limit(max_nesting_depth: usize) -> YamlFormatOptions {
+        YamlFormatOptions {
+            max_nesting_depth,
+            ..YamlFormatOptions::default()
+        }
+    }
+
+    const THREE_LEVELS: &str = "a:\n  b:\n    c: 1\n    d: 2\n";
+
+    #[rstest]
+    #[case::at_the_limit(3, "a:\n  b:\n    c: 1\n\n    d: 2\n")]
+    #[case::one_level_over_the_limit(2, THREE_LEVELS)]
+    fn restore_blank_lines_loads_the_formatted_text_within_the_limit(
+        #[case] limit: usize,
+        #[case] expected: &str,
+    ) {
+        let original = "a:\n  b:\n    c: 1\n\n    d: 2\n";
+        assert_eq!(
+            restore_with(original, THREE_LEVELS, &with_limit(limit)),
+            expected
+        );
+    }
+
+    #[rstest]
+    #[case::at_the_limit(3, true)]
+    #[case::one_level_over_the_limit(2, false)]
+    fn same_content_loads_the_restored_text_within_the_limit(
+        #[case] limit: usize,
+        #[case] expected: bool,
+    ) {
+        let documents = rlsp_yaml_parser::load(THREE_LEVELS).expect("test input must parse");
+        assert_eq!(
+            same_content(THREE_LEVELS, &documents, &with_limit(limit)),
+            expected
+        );
     }
 
     #[rstest]

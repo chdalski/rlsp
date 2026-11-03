@@ -28,6 +28,17 @@ fn data_signature(yaml: &str) -> String {
     loaded_data::data_signature(yaml).expect("the input must load")
 }
 
+/// The data of `yaml`, which must load within `max_nesting_depth`.
+#[expect(clippy::expect_used, reason = "test helper")]
+fn data_signature_within(yaml: &str, max_nesting_depth: usize) -> String {
+    loaded_data::data_signature_within(yaml, max_nesting_depth).expect("the input must load")
+}
+
+/// Whether `yaml` loads with nesting up to `max_nesting_depth`.
+fn loads_within(yaml: &str, max_nesting_depth: usize) -> bool {
+    loaded_data::data_signature_within(yaml, max_nesting_depth).is_some()
+}
+
 /// Every option set the formatter's own tests run with.
 fn option_sets() -> Vec<(&'static str, YamlFormatOptions)> {
     let base = YamlFormatOptions::default;
@@ -117,17 +128,17 @@ fn options(f: impl FnOnce(&mut YamlFormatOptions)) -> YamlFormatOptions {
 /// Formatting `input` gives output that loads to the same data and does not
 /// change when formatted again.
 fn assert_data_kept(input: &str, options: &YamlFormatOptions, label: &str) {
-    let input = if options.line_ending == LineEnding::Crlf {
-        input.replace('\n', "\r\n")
-    } else {
-        input.to_string()
-    };
+    let input = in_line_ending(input, options);
     let output = format_yaml(&input, options);
     let context = format!("{label}: input {input:?}, output {output:?}");
-    assert!(load(&output).is_ok(), "the output does not load: {context}");
+    let limit = options.max_nesting_depth;
+    assert!(
+        loads_within(&output, limit),
+        "the output does not load: {context}"
+    );
     assert_eq!(
-        data_signature(&output),
-        data_signature(&input),
+        data_signature_within(&output, limit),
+        data_signature_within(&input, limit),
         "the data differs: {context}"
     );
     assert_eq!(
@@ -140,6 +151,40 @@ fn assert_data_kept(input: &str, options: &YamlFormatOptions, label: &str) {
 fn assert_data_kept_under_every_option_set(input: &str) {
     for (label, options) in option_sets() {
         assert_data_kept(input, &options, label);
+    }
+}
+
+/// `input` with the line ends the option set's input has: `option_sets` runs
+/// the CRLF set on a CRLF text.
+fn in_line_ending(input: &str, options: &YamlFormatOptions) -> String {
+    if options.line_ending == LineEnding::Crlf {
+        input.replace('\n', "\r\n")
+    } else {
+        input.to_string()
+    }
+}
+
+/// `assert_data_kept_under_every_option_set` for an `input` nested up to
+/// `max_nesting_depth`, which every option set takes as its limit.  The
+/// formatter returns a text it cannot load unchanged, which keeps the data too:
+/// so each option set also has to change the text, and has to take the final
+/// line break off when it is asked to.
+fn assert_deep_input_is_formatted_under_every_option_set(input: &str, max_nesting_depth: usize) {
+    for (label, options) in option_sets() {
+        let options = YamlFormatOptions {
+            max_nesting_depth,
+            ..options
+        };
+        assert_data_kept(input, &options, label);
+        let input = in_line_ending(input, &options);
+        let output = format_yaml(&input, &options);
+        assert_ne!(output, input, "{label}: the text came back unformatted");
+        if !options.insert_final_newline {
+            assert!(
+                !output.ends_with(['\n', '\r']),
+                "{label}: the final line break stays"
+            );
+        }
     }
 }
 
@@ -1439,9 +1484,17 @@ fn flow_sequence_on_the_marker_line_nested_as_deep_as_the_parser_accepts() {
     on_large_stack(|| {
         let levels = rlsp_yaml_parser::MAX_COLLECTION_DEPTH - 1;
         let input = format!("--- {}{}\n", "[".repeat(levels), "]".repeat(levels));
-        assert_data_kept_under_every_option_set(&input);
+        assert_deep_input_is_formatted_under_every_option_set(
+            &input,
+            rlsp_yaml_parser::MAX_COLLECTION_DEPTH,
+        );
+        // The parser's own cap holds whatever the limit of the formatter.
         let too_deep = format!("--- {}{}\n", "[".repeat(levels + 2), "]".repeat(levels + 2));
-        assert_eq!(format_default(&too_deep), too_deep);
+        let unlimited = YamlFormatOptions {
+            max_nesting_depth: usize::MAX,
+            ..YamlFormatOptions::default()
+        };
+        assert_eq!(format_yaml(&too_deep, &unlimited), too_deep);
     });
 }
 
@@ -1449,7 +1502,10 @@ fn flow_sequence_on_the_marker_line_nested_as_deep_as_the_parser_accepts() {
 fn collection_keys_nested_as_deep_as_the_parser_accepts_keep_their_data() {
     on_large_stack(|| {
         let input = question_mark_lines(400);
-        assert_data_kept_under_every_option_set(&input);
+        assert_deep_input_is_formatted_under_every_option_set(
+            &input,
+            rlsp_yaml_parser::MAX_COLLECTION_DEPTH,
+        );
     });
 }
 
@@ -1462,7 +1518,55 @@ fn explicit_keys_nested_as_deep_as_the_parser_accepts_keep_their_data(
 ) {
     on_large_stack(move || {
         let input = build(rlsp_yaml_parser::MAX_COLLECTION_DEPTH - 1);
-        assert_data_kept_under_every_option_set(&input);
+        assert_deep_input_is_formatted_under_every_option_set(
+            &input,
+            rlsp_yaml_parser::MAX_COLLECTION_DEPTH,
+        );
+    });
+}
+
+/// Mappings nested `levels` deep, one per line, and in the innermost
+/// an entry with a comment the formatter moves (`k: 1 # c` becomes
+/// `k: 1  # c`; the blank lines are paired by the text before the comment), a
+/// blank line, and another entry.
+fn mappings_with_a_blank_line_at_the_bottom(levels: usize) -> String {
+    (0..levels)
+        .map(|depth| format!("{}a:\n", "  ".repeat(depth)))
+        .chain([format!("{0}k: 1 # c\n\n{0}j: 2\n", "  ".repeat(levels))])
+        .collect()
+}
+
+fn deep_options(f: impl FnOnce(&mut YamlFormatOptions)) -> YamlFormatOptions {
+    let mut deep = options(f);
+    deep.max_nesting_depth = rlsp_yaml_parser::MAX_COLLECTION_DEPTH;
+    deep
+}
+
+// The blank line is restored in the formatter's output, which the formatter
+// loads again: with the limit of its options, not with the loader's default.
+#[test]
+fn blank_line_survives_in_a_text_nested_beyond_the_default_limit() {
+    on_large_stack(|| {
+        let input = mappings_with_a_blank_line_at_the_bottom(400);
+        let output = format_yaml(&input, &deep_options(|_| {}));
+        let bottom = format!("{0}k: 1  # c\n\n{0}j: 2\n", "  ".repeat(400));
+        assert!(output.ends_with(&bottom), "the blank line is lost");
+        assert_eq!(output.matches("\n\n").count(), 1);
+    });
+}
+
+// The final line break is taken off only if the text without it loads to the
+// same data: the formatter loads that text with the limit of its options.
+#[test]
+fn final_line_break_is_removed_in_a_text_nested_beyond_the_default_limit() {
+    on_large_stack(|| {
+        let input = mappings_with_a_blank_line_at_the_bottom(400);
+        let output = format_yaml(&input, &deep_options(|o| o.insert_final_newline = false));
+        assert!(output.ends_with("j: 2"), "the final line break stays");
+        assert!(
+            output.contains("k: 1  # c"),
+            "the text came back unformatted"
+        );
     });
 }
 

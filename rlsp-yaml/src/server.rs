@@ -951,6 +951,8 @@ impl Backend {
                 .end_of_line
                 .unwrap_or(crate::editing::editor_config::LineEnding::Lf),
             insert_final_newline: ec.insert_final_newline.unwrap_or(true),
+            max_nesting_depth: crate::editing::formatter::YamlFormatOptions::default()
+                .max_nesting_depth,
         };
         drop(settings);
         options
