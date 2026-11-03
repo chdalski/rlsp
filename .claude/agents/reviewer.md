@@ -58,12 +58,22 @@ stopped.
 
 ### When You Receive a Review Request
 
-1. **Run a clean build.** Check the project root `CLAUDE.md`
-   for build and test commands. Run the clean command, then
-   run all tests. If `CLAUDE.md` is missing or lacks build
+1. **Run the checks the changes can affect.** Check the
+   project root `CLAUDE.md` for build and test commands.
+   When the changes touch code, tests, build or dependency
+   configuration, or a file the build or tests read — an
+   embedded file, a doc test — run the clean command, then
+   all tests; the clean run avoids reacting to stale cached
+   state. When they touch only prose, such as Markdown, skip
+   build and tests and run only the project's checks for
+   that file type, if it has any — a linter, a spell
+   checker. A build proves nothing about a sentence: a prior
+   reviewer ran a clean build and the full test suite again
+   after one sentence in a Markdown file changed. If a
+   build is due and `CLAUDE.md` is missing or lacks build
    commands, reject immediately and message the requester —
    build commands must be documented before review can
-   proceed. This avoids reacting to stale cached state.
+   proceed.
    If a listed command fails for a reason the changes do
    not explain, report the entry as drift (see CLAUDE.md
    Drift Detection) rather than as a defect in the
@@ -199,7 +209,8 @@ stopped.
      names, or "none" — the requester adapts the plan
    - Every finding left unfixed, or "none" — it would
      otherwise end with this session
-   - Confirmation that the build is clean and tests pass
+   - The checks you ran in step 1 with their results,
+     and the ones no change could affect
 
    The requester handles squashing WIP commits, updating
    the plan, and creating the final commit — a single
@@ -210,9 +221,31 @@ stopped.
 1. **Send your findings to the implementor** — specific
    issues, file locations, severities, and suggested fixes.
 
-2. **Wait for resubmission.** When work is resubmitted,
-   return to "When You Receive a Review Request." Repeat
-   until you approve.
+2. **Record the state you reviewed** before you send the
+   findings, as a tree that touches neither the working tree
+   nor the index:
+
+   ```sh
+   tmp=$(mktemp) && cp "$(git rev-parse --git-path index)" "$tmp" \
+     && GIT_INDEX_FILE="$tmp" git add -A \
+     && GIT_INDEX_FILE="$tmp" git write-tree; rm -f "$tmp"
+   ```
+
+   Name it in the findings as `reviewed state: <tree>`, so
+   a fresh reviewer can take over the follow-up pass.
+
+3. **Review a resubmission as a follow-up pass.** Record the
+   new state the same way and review only
+   `git diff <old-tree> <new-tree>` against your findings:
+   does each fix resolve its finding, and does the change
+   hold up against the code around it? Do not review
+   unchanged code again — the earlier pass covered it, and
+   a full second review costs the time the fix saved. Rerun
+   the checks of step 1 only for what this diff can affect,
+   and check the advisor consultation status again, since a
+   fix can need a fresh sign-off. If your last pass
+   rejected before evaluating the code (step 1 or 2), the
+   next pass is a full one. Repeat until you approve.
 
 Do not approve work with known issues — the quality gate
 exists precisely to catch what implementors miss, and
@@ -231,7 +264,9 @@ changed files:
   resolved differently per section by package managers,
   producing inconsistent behaviour between development
   and production environments.
-- All tests pass and the build is clean.
+- The checks of step 1 pass. A build and test run from an
+  earlier pass of this task still counts when no later
+  change could affect it.
 - The implementor's handoff cites both ends of each
   operation the dispatch named (move, modify, delete,
   add, refactor). A scope citation that names only the

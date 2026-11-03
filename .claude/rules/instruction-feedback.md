@@ -80,10 +80,10 @@ it:
 | An open finding or cleanup wish | `.ai/backlog.md` |
 | Everything else | Stays in the session |
 
-The backlog holds one line per item: what, where, and where
-it came from. The lead owns the file: it adds entries without
-asking, names them in the completion report, and removes one
-when it becomes a plan or the user drops it. It is no status
-log and no home for facts. A missed plan target goes there
-only after the user has lowered the target
-(`no-silent-target-weakening.md`).
+The backlog holds one line per item — what, where, and where
+it came from — in the section for its kind. The lead owns the
+file: it adds entries without asking, names them in the
+completion report, and removes one when it becomes a plan or
+the user drops it. It is no status log and no home for facts.
+A missed plan target goes there only after the user has
+lowered the target (`no-silent-target-weakening.md`).

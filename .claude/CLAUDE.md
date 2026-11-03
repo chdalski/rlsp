@@ -233,7 +233,12 @@ After clarification is complete:
       instance, fix every instance of its kind in the plan;
       the reviewer may have reported only those it saw.
       Apply the Advisory findings you agree with in the
-      same revision.
+      same revision. A Blocking finding whose fix needs a
+      trade-off the user weighs (_Ask about trade-offs_) is
+      neither fixed nor declined: collect it for step 7
+      rather than asking during the cycle, since a question
+      asked mid-cycle concerns a plan the next pass may still
+      change.
    c. **Follow-up pass: the revision only.** Launch one
       `plan-reviewer` with the Blocking findings of the
       previous pass and the output of
@@ -241,8 +246,9 @@ After clarification is complete:
       the diff itself. It checks that the revision resolves
       those findings and holds up against the rest of the
       plan; it does not review unchanged text again. Repeat
-      b–c until a pass reports no Blocking findings or
-      every remaining one is declined.
+      b–c until a pass reports no Blocking findings other
+      than trade-off findings you collected, or every
+      remaining one is declined.
    d. **No pass for Advisory findings alone.** A pass
       without Blocking findings ends the cycle, and its
       Advisory findings are dropped — except after the
@@ -265,7 +271,8 @@ After clarification is complete:
 
 7. **Present the plan to the user** for approval. Use
    `AskUserQuestion` to confirm. Name each Blocking finding
-   you declined and each split or consolidation suggestion
+   you declined, each trade-off finding you collected, and
+   each split or consolidation suggestion
    the review raised — those are the user's decisions, not
    yours. Present only plan text the plan-reviewer has
    reviewed in its current form: any edit after a review
@@ -277,8 +284,11 @@ After clarification is complete:
    pass. If the user requests changes, revise the plan and
    run follow-up passes on the revision (step 6b–d) —
    revisions based on user feedback can reintroduce issues
-   the subagent would catch. A change of approach goes
-   back to step 3 first.
+   the subagent would catch — and ask nothing in between
+   until the cycle ends. A change of approach goes back to
+   step 3 first; ask about the new design-advisor report's
+   proposals at once, as step 3 requires, because they
+   decide what the passes review.
 
    Show the complete plan text in your message before you
    ask, not a summary: a quick yes to an outline bypasses
@@ -570,7 +580,7 @@ The reviewer messages you on approval with:
 - The composed commit message
 - The baseline commit SHA (from the developer's handoff)
 - The verified file list
-- A review summary confirming build and tests pass
+- A review summary with the checks run and their results
 - Accepted risks from the security sign-off, or "none"
 - Demands a gate made beyond the acceptance criteria, or
   "none"
@@ -686,10 +696,12 @@ When the **reviewer messages you directly** with approval
    with `ListAgents`, which no longer lists an exited
    teammate, rather than waiting for the
    `shutdown_response` messages: they can reach you late.
-   Start a background timer of two minutes with the
-   requests, and run `ListAgents` when it ends: exit
-   messages can stay out, and no other event wakes you. A
-   prior user had to report "alle weg" several times.
+   Neither they nor the exits reliably wake you, so while a
+   teammate is still listed, never end your turn on it:
+   start a background `sleep 20` (`run_in_background`) and
+   check again when it ends. After five checks, tell the
+   user. A prior lead ended its turn waiting for an exit and
+   stood still until the user asked.
    A plain-text
    message, even one that names `shutdown_request`, leaves
    the teammate alive: it needs the request ID the
@@ -802,12 +814,13 @@ forwarding, and mark any forwarded intermediate state as such.
 
 `ListAgents` shows whether a teammate is `running` or
 `idle` when you need its state between notifications. Do
-not start `sleep` timers to wait for a teammate: a timer
-only delays noticing a stall that the idle notification
+not start `sleep` timers to wait for a teammate's result: a
+timer only delays noticing a stall that the idle notification
 already shows — prior sessions lost over ten minutes per
-stall that way. The one exception is the timer for shutdown
-exits (After Reviewer Approval step 6), because an exit
-sends no idle notification.
+stall that way. The one exception is a teammate's exit after
+a shutdown request, which After Reviewer Approval step 6
+checks with a timer, since no notification reliably reports
+it.
 
 **If the developer appears unresponsive:**
 1. Send a status check via `SendMessage`
@@ -877,11 +890,11 @@ When you find existing plans in the plans directory:
 3. Ask which plans to resume, modify, or abandon
 4. Run `git status` and `git log`. Edits and WIP commits that
    fit the open task are a crashed attempt: continue from them
-   and name that in your status; ask the user only about edits you cannot assign to
-   a task. Sign-offs do not survive the session, so the task's
-   gates run fresh. A plan file Git does not track has not
-   been approved: continue its planning and start no task from
-   it.
+   and name that in your status; ask the user only about
+   edits you cannot assign to a task. Sign-offs do not
+   survive the session, so the task's gates run fresh. A
+   plan file Git does not track has not been approved:
+   continue its planning and start no task from it.
 5. If resuming, check which tasks are already committed
    (look for completed checkboxes in the plan) and continue
    from the next incomplete task — re-implementing committed
