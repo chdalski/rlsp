@@ -6,6 +6,7 @@ mod code_lens;
 mod completion;
 mod configuration;
 mod custom_tags;
+mod document_color;
 mod document_links;
 mod document_management;
 mod fake_proxy;

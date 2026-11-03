@@ -34,7 +34,7 @@ server gets a setting `maxNestingDepth` with a default of 256 and a range of 1 t
 - [x] Task 1: The loader uses small stack frames
 - [x] Task 2: `format_yaml` holds 256 levels in debug
 - [x] Task 3: One builder for the server's format options
-- [ ] Task 4: Pin the color and code action responses
+- [x] Task 4: Pin the color and code action responses
 - [ ] Task 5: Code actions and colors read the stored AST
 - [ ] Task 6: The formatter takes the nesting limit as an option
 - [ ] Task 7: The default nesting limit is 256
@@ -104,10 +104,10 @@ unchanged.
 Task 5 changes where `code_action` and `document_color` take their AST from; no test sends a
 `textDocument/documentColor` request today.
 
-- [ ] A test sends `textDocument/documentColor` for a document with colors and pins the response
-- [ ] The code action tests cover a document that does not load, so the empty AST stays pinned
-- [ ] The new tests pass at this commit, before Task 5
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] A test sends `textDocument/documentColor` for a document with colors and pins the response
+- [x] The code action tests cover a document that does not load, so the empty AST stays pinned
+- [x] The new tests pass at this commit, before Task 5
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 5: Code actions and colors read the stored AST
 

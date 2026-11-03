@@ -129,3 +129,58 @@ async fn should_return_yaml11_bool_code_actions_via_server_handler() {
         "should include 'Convert to boolean' action; got: {titles:?}"
     );
 }
+
+/// Open `text`, request code actions for lines `start_line..end_line`, and
+/// return the action titles (empty for a `null` result).
+async fn code_action_titles(text: &str, start_line: u32, end_line: u32) -> Vec<String> {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/code-action-titles.yaml";
+    send(&mut service, did_open_notification(uri, text)).await;
+
+    let resp = send(
+        &mut service,
+        code_action_request(2, uri, start_line, end_line),
+    )
+    .await;
+    let resp = resp.expect("codeAction should return a response");
+    let result = resp.result().expect("codeAction should have a result");
+    result.as_array().map_or_else(Vec::new, |actions| {
+        actions
+            .iter()
+            .filter_map(|a| a["title"].as_str().map(str::to_string))
+            .collect()
+    })
+}
+
+#[tokio::test]
+async fn should_offer_block_to_flow_action_for_loading_document() {
+    let titles = code_action_titles("config:\n  key: value\nother: [1, 2]\n", 0, 1).await;
+
+    assert_eq!(titles, vec!["Convert block to flow style"]);
+}
+
+#[tokio::test]
+async fn should_offer_no_structural_actions_for_document_that_does_not_load() {
+    // Same block mapping on line 0 as the loading document above; the
+    // unterminated flow sequence on line 2 makes the whole text fail to load,
+    // so the structural actions see no AST.
+    let titles = code_action_titles("config:\n  key: value\nother: [1, 2\n", 0, 1).await;
+
+    assert!(
+        titles.is_empty(),
+        "no structural action without an AST; got: {titles:?}"
+    );
+}
+
+#[tokio::test]
+async fn should_offer_text_based_tab_action_for_document_that_does_not_load() {
+    // The tab action reads the raw text, so it survives an empty AST.
+    let titles = code_action_titles("config:\n  key: value\n\tother: [1, 2\n", 2, 3).await;
+
+    assert_eq!(titles, vec!["Convert tabs to spaces"]);
+}
