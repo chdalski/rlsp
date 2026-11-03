@@ -1296,8 +1296,10 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri;
         let range = params.range;
 
-        let text = if let Ok(store) = self.document_store.lock() {
-            store.get(&uri).map(str::to_string)
+        let (text, docs) = if let Ok(store) = self.document_store.lock() {
+            let text = store.get(&uri).map(str::to_string);
+            let docs = store.get_documents(&uri).cloned();
+            (text, docs)
         } else {
             return Ok(None);
         };
@@ -1310,9 +1312,8 @@ impl LanguageServer for Backend {
 
         let format_options = self.format_options(&uri, &text, CODE_ACTION_TAB_WIDTH);
 
-        let docs = crate::parser::parse_yaml(&text).documents;
         let actions = crate::editing::code_actions::code_actions(
-            &docs,
+            docs.as_deref().unwrap_or(&[]),
             &text,
             range,
             &diagnostics,
@@ -1662,18 +1663,13 @@ impl LanguageServer for Backend {
         }
 
         let uri = params.text_document.uri;
-        let text = if let Ok(store) = self.document_store.lock() {
-            store.get(&uri).map(str::to_string)
+        let docs = if let Ok(store) = self.document_store.lock() {
+            store.get_documents(&uri).cloned()
         } else {
             return Ok(Vec::new());
         };
 
-        let Some(text) = text else {
-            return Ok(Vec::new());
-        };
-
-        let docs = crate::parser::parse_yaml(&text).documents;
-        let colors = crate::decorators::color::find_colors(&docs)
+        let colors = crate::decorators::color::find_colors(docs.as_deref().unwrap_or(&[]))
             .into_iter()
             .map(|m| ColorInformation {
                 range: m.range,

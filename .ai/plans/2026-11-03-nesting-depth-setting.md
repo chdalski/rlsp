@@ -35,7 +35,7 @@ server gets a setting `maxNestingDepth` with a default of 256 and a range of 1 t
 - [x] Task 2: `format_yaml` holds 256 levels in debug
 - [x] Task 3: One builder for the server's format options
 - [x] Task 4: Pin the color and code action responses
-- [ ] Task 5: Code actions and colors read the stored AST
+- [x] Task 5: Code actions and colors read the stored AST
 - [ ] Task 6: The formatter takes the nesting limit as an option
 - [ ] Task 7: The default nesting limit is 256
 - [ ] Task 8: The server setting `maxNestingDepth`
@@ -114,10 +114,10 @@ Task 5 changes where `code_action` and `document_color` take their AST from; no 
 `code_action` and `document_color` parse the text again, while the other handlers read the AST
 the `DocumentStore` holds; each extra parse would need the limit too. Behavior is unchanged.
 
-- [ ] `code_action` and `document_color` read the AST of the `DocumentStore`, as
+- [x] `code_action` and `document_color` read the AST of the `DocumentStore`, as
       `folding_range` does, and parse no text
-- [ ] The tests of Task 4 and the code action tests pass with their assertions unchanged
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] The tests of Task 4 and the code action tests pass with their assertions unchanged
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 6: The formatter takes the nesting limit as an option
 
