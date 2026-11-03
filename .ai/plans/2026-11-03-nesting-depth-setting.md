@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-11-03
 
 # A Configurable Nesting Depth of 256 That Holds on Every Build
@@ -31,7 +31,7 @@ server gets a setting `maxNestingDepth` with a default of 256 and a range of 1 t
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: The loader uses small stack frames
+- [x] Task 1: The loader uses small stack frames
 - [ ] Task 2: `format_yaml` holds 256 levels in debug
 - [ ] Task 3: One builder for the server's format options
 - [ ] Task 4: Pin the color and code action responses
@@ -48,25 +48,25 @@ server gets a setting `maxNestingDepth` with a default of 256 and a range of 1 t
 
 `parse_node` keeps every temporary of every arm in one frame. Behavior is unchanged.
 
-- [ ] `load()` loads 256 and 512 levels of block mappings, block sequences, flow mappings, and
+- [x] `load()` loads 256 and 512 levels of block mappings, block sequences, flow mappings, and
       flow sequences on a 2 MiB thread in a debug build, with a limit of 512, and tests pin it
-- [ ] The `Debug` output of `load()` at the commit before this task and after it is the same for every
+- [x] The `Debug` output of `load()` at the commit before this task and after it is the same for every
       yaml-test-suite input, every file in `rlsp-yaml/tests/corpus`, and every `*.yml` and
       `*.yaml` file in the repository, in lossless and resolved mode: 0 differences
-- [ ] The loader's tests and the yaml-test-suite conformance tests pass with their assertions
+- [x] The loader's tests and the yaml-test-suite conformance tests pass with their assertions
       unchanged
-- [ ] Whether a node still has children to read is a type of its own, not a `bool`
-- [ ] The comment on the dispatcher states that a slot holds an empty scalar until a node
+- [x] Whether a node still has children to read is a type of its own, not a `bool`
+- [x] The comment on the dispatcher states that a slot holds an empty scalar until a node
       replaces it
-- [ ] The state where a scalar or alias has children is handled in one place, with a comment
-- [ ] Each `#[inline(never)]` says why
-- [ ] The loader description in `rlsp-yaml-parser/docs/architecture.md`, including the arms of
+- [x] The state where a scalar or alias has children is handled in one place, with a comment
+- [x] Each `#[inline(never)]` says why
+- [x] The loader description in `rlsp-yaml-parser/docs/architecture.md`, including the arms of
       `parse_node`, the `Comment` arm, and the paragraph on its recursion, matches the dispatcher
       and its helpers
-- [ ] No test of `rlsp-yaml/src/parser.rs` needs a thread larger than 2 MiB, and no comment in
+- [x] No test of `rlsp-yaml/src/parser.rs` needs a thread larger than 2 MiB, and no comment in
       `loader.rs`, `rlsp-yaml/src/parser.rs`, `rlsp-yaml/src/editing/formatter.rs`, or
       `rlsp-yaml/tests/formatter_keeps_data.rs` states the old stack depth of the loader
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 2: `format_yaml` holds 256 levels in debug
 
@@ -223,3 +223,15 @@ A stack overflow on a tokio worker ends the whole server.
 - **The limit is a server setting, not a formatter setting:** `YamlFormatOptions` carries it for
   the handlers, and `maxNestingDepth` reaches the VS Code extension through Task 8; it has no
   fixture key, since fixtures test formatting styles.
+- **Gate demands of Task 1:** the mixed-nesting test counts each collection exactly, and the handoff
+  carries a table of stack use per depth.
+
+## Task Notes
+
+- Task 2: with the small loader frames, four of the depth tests in `rlsp-yaml/tests/formatter_keeps_data.rs`
+  still overflow 2 MiB at 511 levels, in the formatter; the measurement covers their shapes
+- Task 7: the depth tests that rely on the default limit (`nested_collection_keys_load_on_a_two_mib_stack`
+  and `a_parse_error_deep_in_the_tree_is_returned_unchanged` in `tests/robustness.rs`,
+  `a_comment_below_a_deep_chain_of_collections_reaches_what_follows` in `tests/loader_comments.rs`,
+  `a_stream_that_ends_deep_inside_collections_is_an_error` in `src/loader.rs`) pass the limit 512
+  explicitly and keep their depth

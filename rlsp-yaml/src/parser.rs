@@ -179,8 +179,7 @@ mod tests {
     #[test]
     fn should_not_panic_on_deeply_nested_yaml() {
         // Build 64 levels of nesting: each key indented 2 more spaces than the
-        // parent.  Deep enough to be a meaningful smoke test while staying within
-        // the default thread stack size (debug builds have large frames).
+        // parent.  Deep enough to be a meaningful smoke test.
         let mut text = String::new();
         for i in 0..64usize {
             let indent = "  ".repeat(i);
@@ -346,13 +345,13 @@ mod tests {
         }
     }
 
-    #[test]
-    fn parse_yaml_nesting_depth_limit_produces_diagnostic() {
-        // Build YAML with 260 nesting levels — exceeds MAX_NESTING_DEPTH = 256.
-        // Run in a thread with a larger stack so the recursive parser itself does
-        // not overflow before it can enforce the limit.
-        let result = std::thread::Builder::new()
-            .stack_size(64 * 1024 * 1024)
+    /// Parses 260 nesting levels, which exceeds `MAX_NESTING_DEPTH`, on a thread
+    /// with a 2 MiB stack: the limit must hold before the recursive loader
+    /// overflows that stack, and a fixed size keeps the test independent of the
+    /// test runner's thread.
+    fn parse_beyond_the_nesting_limit() -> ParseResult {
+        std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
             .spawn(|| {
                 let mut text = String::new();
                 for i in 0..260usize {
@@ -365,7 +364,12 @@ mod tests {
             })
             .expect("thread spawn")
             .join()
-            .expect("thread join");
+            .expect("thread join")
+    }
+
+    #[test]
+    fn parse_yaml_nesting_depth_limit_produces_diagnostic() {
+        let result = parse_beyond_the_nesting_limit();
 
         // NestingDepthLimitExceeded now carries the position of the triggering node
         assert!(
@@ -384,21 +388,7 @@ mod tests {
         // diagnostic was always on line 0. After the fix the variant carries the
         // position of the node that exceeded the limit, which for 260 levels of
         // nesting is approximately line 256 (0-based in LSP).
-        let result = std::thread::Builder::new()
-            .stack_size(64 * 1024 * 1024)
-            .spawn(|| {
-                let mut text = String::new();
-                for i in 0..260usize {
-                    let indent = "  ".repeat(i);
-                    writeln!(text, "{indent}level{i}:").unwrap();
-                }
-                let leaf_indent = "  ".repeat(260);
-                writeln!(text, "{leaf_indent}leaf: value").unwrap();
-                parse_yaml(&text)
-            })
-            .expect("thread spawn")
-            .join()
-            .expect("thread join");
+        let result = parse_beyond_the_nesting_limit();
 
         assert!(
             !result.diagnostics.is_empty(),

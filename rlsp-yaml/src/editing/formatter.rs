@@ -2357,9 +2357,8 @@ mod tests {
 
     // The deepest nesting the parser accepts: every level changes style because
     // of one comment at the bottom.  The loader and the renderers recurse once
-    // per level, and a debug build overflows the 2 MiB stack of a test thread
-    // in the loader at about 225 levels, before it reaches the formatter, so the
-    // test runs on a larger stack; a release build runs this depth on 2 MiB.
+    // per level, so the test runs on a thread with a fixed 2 MiB stack, which a
+    // debug build must not overflow at this depth.
     #[rstest]
     #[case::sequences("[", "]")]
     #[case::mappings("{a: ", "}")]
@@ -2368,7 +2367,7 @@ mod tests {
         #[case] close: &'static str,
     ) {
         std::thread::Builder::new()
-            .stack_size(64 << 20)
+            .stack_size(2 << 20)
             .spawn(move || {
                 let levels = rlsp_yaml_parser::MAX_COLLECTION_DEPTH - 1;
                 let input = format!("{} # c\n 1{}\n", open.repeat(levels), close.repeat(levels));

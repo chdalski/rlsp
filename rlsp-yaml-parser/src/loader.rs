@@ -143,6 +143,11 @@ pub enum LoadError {
 // Convenience alias used inside the module.
 type Result<T> = std::result::Result<T, LoadError>;
 
+// The recursive part of the loader boxes its errors: `LoadError` is many words
+// large, and in an unoptimized build every `?` keeps another copy of the
+// `Result` in the frame of each level of nesting.  `LoadState::run` unboxes.
+type BoxedResult<T> = std::result::Result<T, Box<LoadError>>;
+
 // Type alias for the peekable event stream used throughout the loader.
 type EventStream<'a> =
     Peekable<Box<dyn Iterator<Item = std::result::Result<(Event<'a>, Span), Error>> + 'a>>;
@@ -369,7 +374,7 @@ struct LoadState<'opt> {
     depth: usize,
     /// Total nodes produced via alias expansion (resolved mode only).
     expanded_nodes: usize,
-    /// Leading comments accumulated by `parse_node` when it meets a run of
+    /// Leading comments accumulated by `begin_node` when it meets a run of
     /// `Comment` events at a mapping value position (between the key and the
     /// value, whatever the value is), or by a sequence/mapping loop when it
     /// hits End with leftover leading comments.  The next mapping/sequence
@@ -388,6 +393,33 @@ struct SplitComments {
     before: Vec<String>,
     /// The comments that belong to what follows it.
     after: Vec<String>,
+}
+
+/// The comments that lead to a key or item, boxed so that they cost the
+/// recursion one word.  Most entries have none and allocate nothing.
+struct EntryComments {
+    /// The comments read directly before the node, with their start offsets.
+    raw: Vec<(String, u32)>,
+    /// The comments passed on from what came before them.
+    inherited: Vec<String>,
+}
+
+/// What [`LoadState::begin_node`] left in the slot.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Children {
+    /// The node is complete: a scalar, an alias, or an empty scalar where no
+    /// node starts.
+    Absent,
+    /// A mapping or sequence whose entries or items are still in the stream.
+    Follow,
+}
+
+/// What [`LoadState::next_entry`] found in a collection.
+enum NextEntry {
+    /// The collection's end event is next.
+    Closed,
+    /// A key or item is next, led by these comments.
+    Entry(Option<Box<EntryComments>>),
 }
 
 impl<'opt> LoadState<'opt> {
@@ -450,14 +482,14 @@ impl<'opt> LoadState<'opt> {
                     let doc_comments = consume_leading_comments(&mut stream)?;
 
                     // Parse root node (may be absent for empty documents).
-                    let mut root = if is_document_end(stream.peek()) {
-                        // Empty document — emit an empty scalar as root.
-                        let mut node = empty_scalar();
-                        apply_schema_to_node(&mut node, self.options.schema, &self.line_index)?;
-                        node
+                    let mut root = empty_scalar();
+                    if is_document_end(stream.peek()) {
+                        // Empty document — the root is an empty scalar.
+                        apply_schema_to_node(&mut root, self.options.schema, &self.line_index)?;
                     } else {
-                        self.parse_node(&mut stream)?
-                    };
+                        self.parse_node(&mut stream, &mut root)
+                            .map_err(|error| *error)?;
+                    }
                     attach_line_comment(&mut stream, &mut root, &self.line_index)?;
 
                     // Comments that no node inherited come first, in source
@@ -538,17 +570,60 @@ impl<'opt> LoadState<'opt> {
         Ok(docs)
     }
 
-    /// Parse a single node from the stream.
+    /// Parse a single node from the stream into `slot`.
     ///
     /// Advances the stream past the node (including end-of-container events).
-    #[expect(
-        clippy::too_many_lines,
-        reason = "match-on-event-type; splitting would obscure flow"
-    )]
-    fn parse_node(&mut self, stream: &mut EventStream<'_>) -> Result<Node<Span>> {
+    ///
+    /// The caller passes a slot that holds an empty scalar, and it still does
+    /// when no node starts here: a structural end event is left in the stream
+    /// for the caller's collection loop, and the empty scalar stands for the
+    /// missing node.  Any other node replaces it.
+    ///
+    /// This function and the two collection loops, `parse_entries` and
+    /// `parse_items`, are the recursion: each level of nesting holds one frame
+    /// of each.  Their frames stay small because the node is built in its slot
+    /// in the parent's vector, so the recursion holds references and no node,
+    /// and everything that needs more than a few words of stack lives in the
+    /// `#[inline(never)]` helpers, whose frames are gone before the recursion
+    /// goes deeper.  That keeps the stack use per level low enough for the
+    /// nesting limit to protect a 2 MiB stack in a debug build, which has the
+    /// largest frames.
+    fn parse_node(
+        &mut self,
+        stream: &mut EventStream<'_>,
+        slot: &mut Node<Span>,
+    ) -> BoxedResult<()> {
+        if self.begin_node(stream, slot)? == Children::Absent {
+            return Ok(());
+        }
+        match slot {
+            Node::Mapping { entries, .. } => self.parse_entries(stream, entries)?,
+            Node::Sequence { items, .. } => self.parse_items(stream, items)?,
+            // `begin_node` reports `Children::Follow` only for the mapping or
+            // sequence it just put in the slot, so a complete node never gets
+            // here.  Reaching this arm would mean a bug in `begin_node`; it has
+            // no children to read and nothing to finish.
+            Node::Scalar { .. } | Node::Alias { .. } => return Ok(()),
+        }
+        self.finish_collection(stream, slot)
+    }
+
+    /// Read the events up to the next node's first one and start the node in
+    /// `slot`.  A mapping or sequence is only started: its entries or items
+    /// come next ([`Children::Follow`]).  Any other node is complete.
+    // Not inlined: in a release build this function would join the frame of
+    // `parse_node`, and its event and error temporaries would add to the stack
+    // use of every level of nesting.
+    #[inline(never)]
+    fn begin_node(
+        &mut self,
+        stream: &mut EventStream<'_>,
+        slot: &mut Node<Span>,
+    ) -> BoxedResult<Children> {
         // Structural end events close the caller's collection loop — do NOT
-        // consume them here.  Return an empty scalar and leave the event in
-        // the stream so the outer mapping/sequence loop can see and consume it.
+        // consume them here.  Leave the empty scalar in the slot and the event
+        // in the stream so the outer mapping/sequence loop can see and consume
+        // it.
         if matches!(
             stream.peek(),
             Some(Ok((
@@ -556,249 +631,48 @@ impl<'opt> LoadState<'opt> {
                 _
             )))
         ) {
-            return Ok(empty_scalar());
+            return Ok(Children::Absent);
         }
 
         let Some((event, span)) = next_from(stream)? else {
-            return Ok(empty_scalar());
+            return Ok(Children::Absent);
         };
 
         match event {
             Event::Scalar { value, style, meta } => {
-                let (anchor, anchor_loc, tag, tag_loc) = unpack_meta(meta);
-                let anchor = anchor.map(str::to_owned);
-                // Capture the anchor span before it moves into NodeMeta.
-                let anchor_span = anchor_loc.unwrap_or(span);
-                let mut node = Node::Scalar {
-                    value: value.into_owned(),
-                    style,
-                    tag: tag.map(|t| Cow::Owned(t.into_owned())),
-                    loc: span,
-                    meta: NodeMeta {
-                        anchor,
-                        anchor_loc,
-                        tag_loc,
-                        leading_comments: None,
-                        trailing_comment: None,
-                    }
-                    .into_option(),
-                };
-                apply_schema_to_node(&mut node, self.options.schema, &self.line_index)?;
-                if let Some(name) = node.anchor() {
-                    self.register_anchor(name.to_owned(), &node, anchor_span)?;
-                }
-                Ok(node)
+                *slot = self.scalar_node(value, style, meta, span)?;
+                Ok(Children::Absent)
             }
 
             Event::MappingStart { style, meta } => {
-                let (event_anchor, anchor_loc, event_tag, tag_loc) = unpack_meta(meta);
-                let anchor = event_anchor.map(str::to_owned);
-                let tag = event_tag.map(|t| Cow::Owned(t.into_owned()));
-                let anchor_for_registration = anchor.clone();
-                // Capture the anchor span before it moves into NodeMeta.
-                let anchor_span = anchor_loc.unwrap_or(span);
-
-                self.depth += 1;
-                if self.depth > self.options.max_nesting_depth {
-                    return Err(LoadError::NestingDepthLimitExceeded {
-                        limit: self.options.max_nesting_depth,
-                        pos: span_start_to_pos(span.start, &self.line_index),
-                    });
-                }
-
-                let mut entries: Vec<(Node<Span>, Node<Span>)> = Vec::new();
-                let mut end_span = span;
-
-                loop {
-                    // Consume leading comments before the next key.  Also
-                    // collect any comments that spilled over from a sibling
-                    // value's collection end (stored in `pending_leading`).
-                    let raw_leading = consume_leading_comments_at(stream)?;
-                    let mut leading = std::mem::take(&mut self.pending_leading);
-
-                    match stream.peek() {
-                        None | Some(Ok((Event::StreamEnd, _))) => {
-                            // The stream stops inside the mapping.
-                            return Err(LoadError::UnexpectedEndOfStream);
-                        }
-                        Some(Ok((Event::MappingEnd, _))) => {
-                            // Save any collected leading comments so the next
-                            // sibling entry in the parent collection can inherit
-                            // them (e.g. a comment just before MappingEnd that
-                            // belongs to the following mapping entry).
-                            leading.extend(raw_leading.into_iter().map(|(text, _)| text));
-                            if !leading.is_empty() {
-                                self.pending_leading = leading;
-                            }
-                            break;
-                        }
-                        Some(Ok((Event::SequenceEnd | Event::DocumentEnd { .. }, end))) => {
-                            return Err(self.unbalanced_end(*end));
-                        }
-                        Some(Err(_)) => {
-                            // Consume the error.
-                            return Err(match stream.next() {
-                                Some(Err(e)) => LoadError::Parse {
-                                    pos: e.pos,
-                                    message: e.message,
-                                    kind: e.kind,
-                                },
-                                _ => LoadError::UnexpectedEndOfStream,
-                            });
-                        }
-                        Some(Ok(_)) => {}
-                    }
-
-                    let mut key = self.parse_node(stream)?;
-                    let after_key = self.split_comments_after_empty_node(&key, raw_leading);
-                    leading.extend(after_key.before);
-                    attach_leading_comments(&mut key, leading);
-                    self.pending_leading.extend(after_key.after);
-                    // The comment after the key on its own line (`k: # c`,
-                    // `a: &x # c`) sits between the key and the value event.
-                    attach_key_line_comment(stream, &mut key, &self.line_index)?;
-
-                    let mut value = self.parse_node(stream)?;
-                    attach_line_comment(stream, &mut value, &self.line_index)?;
-
-                    entries.push((key, value));
-                }
-
-                // Consume MappingEnd and capture its span.
-                if let Some(Ok((Event::MappingEnd, end))) = stream.peek() {
-                    end_span = *end;
-                    let _ = stream.next();
-                }
-                self.depth -= 1;
-
-                let mut node = Node::Mapping {
-                    entries,
+                self.enter_collection(span)?;
+                let (tag, meta) = node_properties(meta);
+                *slot = Node::Mapping {
+                    entries: Vec::new(),
                     style,
                     tag,
-                    loc: Span {
-                        start: span.start,
-                        end: end_span.end,
-                    },
-                    meta: NodeMeta {
-                        anchor,
-                        anchor_loc,
-                        tag_loc,
-                        leading_comments: None,
-                        trailing_comment: None,
-                    }
-                    .into_option(),
+                    loc: span,
+                    meta,
                 };
-                apply_schema_to_node(&mut node, self.options.schema, &self.line_index)?;
-                if let Some(name) = anchor_for_registration {
-                    self.register_anchor(name, &node, anchor_span)?;
-                }
-                Ok(node)
+                Ok(Children::Follow)
             }
 
             Event::SequenceStart { style, meta } => {
-                let (event_anchor, anchor_loc, event_tag, tag_loc) = unpack_meta(meta);
-                let anchor = event_anchor.map(str::to_owned);
-                let tag = event_tag.map(|t| Cow::Owned(t.into_owned()));
-                let anchor_for_registration = anchor.clone();
-                // Capture the anchor span before it moves into NodeMeta.
-                let anchor_span = anchor_loc.unwrap_or(span);
-
-                self.depth += 1;
-                if self.depth > self.options.max_nesting_depth {
-                    return Err(LoadError::NestingDepthLimitExceeded {
-                        limit: self.options.max_nesting_depth,
-                        pos: span_start_to_pos(span.start, &self.line_index),
-                    });
-                }
-
-                let mut items: Vec<Node<Span>> = Vec::new();
-                let mut end_span = span;
-
-                loop {
-                    // Collect leading comments before the next item.  Also
-                    // collect any comments that spilled over from a sibling
-                    // value's collection end (stored in `pending_leading`).
-                    let raw_leading = consume_leading_comments_at(stream)?;
-                    let mut leading = std::mem::take(&mut self.pending_leading);
-
-                    match stream.peek() {
-                        None | Some(Ok((Event::StreamEnd, _))) => {
-                            // The stream stops inside the sequence.
-                            return Err(LoadError::UnexpectedEndOfStream);
-                        }
-                        Some(Ok((Event::SequenceEnd, _))) => {
-                            // Save any collected leading comments so the next
-                            // sibling entry in the parent collection can inherit
-                            // them (e.g. a comment just before SequenceEnd that
-                            // belongs to the following sequence item or mapping
-                            // entry in the parent).
-                            leading.extend(raw_leading.into_iter().map(|(text, _)| text));
-                            if !leading.is_empty() {
-                                self.pending_leading = leading;
-                            }
-                            break;
-                        }
-                        Some(Ok((Event::MappingEnd | Event::DocumentEnd { .. }, end))) => {
-                            return Err(self.unbalanced_end(*end));
-                        }
-                        Some(Err(_)) => {
-                            // Consume the error.
-                            return Err(match stream.next() {
-                                Some(Err(e)) => LoadError::Parse {
-                                    pos: e.pos,
-                                    message: e.message,
-                                    kind: e.kind,
-                                },
-                                _ => LoadError::UnexpectedEndOfStream,
-                            });
-                        }
-                        Some(Ok(_)) => {}
-                    }
-
-                    let mut item = self.parse_node(stream)?;
-                    let after_item = self.split_comments_after_empty_node(&item, raw_leading);
-                    leading.extend(after_item.before);
-                    attach_leading_comments(&mut item, leading);
-                    self.pending_leading.extend(after_item.after);
-                    attach_line_comment(stream, &mut item, &self.line_index)?;
-
-                    items.push(item);
-                }
-
-                // Consume SequenceEnd and capture its span.
-                if let Some(Ok((Event::SequenceEnd, end))) = stream.peek() {
-                    end_span = *end;
-                    let _ = stream.next();
-                }
-                self.depth -= 1;
-
-                let mut node = Node::Sequence {
-                    items,
+                self.enter_collection(span)?;
+                let (tag, meta) = node_properties(meta);
+                *slot = Node::Sequence {
+                    items: Vec::new(),
                     style,
                     tag,
-                    loc: Span {
-                        start: span.start,
-                        end: end_span.end,
-                    },
-                    meta: NodeMeta {
-                        anchor,
-                        anchor_loc,
-                        tag_loc,
-                        leading_comments: None,
-                        trailing_comment: None,
-                    }
-                    .into_option(),
+                    loc: span,
+                    meta,
                 };
-                apply_schema_to_node(&mut node, self.options.schema, &self.line_index)?;
-                if let Some(name) = anchor_for_registration {
-                    self.register_anchor(name, &node, anchor_span)?;
-                }
-                Ok(node)
+                Ok(Children::Follow)
             }
 
             Event::Alias { name } => {
-                let name = name.to_owned();
-                self.resolve_alias(&name, span)
+                *slot = self.resolve_alias(name, span)?;
+                Ok(Children::Absent)
             }
 
             Event::Comment { text } => {
@@ -818,25 +692,245 @@ impl<'opt> LoadState<'opt> {
                 self.pending_leading.push(with_hash_prefix(text));
                 self.pending_leading
                     .extend(consume_leading_comments(stream)?);
-                self.parse_node(stream)
+                self.begin_node(stream, slot)
             }
 
+            // Structural event where a node is expected — leave the empty scalar.
             Event::StreamStart
             | Event::StreamEnd
             | Event::DocumentStart { .. }
             | Event::DocumentEnd { .. }
             | Event::MappingEnd
-            | Event::SequenceEnd => {
-                // Structural event where a node is expected — return empty scalar.
-                Ok(empty_scalar())
-            }
+            | Event::SequenceEnd => Ok(Children::Absent),
         }
+    }
+
+    fn scalar_node(
+        &mut self,
+        value: Cow<'_, str>,
+        style: ScalarStyle,
+        meta: Option<Box<EventMeta<'_>>>,
+        span: Span,
+    ) -> Result<Node<Span>> {
+        let (tag, meta) = node_properties(meta);
+        let mut node = Node::Scalar {
+            value: value.into_owned(),
+            style,
+            tag,
+            loc: span,
+            meta,
+        };
+        self.complete_node(&mut node, span)?;
+        Ok(node)
+    }
+
+    /// Apply the schema to a node that has everything but its comments, and
+    /// register its anchor.  `span` starts where the node does.
+    fn complete_node(&mut self, node: &mut Node<Span>, span: Span) -> Result<()> {
+        apply_schema_to_node(node, self.options.schema, &self.line_index)?;
+        if let Some(name) = node.anchor() {
+            let anchor_span = node.anchor_loc().unwrap_or(span);
+            self.register_anchor(name.to_owned(), node, anchor_span)?;
+        }
+        Ok(())
+    }
+
+    /// Count a mapping or sequence that starts at `span` toward the nesting
+    /// depth.
+    fn enter_collection(&mut self, span: Span) -> Result<()> {
+        self.depth += 1;
+        if self.depth > self.options.max_nesting_depth {
+            return Err(LoadError::NestingDepthLimitExceeded {
+                limit: self.options.max_nesting_depth,
+                pos: span_start_to_pos(span.start, &self.line_index),
+            });
+        }
+        Ok(())
+    }
+
+    /// Load the keys and values of the mapping that `begin_node` started, up to
+    /// its end event.
+    fn parse_entries(
+        &mut self,
+        stream: &mut EventStream<'_>,
+        entries: &mut Vec<(Node<Span>, Node<Span>)>,
+    ) -> BoxedResult<()> {
+        while let NextEntry::Entry(comments) = self.next_entry(stream, CollectionKind::Mapping)? {
+            let (key, value) = push_empty_entry(entries);
+            self.parse_node(stream, key)?;
+            self.finish_key(stream, key, comments)?;
+            self.parse_node(stream, value)?;
+            self.finish_value(stream, value)?;
+        }
+        Ok(())
+    }
+
+    /// Load the items of the sequence that `begin_node` started, up to its end
+    /// event.
+    fn parse_items(
+        &mut self,
+        stream: &mut EventStream<'_>,
+        items: &mut Vec<Node<Span>>,
+    ) -> BoxedResult<()> {
+        while let NextEntry::Entry(comments) = self.next_entry(stream, CollectionKind::Sequence)? {
+            let item = push_empty_item(items);
+            self.parse_node(stream, item)?;
+            self.finish_item(stream, item, comments)?;
+        }
+        Ok(())
+    }
+
+    /// Decide whether the collection of the given kind has another key or item,
+    /// and collect the comments that lead to it.  The end event of the
+    /// collection stays in the stream.
+    // Not inlined: the comment vectors and the event temporaries would join
+    // the frame of the collection loop in a release build, and the loop is part
+    // of the recursion.
+    #[inline(never)]
+    fn next_entry(
+        &mut self,
+        stream: &mut EventStream<'_>,
+        kind: CollectionKind,
+    ) -> BoxedResult<NextEntry> {
+        // Consume leading comments before the next key or item.  Also collect
+        // any comments that spilled over from a sibling value's collection end
+        // (stored in `pending_leading`).
+        let raw = consume_leading_comments_at(stream)?;
+        let inherited = std::mem::take(&mut self.pending_leading);
+
+        let closes = match stream.peek() {
+            // The stream stops inside the collection.
+            None | Some(Ok((Event::StreamEnd, _))) => {
+                return Err(Box::new(LoadError::UnexpectedEndOfStream));
+            }
+            Some(Ok((Event::MappingEnd, _))) if kind == CollectionKind::Mapping => true,
+            Some(Ok((Event::SequenceEnd, _))) if kind == CollectionKind::Sequence => true,
+            Some(Ok((Event::MappingEnd | Event::SequenceEnd | Event::DocumentEnd { .. }, end))) => {
+                return Err(Box::new(self.unbalanced_end(*end)));
+            }
+            Some(Err(_)) => {
+                // Consume the error.
+                return Err(Box::new(match stream.next() {
+                    Some(Err(e)) => LoadError::Parse {
+                        pos: e.pos,
+                        message: e.message,
+                        kind: e.kind,
+                    },
+                    _ => LoadError::UnexpectedEndOfStream,
+                }));
+            }
+            Some(Ok(_)) => false,
+        };
+
+        if closes {
+            // Save any collected leading comments so the next sibling entry in
+            // the parent collection can inherit them (e.g. a comment just
+            // before the end event that belongs to the parent's following
+            // entry).
+            let mut leading = inherited;
+            leading.extend(raw.into_iter().map(|(text, _)| text));
+            if !leading.is_empty() {
+                self.pending_leading = leading;
+            }
+            return Ok(NextEntry::Closed);
+        }
+
+        Ok(NextEntry::Entry(
+            if raw.is_empty() && inherited.is_empty() {
+                None
+            } else {
+                Some(Box::new(EntryComments { raw, inherited }))
+            },
+        ))
+    }
+
+    /// Give a loaded key or item the comments read before it.
+    fn attach_entry_comments(
+        &mut self,
+        node: &mut Node<Span>,
+        comments: Option<Box<EntryComments>>,
+    ) {
+        let Some(comments) = comments else {
+            return;
+        };
+        let EntryComments { raw, mut inherited } = *comments;
+        let split = self.split_comments_after_empty_node(node, raw);
+        inherited.extend(split.before);
+        attach_leading_comments(node, inherited);
+        self.pending_leading.extend(split.after);
+    }
+
+    /// Give a loaded mapping key the comments around it.
+    // Not inlined: the comment handling would join the frame of the collection
+    // loop in a release build.
+    #[inline(never)]
+    fn finish_key(
+        &mut self,
+        stream: &mut EventStream<'_>,
+        key: &mut Node<Span>,
+        comments: Option<Box<EntryComments>>,
+    ) -> BoxedResult<()> {
+        self.attach_entry_comments(key, comments);
+        // The comment after the key on its own line (`k: # c`, `a: &x # c`) sits
+        // between the key and the value event.
+        attach_key_line_comment(stream, key, &self.line_index)?;
+        Ok(())
+    }
+
+    /// Give a loaded mapping value the comment on its line.
+    // Not inlined: the comment handling would join the frame of the collection
+    // loop in a release build.
+    #[inline(never)]
+    fn finish_value(
+        &self,
+        stream: &mut EventStream<'_>,
+        value: &mut Node<Span>,
+    ) -> BoxedResult<()> {
+        attach_line_comment(stream, value, &self.line_index)?;
+        Ok(())
+    }
+
+    /// Give a loaded sequence item the comments around it.
+    // Not inlined: the comment handling would join the frame of the collection
+    // loop in a release build.
+    #[inline(never)]
+    fn finish_item(
+        &mut self,
+        stream: &mut EventStream<'_>,
+        item: &mut Node<Span>,
+        comments: Option<Box<EntryComments>>,
+    ) -> BoxedResult<()> {
+        self.attach_entry_comments(item, comments);
+        attach_line_comment(stream, item, &self.line_index)?;
+        Ok(())
+    }
+
+    /// Complete a mapping or sequence whose entries or items are loaded:
+    /// consume its end event, leave its nesting level, apply the schema, and
+    /// register its anchor.
+    // Not inlined: the end event and the schema and anchor work hold large
+    // temporaries that would join the frame of `parse_node` in a release build.
+    #[inline(never)]
+    fn finish_collection(
+        &mut self,
+        stream: &mut EventStream<'_>,
+        node: &mut Node<Span>,
+    ) -> BoxedResult<()> {
+        let loc = loc_mut(node);
+        if let Some(Ok((Event::MappingEnd | Event::SequenceEnd, end))) = stream.peek() {
+            loc.end = end.end;
+            let _ = stream.next();
+        }
+        let span = *loc;
+        self.depth -= 1;
+        self.complete_node(node, span)?;
+        Ok(())
     }
 
     /// The error for a closing event that does not close the collection being
     /// loaded: a mapping that meets a `SequenceEnd`, a sequence that meets a
     /// `MappingEnd`, either that meets a `DocumentEnd`.  The parser emits such a
-    /// stream only for input it should have rejected; `parse_node` leaves a
+    /// stream only for input it should have rejected; `begin_node` leaves a
     /// closing event in the stream, so a loop that did not stop here would never
     /// consume it and would add entries until memory ran out.
     fn unbalanced_end(&self, end: Span) -> LoadError {
@@ -1350,6 +1444,49 @@ const fn empty_scalar() -> Node<Span> {
     }
 }
 
+/// The source span of any node.
+const fn loc_mut(node: &mut Node<Span>) -> &mut Span {
+    match node {
+        Node::Scalar { loc, .. }
+        | Node::Mapping { loc, .. }
+        | Node::Sequence { loc, .. }
+        | Node::Alias { loc, .. } => loc,
+    }
+}
+
+/// Add an empty slot for the next sequence item.
+// Not inlined: in a release build the empty scalars would be built in the frame
+// of the collection loop, which is part of the recursion.
+#[inline(never)]
+fn push_empty_item(items: &mut Vec<Node<Span>>) -> &mut Node<Span> {
+    items.push_mut(empty_scalar())
+}
+
+/// Add empty slots for the next mapping key and value.
+// Not inlined: for the same reason as `push_empty_item`.
+#[inline(never)]
+fn push_empty_entry(entries: &mut Vec<(Node<Span>, Node<Span>)>) -> &mut (Node<Span>, Node<Span>) {
+    entries.push_mut((empty_scalar(), empty_scalar()))
+}
+
+/// The tag and the metadata a node takes from its event's properties.
+fn node_properties(
+    meta: Option<Box<EventMeta<'_>>>,
+) -> (Option<Cow<'static, str>>, Option<Box<NodeMeta<Span>>>) {
+    let (anchor, anchor_loc, tag, tag_loc) = unpack_meta(meta);
+    (
+        tag.map(|t| Cow::Owned(t.into_owned())),
+        NodeMeta {
+            anchor: anchor.map(str::to_owned),
+            anchor_loc,
+            tag_loc,
+            leading_comments: None,
+            trailing_comment: None,
+        }
+        .into_option(),
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -1465,6 +1602,74 @@ mod tests {
     ) {
         let result = load_events(events);
         assert!(result.is_err(), "{result:?}");
+    }
+
+    /// A closing event where a key's value is expected closes the collection:
+    /// the value is the empty scalar that the slot held, untouched by the
+    /// schema, so it has neither a tag nor a position.
+    #[test]
+    fn a_key_without_a_value_gets_the_untouched_empty_scalar() {
+        let events = document_of(vec![
+            start_of(CollectionStyle::Block, true),
+            scalar_of("k"),
+            Event::MappingEnd,
+        ]);
+        let docs = load_events(events).unwrap();
+        let Node::Mapping { entries, .. } = &docs[0].root else {
+            panic!("expected a mapping, got {:?}", docs[0].root);
+        };
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].1, empty_scalar());
+    }
+
+    /// A closing event of the wrong kind where a value is expected is not
+    /// consumed by the value: the collection's loop reports it.
+    #[rstest]
+    #[case::sequence_end_in_a_mapping(Event::SequenceEnd)]
+    #[case::document_end_in_a_mapping(Event::DocumentEnd { explicit: false })]
+    fn a_wrong_closing_event_where_a_value_is_expected_is_an_error(#[case] wrong: Event<'static>) {
+        let events = document_of(vec![
+            start_of(CollectionStyle::Block, true),
+            scalar_of("k"),
+            wrong,
+        ]);
+        assert_syntax_error(&load_events(events));
+    }
+
+    /// An event that opens or closes a stream or a document where a value is
+    /// expected is consumed and stands for an empty value.
+    #[rstest]
+    #[case::stream_start(Event::StreamStart)]
+    #[case::document_start(document_start())]
+    #[case::stream_end(Event::StreamEnd)]
+    fn a_stream_or_document_event_where_a_value_is_expected_is_an_empty_value(
+        #[case] event: Event<'static>,
+    ) {
+        let events = document_of(vec![
+            start_of(CollectionStyle::Block, true),
+            scalar_of("k"),
+            event,
+            Event::MappingEnd,
+        ]);
+        let docs = load_events(events).unwrap();
+        let Node::Mapping { entries, .. } = &docs[0].root else {
+            panic!("expected a mapping, got {:?}", docs[0].root);
+        };
+        assert_eq!(entries[0].1, empty_scalar());
+    }
+
+    /// A stream that ends many levels down is an error, not a stack overflow
+    /// or a half-built tree.
+    #[test]
+    fn a_stream_that_ends_deep_inside_collections_is_an_error() {
+        let mut events = vec![Event::StreamStart, document_start()];
+        events.extend((0..300).map(|level| start_of(CollectionStyle::Block, level % 2 == 0)));
+        events.push(Event::StreamEnd);
+        let result = on_stack(TWO_MIB, move || load_events(events));
+        assert!(
+            matches!(result, Err(LoadError::UnexpectedEndOfStream)),
+            "{result:?}"
+        );
     }
 
     #[test]
@@ -2169,7 +2374,7 @@ mod tests {
     }
 
     // Same placement as the short runs pinned above, for a run long enough to
-    // overflow the stack when each comment costs a `parse_node` frame.
+    // overflow the stack when each comment costs a `begin_node` frame.
     #[rstest]
     #[case::nested_block_sequence("key:\n", "  - item\n", &["item"])]
     #[case::nested_flow_mapping("key:\n", "  {k: v}\nb: 1\n", &["k"])]

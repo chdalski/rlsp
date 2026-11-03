@@ -15,6 +15,7 @@ use rstest::rstest;
 use rlsp_yaml_parser::encoding::decode;
 use rlsp_yaml_parser::loader::{LoadError, LoaderBuilder};
 use rlsp_yaml_parser::node::Node;
+use rlsp_yaml_parser::{ErrorKind, Span};
 use rlsp_yaml_parser::{load, parse_events};
 
 // ===========================================================================
@@ -187,7 +188,7 @@ fn build_nested_mapping(depth: usize) -> String {
 #[test]
 fn nesting_depth_within_limit_succeeds() {
     // The check is `depth > limit`, so depth == limit should succeed.
-    // Use a smaller limit to keep the test fast and avoid stack issues.
+    // Use a smaller limit to keep the test fast.
     let result = LoaderBuilder::new()
         .max_nesting_depth(100)
         .build()
@@ -212,6 +213,434 @@ fn nesting_depth_one_over_limit_is_rejected() {
         ),
         "expected NestingDepthLimitExceeded, got: {result:?}"
     );
+}
+
+// The loader recurses once per level of nesting, so these tests run it on a
+// thread with the 2 MiB stack of a test thread in a debug build, the build with
+// the largest frames, at the deepest nesting the loader accepts.  An overflow
+// aborts the whole test binary.
+
+const TWO_MIB: usize = 2 * 1024 * 1024;
+
+/// Runs `f` on a thread with a fixed stack size, so the stack budget does not
+/// depend on the test runner's thread or `RUST_MIN_STACK`.
+fn on_stack<T: Send + 'static>(bytes: usize, f: impl FnOnce() -> T + Send + 'static) -> T {
+    std::thread::Builder::new()
+        .stack_size(bytes)
+        .spawn(f)
+        .unwrap()
+        .join()
+        .unwrap()
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Mode {
+    Lossless,
+    Resolved,
+}
+
+impl Mode {
+    fn builder(self) -> LoaderBuilder {
+        match self {
+            Self::Lossless => LoaderBuilder::new().lossless(),
+            Self::Resolved => LoaderBuilder::new().resolved(),
+        }
+    }
+}
+
+/// Input that nests `levels` collections of one kind around the scalar `leaf`.
+#[derive(Debug, Clone, Copy)]
+enum Nesting {
+    BlockMappings,
+    BlockSequences,
+    FlowMappings,
+    FlowSequences,
+}
+
+impl Nesting {
+    fn input(self, levels: usize) -> String {
+        match self {
+            Self::BlockMappings => build_nested_mapping(levels),
+            Self::BlockSequences => format!("{}leaf\n", "- ".repeat(levels)),
+            Self::FlowMappings => format!("{}leaf{}\n", "{a: ".repeat(levels), "}".repeat(levels)),
+            Self::FlowSequences => format!("{}leaf{}\n", "[".repeat(levels), "]".repeat(levels)),
+        }
+    }
+
+    /// Where the collection that nests one level deeper than the limit starts.
+    fn start_of_level(self, level: usize) -> (usize, usize, usize) {
+        let before = level - 1;
+        match self {
+            // (byte offset, line, column)
+            Self::BlockMappings => {
+                // Line `n` holds `2 * (n - 1)` spaces and `k<n - 1>:`.
+                let offset: usize = (0..before).map(|i| 2 * i + format!("k{i}:\n").len()).sum();
+                (offset + 2 * before, level, 2 * before)
+            }
+            Self::BlockSequences => (2 * before, 1, 2 * before),
+            Self::FlowMappings => (4 * before, 1, 4 * before),
+            Self::FlowSequences => (before, 1, before),
+        }
+    }
+}
+
+/// How many collections the first entry of each collection leads through, and
+/// the text of the scalar at the bottom.  Follows values of mappings; neither
+/// recursion nor a returned tree is involved, so a deep tree costs the test
+/// no stack.
+fn descent(root: &Node<Span>) -> (usize, String) {
+    let mut node = root;
+    let mut collections = 0;
+    loop {
+        match node {
+            Node::Mapping { entries, .. } => node = &entries.first().unwrap().1,
+            Node::Sequence { items, .. } => node = items.first().unwrap(),
+            Node::Scalar { value, .. } => return (collections, value.clone()),
+            Node::Alias { name, .. } => return (collections, format!("*{name}")),
+        }
+        collections += 1;
+    }
+}
+
+/// One line per level, each indented two spaces deeper than the line before.
+fn indented_lines(levels: usize, text: impl Fn(usize) -> String) -> String {
+    let mut lines = String::new();
+    for level in 0..levels {
+        writeln!(lines, "{}{}", "  ".repeat(level), text(level)).unwrap();
+    }
+    lines
+}
+
+#[rstest]
+fn nesting_of_256_and_512_levels_loads_on_a_two_mib_stack(
+    #[values(256, 512)] levels: usize,
+    #[values(
+        Nesting::BlockMappings,
+        Nesting::BlockSequences,
+        Nesting::FlowMappings,
+        Nesting::FlowSequences
+    )]
+    nesting: Nesting,
+    #[values(Mode::Lossless, Mode::Resolved)] mode: Mode,
+) {
+    let input = nesting.input(levels);
+    let (collections, leaf) = on_stack(TWO_MIB, move || {
+        let docs = mode
+            .builder()
+            .max_nesting_depth(512)
+            .build()
+            .load(&input)
+            .unwrap();
+        assert_eq!(docs.len(), 1);
+        descent(&docs[0].root)
+    });
+    assert_eq!((collections, leaf.as_str()), (levels, "leaf"));
+}
+
+#[rstest]
+#[case::flow_sequences_and_mappings_in_turn(
+    format!("{}leaf{}\n", "{a: [".repeat(256), "]}".repeat(256)),
+    512
+)]
+#[case::block_mappings_then_flow_sequences(
+    indented_lines(99, |level| format!("k{level}:"))
+        + &format!("{}k: {}leaf{}\n", "  ".repeat(99), "[".repeat(412), "]".repeat(412)),
+    // 99 mappings with a key each, the mapping of the last line, 412 sequences
+    99 + 1 + 412
+)]
+#[case::block_sequences_and_mappings_in_turn(
+    indented_lines(255, |_| "- a:".to_owned()) + &format!("{}- a: leaf\n", "  ".repeat(255)),
+    // 256 lines with a sequence and a mapping each
+    256 * 2
+)]
+#[case::marker_line_flow_sequences(
+    format!("--- {}leaf{}\n", "[".repeat(511), "]".repeat(511)),
+    511
+)]
+fn mixed_nesting_of_511_and_512_levels_loads_on_a_two_mib_stack(
+    #[case] input: String,
+    #[case] expected_collections: usize,
+) {
+    let (collections, leaf) = on_stack(TWO_MIB, move || {
+        let docs = LoaderBuilder::new()
+            .max_nesting_depth(512)
+            .build()
+            .load(&input)
+            .unwrap();
+        assert_eq!(docs.len(), 1);
+        descent(&docs[0].root)
+    });
+    assert_eq!((collections, leaf.as_str()), (expected_collections, "leaf"));
+}
+
+#[rstest]
+#[case::mappings_as_keys("? ", 511)]
+#[case::sequences_and_mappings_as_keys("? - ", 255)]
+fn nested_collection_keys_load_on_a_two_mib_stack(
+    #[case] opener: &'static str,
+    #[case] repeats: usize,
+    #[values(Mode::Lossless, Mode::Resolved)] mode: Mode,
+) {
+    let input = format!("{}leaf\n", opener.repeat(repeats));
+    let (collections, leaf) = on_stack(TWO_MIB, move || {
+        let docs = mode.builder().build().load(&input).unwrap();
+        let mut node = &docs[0].root;
+        let mut collections = 0;
+        loop {
+            match node {
+                Node::Mapping { entries, .. } => node = &entries[0].0,
+                Node::Sequence { items, .. } => node = &items[0],
+                Node::Scalar { value, .. } => break (collections, value.clone()),
+                Node::Alias { .. } => unreachable!("the input has no alias"),
+            }
+            collections += 1;
+        }
+    });
+    assert_eq!(leaf, "leaf");
+    assert_eq!(collections, repeats * opener.matches(['?', '-']).count());
+}
+
+// Resolved mode expands an alias by recursing over the anchored tree, which this
+// test keeps at the depth the server accepts.
+#[test]
+fn an_alias_of_a_deep_anchored_collection_expands_on_a_two_mib_stack() {
+    let input = format!("x: &a {0}v{1}\ny: *a\n", "[".repeat(255), "]".repeat(255));
+    let (anchored, expanded) = on_stack(TWO_MIB, move || {
+        let docs = LoaderBuilder::new()
+            .resolved()
+            .max_nesting_depth(256)
+            .build()
+            .load(&input)
+            .unwrap();
+        let Node::Mapping { entries, .. } = &docs[0].root else {
+            panic!("expected a mapping");
+        };
+        (descent(&entries[0].1), descent(&entries[1].1))
+    });
+    assert_eq!(anchored, (255, "v".to_owned()));
+    assert_eq!(expanded, anchored);
+}
+
+#[rstest]
+fn the_limit_holds_on_a_two_mib_stack(
+    #[values(
+        Nesting::BlockMappings,
+        Nesting::BlockSequences,
+        Nesting::FlowMappings,
+        Nesting::FlowSequences
+    )]
+    nesting: Nesting,
+) {
+    let (at_limit, over_limit) = on_stack(TWO_MIB, move || {
+        let loader = LoaderBuilder::new().max_nesting_depth(256).build();
+        (
+            loader.load(&nesting.input(256)).map(|docs| docs.len()),
+            loader.load(&nesting.input(257)),
+        )
+    });
+    assert_eq!(at_limit.unwrap(), 1);
+    let (byte_offset, line, column) = nesting.start_of_level(257);
+    match over_limit {
+        Err(LoadError::NestingDepthLimitExceeded { limit, pos }) => {
+            assert_eq!(limit, 256);
+            assert_eq!(
+                (pos.byte_offset, pos.line, pos.column),
+                (byte_offset, line, column)
+            );
+        }
+        other => panic!("expected NestingDepthLimitExceeded, got {other:?}"),
+    }
+}
+
+#[rstest]
+fn nesting_deeper_than_the_parser_accepts_is_a_parse_error_on_a_two_mib_stack(
+    #[values(
+        Nesting::BlockMappings,
+        Nesting::BlockSequences,
+        Nesting::FlowMappings,
+        Nesting::FlowSequences
+    )]
+    nesting: Nesting,
+) {
+    let result = on_stack(TWO_MIB, move || {
+        LoaderBuilder::new()
+            .max_nesting_depth(512)
+            .build()
+            .load(&nesting.input(600))
+            .map(|docs| docs.len())
+    });
+    assert!(
+        matches!(
+            result,
+            Err(LoadError::Parse {
+                kind: ErrorKind::Syntax,
+                ..
+            })
+        ),
+        "{result:?}"
+    );
+}
+
+/// An error raised while the loader is `levels` deep comes back unchanged
+/// through all the levels, and no level swallows it.
+#[rstest]
+#[case::unterminated_flow_sequence_at_the_end_of_input(
+    format!("{}1", "[".repeat(300)),
+    (301, 1, 301),
+    "unterminated flow collection: unexpected end of input",
+)]
+#[case::unterminated_scalar_below_block_mappings(
+    indented_lines(300, |level| format!("k{level}:"))
+        + &format!("{}\"unterminated\n", "  ".repeat(300)),
+    (92_004, 302, 0),
+    "unterminated double-quoted scalar",
+)]
+#[case::unterminated_scalar_after_a_deep_sibling(
+    format!("a: {}1{}\nb: \"unterminated\n", "[".repeat(300), "]".repeat(300)),
+    (622, 3, 0),
+    "unterminated double-quoted scalar",
+)]
+fn a_parse_error_deep_in_the_tree_is_returned_unchanged(
+    #[case] input: String,
+    #[case] at: (usize, usize, usize),
+    #[case] expected_message: &'static str,
+) {
+    let result = on_stack(TWO_MIB, move || {
+        LoaderBuilder::new()
+            .build()
+            .load(&input)
+            .map(|docs| docs.len())
+    });
+    match result {
+        Err(LoadError::Parse {
+            pos, message, kind, ..
+        }) => {
+            assert_eq!(kind, ErrorKind::Syntax);
+            assert_eq!(message, expected_message);
+            assert_eq!((pos.byte_offset, pos.line, pos.column), at);
+        }
+        other => panic!("expected a parse error, got {other:?}"),
+    }
+}
+
+/// Every collection leaves its level when it is complete, so collections that
+/// follow each other never add up to more than the limit.
+#[rstest]
+#[case::sibling_collections_at_the_limit(
+    format!("- {0}1{1}\n- {0}2{1}\n- {0}3{1}\n", "[".repeat(19), "]".repeat(19)),
+    1,
+)]
+#[case::a_collection_as_key_and_as_value_at_the_limit(
+    format!("? {0}1{1}\n: {0}2{1}\n", "[".repeat(19), "]".repeat(19)),
+    1,
+)]
+#[case::three_documents_at_the_limit(
+    format!("--- {0}1{1}\n--- {0}2{1}\n--- {0}3{1}\n", "[".repeat(20), "]".repeat(20)),
+    3,
+)]
+#[case::many_siblings_of_a_short_chain("- [a]\n".repeat(1000), 1)]
+fn the_nesting_depth_returns_to_the_start_after_each_collection(
+    #[case] input: String,
+    #[case] documents: usize,
+) {
+    let result = LoaderBuilder::new()
+        .max_nesting_depth(20)
+        .build()
+        .load(&input);
+    assert_eq!(result.unwrap().len(), documents);
+}
+
+#[test]
+fn a_sibling_one_level_over_the_limit_is_rejected_after_one_at_the_limit() {
+    let input = format!(
+        "- {}1{}\n- {}2{}\n",
+        "[".repeat(19),
+        "]".repeat(19),
+        "[".repeat(20),
+        "]".repeat(20)
+    );
+    let result = LoaderBuilder::new()
+        .max_nesting_depth(20)
+        .build()
+        .load(&input);
+    assert!(
+        matches!(
+            result,
+            Err(LoadError::NestingDepthLimitExceeded { limit: 20, .. })
+        ),
+        "{result:?}"
+    );
+}
+
+/// A node is complete when its children are: only then are its schema applied
+/// and its anchor registered.  The first step that fails decides the error.
+#[rstest]
+#[case::the_schema_of_a_scalar_comes_before_its_anchor(
+    "- &a abc\n",
+    Mode::Lossless,
+    512,
+    0,
+    "UnresolvedScalar"
+)]
+#[case::the_schema_of_a_child_comes_before_the_anchor_of_the_collection(
+    "&a [ abc ]\n",
+    Mode::Lossless,
+    512,
+    0,
+    "UnresolvedScalar"
+)]
+#[case::the_anchors_of_the_children_come_before_the_one_of_the_collection(
+    "&a [ &b 1 ]\n",
+    Mode::Lossless,
+    512,
+    1,
+    "AnchorCountLimitExceeded"
+)]
+#[case::the_nesting_limit_comes_before_the_anchor(
+    "&a [ [ x ] ]\n",
+    Mode::Lossless,
+    1,
+    512,
+    "NestingDepthLimitExceeded"
+)]
+#[case::a_sequence_does_not_hold_its_own_anchor_for_its_items(
+    "&a [ *a ]\n",
+    Mode::Resolved,
+    512,
+    512,
+    "UndefinedAlias"
+)]
+#[case::a_mapping_does_not_hold_its_own_anchor_for_its_values(
+    "&a {1: *a}\n",
+    Mode::Resolved,
+    512,
+    512,
+    "UndefinedAlias"
+)]
+#[case::a_redefined_anchor_counts_once("- &a 1\n- &a 2\n- *a\n", Mode::Resolved, 512, 1, "ok(1)")]
+fn the_steps_that_complete_a_node_fail_in_their_order(
+    #[case] input: &str,
+    #[case] mode: Mode,
+    #[case] depth: usize,
+    #[case] anchors: usize,
+    #[case] expected: &str,
+) {
+    let result = mode
+        .builder()
+        .schema(rlsp_yaml_parser::Schema::Json)
+        .max_nesting_depth(depth)
+        .max_anchors(anchors)
+        .build()
+        .load(input);
+    let outcome = match result {
+        Ok(docs) => format!("ok({})", docs.len()),
+        Err(error) => format!("{error:?}")
+            .split([' ', '{'])
+            .next()
+            .unwrap()
+            .to_owned(),
+    };
+    assert_eq!(outcome, expected);
 }
 
 // ===========================================================================

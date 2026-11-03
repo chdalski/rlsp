@@ -1384,8 +1384,9 @@ fn flow_key_that_breaks_over_lines_stays_a_key() {
     }
 }
 
-/// Runs `f` on a thread with a large stack: a debug build of the loader needs
-/// more than the 2 MiB of a test thread at the deepest nesting the parser accepts.
+/// Runs `f` on a thread with a large stack: the formatter recurses once per
+/// level of nesting, and a debug build of it needs more than the 2 MiB of a
+/// test thread at the deepest nesting the parser accepts.
 #[expect(clippy::expect_used, reason = "test helper")]
 fn on_large_stack(f: impl FnOnce() + Send + 'static) {
     std::thread::Builder::new()

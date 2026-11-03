@@ -545,6 +545,48 @@ fn long_comment_run_after_deeply_nested_collections_is_stored_once_in_order() {
     );
 }
 
+/// The key `a:` with `levels` mappings nested in it, each holding one key, and a
+/// scalar at the bottom.
+fn mappings_nested_below_a_key(levels: usize) -> String {
+    let mut input = String::from("a:\n");
+    for level in 1..=levels {
+        writeln!(input, "{}k:", "  ".repeat(level)).unwrap();
+    }
+    writeln!(input, "{}v", "  ".repeat(levels + 1)).unwrap();
+    input
+}
+
+// A comment below a deep chain of collections leaves every one of them and
+// reaches the next key of the root, or the end of the document.
+#[rstest]
+#[case::block_mappings_then_key(
+    format!("{}# bottom\nz: 1\n", mappings_nested_below_a_key(299)),
+    vec![("d0.lead:z", "# bottom")],
+)]
+#[case::block_sequences_then_key(
+    format!("a:\n{}v\n# bottom\nz: 1\n", "- ".repeat(299)),
+    vec![("d0.lead:z", "# bottom")],
+)]
+#[case::flow_sequences_then_key(
+    format!("a: {}v{}\n# bottom\nz: 1\n", "[".repeat(299), "]".repeat(299)),
+    vec![("d0.lead:z", "# bottom")],
+)]
+#[case::block_mappings_then_end_of_document(
+    format!("{}# bottom\n", mappings_nested_below_a_key(299)),
+    vec![("d0.end", "# bottom")],
+)]
+#[case::flow_sequences_then_end_of_document(
+    format!("a: {}v{}\n# bottom\n", "[".repeat(299), "]".repeat(299)),
+    vec![("d0.end", "# bottom")],
+)]
+fn a_comment_below_a_deep_chain_of_collections_reaches_what_follows(
+    #[case] input: String,
+    #[case] expected_places: Vec<(&'static str, &'static str)>,
+) {
+    let found = on_small_stack(move || places(&input));
+    assert_eq!(found, expected(&expected_places));
+}
+
 // ---------------------------------------------------------------------------
 // Errors after a comment run
 // ---------------------------------------------------------------------------

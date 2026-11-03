@@ -65,7 +65,6 @@ target goes here only after the user has lowered the target.
 - Test consolidation candidates: the weak `anchor_with_trailing_comment_preserved` and the similar `comment-line-after-plain-*` fixtures; comment plan Task 7 test review.
 - `has_properties: bool` and `explicit_key: bool` in `mapping_render.rs` go against `lang-rust.md` (enums over boolean parameters); comment plan Task 8 review.
 - `? ? a\n  : 1\n: v\n` is misread by the parser (the formatter avoids the form), and `a:\n!t : 1\n` belongs to the silent data change entry; comment plan Task 8 security review.
-- The loader overflows a 2 MiB stack at about 225 nesting levels in debug builds; release builds reach the depth limit; comment plan Task 8.
 - `? b\n` prints `b: ` with a trailing space, as `- ` does for nested sequences; comment plan Task 9 review.
 - Blank-line restoration loses every following blank line after an entry that `format_remove_duplicate_keys` removed; comment plan Task 9 test review.
 - Test consolidation candidates in `dedup.rs`: the misleadingly named `dedup_removed_entry_with_trailing_comment_no_crash`, and groups C and F into one `rstest` table; comment plan Task 9 test review.
@@ -117,3 +116,5 @@ target goes here only after the user has lowered the target.
 - A comment before the `:` of an inner entry of a block key has no pinned placement in `rlsp-yaml/tests/formatter_keeps_comments.rs`; parser plan Task 14 review.
 - A core tag `!!map` on a block key is dropped on format, with the same data; parser plan Task 14 review.
 - Dependabot's security update for `minimatch` in `rlsp-yaml/integrations/vscode` fails with `security_update_not_possible` (latest resolvable 9.0.9, lowest non-vulnerable 11.0.1); the run on the parser plan's push.
+- The doc comment of `parse_node` in `rlsp-yaml-parser/src/loader.rs` says each level holds a frame of both collection loops; it holds the one that matches its collection; nesting plan Task 1 review.
+- Test consolidation candidates: the stack-thread helper exists three times (`on_stack` in `src/loader.rs` and `tests/robustness.rs`, `on_small_stack` in `tests/loader_comments.rs`), and three older depth tests in `tests/robustness.rs` overlap `the_limit_holds_on_a_two_mib_stack`; nesting plan Task 1 review.

@@ -436,18 +436,36 @@ that need a fully materialised document.
 calling `reset_for_document` (clears anchor map, resets counts) at the start of
 each document. Inside each document it calls `parse_node` recursively.
 
-`parse_node` matches on the next event:
+`parse_node` builds a node in place: the caller passes a slot that holds an
+empty scalar, and the node replaces it. The slot is the root of the document or
+an entry of the parent's vector, so a collection grows in its parent and the
+recursion holds references, not nodes. `parse_node` is a small dispatcher over
+helpers that do the work:
 
-- `Scalar` → `Node::Scalar` (with anchor registration if anchored)
-- `MappingStart` → enters a loop, collecting (key, value) pairs until
-  `MappingEnd`; increments depth on entry, decrements on exit
-- `SequenceStart` → enters a loop, collecting items until `SequenceEnd`;
-  increments/decrements depth
-- `Alias` → delegates to `resolve_alias`
-- `Comment` → a comment run at a mapping value position: moves the whole run
-  into `pending_leading` and calls `parse_node` once for the value that follows
-  (see "Comment attachment strategy")
-- Structural boundary events (e.g. `StreamEnd`) → returns an empty scalar
+- `begin_node` matches on the next event and starts the node in the slot. It
+  reports whether children follow:
+  - `Scalar` → `Node::Scalar` (with schema resolution and anchor registration),
+    complete
+  - `MappingStart` / `SequenceStart` → an empty `Node::Mapping` or
+    `Node::Sequence` that carries the event's span, tag, and anchor; increments
+    depth and checks it against the limit; children follow
+  - `Alias` → delegates to `resolve_alias`, complete
+  - `Comment` → a comment run at a mapping value position: moves the whole run
+    into `pending_leading` and calls `begin_node` once for the value that
+    follows (see "Comment attachment strategy")
+  - Structural boundary events (e.g. `StreamEnd`) → leaves the empty scalar in
+    the slot
+- For a collection, `parse_entries` or `parse_items` loops until the end event.
+  `next_entry` decides, per round, between another key or item and the end, and
+  collects the comments that lead to it; `finish_key`, `finish_value`, and
+  `finish_item` attach the comments around the loaded node.
+- `finish_collection` consumes the end event, extends the node's span to it,
+  decrements depth, and then applies the schema and registers the anchor, as
+  for a scalar. A collection's anchor is therefore registered after its
+  children, so an alias inside the collection cannot refer to it.
+
+Inside the recursion, errors are boxed (`LoadError` is many words large) and
+`run` unboxes them.
 
 ### Anchor and alias resolution
 
@@ -499,10 +517,10 @@ to `pending_leading` and so to the next item or key, or to the document's
 
 **Comments between a key and its value.** Keys, sequence items, and the
 document root drain their leading comments in a loop, so a `Comment` event
-reaches `parse_node` only at a mapping value position (`key:\n  # c\n  value`).
+reaches `begin_node` only at a mapping value position (`key:\n  # c\n  value`).
 The `Comment` arm moves the whole run into `LoadState::pending_leading` — it
 takes the first comment, drains the rest with `consume_leading_comments`, and
-calls `parse_node` once. The recursive call never sees another `Comment`, so
+calls `begin_node` once. The recursive call never sees another `Comment`, so
 the stack use does not grow with the number of comments. The node that follows
 the run decides who inherits it: a nested collection (block or flow) hands the
 run to its first entry or item; a scalar, empty value, or alias leaves it for
@@ -684,10 +702,13 @@ the outer loop to drain the queue before calling the next step. This prevents
 deeply-nested documents from overflowing the call stack.
 
 The loader's `parse_node` is recursive (matching tree structure), but its depth
-is bounded by `max_nesting_depth` (default 512), which is well within default
-Rust stack limits. The one recursion outside that bound is the `Comment` arm,
-which adds at most one level per value position because it drains the whole
-comment run before recursing.
+is bounded by `max_nesting_depth`. Each level holds the small frames of
+`parse_node` and of the collection loop; everything bigger lives in
+`#[inline(never)]` helpers that return before the recursion goes deeper, so a
+debug build, the build with the largest frames, loads the depth that the
+default `max_nesting_depth` allows on a 2 MiB stack. The one recursion outside that bound is the `Comment` arm of
+`begin_node`, which adds at most one level per value position because it drains
+the whole comment run before recursing.
 
 ### Lossless mode as the default
 
