@@ -207,12 +207,14 @@ describe('getConfig — manifest defaults', () => {
   });
 });
 
-describe('getConfig — hover, completion and maxItemsComputed', () => {
+describe('getConfig — hover, completion, maxItemsComputed and maxNestingDepth', () => {
   it.each([
     ['hover', false],
     ['completion', false],
     ['maxItemsComputed', 0],
     ['maxItemsComputed', 1],
+    ['maxNestingDepth', 1],
+    ['maxNestingDepth', 512],
   ])('passes the user-set %s value %s through', (key, value) => {
     const stub = makeDefaultingStub();
     stub.get.mockImplementation((asked: string, fallback?: unknown) =>
@@ -226,6 +228,10 @@ describe('getConfig — hover, completion and maxItemsComputed', () => {
     ['maxItemsComputed', 'abc'],
     ['maxItemsComputed', -1],
     ['maxItemsComputed', 1.5],
+    ['maxNestingDepth', 'abc'],
+    ['maxNestingDepth', 0],
+    ['maxNestingDepth', 513],
+    ['maxNestingDepth', 1.5],
     ['hover', 'yes'],
     ['completion', 1],
   ])('passes the wrongly typed %s value %j on for the server to judge', (key, value) => {

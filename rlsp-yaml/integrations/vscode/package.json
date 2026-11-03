@@ -196,6 +196,13 @@
           "default": 5000,
           "description": "Maximum number of document symbols and folding ranges the server returns per document."
         },
+        "rlsp-yaml.maxNestingDepth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 512,
+          "default": 256,
+          "description": "Deepest nesting of collections the server loads. A document nested deeper gets an error diagnostic and is not formatted. A value outside 1 to 512 is ignored with a warning and the default applies."
+        },
         "rlsp-yaml.formatRespectEditorconfig": {
           "type": "boolean",
           "default": true,

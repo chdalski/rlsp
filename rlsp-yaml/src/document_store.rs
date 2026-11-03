@@ -13,7 +13,25 @@ struct StoredDocument {
     documents: Option<Vec<Document<Span>>>,
 }
 
+impl StoredDocument {
+    /// Store `text` with its AST, loaded with `max_nesting_depth`; the AST is
+    /// absent when the text does not load.
+    fn load(text: String, max_nesting_depth: usize) -> Self {
+        let parsed = parser::parse_yaml_with_limit(&text, max_nesting_depth);
+        let documents = if parsed.documents.is_empty() {
+            None
+        } else {
+            Some(parsed.documents)
+        };
+        Self { text, documents }
+    }
+}
+
 /// In-memory store for open YAML documents and their parsed ASTs.
+///
+/// The store holds no nesting limit: every call that parses takes the
+/// `maxNestingDepth` setting's current value, so the caller decides when a
+/// stored AST is out of date.
 #[derive(Default)]
 pub struct DocumentStore {
     documents: HashMap<Url, StoredDocument>,
@@ -26,34 +44,34 @@ impl DocumentStore {
         Self::default()
     }
 
-    /// Open a document, parsing it immediately.
-    pub fn open(&mut self, uri: Url, text: String) {
-        let parsed = parser::parse_yaml(&text);
-        let docs = if parsed.documents.is_empty() {
-            None
-        } else {
-            Some(parsed.documents)
-        };
-        self.documents.insert(
-            uri,
-            StoredDocument {
-                text,
-                documents: docs,
-            },
-        );
+    /// Open a document, parsing it immediately with `max_nesting_depth`.
+    pub fn open(&mut self, uri: Url, text: String, max_nesting_depth: usize) {
+        self.documents
+            .insert(uri, StoredDocument::load(text, max_nesting_depth));
     }
 
-    /// Update an open document's text and reparse.
-    pub fn change(&mut self, uri: &Url, text: String) {
+    /// Update an open document's text and reparse it with `max_nesting_depth`.
+    pub fn change(&mut self, uri: &Url, text: String, max_nesting_depth: usize) {
         if let Some(doc) = self.documents.get_mut(uri) {
-            let parsed = parser::parse_yaml(&text);
-            doc.text = text;
-            doc.documents = if parsed.documents.is_empty() {
-                None
-            } else {
-                Some(parsed.documents)
-            };
+            *doc = StoredDocument::load(text, max_nesting_depth);
         }
+    }
+
+    /// Parse the stored text of every open document again with
+    /// `max_nesting_depth`, leaving the texts as they are, and return each
+    /// document's URI and text.
+    ///
+    /// For a change of the nesting limit: one call under one lock, so a text
+    /// the client changed in the meantime is never replaced by an older one.
+    pub fn reparse_all(&mut self, max_nesting_depth: usize) -> Vec<(Url, String)> {
+        self.documents
+            .iter_mut()
+            .map(|(uri, doc)| {
+                let text = std::mem::take(&mut doc.text);
+                *doc = StoredDocument::load(text, max_nesting_depth);
+                (uri.clone(), doc.text.clone())
+            })
+            .collect()
     }
 
     /// Remove a document from the store when it is closed.
@@ -85,9 +103,17 @@ impl DocumentStore {
 
 #[cfg(test)]
 mod tests {
+    use rlsp_yaml_parser::DEFAULT_MAX_NESTING_DEPTH;
     use rlsp_yaml_parser::node::Node;
+    use rstest::rstest;
 
     use super::*;
+
+    /// The limit of every test that is not about the limit.
+    const LIMIT: usize = DEFAULT_MAX_NESTING_DEPTH;
+
+    /// Three nested block mappings: loads with a limit of 3, not with 2.
+    const THREE_LEVELS: &str = "a:\n  b:\n    c: 1\n";
 
     fn test_uri(name: &str) -> Url {
         Url::parse(&format!("file:///test/{name}")).expect("valid test URI")
@@ -98,7 +124,7 @@ mod tests {
         let mut store = DocumentStore::new();
         let uri = test_uri("doc.yaml");
 
-        store.open(uri.clone(), "key: value".to_string());
+        store.open(uri.clone(), "key: value".to_string(), LIMIT);
 
         assert_eq!(store.get(&uri), Some("key: value"));
     }
@@ -116,8 +142,8 @@ mod tests {
         let mut store = DocumentStore::new();
         let uri = test_uri("doc.yaml");
 
-        store.open(uri.clone(), "old text".to_string());
-        store.change(&uri, "new text".to_string());
+        store.open(uri.clone(), "old text".to_string(), LIMIT);
+        store.change(&uri, "new text".to_string(), LIMIT);
 
         assert_eq!(store.get(&uri), Some("new text"));
     }
@@ -127,7 +153,7 @@ mod tests {
         let mut store = DocumentStore::new();
         let uri = test_uri("doc.yaml");
 
-        store.open(uri.clone(), "content".to_string());
+        store.open(uri.clone(), "content".to_string(), LIMIT);
         store.close(&uri);
 
         assert_eq!(store.get(&uri), None);
@@ -139,8 +165,8 @@ mod tests {
         let uri_a = test_uri("a.yaml");
         let uri_b = test_uri("b.yaml");
 
-        store.open(uri_a.clone(), "alpha".to_string());
-        store.open(uri_b.clone(), "beta".to_string());
+        store.open(uri_a.clone(), "alpha".to_string(), LIMIT);
+        store.open(uri_b.clone(), "beta".to_string(), LIMIT);
 
         assert_eq!(store.get(&uri_a), Some("alpha"));
         assert_eq!(store.get(&uri_b), Some("beta"));
@@ -152,8 +178,8 @@ mod tests {
         let uri_a = test_uri("a.yaml");
         let uri_b = test_uri("b.yaml");
 
-        store.open(uri_a.clone(), "alpha".to_string());
-        store.open(uri_b.clone(), "beta".to_string());
+        store.open(uri_a.clone(), "alpha".to_string(), LIMIT);
+        store.open(uri_b.clone(), "beta".to_string(), LIMIT);
         store.close(&uri_a);
 
         assert_eq!(store.get(&uri_a), None);
@@ -165,9 +191,9 @@ mod tests {
         let mut store = DocumentStore::new();
         let uri = test_uri("doc.yaml");
 
-        store.open(uri.clone(), "first".to_string());
+        store.open(uri.clone(), "first".to_string(), LIMIT);
         store.close(&uri);
-        store.open(uri.clone(), "second".to_string());
+        store.open(uri.clone(), "second".to_string(), LIMIT);
 
         assert_eq!(store.get(&uri), Some("second"));
     }
@@ -177,7 +203,7 @@ mod tests {
         let mut store = DocumentStore::new();
         let uri = test_uri("empty.yaml");
 
-        store.open(uri.clone(), String::new());
+        store.open(uri.clone(), String::new(), LIMIT);
 
         assert_eq!(store.get(&uri), Some(""));
     }
@@ -187,7 +213,7 @@ mod tests {
         let mut store = DocumentStore::new();
         let uri = test_uri("unknown.yaml");
 
-        store.change(&uri, "new text".to_string());
+        store.change(&uri, "new text".to_string(), LIMIT);
 
         assert_eq!(store.get(&uri), None);
     }
@@ -207,8 +233,8 @@ mod tests {
         let mut store = DocumentStore::new();
         let uri = test_uri("doc.yaml");
 
-        store.open(uri.clone(), "first".to_string());
-        store.open(uri.clone(), "second".to_string());
+        store.open(uri.clone(), "first".to_string(), LIMIT);
+        store.open(uri.clone(), "second".to_string(), LIMIT);
 
         assert_eq!(store.get(&uri), Some("second"));
     }
@@ -218,7 +244,7 @@ mod tests {
         let mut store = DocumentStore::new();
         let uri = test_uri("doc.yaml");
 
-        store.open(uri.clone(), "key: value\n".to_string());
+        store.open(uri.clone(), "key: value\n".to_string(), LIMIT);
 
         assert_eq!(store.get(&uri), Some("key: value\n"));
         let docs = store.get_documents(&uri);
@@ -239,8 +265,8 @@ mod tests {
         let mut store = DocumentStore::new();
         let uri = test_uri("doc.yaml");
 
-        store.open(uri.clone(), "key: old\n".to_string());
-        store.change(&uri, "key: new\n".to_string());
+        store.open(uri.clone(), "key: old\n".to_string(), LIMIT);
+        store.change(&uri, "key: new\n".to_string(), LIMIT);
 
         let docs = store.get_documents(&uri).expect("documents present");
         assert_eq!(docs.len(), 1);
@@ -266,7 +292,7 @@ mod tests {
         let mut store = DocumentStore::new();
         let uri = test_uri("doc.yaml");
 
-        store.open(uri.clone(), "key: value\n".to_string());
+        store.open(uri.clone(), "key: value\n".to_string(), LIMIT);
         store.close(&uri);
 
         assert!(store.get_documents(&uri).is_none());
@@ -278,8 +304,8 @@ mod tests {
         let uri_a = test_uri("a.yaml");
         let uri_b = test_uri("b.yaml");
 
-        store.open(uri_a, "alpha".to_string());
-        store.open(uri_b, "beta".to_string());
+        store.open(uri_a, "alpha".to_string(), LIMIT);
+        store.open(uri_b, "beta".to_string(), LIMIT);
 
         let mut docs = store.all_documents();
         docs.sort_by(|a, b| a.0.cmp(&b.0));
@@ -301,7 +327,7 @@ mod tests {
         let mut store = DocumentStore::new();
         let uri = test_uri("bad.yaml");
 
-        store.open(uri.clone(), "key: [bad".to_string());
+        store.open(uri.clone(), "key: [bad".to_string(), LIMIT);
 
         assert_eq!(store.get(&uri), Some("key: [bad"));
         assert!(store.get_documents(&uri).is_none());
@@ -312,7 +338,7 @@ mod tests {
         let mut store = DocumentStore::new();
         let uri = test_uri("doc.yaml");
 
-        store.open(uri.clone(), "a: 1\n---\nb: 2\n".to_string());
+        store.open(uri.clone(), "a: 1\n---\nb: 2\n".to_string(), LIMIT);
 
         let docs = store.get_documents(&uri).expect("documents present");
         assert_eq!(docs.len(), 2);
@@ -323,7 +349,7 @@ mod tests {
         let mut store = DocumentStore::new();
         let uri = test_uri("doc.yaml");
 
-        store.open(uri.clone(), "key: value\n".to_string());
+        store.open(uri.clone(), "key: value\n".to_string(), LIMIT);
 
         let docs = store.get_documents(&uri).expect("documents present");
         // Confirm type is Document<Span> by accessing the root field.
@@ -335,8 +361,8 @@ mod tests {
         let mut store = DocumentStore::new();
         let uri = test_uri("doc.yaml");
 
-        store.open(uri.clone(), "hello\n".to_string());
-        store.change(&uri, "world\n".to_string());
+        store.open(uri.clone(), "hello\n".to_string(), LIMIT);
+        store.change(&uri, "world\n".to_string(), LIMIT);
 
         let docs = store.get_documents(&uri).expect("documents present");
         match &docs[0].root {
@@ -345,5 +371,76 @@ mod tests {
                 panic!("expected Scalar")
             }
         }
+    }
+
+    #[rstest]
+    #[case::fits_the_limit(3, true)]
+    #[case::over_the_limit(2, false)]
+    fn open_stores_the_ast_only_when_the_document_fits_the_limit(
+        #[case] limit: usize,
+        #[case] has_ast: bool,
+    ) {
+        let mut store = DocumentStore::new();
+        let uri = test_uri("doc.yaml");
+
+        store.open(uri.clone(), THREE_LEVELS.to_string(), limit);
+
+        assert_eq!(store.get_documents(&uri).is_some(), has_ast);
+        assert_eq!(store.get(&uri), Some(THREE_LEVELS));
+    }
+
+    #[rstest]
+    #[case::lowered_below_the_depth(3, 2, false)]
+    #[case::raised_to_the_depth(2, 3, true)]
+    fn change_reparses_with_the_given_limit(
+        #[case] open_limit: usize,
+        #[case] change_limit: usize,
+        #[case] has_ast: bool,
+    ) {
+        let mut store = DocumentStore::new();
+        let uri = test_uri("doc.yaml");
+        store.open(uri.clone(), THREE_LEVELS.to_string(), open_limit);
+
+        store.change(&uri, THREE_LEVELS.to_string(), change_limit);
+
+        assert_eq!(store.get_documents(&uri).is_some(), has_ast);
+        assert_eq!(store.get(&uri), Some(THREE_LEVELS));
+    }
+
+    #[rstest]
+    #[case::raised_to_the_depth(2, 3, true)]
+    #[case::lowered_below_the_depth(3, 2, false)]
+    fn reparse_all_loads_every_stored_text_with_the_given_limit(
+        #[case] open_limit: usize,
+        #[case] reparse_limit: usize,
+        #[case] has_ast: bool,
+    ) {
+        let mut store = DocumentStore::new();
+        let uri_a = test_uri("a.yaml");
+        let uri_b = test_uri("b.yaml");
+        store.open(uri_a.clone(), THREE_LEVELS.to_string(), open_limit);
+        store.open(uri_b.clone(), THREE_LEVELS.to_string(), open_limit);
+
+        let mut returned = store.reparse_all(reparse_limit);
+
+        returned.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            returned,
+            vec![
+                (uri_a.clone(), THREE_LEVELS.to_string()),
+                (uri_b.clone(), THREE_LEVELS.to_string())
+            ]
+        );
+        assert_eq!(store.get_documents(&uri_a).is_some(), has_ast);
+        assert_eq!(store.get_documents(&uri_b).is_some(), has_ast);
+        assert_eq!(store.get(&uri_a), Some(THREE_LEVELS));
+        assert_eq!(store.get(&uri_b), Some(THREE_LEVELS));
+    }
+
+    #[test]
+    fn reparse_all_returns_nothing_for_an_empty_store() {
+        let mut store = DocumentStore::new();
+
+        assert!(store.reparse_all(LIMIT).is_empty());
     }
 }

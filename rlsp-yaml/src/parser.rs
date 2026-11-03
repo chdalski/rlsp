@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 
+use rlsp_yaml_parser::DEFAULT_MAX_NESTING_DEPTH;
 use rlsp_yaml_parser::ErrorKind;
 use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::loader::LoaderBuilder;
@@ -14,10 +15,28 @@ pub struct ParseResult {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-/// Parse YAML text, returning documents and any parse diagnostics.
+/// Parse YAML text at the loader's default nesting limit, returning documents
+/// and any parse diagnostics.
+///
+/// Handlers do not call this: they load with the `maxNestingDepth` setting
+/// through [`parse_yaml_with_limit`].
 #[must_use]
 pub fn parse_yaml(text: &str) -> ParseResult {
-    match LoaderBuilder::new().lossless().build().load(text) {
+    parse_yaml_with_limit(text, DEFAULT_MAX_NESTING_DEPTH)
+}
+
+/// Parse YAML text with `max_nesting_depth` as the deepest nesting of
+/// collections, returning documents and any parse diagnostics.
+///
+/// A document nested deeper gives one diagnostic and no documents.
+#[must_use]
+pub fn parse_yaml_with_limit(text: &str, max_nesting_depth: usize) -> ParseResult {
+    match LoaderBuilder::new()
+        .lossless()
+        .max_nesting_depth(max_nesting_depth)
+        .build()
+        .load(text)
+    {
         Ok(documents) => ParseResult {
             documents,
             diagnostics: Vec::new(),
@@ -81,7 +100,6 @@ pub fn parse_yaml(text: &str) -> ParseResult {
 mod tests {
     use std::fmt::Write as _;
 
-    use rlsp_yaml_parser::DEFAULT_MAX_NESTING_DEPTH;
     use rlsp_yaml_parser::node::Node;
     use rstest::rstest;
 
@@ -339,8 +357,12 @@ mod tests {
     /// Parses `levels` nested block mappings, one key per line, on a thread with
     /// a 2 MiB stack: the limit must hold before the recursive loader overflows
     /// that stack, and a fixed size keeps the test independent of the test
-    /// runner's thread.
-    fn parse_nested_mappings(levels: usize) -> ParseResult {
+    /// runner's thread.  `parse` is the function under test, called with the
+    /// text of the nested mappings.
+    fn parse_nested(
+        levels: usize,
+        parse: impl FnOnce(&str) -> ParseResult + Send + 'static,
+    ) -> ParseResult {
         std::thread::Builder::new()
             .stack_size(2 * 1024 * 1024)
             .spawn(move || {
@@ -351,11 +373,57 @@ mod tests {
                 }
                 let leaf_indent = "  ".repeat(levels - 1);
                 writeln!(text, "{leaf_indent}leaf: value").unwrap();
-                parse_yaml(&text)
+                parse(&text)
             })
             .expect("thread spawn")
             .join()
             .expect("thread join")
+    }
+
+    fn parse_nested_mappings(levels: usize) -> ParseResult {
+        parse_nested(levels, parse_yaml)
+    }
+
+    fn parse_nested_mappings_with_limit(levels: usize, max_nesting_depth: usize) -> ParseResult {
+        parse_nested(levels, move |text| {
+            parse_yaml_with_limit(text, max_nesting_depth)
+        })
+    }
+
+    #[rstest]
+    #[case::least(1)]
+    #[case::small(2)]
+    #[case::default_limit(256)]
+    #[case::over_the_default(300)]
+    #[case::parser_cap(512)]
+    fn parse_yaml_with_limit_loads_a_document_nested_exactly_to_the_limit(#[case] limit: usize) {
+        let result = parse_nested_mappings_with_limit(limit, limit);
+
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.documents.len(), 1);
+    }
+
+    #[rstest]
+    #[case::least(1)]
+    #[case::small(2)]
+    #[case::default_limit(256)]
+    #[case::over_the_default(300)]
+    #[case::parser_cap(512)]
+    fn parse_yaml_with_limit_reports_one_diagnostic_over_the_limit(#[case] limit: usize) {
+        let result = parse_nested_mappings_with_limit(limit + 1, limit);
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(result.documents.is_empty());
+        let diagnostic = &result.diagnostics[0];
+        assert_eq!(
+            diagnostic.code,
+            Some(NumberOrString::String("yamlSyntax".to_string()))
+        );
+        let start = diagnostic.range.start;
+        assert_eq!(
+            (start.line as usize, start.character as usize),
+            (limit, 2 * limit)
+        );
     }
 
     #[test]

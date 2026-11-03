@@ -172,6 +172,7 @@ const BLOCK_SEQUENCE: &str = "items:\n  - aaaa\n  - bbbb\n  - cccc\n  - dddd\n  
 #[case::remove_duplicate_keys(json!({ "formatRemoveDuplicateKeys": true }), 2, "a: 1\na: 2\n", "a: 2\n", "a: 1\na: 2\n")]
 #[case::indent_sequences_off(json!({ "formatIndentSequences": false }), 2, "a:\n  - 1\n", "a:\n- 1\n", "a:\n  - 1\n")]
 #[case::yaml_version_1_1(json!({ "yamlVersion": "1.1" }), 2, "v: \"yes\"\n", "v: \"yes\"\n", "v: yes\n")]
+#[case::max_nesting_depth(json!({ "maxNestingDepth": 2 }), 2, "a:\n  b:\n    c:   1\n", "a:\n  b:\n    c:   1\n", "a:\n  b:\n    c: 1\n")]
 #[tokio::test]
 async fn setting_reaches_the_formatter(
     #[values(Handler::Formatting, Handler::RangeFormatting)] handler: Handler,
@@ -289,6 +290,7 @@ async fn disabled_respect_editorconfig_ignores_end_of_line_and_final_newline() {
 #[case::yaml_version_1_1(json!({ "yamlVersion": "1.1" }), "items:\n  - \"yes\"\n  - d\n", "block to flow", Some(" [\"yes\", d]\n"), Some(" [yes, d]\n"))]
 #[case::yaml_version_modeline_over_setting(json!({ "yamlVersion": "1.1" }), "# yaml-language-server: $yamlVersion=1.2\nitems:\n  - \"yes\"\n  - d\n", "block to flow", Some(" [yes, d]\n"), Some(" [yes, d]\n"))]
 #[case::enforce_block_style(json!({ "formatEnforceBlockStyle": true }), BLOCK_SEQUENCE, "block to flow", None, Some(" [aaaa, bbbb, cccc, dddd, eeee]\n"))]
+#[case::max_nesting_depth(json!({ "maxNestingDepth": 1 }), BLOCK_SEQUENCE, "block to flow", None, Some(" [aaaa, bbbb, cccc, dddd, eeee]\n"))]
 #[tokio::test]
 async fn code_action_follows_the_settings(
     #[case] settings: Value,

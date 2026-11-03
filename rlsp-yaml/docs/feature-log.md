@@ -31,6 +31,15 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### The `maxNestingDepth` Setting [completed]
+
+**Date:** 2026-11-03
+**Description:** The new setting [`maxNestingDepth`](configuration.md#maxnestingdepth) sets how deep collections may nest in a document the server loads, from 1 to 512 and 256 by default. A document nested deeper gets an error diagnostic, and formatting it returns no edits. A change of the setting loads the open documents again and updates their diagnostics. A value outside 1 to 512, or of another type, is ignored with a warning and the default applies. YAML embedded in strings (`contentSchema`) keeps the limit of 256.
+**Complexity:** Low
+**Tier:** 1
+
+---
+
 ### Nesting Stops at 256 Levels by Default [completed]
 
 **Date:** 2026-11-03

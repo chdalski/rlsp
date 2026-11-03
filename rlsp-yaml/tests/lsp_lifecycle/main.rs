@@ -19,6 +19,7 @@ mod hover;
 mod kubernetes_detection;
 mod lifecycle;
 mod navigation;
+mod nesting_depth;
 mod on_type_formatting;
 mod rename;
 mod schema_fetch;

@@ -25,6 +25,7 @@ export interface ServerSettings {
   hover: boolean;
   completion: boolean;
   maxItemsComputed: number;
+  maxNestingDepth: number;
 }
 
 export function getConfig(): ServerSettings {
@@ -59,5 +60,6 @@ export function getConfig(): ServerSettings {
     hover: cfg.get<boolean>('hover', true),
     completion: cfg.get<boolean>('completion', true),
     maxItemsComputed: cfg.get<number>('maxItemsComputed', 5000),
+    maxNestingDepth: cfg.get<number>('maxNestingDepth', 256),
   };
 }

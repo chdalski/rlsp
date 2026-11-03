@@ -97,6 +97,13 @@ const ALLOW_LIST: &[AllowEntry] = &[
         },
     },
     AllowEntry {
+        file: "parser.rs",
+        func: "parse_yaml_with_limit",
+        marker: AllowMarker::CarveOut {
+            reason: "canonical parser entry point with the maxNestingDepth setting — the one parser the handlers load with",
+        },
+    },
+    AllowEntry {
         file: "validation/suppression.rs",
         func: "build_suppression_map",
         marker: AllowMarker::CarveOut {

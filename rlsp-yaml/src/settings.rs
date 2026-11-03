@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use rlsp_yaml_parser::{DEFAULT_MAX_NESTING_DEPTH, MAX_COLLECTION_DEPTH};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value};
@@ -20,6 +21,8 @@ const URL_SETTINGS: [&str; 2] = ["httpProxy", "schemas"];
 
 const BOOLEAN: &str = "a boolean";
 const COUNT: &str = "a non-negative integer";
+/// The range is [`MAX_COLLECTION_DEPTH`]; a test keeps the text in step with it.
+const NESTING_DEPTH: &str = "a whole number from 1 to 512";
 const TEXT: &str = "a string";
 const SCHEMAS: &str = "an object mapping schema URLs to globs";
 const SCHEMA_GLOBS: &str = "a glob or an array of at most 32 globs (at most 256 bytes each, \
@@ -75,6 +78,11 @@ pub struct Settings {
     /// Maximum number of items returned by document symbols and folding ranges.
     /// Defaults to 5000 when absent.
     pub max_items_computed: Option<usize>,
+    /// Deepest nesting of collections a document may have to be loaded, from 1
+    /// to `MAX_COLLECTION_DEPTH`. The reader keeps no other value: a number
+    /// outside the range is rejected, not clamped. Defaults to
+    /// `DEFAULT_MAX_NESTING_DEPTH` when absent.
+    pub max_nesting_depth: Option<usize>,
     /// Controls severity of flow-style diagnostics: `"off"` disables them,
     /// `"warning"` (default) emits warnings, `"error"` emits errors.
     pub flow_style: Option<String>,
@@ -99,6 +107,15 @@ pub struct Settings {
     pub format_enable: Option<bool>,
     /// When `false`, `.editorconfig` files are not read during formatting. Defaults to `true`.
     pub format_respect_editorconfig: Option<bool>,
+}
+
+impl Settings {
+    /// The nesting limit documents are loaded with: the setting, or
+    /// `DEFAULT_MAX_NESTING_DEPTH` when absent or rejected.
+    #[must_use]
+    pub fn effective_max_nesting_depth(&self) -> usize {
+        self.max_nesting_depth.unwrap_or(DEFAULT_MAX_NESTING_DEPTH)
+    }
 }
 
 /// The settings read from a JSON object, with what the reader rejected.
@@ -231,6 +248,7 @@ impl SettingsRead {
             hover: reader.field("hover", BOOLEAN),
             completion: reader.field("completion", BOOLEAN),
             max_items_computed: reader.field("maxItemsComputed", COUNT),
+            max_nesting_depth: reader.nesting_depth("maxNestingDepth"),
             flow_style: reader.field("flowStyle", TEXT),
             duplicate_keys: reader.field("duplicateKeys", TEXT),
             format_enforce_block_style: reader.field("formatEnforceBlockStyle", BOOLEAN),
@@ -300,6 +318,21 @@ impl<'a> FieldReader<'a> {
             self.record(|| Rejection::new(key, Entry::Whole, expected, value));
             T::default()
         })
+    }
+
+    /// Read `key` as a whole number from 1 to [`MAX_COLLECTION_DEPTH`]; `None`
+    /// when it is absent, `null`, or anything else (the last is recorded as a
+    /// rejection). A number out of range is rejected, never clamped.
+    fn nesting_depth(&mut self, key: &'static str) -> Option<usize> {
+        let value = self.present(key)?;
+        let depth = value
+            .as_u64()
+            .and_then(|number| usize::try_from(number).ok())
+            .filter(|number| (1..=MAX_COLLECTION_DEPTH).contains(number));
+        if depth.is_none() {
+            self.record(|| Rejection::new(key, Entry::Whole, NESTING_DEPTH, value));
+        }
+        depth
     }
 
     /// Read one string entry of `setting`; a non-string entry is recorded.
@@ -438,11 +471,14 @@ mod tests {
         "duplicateKeys",
     ];
     const COLLECTION_KEYS: [&str; 2] = ["customTags", "schemas"];
+    /// Not among `COUNT_KEYS`: its range starts at 1, not 0.
+    const NESTING_DEPTH_KEYS: [&str; 1] = ["maxNestingDepth"];
 
     fn all_keys() -> Vec<&'static str> {
         [
             BOOLEAN_KEYS.as_slice(),
             COUNT_KEYS.as_slice(),
+            NESTING_DEPTH_KEYS.as_slice(),
             TEXT_KEYS.as_slice(),
             COLLECTION_KEYS.as_slice(),
         ]
@@ -486,6 +522,7 @@ mod tests {
             "hover": false,
             "completion": false,
             "maxItemsComputed": 10,
+            "maxNestingDepth": 300,
             "flowStyle": "error",
             "duplicateKeys": "off",
             "formatEnforceBlockStyle": true,
@@ -535,6 +572,7 @@ mod tests {
                 hover: Some(false),
                 completion: Some(false),
                 max_items_computed: Some(10),
+                max_nesting_depth: Some(300),
                 flow_style: Some("error".to_string()),
                 duplicate_keys: Some("off".to_string()),
                 format_enforce_block_style: Some(true),
@@ -913,6 +951,82 @@ mod tests {
         assert_eq!(read.settings.custom_tags, vec!["!a"]);
         assert!(read.rejections.is_empty());
         assert_eq!(read.unlisted_rejections, 0);
+    }
+
+    #[rstest]
+    #[case::least(1)]
+    #[case::second(2)]
+    #[case::default_limit(256)]
+    #[case::below_cap(511)]
+    #[case::cap(512)]
+    fn reader_accepts_max_nesting_depth_within_range(#[case] depth: u64) {
+        let read = read(&json!({"maxNestingDepth": depth}));
+
+        assert_eq!(
+            read.settings.max_nesting_depth,
+            Some(usize::try_from(depth).unwrap())
+        );
+        assert!(read.rejections.is_empty());
+    }
+
+    #[rstest]
+    #[case::zero(json!(0))]
+    #[case::over_the_cap(json!(513))]
+    #[case::largest_integer(json!(u64::MAX))]
+    #[case::negative(json!(-1))]
+    #[case::fraction(json!(1.5))]
+    #[case::whole_float(json!(256.0))]
+    #[case::exponent(json!(1e2))]
+    #[case::huge_float(json!(1e30))]
+    #[case::numeric_string(json!("256"))]
+    #[case::text(json!("abc"))]
+    #[case::boolean(json!(true))]
+    #[case::array(json!([]))]
+    #[case::object(json!({}))]
+    fn reader_rejects_max_nesting_depth_outside_range_or_of_wrong_type(#[case] bad: Value) {
+        let rejection = sole_rejection(&json!({"maxNestingDepth": bad}));
+
+        assert_eq!(rejection.setting, "maxNestingDepth");
+        assert_eq!(rejection.entry, Entry::Whole);
+        assert_eq!(rejection.expected, NESTING_DEPTH);
+        assert_eq!(rejection.found, RejectedValue::of(&bad));
+        assert_eq!(
+            read(&json!({"maxNestingDepth": bad})).settings,
+            Settings::default(),
+            "a rejected value takes the default and is never clamped"
+        );
+    }
+
+    #[test]
+    fn reader_keeps_other_fields_when_max_nesting_depth_is_rejected() {
+        let read = read(&json!({"maxNestingDepth": 0, "keyOrdering": true}));
+
+        assert!(read.settings.key_ordering);
+        assert_eq!(read.settings.max_nesting_depth, None);
+        assert_eq!(read.rejections.len(), 1);
+    }
+
+    #[test]
+    fn nesting_depth_range_text_names_the_parser_cap() {
+        assert_eq!(
+            NESTING_DEPTH,
+            format!("a whole number from 1 to {MAX_COLLECTION_DEPTH}")
+        );
+    }
+
+    #[rstest]
+    #[case::absent(None, DEFAULT_MAX_NESTING_DEPTH)]
+    #[case::set(Some(7), 7)]
+    fn effective_max_nesting_depth_falls_back_to_the_default(
+        #[case] setting: Option<usize>,
+        #[case] expected: usize,
+    ) {
+        let settings = Settings {
+            max_nesting_depth: setting,
+            ..Settings::default()
+        };
+
+        assert_eq!(settings.effective_max_nesting_depth(), expected);
     }
 
     #[test]
@@ -1442,7 +1556,7 @@ mod tests {
     proptest! {
         #[test]
         fn reader_reports_only_known_settings_for_any_value(
-            values in prop::collection::vec(arbitrary_json(), 24)
+            values in prop::collection::vec(arbitrary_json(), 25)
         ) {
             let keys = all_keys();
             let object: Map<String, Value> = keys
@@ -1453,6 +1567,28 @@ mod tests {
             let read = read(&Value::Object(object));
             prop_assert!(read.rejections.len() <= MAX_LISTED_REJECTIONS);
             prop_assert!(read.rejections.iter().all(|r| keys.contains(&r.setting)));
+        }
+
+        #[test]
+        fn reader_keeps_no_max_nesting_depth_outside_its_range(value in arbitrary_json()) {
+            let read = read(&json!({"maxNestingDepth": value}));
+            prop_assert!(
+                read.settings
+                    .max_nesting_depth
+                    .is_none_or(|depth| (1..=MAX_COLLECTION_DEPTH).contains(&depth))
+            );
+        }
+
+        #[test]
+        fn reader_keeps_no_max_nesting_depth_outside_its_range_for_any_integer(
+            value in prop_oneof![any::<u64>().prop_map(Value::from), any::<i64>().prop_map(Value::from)]
+        ) {
+            let read = read(&json!({"maxNestingDepth": value}));
+            prop_assert!(
+                read.settings
+                    .max_nesting_depth
+                    .is_none_or(|depth| (1..=MAX_COLLECTION_DEPTH).contains(&depth))
+            );
         }
     }
 
@@ -1552,6 +1688,16 @@ mod tests {
         }
 
         #[test]
+        fn manifest_declares_max_nesting_depth_as_an_integer_between_one_and_the_parser_cap() {
+            let setting = declared("maxNestingDepth");
+
+            assert_eq!(setting["type"], "integer");
+            assert_eq!(setting["minimum"], 1);
+            assert_eq!(setting["maximum"], json!(MAX_COLLECTION_DEPTH));
+            assert_eq!(setting["default"], json!(DEFAULT_MAX_NESTING_DEPTH));
+        }
+
+        #[test]
         fn manifest_defaults_of_hover_completion_and_max_items_computed_are_the_server_defaults() {
             let (service, _) = tower_lsp::LspService::new(Backend::new);
             let backend = service.inner();
@@ -1568,11 +1714,16 @@ mod tests {
                 declared("maxItemsComputed")["default"],
                 json!(backend.get_max_items_computed())
             );
+            assert_eq!(
+                declared("maxNestingDepth")["default"],
+                json!(backend.get_max_nesting_depth())
+            );
             assert_eq!(declared("formatPrintWidth")["default"], json!(80));
         }
 
         /// A sample is a type-level one: the manifest and the reader must
-        /// judge it alike. The samples leave out `null` (the reader takes it
+        /// judge it alike. The samples of `maxNestingDepth` also bind the
+        /// bounds of its range. The samples leave out `null` (the reader takes it
         /// as "not set", the manifest reports it) and the floats `80.0` and
         /// `1e3` (the reader refuses them, but the client serialises them as
         /// the integers `80` and `1000`). The value of a text setting is not
@@ -1580,7 +1731,23 @@ mod tests {
         /// `yamlVersion` and `kubernetesVersion` further than the reader does.
         #[test]
         fn manifest_and_reader_judge_type_level_samples_alike() {
-            let samples: [(&[&str], Vec<Value>); 4] = [
+            let samples: [(&[&str], Vec<Value>); 5] = [
+                (
+                    &NESTING_DEPTH_KEYS,
+                    vec![
+                        json!(0),
+                        json!(1),
+                        json!(256),
+                        json!(512),
+                        json!(513),
+                        json!(-1),
+                        json!(1.5),
+                        json!("256"),
+                        json!(true),
+                        json!([]),
+                        json!({}),
+                    ],
+                ),
                 (
                     &BOOLEAN_KEYS,
                     vec![

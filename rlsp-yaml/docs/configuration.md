@@ -26,6 +26,7 @@ Settings are passed as a JSON object via LSP `initializationOptions` at startup 
   "hover": true,
   "completion": true,
   "maxItemsComputed": 5000,
+  "maxNestingDepth": 256,
   "schemas": {
     "https://json.schemastore.org/github-workflow": ".github/workflows/*.yml",
     "https://example.com/schema.json": ["deploy/**/*.yaml", "!deploy/legacy/*.yaml"]
@@ -485,6 +486,23 @@ This limit prevents performance degradation when editing very large YAML files t
 { "maxItemsComputed": 1000 }
 ```
 
+### `maxNestingDepth`
+
+- **Type:** `integer` (1 to 512, written without a decimal point)
+- **Default:** `256`
+
+Deepest nesting of collections (mappings and sequences inside each other) in a document the server loads. A document nested deeper gets an error diagnostic and no other feature that reads its structure works on it; formatting it returns no edits. A value of `300` loads a document of 300 levels where the default reports it.
+
+A value of `0`, a value above `512`, a fraction, or a value of another type is not clamped: the setting takes its default of `256` and the server logs a warning.
+
+When a settings update changes the limit the server applies, it loads every open document again and updates its diagnostics; an update that leaves the limit as it was loads nothing again.
+
+YAML embedded in a string (`contentSchema`) is always loaded with the default limit of `256`, whatever this setting says, so embedded YAML nested deeper than that is reported as not parseable.
+
+```json
+{ "maxNestingDepth": 512 }
+```
+
 > **Tab width** is not configurable via workspace settings — it is taken from the `tab_size` field of the LSP `textDocument/formatting` request, which carries the editor's indentation preference. Configure it in your editor settings. `insertSpaces: false` (tabs) is silently ignored: YAML 1.2 §6.1 forbids tab characters for indentation, so the formatter always uses spaces regardless of editor preference.
 
 ## Modelines
@@ -731,6 +749,6 @@ A schema that exceeds a budget is not applied at all, because a partial schema c
 
 ## Schema Validation Limits
 
-Every `allOf`, `anyOf`, and `oneOf` branch of a schema is evaluated. To keep a complex or hostile schema from stalling the server, the work of one schema validation run is bounded in proportion to the size of the document, up to a fixed maximum, and the run returns at most 10,000 schema diagnostics. Content that a schema embeds in a string (`contentSchema`) is validated as a document of its own, at full length and depth; embedded content may itself embed content, to at most 8 levels of nesting. All documents of a multi-document file share these bounds.
+Every `allOf`, `anyOf`, and `oneOf` branch of a schema is evaluated. To keep a complex or hostile schema from stalling the server, the work of one schema validation run is bounded in proportion to the size of the document, up to a fixed maximum, and the run returns at most 10,000 schema diagnostics. Content that a schema embeds in a string (`contentSchema`) is validated as a document of its own, at full length and up to the default nesting limit of 256 levels, whatever [`maxNestingDepth`](#maxnestingdepth) says; embedded content may itself embed content, to at most 8 levels of nesting. All documents of a multi-document file share these bounds.
 
 When a run reaches any of these bounds, validation stops. Diagnostics found before that point are published; checks that had not finished report nothing, so the diagnostics may be incomplete, but the server never reports a problem the full run would not. The server then sends a `window/logMessage` of type Warning to the client's log, naming the schema URL and saying that validation is incomplete. The Warning is sent for every schema source, including Kubernetes auto-detection, and on every run that stops early; no diagnostic is added to the document. A run that completes sends no such Warning.

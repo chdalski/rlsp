@@ -38,7 +38,7 @@ server gets a setting `maxNestingDepth` with a default of 256 and a range of 1 t
 - [x] Task 5: Code actions and colors read the stored AST
 - [x] Task 6: The formatter takes the nesting limit as an option
 - [x] Task 7: The default nesting limit is 256
-- [ ] Task 8: The server setting `maxNestingDepth`
+- [x] Task 8: The server setting `maxNestingDepth`
 - [ ] Task 9: The server holds both ends of the setting
 - [ ] Push to `main` and confirm the full CI matrix is green
 
@@ -155,24 +155,24 @@ final-newline check; all three use one limit.
 
 ### Task 8: The server setting `maxNestingDepth`
 
-- [ ] The settings reader takes `maxNestingDepth` as a whole number from 1 to
+- [x] The settings reader takes `maxNestingDepth` as a whole number from 1 to
       `MAX_COLLECTION_DEPTH`; any other value takes the default of 256 and gives the warning other
       rejected values give, and tests pin 0, 1, 512, 513, a string, and a fraction
-- [ ] A variant of `parse_yaml` takes the limit, `DocumentStore::open` and `DocumentStore::change`
+- [x] A variant of `parse_yaml` takes the limit, `DocumentStore::open` and `DocumentStore::change`
       take the limit, and every server load of a document and every `format_yaml` call of a
       handler use the setting's value; the doc comment of `parse_yaml(text)` says that handlers
       use the variant
-- [ ] When the effective limit changes, the server parses every open document again and publishes
+- [x] When the effective limit changes, the server parses every open document again and publishes
       its diagnostics; a change of another setting, or of the value to one with the same effective
       limit, parses nothing again; tests pin each
-- [ ] A document of 300 levels gives a diagnostic at the default and loads with the setting at 512
-- [ ] `textDocument/formatting` returns no edits for a document of 300 levels at the default, and
+- [x] A document of 300 levels gives a diagnostic at the default and loads with the setting at 512
+- [x] `textDocument/formatting` returns no edits for a document of 300 levels at the default, and
       formats it with the setting at 512
-- [ ] The VS Code extension declares the setting with its default and range in `package.json`, and
+- [x] The VS Code extension declares the setting with its default and range in `package.json`, and
       `config.ts` passes it; its tests cover it
-- [ ] `rlsp-yaml/docs/configuration.md` describes the setting, and `rlsp-yaml/docs/feature-log.md`
+- [x] `rlsp-yaml/docs/configuration.md` describes the setting, and `rlsp-yaml/docs/feature-log.md`
       names it
-- [ ] Build, tests, `cargo clippy --all-targets`, fmt, and the VS Code extension's lint, typecheck,
+- [x] Build, tests, `cargo clippy --all-targets`, fmt, and the VS Code extension's lint, typecheck,
       and unit tests pass
 
 ### Task 9: The server holds both ends of the setting
@@ -239,6 +239,9 @@ A stack overflow on a tokio worker ends the whole server.
 - **Gate demands of Task 6:** each load site of the formatter has a mutation check, the field has a
   doc comment and one shared loader serves all three loads, and the root `CLAUDE.md` Settings Sync
   section says that the limit gets no fixture key.
+- **Gate demands of Task 8:** the reload never overwrites a newer text and skips its publish once
+  the limit has moved on, the check for that is the tested predicate `load_is_current`, the old and
+  new limit are compared under one settings lock, and the reader reads whole numbers only.
 
 ## Task Notes
 
@@ -259,3 +262,8 @@ A stack overflow on a tokio worker ends the whole server.
   embedded in a string of 256 levels, since that load runs below the schema validator's frames
 - Task 8: `rlsp-yaml/docs/configuration.md` no longer says that embedded `contentSchema` content is
   validated at full depth, since it stops at the default nesting limit
+- Task 9: the release check runs the 512-level document on a thread of at most 1 MiB, the main thread's
+  stack on Windows where tower-lsp polls the handlers, with a recursive schema that uses composition
+  keywords, and the handoff names the margin
+- Task 9: the release check at 512 levels sends every request of the debug test, not only `didOpen`
+  and `formatting`

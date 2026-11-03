@@ -7,7 +7,7 @@ use serde_json::json;
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tower::Service;
 use tower_lsp::jsonrpc::{Request, Response};
-use tower_lsp::lsp_types::{LogMessageParams, MessageType};
+use tower_lsp::lsp_types::{LogMessageParams, MessageType, PublishDiagnosticsParams};
 use tower_lsp::{ClientSocket, LspService};
 
 pub fn initialize_request(id: i64) -> Request {
@@ -47,6 +47,26 @@ pub fn collect_log_messages(socket: ClientSocket) -> UnboundedReceiver<LogMessag
             && let Ok(log) = serde_json::from_value::<LogMessageParams>(params.clone())
         {
             sender.send(log).ok();
+        }
+        async {}
+    }));
+    receiver
+}
+
+/// Drain the client socket in the background and forward every
+/// `textDocument/publishDiagnostics` notification, in order, to the returned
+/// receiver.
+pub fn collect_published_diagnostics(
+    socket: ClientSocket,
+) -> UnboundedReceiver<PublishDiagnosticsParams> {
+    let (sender, receiver) = unbounded_channel();
+    tokio::spawn(socket.for_each(move |request| {
+        if request.method() == "textDocument/publishDiagnostics"
+            && let Some(params) = request.params()
+            && let Ok(published) =
+                serde_json::from_value::<PublishDiagnosticsParams>(params.clone())
+        {
+            sender.send(published).ok();
         }
         async {}
     }));
@@ -148,6 +168,42 @@ pub async fn warnings_before_sentinel(
             return warnings;
         }
         warnings.push(message.message);
+    }
+}
+
+/// Return every publication of diagnostics made before the publication of the
+/// sentinel's own, leaving out the sentinels' publications.
+///
+/// The sentinel is a document opened as the last step of `round`; each round
+/// has its own, since an open sentinel is loaded again whenever the nesting
+/// limit changes. Client-bound messages arrive in order, so once the
+/// sentinel's publication is seen, everything the earlier requests published
+/// has been delivered. Without this anchor an absence assertion could pass
+/// because the messages were read too early.
+pub async fn publishes_before_sentinel(
+    service: &mut LspService<Backend>,
+    published: &mut UnboundedReceiver<PublishDiagnosticsParams>,
+    round: usize,
+) -> Vec<PublishDiagnosticsParams> {
+    let sentinel = format!("file:///test/sentinel-{round}.yaml");
+    send(
+        service,
+        did_open_notification(&sentinel, "sentinel: true\n"),
+    )
+    .await;
+
+    let mut before = Vec::new();
+    loop {
+        let message = tokio::time::timeout(Duration::from_secs(5), published.recv())
+            .await
+            .expect("sentinel publication never arrived")
+            .expect("publication channel closed before the sentinel's");
+        if message.uri.as_str() == sentinel {
+            return before;
+        }
+        if !message.uri.as_str().contains("/sentinel-") {
+            before.push(message);
+        }
     }
 }
 

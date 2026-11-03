@@ -3,6 +3,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
+use rlsp_yaml_parser::DEFAULT_MAX_NESTING_DEPTH;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     CodeAction, CodeActionParams, CodeActionProviderCapability, CodeActionResponse, CodeLens,
@@ -668,7 +669,11 @@ impl Backend {
         }
     }
 
-    async fn parse_and_publish(&self, uri: Url, text: &str) {
+    /// Parse `text` with `max_nesting_depth` and publish its diagnostics.
+    ///
+    /// The caller reads the limit once and hands the same value to the
+    /// document store, so that the stored AST and the diagnostics agree.
+    async fn parse_and_publish(&self, uri: Url, text: &str, max_nesting_depth: usize) {
         if !self.get_validate() {
             if let Ok(mut diags) = self.diagnostics.lock() {
                 diags.insert(uri.clone(), Vec::new());
@@ -677,7 +682,7 @@ impl Backend {
             return;
         }
 
-        let result = parser::parse_yaml(text);
+        let result = parser::parse_yaml_with_limit(text, max_nesting_depth);
         let mut diagnostics = result.diagnostics.clone();
 
         // Run validators and combine diagnostics
@@ -864,23 +869,81 @@ impl Backend {
             .unwrap_or(5000)
     }
 
+    /// Return the nesting limit documents are loaded with (default:
+    /// `DEFAULT_MAX_NESTING_DEPTH`).
+    ///
+    /// A handler reads it once and passes the value on, so that one request
+    /// never loads with two limits.
+    pub(crate) fn get_max_nesting_depth(&self) -> usize {
+        self.settings
+            .lock()
+            .ok()
+            .map_or(DEFAULT_MAX_NESTING_DEPTH, |s| {
+                s.effective_max_nesting_depth()
+            })
+    }
+
     /// Replace the stored settings; the single store path for `initialize`
     /// and `did_change_configuration`.
+    ///
+    /// Returns the new effective nesting limit when it differs from the old
+    /// one, which the caller has to load the open documents with again. Old and
+    /// new limit are compared under one settings lock, so no change is lost.
     ///
     /// Sends one Warning to the client log per rejected setting or entry (see
     /// [`settings_warnings`]) and one for an invalid `kubernetesVersion`
     /// string. `Client::log_message` is not held back before initialization
     /// completes, so this also reaches the client from `initialize`.
-    async fn store_settings(&self, read: SettingsRead) {
+    async fn store_settings(&self, read: SettingsRead) -> Option<usize> {
         let warnings = settings_warnings(&read);
-        if let Ok(mut s) = self.settings.lock() {
+        let new_limit = read.settings.effective_max_nesting_depth();
+        let changed_limit = self.settings.lock().ok().and_then(|mut s| {
+            let old_limit = s.effective_max_nesting_depth();
             *s = read.settings;
-        }
+            (old_limit != new_limit).then_some(new_limit)
+        });
         for message in warnings {
             self.client
                 .log_message(tower_lsp::lsp_types::MessageType::WARNING, message)
                 .await;
         }
+        changed_limit
+    }
+
+    /// Load every open document again with `max_nesting_depth` and publish its
+    /// diagnostics.
+    ///
+    /// The store parses the texts it already holds under one lock, so a text
+    /// the client changes meanwhile is never replaced by an older one. A
+    /// document whose text changed before its turn is skipped: its own change
+    /// has published diagnostics for the newer text. So is every document once
+    /// the setting has moved on to another limit: the settings update that
+    /// moved it runs its own loop. The store is then left alone as well, so an
+    /// older update cannot load it with a limit the setting no longer holds.
+    async fn reparse_open_documents(&self, max_nesting_depth: usize) {
+        if self.get_max_nesting_depth() != max_nesting_depth {
+            return;
+        }
+        let docs = match self.document_store.lock() {
+            Ok(mut store) => store.reparse_all(max_nesting_depth),
+            Err(_) => return,
+        };
+        for (uri, text) in docs {
+            if self.load_is_current(&uri, &text, max_nesting_depth) {
+                self.parse_and_publish(uri, &text, max_nesting_depth).await;
+            }
+        }
+    }
+
+    /// Whether the load of `text` at `max_nesting_depth` still describes the
+    /// open document `uri`: the setting holds that limit, and the store holds
+    /// that text. The settings lock is released before the store lock is taken.
+    fn load_is_current(&self, uri: &Url, text: &str, max_nesting_depth: usize) -> bool {
+        self.get_max_nesting_depth() == max_nesting_depth
+            && self
+                .document_store
+                .lock()
+                .is_ok_and(|store| store.get(uri) == Some(text))
     }
 
     fn resolve_editor_config(
@@ -951,8 +1014,9 @@ impl Backend {
                 .end_of_line
                 .unwrap_or(crate::editing::editor_config::LineEnding::Lf),
             insert_final_newline: ec.insert_final_newline.unwrap_or(true),
-            max_nesting_depth: crate::editing::formatter::YamlFormatOptions::default()
-                .max_nesting_depth,
+            max_nesting_depth: settings.as_ref().map_or(DEFAULT_MAX_NESTING_DEPTH, |s| {
+                s.effective_max_nesting_depth()
+            }),
         };
         drop(settings);
         options
@@ -967,6 +1031,8 @@ impl LanguageServer for Backend {
             .as_ref()
             .and_then(SettingsRead::from_json)
             .unwrap_or_default();
+        // No document is open before `initialize`, so a changed nesting limit
+        // has nothing to load again.
         self.store_settings(read).await;
         Ok(InitializeResult {
             capabilities: Self::capabilities(),
@@ -975,8 +1041,10 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
-        if let Some(read) = SettingsRead::from_json(&params.settings) {
-            self.store_settings(read).await;
+        if let Some(read) = SettingsRead::from_json(&params.settings)
+            && let Some(max_nesting_depth) = self.store_settings(read).await
+        {
+            self.reparse_open_documents(max_nesting_depth).await;
         }
     }
 
@@ -1029,30 +1097,34 @@ impl LanguageServer for Backend {
         } else {
             return;
         };
+        let max_nesting_depth = self.get_max_nesting_depth();
         for (uri, text) in docs {
-            self.parse_and_publish(uri, &text).await;
+            self.parse_and_publish(uri, &text, max_nesting_depth).await;
         }
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
         let text = params.text_document.text;
+        let max_nesting_depth = self.get_max_nesting_depth();
 
         if let Ok(mut store) = self.document_store.lock() {
-            store.open(uri.clone(), text.clone());
+            store.open(uri.clone(), text.clone(), max_nesting_depth);
         }
 
-        self.parse_and_publish(uri, &text).await;
+        self.parse_and_publish(uri, &text, max_nesting_depth).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
         if let Some(change) = params.content_changes.into_iter().last() {
+            let max_nesting_depth = self.get_max_nesting_depth();
             if let Ok(mut store) = self.document_store.lock() {
-                store.change(&uri, change.text.clone());
+                store.change(&uri, change.text.clone(), max_nesting_depth);
             }
 
-            self.parse_and_publish(uri, &change.text).await;
+            self.parse_and_publish(uri, &change.text, max_nesting_depth)
+                .await;
         }
     }
 
@@ -2384,7 +2456,11 @@ mod tests {
 
         let uri = Url::parse("file:///test.yaml").unwrap();
         if let Ok(mut store) = backend.document_store.lock() {
-            store.open(uri.clone(), "key: value\nother: 1\n".to_string());
+            store.open(
+                uri.clone(),
+                "key: value\nother: 1\n".to_string(),
+                DEFAULT_MAX_NESTING_DEPTH,
+            );
         }
 
         let params = DocumentRangeFormattingParams {
@@ -2426,7 +2502,7 @@ mod tests {
         // `b:  2` → `b: 2`, guaranteeing a change on exactly that line.
         let text = "a: 1\nb:  2\nc: 3\n";
         if let Ok(mut store) = backend.document_store.lock() {
-            store.open(uri.clone(), text.to_string());
+            store.open(uri.clone(), text.to_string(), DEFAULT_MAX_NESTING_DEPTH);
         }
 
         let params = DocumentRangeFormattingParams {
@@ -2480,7 +2556,7 @@ mod tests {
         // runs and produces an edit. Modeline declares V1.1 so `"yes"` must stay quoted.
         let text = "# yaml-language-server: $yamlVersion=1.1\nvalue:  \"yes\"\n";
         if let Ok(mut store) = backend.document_store.lock() {
-            store.open(uri.clone(), text.to_string());
+            store.open(uri.clone(), text.to_string(), DEFAULT_MAX_NESTING_DEPTH);
         }
 
         let params = DocumentFormattingParams {
@@ -2548,7 +2624,11 @@ mod tests {
 
         let uri = Url::parse("file:///test.yaml").unwrap();
         if let Ok(mut store) = backend.document_store.lock() {
-            store.open(uri.clone(), "color: '#ff0000'\n".to_string());
+            store.open(
+                uri.clone(),
+                "color: '#ff0000'\n".to_string(),
+                DEFAULT_MAX_NESTING_DEPTH,
+            );
         }
 
         let params = DocumentColorParams {
@@ -2576,7 +2656,11 @@ mod tests {
 
         let uri = Url::parse("file:///test.yaml").unwrap();
         if let Ok(mut store) = backend.document_store.lock() {
-            store.open(uri.clone(), "color: '#ff0000'\n".to_string());
+            store.open(
+                uri.clone(),
+                "color: '#ff0000'\n".to_string(),
+                DEFAULT_MAX_NESTING_DEPTH,
+            );
         }
 
         let params = DocumentColorParams {
@@ -2711,6 +2795,120 @@ mod tests {
             *s = new_settings;
         }
         assert_eq!(backend.get_max_items_computed(), 0);
+    }
+
+    // ---- maxNestingDepth setting ----
+
+    fn backend_with_settings(json: &serde_json::Value) -> tower_lsp::LspService<Backend> {
+        let (service, _) = tower_lsp::LspService::new(Backend::new);
+        let settings: Settings = serde_json::from_value(json.clone()).unwrap();
+        if let Ok(mut s) = service.inner().settings.lock() {
+            *s = settings;
+        }
+        service
+    }
+
+    #[rstest]
+    #[case::absent(serde_json::json!({}), DEFAULT_MAX_NESTING_DEPTH)]
+    #[case::least(serde_json::json!({"maxNestingDepth": 1}), 1)]
+    #[case::cap(serde_json::json!({"maxNestingDepth": 512}), 512)]
+    #[case::rejected(serde_json::json!({"maxNestingDepth": 0}), DEFAULT_MAX_NESTING_DEPTH)]
+    fn get_max_nesting_depth_returns_the_configured_value_or_the_default(
+        #[case] json: serde_json::Value,
+        #[case] expected: usize,
+    ) {
+        let service = backend_with_settings(&json);
+
+        assert_eq!(service.inner().get_max_nesting_depth(), expected);
+    }
+
+    #[test]
+    fn format_options_carries_the_nesting_limit() {
+        let service = backend_with_settings(&serde_json::json!({"maxNestingDepth": 7}));
+        let uri = Url::parse("file:///test.yaml").unwrap();
+
+        let options = service.inner().format_options(&uri, "a: 1\n", 2);
+
+        assert_eq!(options.max_nesting_depth, 7);
+    }
+
+    #[test]
+    fn format_options_defaults_the_nesting_limit() {
+        let service = backend_with_settings(&serde_json::json!({}));
+        let uri = Url::parse("file:///test.yaml").unwrap();
+
+        let options = service.inner().format_options(&uri, "a: 1\n", 2);
+
+        assert_eq!(options.max_nesting_depth, DEFAULT_MAX_NESTING_DEPTH);
+    }
+
+    #[tokio::test]
+    async fn reparse_open_documents_publishes_nothing_once_the_limit_has_moved_on() {
+        let service = backend_with_settings(&serde_json::json!({ "maxNestingDepth": 2 }));
+        let backend = service.inner();
+        let uri = Url::parse("file:///test/moved-on.yaml").unwrap();
+        if let Ok(mut store) = backend.document_store.lock() {
+            store.open(uri.clone(), "a:\n  b:\n    c: 1\n".to_string(), 2);
+        }
+
+        // A loop started for the limit 3 while the setting holds 2.
+        backend.reparse_open_documents(3).await;
+
+        assert_eq!(backend.get_diagnostics(uri.as_str()), None);
+        let has_ast = backend
+            .document_store
+            .lock()
+            .unwrap()
+            .get_documents(&uri)
+            .is_some();
+        assert!(
+            !has_ast,
+            "the store keeps the load of the limit the setting holds"
+        );
+    }
+
+    #[rstest]
+    #[case::current(3, Some("a: 1\n"), true)]
+    #[case::limit_moved_on(2, Some("a: 1\n"), false)]
+    #[case::text_changed(3, Some("b: 2\n"), false)]
+    #[case::document_closed(3, None, false)]
+    fn load_is_current_needs_the_limit_and_the_text_of_the_load(
+        #[case] setting: u64,
+        #[case] stored: Option<&str>,
+        #[case] expected: bool,
+    ) {
+        let service = backend_with_settings(&serde_json::json!({ "maxNestingDepth": setting }));
+        let backend = service.inner();
+        let uri = Url::parse("file:///test/current.yaml").unwrap();
+        if let (Some(text), Ok(mut store)) = (stored, backend.document_store.lock()) {
+            store.open(uri.clone(), text.to_string(), DEFAULT_MAX_NESTING_DEPTH);
+        }
+
+        // A load of the text "a: 1\n" at the limit 3.
+        assert_eq!(backend.load_is_current(&uri, "a: 1\n", 3), expected);
+    }
+
+    #[tokio::test]
+    async fn reparse_open_documents_publishes_while_the_limit_is_current() {
+        let service = backend_with_settings(&serde_json::json!({ "maxNestingDepth": 3 }));
+        let backend = service.inner();
+        let uri = Url::parse("file:///test/current.yaml").unwrap();
+        if let Ok(mut store) = backend.document_store.lock() {
+            store.open(uri.clone(), "a:\n  b:\n    c: 1\n".to_string(), 2);
+        }
+
+        backend.reparse_open_documents(3).await;
+
+        assert_eq!(backend.get_diagnostics(uri.as_str()), Some(Vec::new()));
+    }
+
+    #[test]
+    fn settings_warnings_pins_the_text_of_an_out_of_range_nesting_depth() {
+        assert_eq!(
+            sole_warning(&serde_json::json!({"maxNestingDepth": 513})),
+            "Setting maxNestingDepth must be a whole number from 1 to 512; \
+             falling back to its default. Rejected value: 513"
+        );
     }
 
     // ---- schema_failure_message ----

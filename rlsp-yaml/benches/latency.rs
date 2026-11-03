@@ -12,8 +12,8 @@ use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use rlsp_yaml::analysis::semantic_tokens::semantic_tokens;
 use rlsp_yaml::completion::complete_at;
 use rlsp_yaml::document_store::DocumentStore;
-use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::Document;
+use rlsp_yaml_parser::{DEFAULT_MAX_NESTING_DEPTH, Span};
 use tower_lsp::lsp_types::{Position, Url};
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -90,10 +90,10 @@ fn bench_document_store_change(c: &mut Criterion) {
     for (name, text) in &sizes {
         // Pre-open the document so `change` only measures the update path.
         let mut store = DocumentStore::new();
-        store.open(uri.clone(), text.clone());
+        store.open(uri.clone(), text.clone(), DEFAULT_MAX_NESTING_DEPTH);
 
         group.bench_with_input(BenchmarkId::from_parameter(name), text, |b, text| {
-            b.iter(|| store.change(&uri, text.clone()));
+            b.iter(|| store.change(&uri, text.clone(), DEFAULT_MAX_NESTING_DEPTH));
         });
     }
     group.finish();
