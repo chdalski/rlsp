@@ -11,7 +11,7 @@ target goes here only after the user has lowered the target.
 ## Open
 
 - Alias expansion depth: `max_nesting_depth` does not bound the expanded tree in resolved mode; `expand_node`, `Clone`, `Drop` in `loader.rs`; stack-overflow investigation.
-- Iterative loader (`wip/iterative-loader`, adff1074), to discuss with the user; `LoadState::parse_node`; schema queue item 3c.
+- Flat arena AST as a possible goal for a 1.0 of `rlsp-yaml-parser`: about 30 to 50% faster `load()` and far less memory in the spike, no depth limit from the stack; `rlsp-yaml` would need a port (479 `Node` patterns in 40 files, an edit API for the formatter); branch `spike/flat-ast` (a09dad39), report `.ai/reports/2026-11-02-loader-depth-spikes.md`; user request.
 - `parse_events` omits the empty scalar in an empty document (14 yaml-test-suite cases expect `=VAL :`); the stream conformance test checks only ok/error; libfyaml comparison.
 - Valid YAML rejected: `{a: b\n  c\n}\n`, `{a: x\n  y, b: z}`, `[x]\t: 2\n`; libfyaml comparison.
 - Invalid YAML accepted: `a:\nw\n`, `a:\n[x]\n`, `a: [x]: 2\n`, `a: *y : 2\n`, `&x\n!!str\n&x v\n`, `? ? a\n[x] :\n`, `?\n!!str\nb: 1\n`, `[x]:2\n`, a `]` at the key's column after a quoted item; libfyaml comparison.
