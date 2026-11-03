@@ -16,8 +16,8 @@ mod loaded_data;
 use rlsp_yaml::editing::editor_config::LineEnding;
 use rlsp_yaml::editing::formatter::{YamlFormatOptions, format_yaml};
 use rlsp_yaml::server::YamlVersion;
-use rlsp_yaml_parser::load;
 use rlsp_yaml_parser::node::Node;
+use rlsp_yaml_parser::{LoaderBuilder, load};
 use rstest::rstest;
 
 // ---- helpers ----------------------------------------------------------------
@@ -1384,17 +1384,54 @@ fn flow_key_that_breaks_over_lines_stays_a_key() {
     }
 }
 
-/// Runs `f` on a thread with a large stack: the formatter recurses once per
-/// level of nesting, and a debug build of it needs more than the 2 MiB of a
-/// test thread at the deepest nesting the parser accepts.
+/// The stack of a test thread and of a tokio worker.
+const TEST_THREAD_STACK: usize = 2 << 20;
+
+/// Runs `f` on a thread with a stack of `bytes`.  A stack overflow aborts the
+/// process, so a test that overflows takes down every test of the file.
 #[expect(clippy::expect_used, reason = "test helper")]
-fn on_large_stack(f: impl FnOnce() + Send + 'static) {
+fn on_stack(bytes: usize, f: impl FnOnce() + Send + 'static) {
     std::thread::Builder::new()
-        .stack_size(64 << 20)
+        .stack_size(bytes)
         .spawn(f)
         .expect("the thread starts")
         .join()
-        .expect("the formatter handles the deepest nesting the parser accepts");
+        .expect("the formatter handles the nesting");
+}
+
+/// Runs `f` on a thread with a large stack: the formatter recurses once per
+/// level of nesting, and a debug build of it needs more than the 2 MiB of a
+/// test thread at the deepest nesting the parser accepts.
+fn on_large_stack(f: impl FnOnce() + Send + 'static) {
+    on_stack(64 << 20, f);
+}
+
+/// `levels` mappings, each the explicit key of the next, and a sequence in the
+/// innermost key, one `?` per line and each line indented below the last.
+fn question_mark_lines(levels: usize) -> String {
+    (0..=levels)
+        .flat_map(|depth| {
+            let line = if depth < levels { "?\n" } else { "- x\n" };
+            ["  ".repeat(depth), line.to_string()]
+        })
+        .collect()
+}
+
+/// `levels` mappings, each the explicit key of the next.
+fn mappings_in_mapping_keys(levels: usize) -> String {
+    format!("{}a\n", "? ".repeat(levels))
+}
+
+/// A mapping whose explicit key is a sequence, the first item of which is a
+/// sequence, and so on: `levels` collections in all.
+fn sequences_in_a_sequence_key(levels: usize) -> String {
+    format!("? {}a\n", "- ".repeat(levels - 1))
+}
+
+/// An explicit key that is a sequence whose first item is a mapping with an
+/// explicit key, and so on: `levels` collections in all.
+fn mappings_and_sequences_in_turn(levels: usize) -> String {
+    format!("{}a\n", "? - ".repeat(levels / 2))
 }
 
 #[test]
@@ -1411,26 +1448,119 @@ fn flow_sequence_on_the_marker_line_nested_as_deep_as_the_parser_accepts() {
 #[test]
 fn collection_keys_nested_as_deep_as_the_parser_accepts_keep_their_data() {
     on_large_stack(|| {
-        let levels = 400;
-        let input: String = (0..=levels)
-            .flat_map(|depth| {
-                let line = if depth < levels { "?\n" } else { "- x\n" };
-                ["  ".repeat(depth), line.to_string()]
-            })
-            .collect();
+        let input = question_mark_lines(400);
         assert_data_kept_under_every_option_set(&input);
     });
 }
 
 #[rstest]
-#[case::mappings_in_mapping_keys(|levels| format!("{}a\n", "? ".repeat(levels)))]
-#[case::sequences_in_a_sequence_key(|levels| format!("? {}a\n", "- ".repeat(levels - 1)))]
-#[case::mappings_and_sequences_in_turn(|levels| format!("{}a\n", "? - ".repeat(levels / 2)))]
+#[case::mappings_in_mapping_keys(mappings_in_mapping_keys)]
+#[case::sequences_in_a_sequence_key(sequences_in_a_sequence_key)]
+#[case::mappings_and_sequences_in_turn(mappings_and_sequences_in_turn)]
 fn explicit_keys_nested_as_deep_as_the_parser_accepts_keep_their_data(
     #[case] build: fn(usize) -> String,
 ) {
     on_large_stack(move || {
         let input = build(rlsp_yaml_parser::MAX_COLLECTION_DEPTH - 1);
+        assert_data_kept_under_every_option_set(&input);
+    });
+}
+
+// ---- nesting depth on the stack of a test thread -----------------------------
+
+/// The nesting the formatter holds on the stack of a test thread, in levels of
+/// collections.
+const FORMATTED_DEPTH: usize = 256;
+
+/// One block mapping inside the other, each level on a line of its own.
+fn block_mappings(levels: usize) -> String {
+    (0..levels)
+        .map(|depth| format!("{}a:\n", "  ".repeat(depth)))
+        .chain([format!("{}x\n", "  ".repeat(levels))])
+        .collect()
+}
+
+/// Like `block_mappings`, with an anchor, a tag and a comment on each level.
+fn block_mappings_with_properties(levels: usize) -> String {
+    (0..levels)
+        .map(|depth| format!("{}a: &a{depth} !t # c\n", "  ".repeat(depth)))
+        .chain([format!("{}x\n", "  ".repeat(levels))])
+        .collect()
+}
+
+/// Block sequences and block mappings in turn, each sequence the value of the
+/// mapping before it.
+fn block_sequences_and_mappings_in_turn(levels: usize) -> String {
+    (0..levels.div_ceil(2))
+        .map(|depth| format!("{}- a:\n", "  ".repeat(depth)))
+        .chain([format!("{}x\n", "  ".repeat(levels.div_ceil(2)))])
+        .collect()
+}
+
+fn block_sequences(levels: usize) -> String {
+    format!("{}x\n", "- ".repeat(levels))
+}
+
+fn flow_mappings(levels: usize) -> String {
+    format!("{}x{}\n", "{a: ".repeat(levels), "}".repeat(levels))
+}
+
+fn flow_sequences(levels: usize) -> String {
+    format!("{}x{}\n", "[".repeat(levels), "]".repeat(levels))
+}
+
+fn flow_sequences_on_the_marker_line(levels: usize) -> String {
+    format!("--- {}x{}\n", "[".repeat(levels), "]".repeat(levels))
+}
+
+/// Mappings in mapping keys, one `?` per line and each line indented below the
+/// last, with an anchor, a tag and a comment on each.
+fn question_marks_with_properties(levels: usize) -> String {
+    (0..levels)
+        .map(|depth| format!("{}? &a{depth} !t # c\n", "  ".repeat(depth)))
+        .chain([format!("{}a\n", "  ".repeat(levels))])
+        .collect()
+}
+
+/// The sequence of `question_mark_lines` makes the last of the `levels`
+/// collections.
+fn question_mark_lines_ending_in_a_sequence(levels: usize) -> String {
+    question_mark_lines(levels - 1)
+}
+
+// The shapes differ in the frames a level costs, so each has a case.
+#[rstest]
+#[case::block_mappings(block_mappings)]
+#[case::block_mappings_with_properties(block_mappings_with_properties)]
+#[case::block_sequences(block_sequences)]
+#[case::block_sequences_and_mappings_in_turn(block_sequences_and_mappings_in_turn)]
+#[case::flow_mappings(flow_mappings)]
+#[case::flow_sequences(flow_sequences)]
+#[case::flow_sequences_on_the_marker_line(flow_sequences_on_the_marker_line)]
+#[case::mappings_in_mapping_keys(mappings_in_mapping_keys)]
+#[case::sequences_in_a_sequence_key(sequences_in_a_sequence_key)]
+#[case::mappings_and_sequences_in_turn(mappings_and_sequences_in_turn)]
+#[case::question_marks_one_per_line(question_mark_lines_ending_in_a_sequence)]
+#[case::question_marks_with_properties(question_marks_with_properties)]
+fn nesting_at_the_formatted_depth_keeps_its_data_on_the_stack_of_a_test_thread(
+    #[case] build: fn(usize) -> String,
+) {
+    let input = build(FORMATTED_DEPTH);
+    // The input is as deep as the case says: the loader takes it at that limit
+    // and no other.  Otherwise a miscounted case checks less than it claims.
+    let loads_with_limit = |limit| {
+        LoaderBuilder::new()
+            .max_nesting_depth(limit)
+            .build()
+            .load(&input)
+            .is_ok()
+    };
+    assert!(loads_with_limit(FORMATTED_DEPTH), "the input must load");
+    assert!(
+        !loads_with_limit(FORMATTED_DEPTH - 1),
+        "the input is not as deep as the limit"
+    );
+    on_stack(TEST_THREAD_STACK, move || {
         assert_data_kept_under_every_option_set(&input);
     });
 }

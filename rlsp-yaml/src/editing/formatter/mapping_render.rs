@@ -616,9 +616,28 @@ pub(super) fn explicit_key_to_doc<'a>(
     };
     let question_line = with_line_end_comment(question, question_comment);
 
+    Entry {
+        above,
+        doc: concat(vec![
+            question_line,
+            hard_line(),
+            explicit_value_line(value, value_is_empty, options),
+        ]),
+    }
+}
+
+/// The `: value` line of an explicit key entry.  A function of its own, apart
+/// from `explicit_key_to_doc`: that function recurses into the key before it
+/// builds this line, and a debug build keeps the temporaries of this line in the
+/// frame of every level of nesting in a key.
+fn explicit_value_line(
+    value: &Node<Span>,
+    value_is_empty: bool,
+    options: &YamlFormatOptions,
+) -> Doc {
     // `: value_doc` — the value part.
     let value_comment = line_end_comment(value);
-    let colon_line = if value_is_empty {
+    if value_is_empty {
         // Set-like entry or empty value: emit bare `:` with no trailing space.
         concat(vec![text(":"), trailing_comment_doc(value_comment)])
     } else {
@@ -682,11 +701,6 @@ pub(super) fn explicit_key_to_doc<'a>(
                 ])
             }
         }
-    };
-
-    Entry {
-        above,
-        doc: concat(vec![question_line, hard_line(), colon_line]),
     }
 }
 

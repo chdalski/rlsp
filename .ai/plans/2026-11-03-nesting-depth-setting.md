@@ -32,7 +32,7 @@ server gets a setting `maxNestingDepth` with a default of 256 and a range of 1 t
 - [x] Clarify scope with the user
 - [x] Design review of the approach
 - [x] Task 1: The loader uses small stack frames
-- [ ] Task 2: `format_yaml` holds 256 levels in debug
+- [x] Task 2: `format_yaml` holds 256 levels in debug
 - [ ] Task 3: One builder for the server's format options
 - [ ] Task 4: Pin the color and code action responses
 - [ ] Task 5: Code actions and colors read the stored AST
@@ -70,17 +70,21 @@ server gets a setting `maxNestingDepth` with a default of 256 and a range of 1 t
 
 ### Task 2: `format_yaml` holds 256 levels in debug
 
-After Task 1 the formatter's own recursion decides how deep `format_yaml` reaches in debug.
+After Task 1 the formatter's own recursion decides how deep `format_yaml` reaches in debug. Chains of
+`?` keys stop first, at 225 levels, with about 9 KiB per level in `explicit_key_to_doc`,
+`entry_to_parts`, `explicit_key_parts`, and `join_entries`. The formatter's output is unchanged.
 
-- [ ] The handoff reports the deepest level up to 511 at which `format_yaml` finishes on a 2 MiB
+- [x] The handoff reports the deepest level up to 511 at which `format_yaml` finishes on a 2 MiB
       thread in a debug build, for block mappings, block sequences, flow mappings, flow
       sequences, and chains of `?` keys, with the default options, `format_enforce_block_style`,
-      and `format_remove_duplicate_keys`
-- [ ] When one of them stops below 511, the scalar arm of `render_node` is a function of its own,
-      and the handoff reports the measurement again
-- [ ] A test runs `format_yaml` at 256 levels of the shape with the least margin on a 2 MiB
-      thread, and the output loads with the input's data
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+      and `format_remove_duplicate_keys`, before and after the change
+- [x] After the change, each of these shapes finishes at 256 levels with each of these option sets
+- [x] The change is in functions whose frames the measurement shows growing per level
+- [x] A test runs `format_yaml` at 256 levels of each of these shapes on a 2 MiB thread, and the
+      output loads with the input's data
+- [x] The formatter's tests and the fixture tests in `tests/fixtures/formatter/` pass with their
+      assertions unchanged
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 3: One builder for the server's format options
 
@@ -201,8 +205,11 @@ A stack overflow on a tokio worker ends the whole server.
 - **The spike's shape with its shortcuts fixed:** an enum in place of a `bool`, the slot stated as
   a contract, the impossible case explicit, a reason on each `#[inline(never)]`, and depth tests.
   Declined: taking the spike as it is.
-- **The formatter is measured before it is changed:** its render path is split only when a shape
-  stops below 511 levels in debug. Declined: splitting it in any case, and not measuring.
+- **The formatter's growing frames shrink until every shape holds 256 in debug:** the measurement
+  names the functions, and chains of `?` keys stopped at 225 levels in the explicit key path, not
+  in the scalar arm of `render_node`. Declined: splitting the scalar arm regardless of the
+  measurement, every shape at 511 in debug, leaving chains of `?` keys at 225, and splitting the
+  render path in any case.
 - **The server is measured at both ends of the setting:** debug at 256 for every request that
   reads the AST, and release at 512. A stop in either goes to the user,
   because the setting's range would then be unsafe. Declined: release only, and no measurement.
@@ -225,6 +232,8 @@ A stack overflow on a tokio worker ends the whole server.
   fixture key, since fixtures test formatting styles.
 - **Gate demands of Task 1:** the mixed-nesting test counts each collection exactly, and the handoff
   carries a table of stack use per depth.
+- **Gate demands of Task 2:** a margin of about 282 levels in debug, a measurement per shape in the
+  handoff, and no larger stack for the new test.
 
 ## Task Notes
 
