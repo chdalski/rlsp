@@ -11,6 +11,7 @@ mod document_management;
 mod fake_proxy;
 mod false_schema;
 mod folding_ranges;
+mod format_options;
 mod formatting_integration;
 mod helpers;
 mod hover;

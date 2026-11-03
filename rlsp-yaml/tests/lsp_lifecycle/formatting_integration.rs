@@ -302,12 +302,16 @@ async fn duplicate_keys_off_suppresses_duplicate_key_diagnostics() {
 // ---- formatEnforceBlockStyle setting ----
 
 fn formatting_request(id: i64, uri: &str) -> Request {
+    formatting_request_with_tab_size(id, uri, 2)
+}
+
+pub fn formatting_request_with_tab_size(id: i64, uri: &str, tab_size: u32) -> Request {
     Request::build("textDocument/formatting")
         .id(id)
         .params(json!({
             "textDocument": { "uri": uri },
             "options": {
-                "tabSize": 2,
+                "tabSize": tab_size,
                 "insertSpaces": true
             }
         }))
@@ -683,6 +687,16 @@ async fn range_formatting_in_comment_only_document_returns_no_edit() {
 // ---- formatEnable setting ----
 
 fn range_formatting_request(id: i64, uri: &str, start_line: u32, end_line: u32) -> Request {
+    range_formatting_request_with_tab_size(id, uri, start_line, end_line, 2)
+}
+
+pub fn range_formatting_request_with_tab_size(
+    id: i64,
+    uri: &str,
+    start_line: u32,
+    end_line: u32,
+    tab_size: u32,
+) -> Request {
     Request::build("textDocument/rangeFormatting")
         .id(id)
         .params(json!({
@@ -691,7 +705,7 @@ fn range_formatting_request(id: i64, uri: &str, start_line: u32, end_line: u32) 
                 "start": { "line": start_line, "character": 0 },
                 "end": { "line": end_line, "character": 0 }
             },
-            "options": { "tabSize": 2, "insertSpaces": true }
+            "options": { "tabSize": tab_size, "insertSpaces": true }
         }))
         .finish()
 }

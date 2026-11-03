@@ -33,7 +33,7 @@ server gets a setting `maxNestingDepth` with a default of 256 and a range of 1 t
 - [x] Design review of the approach
 - [x] Task 1: The loader uses small stack frames
 - [x] Task 2: `format_yaml` holds 256 levels in debug
-- [ ] Task 3: One builder for the server's format options
+- [x] Task 3: One builder for the server's format options
 - [ ] Task 4: Pin the color and code action responses
 - [ ] Task 5: Code actions and colors read the stored AST
 - [ ] Task 6: The formatter takes the nesting limit as an option
@@ -92,12 +92,12 @@ After Task 1 the formatter's own recursion decides how deep `format_yaml` reache
 `YamlFormatOptions` field by field, so Task 6 would add its field three times. Behavior is
 unchanged.
 
-- [ ] One function builds `YamlFormatOptions` from the settings, the editorconfig, and the tab
+- [x] One function builds `YamlFormatOptions` from the settings, the editorconfig, and the tab
       width, and the three handlers call it
-- [ ] The formatting tests in `server.rs`, `tests/editorconfig_integration.rs`,
+- [x] The formatting tests in `server.rs`, `tests/editorconfig_integration.rs`,
       `tests/lsp_lifecycle/formatting_integration.rs`, and `tests/lsp_lifecycle/code_actions.rs`
       pass with their assertions unchanged
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 4: Pin the color and code action responses
 
@@ -234,6 +234,8 @@ A stack overflow on a tokio worker ends the whole server.
   carries a table of stack use per depth.
 - **Gate demands of Task 2:** a margin of about 282 levels in debug, a measurement per shape in the
   handoff, and no larger stack for the new test.
+- **Gate demands of Task 3:** tests through all three handlers pin every format setting and the
+  editorconfig fallbacks, and they pass against the code before the refactor.
 
 ## Task Notes
 

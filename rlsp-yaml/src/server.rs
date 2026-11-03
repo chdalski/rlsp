@@ -46,6 +46,10 @@ pub enum YamlVersion {
 /// Kubernetes version used when `kubernetesVersion` is absent or invalid.
 const DEFAULT_KUBERNETES_VERSION: &str = "master";
 
+/// Spaces per indent level in the text code actions produce: a code action
+/// request carries no tab size.
+const CODE_ACTION_TAB_WIDTH: usize = 2;
+
 /// Longest rejected setting value echoed into a client log message, in
 /// characters: a rejected `kubernetesVersion` string and any rejected text a
 /// settings reader reports.
@@ -889,6 +893,68 @@ impl Backend {
             crate::editing::editor_config::EditorConfigSettings::default()
         }
     }
+
+    /// The formatter options for the document `text` at `uri`.
+    ///
+    /// Each option comes from the workspace settings first; `print_width`,
+    /// `line_ending`, and `insert_final_newline` fall back to the
+    /// `.editorconfig` (unless `formatRespectEditorconfig` is off), then to the
+    /// default. `tab_width` is the caller's: the request's tab size for
+    /// formatting, a fixed width for the code actions.
+    fn format_options(
+        &self,
+        uri: &Url,
+        text: &str,
+        tab_width: usize,
+    ) -> crate::editing::formatter::YamlFormatOptions {
+        // Before the settings lock is taken: `get_yaml_version` locks it too.
+        let yaml_version = self.get_yaml_version(text);
+        let settings = self.settings.lock().ok();
+        let respect_ec = settings
+            .as_ref()
+            .and_then(|s| s.format_respect_editorconfig)
+            .unwrap_or(true);
+        let ec = Self::resolve_editor_config(uri, respect_ec);
+        let options = crate::editing::formatter::YamlFormatOptions {
+            print_width: settings
+                .as_ref()
+                .and_then(|s| s.format_print_width)
+                .or(ec.max_line_length)
+                .unwrap_or(80),
+            tab_width,
+            single_quote: settings
+                .as_ref()
+                .and_then(|s| s.format_single_quote)
+                .unwrap_or(false),
+            preserve_quotes: settings
+                .as_ref()
+                .and_then(|s| s.format_preserve_quotes)
+                .unwrap_or(false),
+            bracket_spacing: settings
+                .as_ref()
+                .and_then(|s| s.format_bracket_spacing)
+                .unwrap_or(true),
+            yaml_version,
+            format_enforce_block_style: settings
+                .as_ref()
+                .and_then(|s| s.format_enforce_block_style)
+                .unwrap_or(false),
+            format_remove_duplicate_keys: settings
+                .as_ref()
+                .and_then(|s| s.format_remove_duplicate_keys)
+                .unwrap_or(false),
+            format_indent_sequences: settings
+                .as_ref()
+                .and_then(|s| s.format_indent_sequences)
+                .unwrap_or(true),
+            line_ending: ec
+                .end_of_line
+                .unwrap_or(crate::editing::editor_config::LineEnding::Lf),
+            insert_final_newline: ec.insert_final_newline.unwrap_or(true),
+        };
+        drop(settings);
+        options
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -1242,51 +1308,7 @@ impl LanguageServer for Backend {
 
         let diagnostics = self.get_diagnostics(uri.as_str()).unwrap_or_default();
 
-        let yaml_version = self.get_yaml_version(&text);
-        let settings = self.settings.lock().ok();
-        let respect_ec = settings
-            .as_ref()
-            .and_then(|s| s.format_respect_editorconfig)
-            .unwrap_or(true);
-        let ec = Self::resolve_editor_config(&uri, respect_ec);
-        let format_options = crate::editing::formatter::YamlFormatOptions {
-            print_width: settings
-                .as_ref()
-                .and_then(|s| s.format_print_width)
-                .or(ec.max_line_length)
-                .unwrap_or(80),
-            tab_width: 2,
-            single_quote: settings
-                .as_ref()
-                .and_then(|s| s.format_single_quote)
-                .unwrap_or(false),
-            preserve_quotes: settings
-                .as_ref()
-                .and_then(|s| s.format_preserve_quotes)
-                .unwrap_or(false),
-            bracket_spacing: settings
-                .as_ref()
-                .and_then(|s| s.format_bracket_spacing)
-                .unwrap_or(true),
-            yaml_version,
-            format_enforce_block_style: settings
-                .as_ref()
-                .and_then(|s| s.format_enforce_block_style)
-                .unwrap_or(false),
-            format_remove_duplicate_keys: settings
-                .as_ref()
-                .and_then(|s| s.format_remove_duplicate_keys)
-                .unwrap_or(false),
-            format_indent_sequences: settings
-                .as_ref()
-                .and_then(|s| s.format_indent_sequences)
-                .unwrap_or(true),
-            line_ending: ec
-                .end_of_line
-                .unwrap_or(crate::editing::editor_config::LineEnding::Lf),
-            insert_final_newline: ec.insert_final_newline.unwrap_or(true),
-        };
-        drop(settings);
+        let format_options = self.format_options(&uri, &text, CODE_ACTION_TAB_WIDTH);
 
         let docs = crate::parser::parse_yaml(&text).documents;
         let actions = crate::editing::code_actions::code_actions(
@@ -1356,51 +1378,7 @@ impl LanguageServer for Backend {
 
         // Tab settings come from LSP params (editor override); other settings from workspace.
         let tab_size = params.options.tab_size as usize;
-        let yaml_version = self.get_yaml_version(&text);
-        let settings = self.settings.lock().ok();
-        let respect_ec = settings
-            .as_ref()
-            .and_then(|s| s.format_respect_editorconfig)
-            .unwrap_or(true);
-        let ec = Self::resolve_editor_config(&uri, respect_ec);
-        let options = crate::editing::formatter::YamlFormatOptions {
-            print_width: settings
-                .as_ref()
-                .and_then(|s| s.format_print_width)
-                .or(ec.max_line_length)
-                .unwrap_or(80),
-            tab_width: tab_size,
-            single_quote: settings
-                .as_ref()
-                .and_then(|s| s.format_single_quote)
-                .unwrap_or(false),
-            preserve_quotes: settings
-                .as_ref()
-                .and_then(|s| s.format_preserve_quotes)
-                .unwrap_or(false),
-            bracket_spacing: settings
-                .as_ref()
-                .and_then(|s| s.format_bracket_spacing)
-                .unwrap_or(true),
-            yaml_version,
-            format_enforce_block_style: settings
-                .as_ref()
-                .and_then(|s| s.format_enforce_block_style)
-                .unwrap_or(false),
-            format_remove_duplicate_keys: settings
-                .as_ref()
-                .and_then(|s| s.format_remove_duplicate_keys)
-                .unwrap_or(false),
-            format_indent_sequences: settings
-                .as_ref()
-                .and_then(|s| s.format_indent_sequences)
-                .unwrap_or(true),
-            line_ending: ec
-                .end_of_line
-                .unwrap_or(crate::editing::editor_config::LineEnding::Lf),
-            insert_final_newline: ec.insert_final_newline.unwrap_or(true),
-        };
-        drop(settings);
+        let options = self.format_options(&uri, &text, tab_size);
 
         let formatted = crate::editing::formatter::format_yaml(&text, &options);
 
@@ -1466,51 +1444,7 @@ impl LanguageServer for Backend {
         };
 
         let tab_size = params.options.tab_size as usize;
-        let yaml_version = self.get_yaml_version(&text);
-        let settings = self.settings.lock().ok();
-        let respect_ec = settings
-            .as_ref()
-            .and_then(|s| s.format_respect_editorconfig)
-            .unwrap_or(true);
-        let ec = Self::resolve_editor_config(&uri, respect_ec);
-        let options = crate::editing::formatter::YamlFormatOptions {
-            print_width: settings
-                .as_ref()
-                .and_then(|s| s.format_print_width)
-                .or(ec.max_line_length)
-                .unwrap_or(80),
-            tab_width: tab_size,
-            single_quote: settings
-                .as_ref()
-                .and_then(|s| s.format_single_quote)
-                .unwrap_or(false),
-            preserve_quotes: settings
-                .as_ref()
-                .and_then(|s| s.format_preserve_quotes)
-                .unwrap_or(false),
-            bracket_spacing: settings
-                .as_ref()
-                .and_then(|s| s.format_bracket_spacing)
-                .unwrap_or(true),
-            yaml_version,
-            format_enforce_block_style: settings
-                .as_ref()
-                .and_then(|s| s.format_enforce_block_style)
-                .unwrap_or(false),
-            format_remove_duplicate_keys: settings
-                .as_ref()
-                .and_then(|s| s.format_remove_duplicate_keys)
-                .unwrap_or(false),
-            format_indent_sequences: settings
-                .as_ref()
-                .and_then(|s| s.format_indent_sequences)
-                .unwrap_or(true),
-            line_ending: ec
-                .end_of_line
-                .unwrap_or(crate::editing::editor_config::LineEnding::Lf),
-            insert_final_newline: ec.insert_final_newline.unwrap_or(true),
-        };
-        drop(settings);
+        let options = self.format_options(&uri, &text, tab_size);
 
         let formatted = crate::editing::formatter::format_yaml(&text, &options);
 
