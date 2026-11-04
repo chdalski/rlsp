@@ -849,7 +849,11 @@ pub(crate) mod test_support {
             /// and requires the child to overflow in the helper's thread without
             /// dumping core. The core-dump check cannot detect a missing flag on a
             /// host where the kernel writes no dump anyway, such as one whose
-            /// `core_pattern` names a file and whose core limit is 0.
+            /// `core_pattern` names a file and whose core limit is 0. This
+            /// repository's dev container is such a host: its compose file sets a
+            /// core limit of 1 so that no crash reaches the host's core-dump
+            /// handler, which means a green run inside it proves nothing about the
+            /// flag. Only a run on CI or on a host without that limit does.
             #[test]
             fn small_stack_is_not_served_from_a_cached_2_mib_stack() {
                 let output =

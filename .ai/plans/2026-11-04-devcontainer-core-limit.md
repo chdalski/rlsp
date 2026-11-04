@@ -23,7 +23,7 @@ container.
 - [x] Clarify the approach
 - [x] Settle the design with the design-advisor
 - [x] Task 1: The dev container limits core dumps to 1
-- [ ] Task 2: The canary's doc comment names the dev container's blind spot
+- [x] Task 2: The canary's doc comment names the dev container's blind spot
 
 ## Tasks
 
@@ -56,10 +56,10 @@ itself non-dumpable, left no core dump. Its doc comment says the check cannot de
 flag on a host where the kernel writes no dump anyway; with a core limit of 1, the dev
 container is such a host, so a green run there proves nothing about the flag.
 
-- [ ] A reader of that doc comment learns that the core-dump check cannot detect a missing flag
+- [x] A reader of that doc comment learns that the core-dump check cannot detect a missing flag
       inside this repository's dev container, and that the container's core limit is the reason
-- [ ] The change is limited to that doc comment
-- [ ] `cargo fmt --check` and `cargo clippy --all-targets` pass
+- [x] The change is limited to that doc comment
+- [x] `cargo fmt --check` and `cargo clippy --all-targets` pass
 
 ## Decisions
 
