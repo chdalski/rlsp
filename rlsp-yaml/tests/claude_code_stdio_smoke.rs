@@ -18,7 +18,7 @@
 #![expect(clippy::expect_used, missing_docs, reason = "test code")]
 
 use std::io::{BufReader, Read, Write};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -37,18 +37,20 @@ struct ServerProcess {
 }
 
 impl ServerProcess {
-    /// Waits for the child to exit on its own (after `shutdown`/`exit`),
-    /// falling back to a kill if it hasn't within `timeout`.
-    fn wait_for_exit(&mut self, timeout: Duration) {
+    /// Waits for the child to exit on its own (after `exit` and closing its
+    /// stdin) and returns its status. Kills the child and returns `None` if it
+    /// hasn't exited within `timeout`.
+    fn wait_for_exit(&mut self, timeout: Duration) -> Option<ExitStatus> {
         let deadline = Instant::now() + timeout;
         while Instant::now() < deadline {
-            if matches!(self.child.try_wait(), Ok(Some(_))) {
-                return;
+            if let Ok(Some(status)) = self.child.try_wait() {
+                return Some(status);
             }
             std::thread::sleep(Duration::from_millis(20));
         }
         let _ = self.child.kill();
         let _ = self.child.wait();
+        None
     }
 }
 
@@ -212,17 +214,23 @@ fn initialize_and_open(stdin: &mut ChildStdin, rx: &mpsc::Receiver<Value>, uri: 
     send(stdin, &did_open_notification(uri, text));
 }
 
-/// Runs the `shutdown` -> `exit` teardown and waits for the process to exit.
+/// Runs the `shutdown` -> `exit` teardown, closes the child's stdin like a
+/// client that has gone away, and asserts that the process exits on its own
+/// with success.
 fn shutdown_and_exit(
     server: &mut ServerProcess,
-    stdin: &mut ChildStdin,
+    mut stdin: ChildStdin,
     rx: &mpsc::Receiver<Value>,
 ) {
-    send(stdin, &shutdown_request());
+    send(&mut stdin, &shutdown_request());
     recv_matching(rx, HANDSHAKE_TIMEOUT, |m| is_response_to(m, 2))
         .expect("timed out waiting for shutdown response");
-    send(stdin, &exit_notification());
-    server.wait_for_exit(EXIT_TIMEOUT);
+    send(&mut stdin, &exit_notification());
+    drop(stdin);
+    let status = server
+        .wait_for_exit(EXIT_TIMEOUT)
+        .expect("server did not exit after exit and stdin close");
+    assert!(status.success(), "server exited with {status:?}");
 }
 
 // ---- Tests --------------------------------------------------------------
@@ -247,7 +255,7 @@ fn stdio_smoke_reports_syntax_error_diagnostic() {
         "expected a yamlSyntax error diagnostic, got: {diagnostics:?}"
     );
 
-    shutdown_and_exit(&mut server, &mut stdin, &rx);
+    shutdown_and_exit(&mut server, stdin, &rx);
 }
 
 #[test]
@@ -271,5 +279,5 @@ fn stdio_smoke_reports_no_diagnostics_for_valid_yaml() {
         );
     }
 
-    shutdown_and_exit(&mut server, &mut stdin, &rx);
+    shutdown_and_exit(&mut server, stdin, &rx);
 }

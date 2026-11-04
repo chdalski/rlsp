@@ -43,7 +43,7 @@ a crafted schema exhausts the server's stack.
 - [x] Task 7: The default nesting limit is 256
 - [x] Task 8: The server setting `maxNestingDepth`
 - [x] Task 9: Embedded documents count toward the validation depth
-- [ ] Task 10: The server runs on a thread with an 8 MiB stack
+- [x] Task 10: The server runs on a thread with an 8 MiB stack
 - [ ] Task 11: The server holds both ends of the setting
 - [ ] Push to `main` and confirm the full CI matrix is green
 
@@ -210,15 +210,15 @@ of `contentSchema` embeddings nests up to nine times `MAX_VALIDATION_DEPTH` leve
 tower-lsp polls the handlers inside `serve`, so they run on the thread that drives it: today the
 main thread, which has 1 MiB on Windows.
 
-- [ ] The `rlsp-yaml` binary drives the server on a thread with an 8 MiB stack, set by a named
+- [x] The `rlsp-yaml` binary drives the server on a thread with an 8 MiB stack, set by a named
       constant whose comment says why, in a single-thread runtime whose blocking threads get the
       same size
-- [ ] A panic on the server thread ends the process with the exit code it has today, a failed
+- [x] A panic on the server thread ends the process with the exit code it has today, a failed
       thread start or runtime build prints its error to stderr and exits non-zero, and the start
       and join path uses no `expect` or `unwrap`
-- [ ] `tests/claude_code_stdio_smoke.rs` closes the child's stdin after `exit` and asserts that the
+- [x] `tests/claude_code_stdio_smoke.rs` closes the child's stdin after `exit` and asserts that the
       server exits on its own with success within its timeout
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 11: The server holds both ends of the setting
 
@@ -307,6 +307,9 @@ A stack overflow on the thread that drives the server ends the whole server.
 - **Gate demands of Task 9:** the depth is a required parameter of every function in the scalar
   chain, the measurement also covers an embedded string of 250 levels, and the docs name no
   number.
+- **Gate demands of Task 10:** the blocking pool is capped by the named constant
+  `MAX_BLOCKING_THREADS`, whose comment derives the cap from tower-lsp's limit of four messages at
+  once and the threads for stdin and stdout.
 
 ## Task Notes
 
@@ -328,3 +331,8 @@ A stack overflow on the thread that drives the server ends the whole server.
 - Task 11: the local branch `wip/server-stack-check` (855543f1) holds the unreviewed debug and release
   tests of the earlier server check (`tests/lsp_lifecycle/stack_depth.rs`) as a starting point; the
   `#[ignore]` reason of the release test names the command for each shape in its own process
+- Task 11: the runs also fetch and parse a deeply nested schema through the `spawn_blocking` path,
+  whose blocking threads have the server's stack size since Task 10
+- Task 11: a test also runs the `rlsp-yaml` binary as a child process over stdio in a debug build with a
+  512-level document and `maxNestingDepth` 512, so it measures the shipped server thread; if the
+  schema fetch path has no depth limit of its own, the handoff reports that as a finding
