@@ -21,7 +21,7 @@ Requires Docker Compose 2.24 or newer (optional `env_file` entries).
 | File | Purpose |
 |------|---------|
 | `devcontainer.json` | Features, named volumes, lifecycle scripts |
-| `docker-compose.yml` | Build, resource limits, env files, read-only host binds |
+| `docker-compose.yml` | Build, resource limits, core limit, env files, read-only host binds |
 | `docker-compose.audio.yml` | PulseAudio passthrough overlay (Linux) |
 | `Dockerfile` | Base image and tools |
 | `fish/config.fish` | Shell config; reads `.env.credentials` |
@@ -72,6 +72,28 @@ DEVCONTAINER_MEMORY=8g
 substitutes them into `docker-compose.yml` from that file, not from
 `.env.defaults`. For a team-wide default, change the fallback in
 `docker-compose.yml` (e.g. `${DEVCONTAINER_CPUS:-4}`).
+
+## Core Dumps
+
+No process in the container dumps core. The kernel's `core_pattern` is shared
+with the host, not namespaced per container: if the host pipes core dumps to
+a handler such as `systemd-coredump`, every crash inside the container runs
+that handler on the host, which can log denials and store a core file each
+time. `docker-compose.yml` therefore sets the core size limit of the container
+to 1, fixed and not configurable through `.env`. With a limit of 1 the kernel
+does not start a piped handler and only logs a warning; a limit of 0 would
+still start it.
+
+To confirm the limit after "Rebuild Container", run in a terminal:
+
+```bash
+grep core /proc/self/limits
+```
+
+The soft and the hard limit of `Max core file size` both read `1`.
+
+A program whose crash you want to debug from a core file has to run outside
+the dev container.
 
 ## Authentication Modes
 

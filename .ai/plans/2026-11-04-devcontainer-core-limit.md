@@ -22,7 +22,7 @@ container.
 
 - [x] Clarify the approach
 - [x] Settle the design with the design-advisor
-- [ ] Task 1: The dev container limits core dumps to 1
+- [x] Task 1: The dev container limits core dumps to 1
 - [ ] Task 2: The canary's doc comment names the dev container's blind spot
 
 ## Tasks
@@ -33,19 +33,19 @@ The `sandbox` service gets a core limit of 1, so the kernel never starts the hos
 handler for a crash in the container, and the dev container's README tells a developer why no
 core file appears. `.devcontainer/` is a template meant to be copied into other projects.
 
-- [ ] The `sandbox` service in `.devcontainer/docker-compose.yml` sets the core limit to the
+- [x] The `sandbox` service in `.devcontainer/docker-compose.yml` sets the core limit to the
       fixed value 1; the value is not read from `.env`, and its comment is separate from the
       comment on the personal CPU and memory limits
-- [ ] That comment tells a reader why the container keeps every process from dumping core and
+- [x] That comment tells a reader why the container keeps every process from dumping core and
       why the value is 1 and not 0
-- [ ] `.devcontainer/README.md` has a `## Core Dumps` section from which a reader learns why no
+- [x] `.devcontainer/README.md` has a `## Core Dumps` section from which a reader learns why no
       process in the container dumps core, how to confirm inside a rebuilt container that the
       limit is active, and that a program whose crash they want to debug from a core file has
       to run outside the dev container
-- [ ] The new comment and the new README section name nothing specific to this project
-- [ ] `.devcontainer/docker-compose.yml` parses as YAML and `services.sandbox.ulimits.core` is
+- [x] The new comment and the new README section name nothing specific to this project
+- [x] `.devcontainer/docker-compose.yml` parses as YAML and `services.sandbox.ulimits.core` is
       the integer 1; the handoff names the parser used
-- [ ] In this container, a process that runs under a soft and hard core limit of 1 and is
+- [x] In this container, a process that runs under a soft and hard core limit of 1 and is
       killed by SIGSEGV is reported as not having dumped core; the handoff shows the run
 
 ### Task 2: The canary's doc comment names the dev container's blind spot

@@ -123,6 +123,7 @@ share a parent line with one sub-item each.
 - The doc comment on `settle_collection_styles` in `rlsp-yaml/src/editing/formatter/flow_comments.rs` writes `enforce_block`, which is no longer a parameter there; parser plan Task 14 review.
 - The doc comment of `parse_node` in `rlsp-yaml-parser/src/loader.rs` says each level holds a frame of both collection loops; it holds the one that matches its collection; nesting plan Task 1 review.
 - `rlsp-yaml-parser/docs/architecture.md`: in "can build trees deeper than the limit, and it does not bound code that walks the loaded tree" the "it" reads as alias expansion, not the limit; nesting plan Task 7 review.
+- The core-limit comment in `.devcontainer/docker-compose.yml` lets "then" in "unless a process lowers its own limit to 0; the kernel then skips a piped handler" read as the 0 case; core-limit plan Task 1 review.
 
 ## Tooling & CI
 
