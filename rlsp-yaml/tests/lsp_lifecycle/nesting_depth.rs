@@ -25,7 +25,7 @@ const THREE_LEVELS: &str = "a:\n  b:\n    c: 1\n";
 
 /// `levels` nested block mappings; the leaf has a double space after its
 /// colon, so the formatter has an edit to make.
-fn nested(levels: usize) -> String {
+pub fn nested(levels: usize) -> String {
     let mut text = String::new();
     for level in 0..levels - 1 {
         writeln!(text, "{}k:", "  ".repeat(level)).expect("writing to a String");
@@ -43,7 +43,7 @@ fn document_symbol_request(id: i64, uri: &str) -> Request {
 
 /// Whether `documentSymbol` finds a symbol, which it does only for a document
 /// whose AST the store holds.
-async fn has_symbols(service: &mut LspService<Backend>, uri: &str) -> bool {
+pub async fn has_symbols(service: &mut LspService<Backend>, uri: &str) -> bool {
     let resp = send(service, document_symbol_request(9, uri))
         .await
         .expect("documentSymbol should return a response");
@@ -53,7 +53,7 @@ async fn has_symbols(service: &mut LspService<Backend>, uri: &str) -> bool {
         .is_some_and(|symbols| !symbols.is_empty())
 }
 
-fn diagnostics_of(service: &LspService<Backend>, uri: &str) -> Vec<Diagnostic> {
+pub fn diagnostics_of(service: &LspService<Backend>, uri: &str) -> Vec<Diagnostic> {
     service
         .inner()
         .get_diagnostics(uri)

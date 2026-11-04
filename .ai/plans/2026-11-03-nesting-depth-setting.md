@@ -44,7 +44,7 @@ a crafted schema exhausts the server's stack.
 - [x] Task 8: The server setting `maxNestingDepth`
 - [x] Task 9: Embedded documents count toward the validation depth
 - [x] Task 10: The server runs on a thread with an 8 MiB stack
-- [ ] Task 11: The server holds both ends of the setting
+- [x] Task 11: The server holds both ends of the setting
 - [ ] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
@@ -224,7 +224,7 @@ main thread, which has 1 MiB on Windows.
 
 A stack overflow on the thread that drives the server ends the whole server.
 
-- [ ] A test in a debug build sends a document of 256 levels through `didOpen` and every request
+- [x] A test in a debug build sends a document of 256 levels through `didOpen` and every request
       whose handler in `server.rs` reads the stored AST or calls `format_yaml`, among them
       `documentSymbol`, `selectionRange`, `foldingRange`, `semanticTokens/full`, `hover`,
       `completion`, `definition`, `references`, `prepareRename`, `rename`, `documentLink`,
@@ -233,14 +233,14 @@ A stack overflow on the thread that drives the server ends the whole server.
       server answers each; `didOpen` also validates against a schema whose `contentSchema` loads
       YAML of 256 levels embedded in a string, and against a chain of eight `contentSchema`
       embeddings whose innermost string holds YAML of 256 levels at the deepest validated depth
-- [ ] In a release build, a document of 512 levels with a recursive schema that uses composition
+- [x] In a release build, a document of 512 levels with a recursive schema that uses composition
       keywords, and the chain of eight embeddings, go through `didOpen` and every request of the
       debug test with `maxNestingDepth` set to 512, and the server answers each; the handoff names
       the command and its result
-- [ ] The handoff reports for the debug and the release run the smallest thread size, in steps of
+- [x] The handoff reports for the debug and the release run the smallest thread size, in steps of
       16 KiB, at which each passes, as a share of the server thread's 8 MiB, and each share is at
       most 75%
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ## Non-Goals
 
@@ -310,6 +310,11 @@ A stack overflow on the thread that drives the server ends the whole server.
 - **Gate demands of Task 10:** the blocking pool is capped by the named constant
   `MAX_BLOCKING_THREADS`, whose comment derives the cap from tower-lsp's limit of four messages at
   once and the threads for stdin and stdout.
+- **Gate demands of Task 11:** each request's answer reaches deep into the document, with a
+  negative control one level beyond the limit; a boundary pair at the validation depth; the chain
+  of eight embeddings beside a chain cut by depth and one of nine; schemas at 49 and 50 JSON levels
+  and a body of 100000 `[` on the fetch path; and the child process runs without proxy variables,
+  is killed on drop, has a timeout, and must exit with success.
 
 ## Task Notes
 

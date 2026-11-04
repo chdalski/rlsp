@@ -22,6 +22,7 @@ share a parent line with one sub-item each.
 - One long flow-collection line takes quadratic time, about 25 s for 2 MB (suspect `abs_pos` in `event_iter/flow.rs`), a denial-of-service risk for the language server; comment plan Task 4 security review.
 - Dependabot's security update for `minimatch` in `rlsp-yaml/integrations/vscode` fails with `security_update_not_possible` (latest resolvable 9.0.9, lowest non-vulnerable 11.0.1); the run on the parser plan's push.
 - Formatter output grows with depth times `tab_width` (a 250-level flow sequence prints about 250 times its input), and time grows with the square of the item count; `tab_size` and `print_width` come from the client unchecked; medium, nesting plan Task 2 security review.
+- `fetch_schemastore_catalog` in `rlsp-yaml/src/schema.rs` calls `fetch_json` without `check_json_depth` or the raw budget, so only the 5 MiB cap and serde's depth limit of 128 apply (fixed URL, non-recursive consumer); security Low, nesting plan Task 11 security review.
 
 ## Bugs
 
@@ -66,7 +67,9 @@ share a parent line with one sub-item each.
 
 ## Tests
 
-- `document_symbol_request` in `rlsp-yaml/tests/lsp_lifecycle/nesting_depth.rs` duplicates the helper in `navigation.rs`; nesting plan Task 9 test review.
+- `document_symbol_request` in `rlsp-yaml/tests/lsp_lifecycle/nesting_depth.rs` duplicates the helper in `navigation.rs`, and its `server()` overlaps `helpers::start_server` (it drops the log instead of collecting it); nesting plan Task 9 and Task 11 test reviews.
+- The stdio framing (`read_one_message`, `read_content_length`, `send`, `recv_matching`, `is_response_to`) exists in both `rlsp-yaml/tests/claude_code_stdio_smoke.rs` and `tests/lsp_lifecycle/stack_depth.rs`; extract it to a shared `tests/common` module; nesting plan Task 11 review.
+- The release runs in `rlsp-yaml/tests/lsp_lifecycle/stack_depth.rs` fetch no 49-level schema and do not assert that the validator reaches its depth limit at 512 levels; only the debug and stdio runs do; nesting plan Task 11 review.
 - Kubernetes detection tests reach the real network without the FakeProxy (`tests/lsp_lifecycle/kubernetes_detection.rs`); new API groups need `BUILTIN_DOTTED_GROUPS` entries; validate-kubernetes-schema-url plan.
 - "after Restart Server" integration test has no baseline assertion (`settings-sync.test.ts`); VS Code settings-sync plan.
 - Expand the test corpus beyond the 4 seed files (`rlsp-yaml/tests/corpus`); corpus plan.
@@ -97,6 +100,7 @@ share a parent line with one sub-item each.
   - `rlsp-yaml/tests/editorconfig_integration.rs`: A2 only checks its local copy `make_options_from_ec`, and B1 to B3 and C1 to C3 repeat the `line_ending_*` and `insert_final_newline_*` unit tests of `formatter.rs`; nesting plan Task 3 test review.
   - fold `collection_keys_nested_as_deep_as_the_parser_accepts_keep_their_data` (400 levels) into the rstest `explicit_keys_nested_as_deep_as_the_parser_accepts_keep_their_data` in `rlsp-yaml/tests/formatter_keeps_data.rs`; nesting plan Task 6 review.
   - `rlsp-yaml`: `should_not_panic_on_deeply_nested_yaml` and the three default-nesting tests in `src/parser.rs` (partly repeated by the rstest case 256), and the four `get_max_items_computed_*` tests in `src/server.rs`; nesting plan Task 8 test review.
+  - `should_publish_no_schema_diagnostics_when_schema_exceeds_depth_limit` in `rlsp-yaml/tests/lsp_lifecycle/schema_fetch.rs` partly overlaps `schema_beyond_the_json_depth_limit_is_refused` in `stack_depth.rs`; nesting plan Task 11 test review.
 
 ## Cleanup
 

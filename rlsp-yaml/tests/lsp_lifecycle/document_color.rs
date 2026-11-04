@@ -7,7 +7,7 @@ use tower_lsp::jsonrpc::Request;
 
 use super::helpers::*;
 
-fn document_color_request(id: i64, uri: &str) -> Request {
+pub fn document_color_request(id: i64, uri: &str) -> Request {
     Request::build("textDocument/documentColor")
         .id(id)
         .params(json!({ "textDocument": { "uri": uri } }))
