@@ -33,7 +33,9 @@ You receive:
 
 - The user's request, as captured during clarification
 - The approach under consideration — one or several
-  options, or the approach being planned
+  options, or the approach being planned. The options
+  frame the question, not the answer: a better option
+  nobody listed is a proposal too
 - The code areas the requester expects the change to touch
 - Proposals the user already declined for this request,
   with their reasons — raise one again only if the
@@ -109,6 +111,18 @@ nobody described.
    or would add to the structure the redesign removes;
    **after** when the redesign builds on the change's
    result or shares no code with it.
+
+   When a proposal rejects an option because of existing
+   structure — code the option needs is private to one
+   module or package, a check covers only one directory —
+   that structure is a finding of its own. Report the
+   refactor that removes it under Preparatory Refactors
+   or Larger Redesigns, weighed and placed like any
+   other, and name its ID where the proposal rejects the
+   option. Report it even when you recommend **not now**:
+   the user chooses only among the options your
+   rejections leave standing, so a rejection whose cause
+   goes unreported makes the choice for them.
 6. **Return the report** (see Report).
 
 ## Report
