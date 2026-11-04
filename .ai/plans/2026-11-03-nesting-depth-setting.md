@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-11-04)
 **Created:** 2026-11-03
 
 # A Configurable Nesting Depth of 256 That Holds on Every Build
@@ -45,7 +45,7 @@ a crafted schema exhausts the server's stack.
 - [x] Task 9: Embedded documents count toward the validation depth
 - [x] Task 10: The server runs on a thread with an 8 MiB stack
 - [x] Task 11: The server holds both ends of the setting
-- [ ] Push to `main` and confirm the full CI matrix is green
+- [x] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
@@ -315,6 +315,11 @@ A stack overflow on the thread that drives the server ends the whole server.
   of eight embeddings beside a chain cut by depth and one of nine; schemas at 49 and 50 JSON levels
   and a body of 100000 `[` on the fetch path; and the child process runs without proxy variables,
   is killed on drop, has a timeout, and must exit with success.
+- **The VS Code audit stays red for a separate plan:** at the push, `VS Code Extension` failed in
+  `pnpm audit` on moderate advisories for `minimatch` and `glob` through the dev dependency
+  `@vscode/test-cli`, as it has since 2026-11-02, before this plan; this plan changed no
+  dependency. `CI`, `Coverage`, `Push on main`, and `Release-plz` passed. The user chose to close
+  this plan and fix the audit in a separate plan after it.
 
 ## Task Notes
 
