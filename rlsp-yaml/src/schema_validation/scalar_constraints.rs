@@ -24,6 +24,7 @@ pub(super) fn validate_scalar_constraints(
     schema: &JsonSchema,
     path: &[String],
     ctx: &mut Ctx<'_>,
+    depth: usize,
 ) {
     if let Node::Scalar {
         value,
@@ -44,7 +45,7 @@ pub(super) fn validate_scalar_constraints(
         // String constraints apply to scalars that resolve to string type.
         // A scalar is a string when its resolved tag is str (or unrecognised).
         if tag.as_deref() == Some("tag:yaml.org,2002:str") {
-            validate_string_constraints(value, *loc, schema, path, ctx);
+            validate_string_constraints(value, *loc, schema, path, ctx, depth);
         }
 
         // Numeric constraints only apply to plain scalars.
@@ -85,6 +86,7 @@ pub(super) fn validate_string_constraints(
     schema: &JsonSchema,
     path: &[String],
     ctx: &mut Ctx<'_>,
+    depth: usize,
 ) {
     let range = span_to_lsp(loc, ctx.idx);
     if let Some(pattern) = &schema.pattern {
@@ -172,7 +174,7 @@ pub(super) fn validate_string_constraints(
             || schema.content_media_type.is_some()
             || schema.content_schema.is_some()
         {
-            validate_content(s, schema, loc, path, ctx);
+            validate_content(s, schema, loc, path, ctx, depth);
         }
     }
 }
@@ -239,6 +241,7 @@ pub(super) fn validate_content(
     loc: Span,
     path: &[String],
     ctx: &mut Ctx<'_>,
+    depth: usize,
 ) {
     // Decoding costs time proportional to the string, which one step does not cover.
     if !ctx.budget.spend_work(s.len()) {
@@ -300,11 +303,12 @@ pub(super) fn validate_content(
     // Unknown media type — fall through to contentSchema if present
 
     // Step 3: validate decoded content against contentSchema if present
-    validate_content_schema(s, decoded_bytes.as_deref(), schema, loc, path, ctx);
+    validate_content_schema(s, decoded_bytes.as_deref(), schema, loc, path, ctx, depth);
 }
 
 /// If `contentSchema` is present, parse the (possibly decoded) content as YAML
-/// and validate the parsed result against the sub-schema.
+/// and validate the parsed result against the sub-schema. `depth` is the depth
+/// of the string that holds the content; the content continues one level below.
 pub(super) fn validate_content_schema(
     raw: &str,
     decoded_bytes: Option<&[u8]>,
@@ -312,14 +316,16 @@ pub(super) fn validate_content_schema(
     loc: Span,
     path: &[String],
     ctx: &mut Ctx<'_>,
+    depth: usize,
 ) {
     let Some(content_schema) = &schema.content_schema else {
         return;
     };
-    // Every embedded document restarts the validation depth: without this
-    // bound, a schema that reaches `contentSchema` through a cycle recurses
-    // until the budget runs out. Reaching it ends the run like running out of
-    // steps, so the client is told that validation is incomplete.
+    // Embedded content counts toward the validation depth, which keeps the
+    // stack in check; this bound keeps a schema that reaches `contentSchema`
+    // through a cycle from loading a document for every level of that depth.
+    // Reaching it ends the run like running out of steps, so the client is
+    // told that validation is incomplete.
     if ctx.content_depth >= MAX_CONTENT_DEPTH {
         ctx.undecided = true;
         ctx.budget.exhaust();
@@ -371,7 +377,7 @@ pub(super) fn validate_content_schema(
             content_schema,
             &content_path,
             &mut content_ctx,
-            0,
+            depth + 1,
         );
         ctx.undecided |= content_ctx.undecided;
     }

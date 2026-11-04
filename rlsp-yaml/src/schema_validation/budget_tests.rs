@@ -842,14 +842,16 @@ fn embedded_content_larger_than_the_budget_exhausts_it() {
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
 }
 
-#[test]
-fn embedded_content_is_validated_from_depth_zero() {
-    // The content is a document of its own: a string at the depth limit still
-    // gets its content validated in full, and the outer nesting is not counted.
-    let parsed = ParsedSchema::new(schema_of(&json!({
-        "contentSchema": {"properties": {"a": {"type": "string"}}}
-    })));
-    let docs = parse_docs("\"a: 1\"");
+/// Validates the string `content` against `raw_schema` as if it stood `depth`
+/// levels down in a document, and returns the diagnostics and whether the walk
+/// skipped a check it could not finish.
+fn validate_string_at_depth(
+    raw_schema: &serde_json::Value,
+    content: &str,
+    depth: usize,
+) -> (Vec<Diagnostic>, bool) {
+    let parsed = ParsedSchema::new(schema_of(raw_schema));
+    let docs = parse_docs(&serde_json::to_string(content).expect("a string is JSON"));
     let budget = Budget::new(usize::MAX);
     let mut diagnostics = Vec::new();
     let mut ctx = Ctx::new(
@@ -861,16 +863,135 @@ fn embedded_content_is_validated_from_depth_zero() {
         &parsed,
     );
 
-    validate_node(
-        &docs[0].root,
-        &parsed.root,
-        &[],
-        &mut ctx,
-        support::MAX_VALIDATION_DEPTH,
-    );
+    validate_node(&docs[0].root, &parsed.root, &[], &mut ctx, depth);
 
-    assert!(!ctx.undecided);
-    assert_eq!(diagnostics.len(), 1);
+    let undecided = ctx.undecided;
+    (diagnostics, undecided)
+}
+
+const LAST: usize = support::MAX_VALIDATION_DEPTH;
+
+// The embedded document continues at the depth of the string that holds it
+// plus one: its root sits one level below the string, and the scalar `1` inside
+// `a: 1` two levels below.
+#[rstest]
+#[case::shallow(0, 1, false)]
+#[case::last_depth_that_reaches_the_value(LAST - 2, 1, false)]
+#[case::value_one_level_too_deep(LAST - 1, 0, true)]
+#[case::string_at_the_limit(LAST, 0, true)]
+fn embedded_content_counts_toward_the_depth_of_its_string(
+    #[case] depth: usize,
+    #[case] expected_diagnostics: usize,
+    #[case] expected_undecided: bool,
+) {
+    let schema = json!({"contentSchema": {"properties": {"a": {"type": "string"}}}});
+
+    let (diagnostics, undecided) = validate_string_at_depth(&schema, "a: 1", depth);
+
+    assert_eq!(diagnostics.len(), expected_diagnostics, "{diagnostics:?}");
+    assert!(
+        diagnostics.iter().all(|d| d.message.contains("(content)")),
+        "{diagnostics:?}"
+    );
+    assert_eq!(undecided, expected_undecided);
+}
+
+// The root of the embedded document is a level of its own: the string `1`
+// parses to a scalar that sits one level below the string.
+#[rstest]
+#[case::root_scalar_at_the_last_depth(LAST - 1, 1, false)]
+#[case::root_scalar_one_level_too_deep(LAST, 0, true)]
+fn the_root_of_embedded_content_counts_as_a_level(
+    #[case] depth: usize,
+    #[case] expected_diagnostics: usize,
+    #[case] expected_undecided: bool,
+) {
+    let schema = json!({"contentSchema": {"type": "string"}});
+
+    let (diagnostics, undecided) = validate_string_at_depth(&schema, "1", depth);
+
+    assert_eq!(diagnostics.len(), expected_diagnostics, "{diagnostics:?}");
+    assert_eq!(undecided, expected_undecided);
+}
+
+// Embedded content is loaded even where the depth hides it from validation, so
+// a malformed document keeps its diagnostic.
+#[rstest]
+#[case::within_the_depth(LAST - 2)]
+#[case::at_the_limit(LAST)]
+fn embedded_content_that_does_not_parse_is_reported_at_any_depth(#[case] depth: usize) {
+    let schema = json!({"contentSchema": {"type": "object"}});
+
+    let (diagnostics, undecided) = validate_string_at_depth(&schema, "a: [", depth);
+
+    assert_eq!(codes(&diagnostics), ["schemaContentSchema"]);
+    assert!(!undecided);
+}
+
+#[test]
+fn embedded_content_without_a_document_is_not_undecided() {
+    let schema = json!({"contentSchema": {"type": "object"}});
+
+    let (diagnostics, undecided) = validate_string_at_depth(&schema, "# nothing", LAST);
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(!undecided, "nothing was cut");
+}
+
+#[rstest]
+#[case::within_the_depth(LAST - 2, 2, false)]
+#[case::one_level_too_deep(LAST - 1, 0, true)]
+fn every_document_of_embedded_content_starts_at_the_same_depth(
+    #[case] depth: usize,
+    #[case] expected_diagnostics: usize,
+    #[case] expected_undecided: bool,
+) {
+    let schema = json!({"contentSchema": {"properties": {"a": {"type": "string"}}}});
+
+    let (diagnostics, undecided) = validate_string_at_depth(&schema, "a: 1\n---\na: 2", depth);
+
+    assert_eq!(diagnostics.len(), expected_diagnostics, "{diagnostics:?}");
+    assert_eq!(undecided, expected_undecided);
+}
+
+// Content that embeds content adds a level for each document: the outer string
+// is at `depth`, the inner string at `depth + 2` (the root of the outer content
+// is one below, its `x` value another), the inner root at `depth + 3`, and the
+// scalar `1` at `depth + 4`.
+#[rstest]
+#[case::within_the_depth(LAST - 4, 1, false)]
+#[case::one_level_too_deep(LAST - 3, 0, true)]
+fn embedded_content_inside_embedded_content_adds_a_level_for_each_document(
+    #[case] depth: usize,
+    #[case] expected_diagnostics: usize,
+    #[case] expected_undecided: bool,
+) {
+    let schema = json!({"contentSchema": {"properties": {"x": {
+        "contentSchema": {"properties": {"a": {"type": "string"}}}
+    }}}});
+
+    let (diagnostics, undecided) = validate_string_at_depth(&schema, "x: 'a: 1'", depth);
+
+    assert_eq!(diagnostics.len(), expected_diagnostics, "{diagnostics:?}");
+    assert_eq!(undecided, expected_undecided);
+}
+
+// `not` fires when its sub-schema passes. Content the depth hid is not known to
+// pass, so `not` must stay silent there.
+#[rstest]
+#[case::content_passes_within_the_depth(0, &["schemaNot"][..], false)]
+#[case::content_hidden_by_the_depth(LAST - 1, &[][..], true)]
+fn embedded_content_cut_inside_a_probe_is_undecided_not_a_pass(
+    #[case] depth: usize,
+    #[case] expected_codes: &[&str],
+    #[case] expected_undecided: bool,
+) {
+    let schema = json!({"not": {"contentSchema": {"type": "object"}}});
+
+    let (diagnostics, undecided) = validate_string_at_depth(&schema, "a: 1", depth);
+
+    assert_eq!(codes(&diagnostics), expected_codes);
+    assert_eq!(undecided, expected_undecided);
 }
 
 // ══════════════════════════════════════════════════════════════════════════

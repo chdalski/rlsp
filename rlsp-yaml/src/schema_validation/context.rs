@@ -177,8 +177,8 @@ pub(super) struct Ctx<'a> {
     pub(super) parsed: &'a ParsedSchema,
     pub(super) mode: Mode,
     /// How many embedded documents (`contentSchema`) enclose the node being
-    /// validated. Each of them restarts the validation depth, so this is the
-    /// bound on a schema that reaches `contentSchema` through a cycle.
+    /// validated; bounded by `MAX_CONTENT_DEPTH`, so a schema that reaches
+    /// `contentSchema` through a cycle ends.
     pub(super) content_depth: usize,
     /// Set when this walk skipped a check it could not finish (depth limit,
     /// or a `collect_evaluated_*` scan the budget cut short). A probe that

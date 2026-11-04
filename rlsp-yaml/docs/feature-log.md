@@ -31,6 +31,15 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### Embedded Content Counts Toward the Schema Validation Depth [completed]
+
+**Date:** 2026-11-04
+**Description:** Content that a schema embeds in a string (`contentSchema`) now counts toward the depth of the string that holds it, where it used to start again at the top. Schema validation checks nesting only down to a fixed depth; a string that sits deep in a document leaves its content less room, and what lies below that depth is not checked and gets no diagnostic, as in the document itself. An embedded document that is not valid YAML is still reported. The change keeps a crafted document with a self-referencing schema from exhausting the server's stack. See [Schema Validation Limits](configuration.md#schema-validation-limits).
+**Complexity:** Low
+**Tier:** 1
+
+---
+
 ### The `maxNestingDepth` Setting [completed]
 
 **Date:** 2026-11-03

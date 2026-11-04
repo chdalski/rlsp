@@ -4,7 +4,7 @@
 
 use rstest::rstest;
 
-use super::support::test_fixtures::integer_schema;
+use super::support::test_fixtures::{integer_schema, string_schema};
 use super::*;
 use crate::schema::SchemaType;
 use crate::schema::test_support::{on_a_small_stack, reference_to, with_targets};
@@ -653,7 +653,7 @@ fn a_reference_node_is_read_as_its_target_and_not_by_its_own_fields() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// Cycles through contentSchema: every embedded document restarts the depth
+// Cycles through contentSchema: the embedding count bounds them
 // ══════════════════════════════════════════════════════════════════════════
 
 fn content_schema_of(schema: JsonSchema) -> JsonSchema {
@@ -782,6 +782,97 @@ fn embedded_documents_nest_up_to_the_content_limit(
         result.diagnostics
     );
     assert_eq!(result.completeness, completeness);
+}
+
+// A string that is `levels` mappings down leaves its embedded content only the
+// levels that remain.
+#[rstest]
+#[case::last_level_that_reaches_the_value(support::MAX_VALIDATION_DEPTH - 2, 1)]
+#[case::value_one_level_too_deep(support::MAX_VALIDATION_DEPTH - 1, 0)]
+fn a_string_deep_in_a_document_gets_only_the_depth_that_remains_for_its_content(
+    #[case] levels: usize,
+    #[case] diagnostics: usize,
+) {
+    let content = JsonSchema {
+        properties: Some([("x".to_string(), string_schema())].into()),
+        ..JsonSchema::default()
+    };
+    let schema = ParsedSchema::new(below_properties(levels, content_schema_of(content)));
+    let docs = parse_docs(&below_mappings(levels, "'x: 1'"));
+
+    let result = validate_schema(&docs, &schema, true, YamlVersion::V1_2);
+
+    assert_eq!(
+        result.diagnostics.len(),
+        diagnostics,
+        "{:?}",
+        result.diagnostics
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .all(|d| d.message.contains("(content).x")),
+        "{:?}",
+        result.diagnostics
+    );
+    assert_eq!(result.completeness, Completeness::Complete);
+}
+
+/// A schema that follows every `a` of a mapping and every string that embeds
+/// content, each through itself.
+fn follows_mappings_and_embedded_content() -> ParsedSchema {
+    with_targets(
+        reference_to(0),
+        vec![JsonSchema {
+            properties: Some([("a".to_string(), reference_to(0))].into()),
+            content_schema: Some(Box::new(reference_to(0))),
+            ..JsonSchema::default()
+        }],
+    )
+}
+
+#[test]
+fn embedded_documents_that_are_each_nearly_as_deep_as_the_limit_end_on_a_small_stack() {
+    // Before embedded content counted toward the depth, each of the documents
+    // below was walked to the full depth, one on top of the other.
+    on_a_small_stack(|| {
+        let levels = support::MAX_VALIDATION_DEPTH - 4;
+        let text = (0..support::MAX_CONTENT_DEPTH).fold(below_mappings(levels, "1"), |inner, _| {
+            let quoted = serde_json::to_string(&inner).expect("a string is JSON");
+            below_mappings(levels, &quoted)
+        });
+
+        let result = validate_schema(
+            &parse_docs(&text),
+            &follows_mappings_and_embedded_content(),
+            true,
+            YamlVersion::V1_2,
+        );
+
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    });
+}
+
+#[test]
+fn embedded_content_nested_past_the_depth_limit_ends_on_a_small_stack() {
+    on_a_small_stack(|| {
+        let content = below_mappings(support::MAX_VALIDATION_DEPTH * 3, "1");
+        let schema = with_targets(
+            content_schema_of(reference_to(0)),
+            vec![additional_properties_of(reference_to(0))],
+        );
+
+        let result = validate_schema(
+            &parse_docs(&format!("'{content}'")),
+            &schema,
+            true,
+            YamlVersion::V1_2,
+        );
+
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.completeness, Completeness::Complete);
+    });
 }
 
 // ── Schemas the parser builds: recursion is followed at any depth ───────────

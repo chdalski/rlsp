@@ -203,7 +203,7 @@ fn validate_node(
     }
 
     // Scalar constraints
-    scalar_constraints::validate_scalar_constraints(node, schema, path, ctx);
+    scalar_constraints::validate_scalar_constraints(node, schema, path, ctx, depth);
     if ctx.probe_decided() {
         return;
     }

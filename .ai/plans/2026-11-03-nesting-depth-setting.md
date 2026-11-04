@@ -42,7 +42,7 @@ a crafted schema exhausts the server's stack.
 - [x] Task 6: The formatter takes the nesting limit as an option
 - [x] Task 7: The default nesting limit is 256
 - [x] Task 8: The server setting `maxNestingDepth`
-- [ ] Task 9: Embedded documents count toward the validation depth
+- [x] Task 9: Embedded documents count toward the validation depth
 - [ ] Task 10: The server runs on a thread with an 8 MiB stack
 - [ ] Task 11: The server holds both ends of the setting
 - [ ] Push to `main` and confirm the full CI matrix is green
@@ -186,24 +186,24 @@ final-newline check; all three use one limit.
 of `contentSchema` embeddings nests up to nine times `MAX_VALIDATION_DEPTH` levels of
 `validate_node`.
 
-- [ ] The validation of a document embedded in a string continues at the depth of the string that
+- [x] The validation of a document embedded in a string continues at the depth of the string that
       holds it plus one, so no chain of embedded documents nests more than `MAX_VALIDATION_DEPTH`
       levels of `validate_node`
-- [ ] `embedded_content_is_validated_from_depth_zero` in `budget_tests.rs` is replaced by a test in
+- [x] `embedded_content_is_validated_from_depth_zero` in `budget_tests.rs` is replaced by a test in
       which, with the string at depth `MAX_VALIDATION_DEPTH - 2`, the scalar inside the embedded
       `a: 1` gets its diagnostic, and with the string at depth `MAX_VALIDATION_DEPTH - 1` it gets
       none and the result is undecided; a test through `validate_schema` puts the string at depth
       `MAX_VALIDATION_DEPTH - 2` of an outer document and pins the diagnostic
-- [ ] `MAX_CONTENT_DEPTH` keeps its incomplete-validation result, and the `contentSchema` cycle and
+- [x] `MAX_CONTENT_DEPTH` keeps its incomplete-validation result, and the `contentSchema` cycle and
       embedding tests in `reference_tests.rs`, `budget_tests.rs`, `false_schema_tests.rs`, and
       `schema_validation.rs` pass with their assertions unchanged
-- [ ] The handoff reports, before and after the change, the smallest thread size in steps of
+- [x] The handoff reports, before and after the change, the smallest thread size in steps of
       16 KiB at which a release build validates a document with eight nested `contentSchema`
       embeddings against a schema that refers to itself through its keywords
-- [ ] No comment or doc says that an embedded document restarts the depth, and
+- [x] No comment or doc says that an embedded document restarts the depth, and
       `rlsp-yaml/docs/configuration.md` and `rlsp-yaml/docs/feature-log.md` tell a reader that
       content embedded in a string counts toward the depth of the string that holds it
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 10: The server runs on a thread with an 8 MiB stack
 
@@ -304,6 +304,9 @@ A stack overflow on the thread that drives the server ends the whole server.
   silently below that as in the outer document, and a `contentSchema` cycle deeper than eight
   levels between its embeddings ends complete without the incomplete-validation warning. Declined: a
   separate plan, the backlog only, and a warning at the depth cut.
+- **Gate demands of Task 9:** the depth is a required parameter of every function in the scalar
+  chain, the measurement also covers an embedded string of 250 levels, and the docs name no
+  number.
 
 ## Task Notes
 

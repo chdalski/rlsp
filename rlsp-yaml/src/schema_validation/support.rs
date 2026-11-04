@@ -13,9 +13,10 @@ use super::context::Budget;
 /// Maximum recursion depth for the validation walk.
 pub(super) const MAX_VALIDATION_DEPTH: usize = 64;
 
-/// Maximum nesting of embedded documents (`contentSchema`). Each level restarts
-/// the validation depth at zero, so a schema that applies itself through
-/// `contentSchema` is bounded by this alone. Reaching it ends the run early.
+/// Maximum nesting of embedded documents (`contentSchema`). Embedded content
+/// counts toward the validation depth, so this bounds the documents a schema
+/// that applies itself through `contentSchema` loads, not the stack. Reaching
+/// it ends the run early.
 pub(super) const MAX_CONTENT_DEPTH: usize = 8;
 
 /// Maximum length of schema description text embedded in diagnostic messages.
