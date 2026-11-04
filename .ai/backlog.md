@@ -20,7 +20,6 @@ share a parent line with one sub-item each.
 - SSRF guard checks hostname strings only (`foo.localhost`, DNS rebinding); schema queue.
 - "(all required)" completion snippet does not escape names (`schema_key_completions`); security Low.
 - One long flow-collection line takes quadratic time, about 25 s for 2 MB (suspect `abs_pos` in `event_iter/flow.rs`), a denial-of-service risk for the language server; comment plan Task 4 security review.
-- Dependabot's security update for `minimatch` in `rlsp-yaml/integrations/vscode` fails with `security_update_not_possible` (latest resolvable 9.0.9, lowest non-vulnerable 11.0.1); the run on the parser plan's push.
 - Formatter output grows with depth times `tab_width` (a 250-level flow sequence prints about 250 times its input), and time grows with the square of the item count; `tab_size` and `print_width` come from the client unchecked; medium, nesting plan Task 2 security review.
 - `fetch_schemastore_catalog` in `rlsp-yaml/src/schema.rs` calls `fetch_json` without `check_json_depth` or the raw budget, so only the 5 MiB cap and serde's depth limit of 128 apply (fixed URL, non-recursive consumer); security Low, nesting plan Task 11 security review.
 
