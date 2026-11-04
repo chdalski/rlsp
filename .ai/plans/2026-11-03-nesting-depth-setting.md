@@ -10,7 +10,10 @@ The loader's nesting limit is meant to protect the stack, but a debug build abor
 thread at about 207 levels, below the server's 256 and the library default of 512, and
 `format_yaml` aborts at 256. The loader gets smaller stack frames, so a depth of 256 holds in
 debug and release, for `load()` and `format_yaml`; the library default becomes 256, and the
-server gets a setting `maxNestingDepth` with a default of 256 and a range of 1 to 512.
+server gets a setting `maxNestingDepth` with a default of 256 and a range of 1 to 512. The server
+drives its handlers on a thread of 8 MiB on every platform, and the schema validation of a document
+embedded in a string counts toward the depth of that string, so neither the setting's upper end nor
+a crafted schema exhausts the server's stack.
 
 ## Context
 
@@ -39,7 +42,9 @@ server gets a setting `maxNestingDepth` with a default of 256 and a range of 1 t
 - [x] Task 6: The formatter takes the nesting limit as an option
 - [x] Task 7: The default nesting limit is 256
 - [x] Task 8: The server setting `maxNestingDepth`
-- [ ] Task 9: The server holds both ends of the setting
+- [ ] Task 9: Embedded documents count toward the validation depth
+- [ ] Task 10: The server runs on a thread with an 8 MiB stack
+- [ ] Task 11: The server holds both ends of the setting
 - [ ] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
@@ -175,20 +180,66 @@ final-newline check; all three use one limit.
 - [x] Build, tests, `cargo clippy --all-targets`, fmt, and the VS Code extension's lint, typecheck,
       and unit tests pass
 
-### Task 9: The server holds both ends of the setting
+### Task 9: Embedded documents count toward the validation depth
 
-A stack overflow on a tokio worker ends the whole server.
+`validate_content_schema` validates each document embedded in a string from depth 0, so a chain
+of `contentSchema` embeddings nests up to nine times `MAX_VALIDATION_DEPTH` levels of
+`validate_node`.
+
+- [ ] The validation of a document embedded in a string continues at the depth of the string that
+      holds it plus one, so no chain of embedded documents nests more than `MAX_VALIDATION_DEPTH`
+      levels of `validate_node`
+- [ ] `embedded_content_is_validated_from_depth_zero` in `budget_tests.rs` is replaced by a test in
+      which, with the string at depth `MAX_VALIDATION_DEPTH - 2`, the scalar inside the embedded
+      `a: 1` gets its diagnostic, and with the string at depth `MAX_VALIDATION_DEPTH - 1` it gets
+      none and the result is undecided; a test through `validate_schema` puts the string at depth
+      `MAX_VALIDATION_DEPTH - 2` of an outer document and pins the diagnostic
+- [ ] `MAX_CONTENT_DEPTH` keeps its incomplete-validation result, and the `contentSchema` cycle and
+      embedding tests in `reference_tests.rs`, `budget_tests.rs`, `false_schema_tests.rs`, and
+      `schema_validation.rs` pass with their assertions unchanged
+- [ ] The handoff reports, before and after the change, the smallest thread size in steps of
+      16 KiB at which a release build validates a document with eight nested `contentSchema`
+      embeddings against a schema that refers to itself through its keywords
+- [ ] No comment or doc says that an embedded document restarts the depth, and
+      `rlsp-yaml/docs/configuration.md` and `rlsp-yaml/docs/feature-log.md` tell a reader that
+      content embedded in a string counts toward the depth of the string that holds it
+- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+
+### Task 10: The server runs on a thread with an 8 MiB stack
+
+tower-lsp polls the handlers inside `serve`, so they run on the thread that drives it: today the
+main thread, which has 1 MiB on Windows.
+
+- [ ] The `rlsp-yaml` binary drives the server on a thread with an 8 MiB stack, set by a named
+      constant whose comment says why, in a single-thread runtime whose blocking threads get the
+      same size
+- [ ] A panic on the server thread ends the process with the exit code it has today, a failed
+      thread start or runtime build prints its error to stderr and exits non-zero, and the start
+      and join path uses no `expect` or `unwrap`
+- [ ] `tests/claude_code_stdio_smoke.rs` closes the child's stdin after `exit` and asserts that the
+      server exits on its own with success within its timeout
+- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+
+### Task 11: The server holds both ends of the setting
+
+A stack overflow on the thread that drives the server ends the whole server.
 
 - [ ] A test in a debug build sends a document of 256 levels through `didOpen` and every request
       whose handler in `server.rs` reads the stored AST or calls `format_yaml`, among them
       `documentSymbol`, `selectionRange`, `foldingRange`, `semanticTokens/full`, `hover`,
       `completion`, `definition`, `references`, `prepareRename`, `rename`, `documentLink`,
       `codeLens`, `documentColor`, `formatting`, `rangeFormatting`, `onTypeFormatting`, and
-      `codeAction` with the flow-to-block and block-to-flow actions, with the server's handlers on
-      threads of 2 MiB, and the server answers each
-- [ ] In a release build, a document of 512 levels with a schema goes through `didOpen` and
-      `formatting` with `maxNestingDepth` set to 512, and the server answers both; the handoff
-      names the command and its result
+      `codeAction` with the flow-to-block and block-to-flow actions, on a thread of 2 MiB, and the
+      server answers each; `didOpen` also validates against a schema whose `contentSchema` loads
+      YAML of 256 levels embedded in a string, and against a chain of eight `contentSchema`
+      embeddings whose innermost string holds YAML of 256 levels at the deepest validated depth
+- [ ] In a release build, a document of 512 levels with a recursive schema that uses composition
+      keywords, and the chain of eight embeddings, go through `didOpen` and every request of the
+      debug test with `maxNestingDepth` set to 512, and the server answers each; the handoff names
+      the command and its result
+- [ ] The handoff reports for the debug and the release run the smallest thread size, in steps of
+      16 KiB, at which each passes, as a share of the server thread's 8 MiB, and each share is at
+      most 75%
 - [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ## Non-Goals
@@ -242,6 +293,17 @@ A stack overflow on a tokio worker ends the whole server.
 - **Gate demands of Task 8:** the reload never overwrites a newer text and skips its publish once
   the limit has moved on, the check for that is the tested predicate `load_is_current`, the old and
   new limit are compared under one settings lock, and the reader reads whole numbers only.
+- **The server drives its handlers on a thread of 8 MiB:** tower-lsp polls them on the thread
+  that drives `serve`, the formatter needs about 81% of 1 MiB at 512 levels in release and of 2 MiB
+  at 256 in debug, and the main thread has 1 MiB on Windows. A single-thread runtime, since the
+  handlers already run on one thread and workers would each reserve the size. Declined: accepting
+  the 81%, shrinking the formatter's frames further, and a multi-thread runtime.
+- **Embedded documents count toward the validation depth, in this plan:** a crafted document and
+  schema nested `contentSchema` up to nine times `MAX_VALIDATION_DEPTH` levels, about 956 KiB in
+  release. An embedded document at depth d is now validated to `MAX_VALIDATION_DEPTH - d` levels,
+  silently below that as in the outer document, and a `contentSchema` cycle deeper than eight
+  levels between its embeddings ends complete without the incomplete-validation warning. Declined: a
+  separate plan, the backlog only, and a warning at the depth cut.
 
 ## Task Notes
 
@@ -258,12 +320,8 @@ A stack overflow on a tokio worker ends the whole server.
   once the default is 256
 - Task 8: a value out of range takes the default with a warning, as Decisions says; it is not
   clamped
-- Task 9: the debug test's `didOpen` also validates against a schema whose `contentSchema` loads YAML
-  embedded in a string of 256 levels, since that load runs below the schema validator's frames
 - Task 8: `rlsp-yaml/docs/configuration.md` no longer says that embedded `contentSchema` content is
   validated at full depth, since it stops at the default nesting limit
-- Task 9: the release check runs the 512-level document on a thread of at most 1 MiB, the main thread's
-  stack on Windows where tower-lsp polls the handlers, with a recursive schema that uses composition
-  keywords, and the handoff names the margin
-- Task 9: the release check at 512 levels sends every request of the debug test, not only `didOpen`
-  and `formatting`
+- Task 11: the local branch `wip/server-stack-check` (855543f1) holds the unreviewed debug and release
+  tests of the earlier server check (`tests/lsp_lifecycle/stack_depth.rs`) as a starting point; the
+  `#[ignore]` reason of the release test names the command for each shape in its own process
