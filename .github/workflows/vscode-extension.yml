@@ -149,6 +149,26 @@ jobs:
       # Suppressed via pnpm.auditConfig.ignoreCves in package.json. Revisit
       # when @vscode/test-cli or mocha bump their `diff` dependency past
       # 8.0.3.
+      #
+      # CVE-2026-118764 / GHSA-g3hv-75wg-m249: CPU/memory amplification in
+      # minimatch's glob pre-processing on attacker-supplied patterns. The
+      # fix exists only in minimatch 11, which drops
+      # Minimatch.prototype.makeRe; the bundled runtime dependency
+      # vscode-languageclient calls makeRe (lib/common/fileOperations.js,
+      # lib/common/utils/globPattern.js), so minimatch cannot be overridden
+      # to 11 without breaking the shipped client. The client passes
+      # minimatch only globs a server registers for file operations, pull
+      # diagnostics, or notebooks; rlsp-yaml registers none of these (only
+      # fixed watcher globs via workspace/didChangeWatchedFiles, which do not
+      # reach minimatch), and no pattern from settings or workspace content
+      # flows into a registration. The other minimatch copies are dev-only
+      # (mocha, eslint, @vscode/test-cli).
+      # Suppressed via pnpm.auditConfig.ignoreCves in package.json. Revisit
+      # when vscode-languageclient ships a release that runs with minimatch
+      # 11.0.1 or later, when a minimatch 10.x release carries the fix, or
+      # once rlsp-yaml registers file operations, pull diagnostics with
+      # patterns, or notebooks, or lets a pattern from settings, workspace
+      # content, or user input flow into any registration.
       - name: Audit dependencies
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         working-directory: rlsp-yaml/integrations/vscode

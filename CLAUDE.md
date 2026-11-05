@@ -31,7 +31,7 @@ pnpm run build     # bundle extension (esbuild)
 pnpm run test      # run unit tests (vitest)
 pnpm run test:integration  # run VS Code integration tests (requires display; use xvfb-run -a on Linux)
 pnpm run typecheck # typecheck without emitting (fast local gate; test:integration also runs tsc)
-pnpm run audit     # pnpm audit gate (low+ severity; pre-existing dev-only lows allowlisted via pnpm.auditConfig.ignoreCves)
+pnpm run audit     # pnpm audit gate (low+ severity; exceptions via pnpm.auditConfig.ignoreCves, see Conventions)
 pnpm run lint      # lint TypeScript source
 pnpm run format    # check formatting (prettier)
 ```
@@ -91,6 +91,7 @@ keywords.
 - OIDC trusted publishing to crates.io — no `CARGO_REGISTRY_TOKEN` secret needed
 - pnpm as Node.js package manager
 - A pnpm override is redundant only when every direct dependent's *declared* range is bounded at or above the advisory's patched floor — an observed resolved version above the floor proves nothing, since it reflects resolver preference (mirror state, store contents, incremental lockfile history)
+- A CVE goes into the VS Code extension's `pnpm.auditConfig.ignoreCves` only when its vulnerable code is unreachable from runtime or user input and either the code is dev-only or its patched release is in a major that a dependent cannot run with and that has no release that can; each entry's reason and revisit trigger go in the comment on the `Audit dependencies` step of `.github/workflows/vscode-extension.yml`
 - AI-written project — external contributions via GitHub issues only
 - Each `rlsp-<language>` crate must have `README.md`, `docs/configuration.md`, `docs/feature-log.md`
 - Root `README.md` is landing page; crate `README.md` is self-contained for users; `docs/configuration.md` is pure settings reference; `docs/feature-log.md` is user-facing feature decisions only — internal refactors and implementation rewrites do NOT go there (commit history + plan files carry that record)

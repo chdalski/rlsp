@@ -22,8 +22,8 @@ trigger, and the project's audit rule says when such an exception is allowed.
 - [x] Clarify scope with the user
 - [x] Design review of the approach
 - [x] Task 1: glob resolves only on its patched major
-- [ ] Task 2: The minimatch advisory is allowlisted under a stated rule
-- [ ] `.ai/backlog.md` has a line for the event that ends the minimatch exception, pointing to the
+- [x] Task 2: The minimatch advisory is allowlisted under a stated rule
+- [x] `.ai/backlog.md` has a line for the event that ends the minimatch exception, pointing to the
       `Audit dependencies` step's comment
 - [ ] Push to `main` and confirm the full CI matrix is green
 
@@ -63,22 +63,23 @@ documents each allowlisted CVE in the comment on its `Audit dependencies` step;
 `dtolnay/rust-toolchain` there is pinned to a toolchain version and moves with
 `rust-toolchain.toml`, not as a major tag.
 
-- [ ] `pnpm.auditConfig.ignoreCves` is exactly `CVE-2026-24001` and `CVE-2026-118764`, and
+- [x] `pnpm.auditConfig.ignoreCves` is exactly `CVE-2026-24001` and `CVE-2026-118764`, and
       `pnpm run audit` passes; the handoff shows that the registry's audit response names
       CVE-2026-118764 for GHSA-g3hv-75wg-m249
-- [ ] A reader of the `Audit dependencies` step's comment finds why CVE-2026-118764 is allowlisted
+- [x] A reader of the `Audit dependencies` step's comment finds why CVE-2026-118764 is allowlisted
       and that the exception ends with a `vscode-languageclient` release that runs with minimatch
       11.0.1 or later, or once rlsp-yaml registers file operations, pull diagnostics with patterns,
       or notebooks
-- [ ] Every action in `vscode-extension.yml` other than `dtolnay/rust-toolchain` is on its latest
+- [x] Every action in `vscode-extension.yml` other than `dtolnay/rust-toolchain` is on its latest
       major tag, and the handoff names the source checked for each action
-- [ ] In the root `CLAUDE.md`, the `pnpm run audit` line no longer limits exceptions to dev-only
+- [x] In the root `CLAUDE.md`, the `pnpm run audit` line no longer limits exceptions to dev-only
       lows and points to Conventions; a Conventions entry, naming no CVE, allows a CVE in the
-      extension's `ignoreCves` only when the vulnerable code is dev-only and unreachable from
-      runtime or user input, or when its patched release is in a major that a dependent cannot run
-      with and that has no release that can, and says that each entry's reason and revisit trigger
-      go in the comment on the `Audit dependencies` step of `.github/workflows/vscode-extension.yml`
-- [ ] `pnpm run build`, `pnpm run test`, `pnpm run typecheck`, `pnpm run lint`, and
+      extension's `ignoreCves` only when its vulnerable code is unreachable from runtime or user
+      input and either the code is dev-only or its patched release is in a major that a dependent
+      cannot run with and that has no release that can, and says that each entry's reason and
+      revisit trigger go in the comment on the `Audit dependencies` step of
+      `.github/workflows/vscode-extension.yml`
+- [x] `pnpm run build`, `pnpm run test`, `pnpm run typecheck`, `pnpm run lint`, and
       `pnpm run format` pass
 
 ## Non-Goals
@@ -104,3 +105,8 @@ documents each allowlisted CVE in the comment on its `Audit dependencies` step;
   ends the exception. Declined: the workflow comment alone.
 - **`lockfileRules` stays a tuple array:** the runtime coverage test already catches a missing glob
   row. Declined: a preparatory task that turns it into a `Record`.
+- **Gate demands of Task 2:** the Conventions rule requires unreachability in both of its branches,
+  in the wording the user approved; the step comment states that rlsp-yaml registers only fixed
+  `didChangeWatchedFiles` globs, which do not reach minimatch, and adds two revisit triggers, a
+  minimatch 10.x release carrying the fix and any pattern from settings, workspace, or user input
+  flowing into a registration.

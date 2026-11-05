@@ -22,6 +22,8 @@ share a parent line with one sub-item each.
 - One long flow-collection line takes quadratic time, about 25 s for 2 MB (suspect `abs_pos` in `event_iter/flow.rs`), a denial-of-service risk for the language server; comment plan Task 4 security review.
 - Formatter output grows with depth times `tab_width` (a 250-level flow sequence prints about 250 times its input), and time grows with the square of the item count; `tab_size` and `print_width` come from the client unchecked; medium, nesting plan Task 2 security review.
 - `fetch_schemastore_catalog` in `rlsp-yaml/src/schema.rs` calls `fetch_json` without `check_json_depth` or the raw budget, so only the 5 MiB cap and serde's depth limit of 128 apply (fixed URL, non-recursive consumer); security Low, nesting plan Task 11 security review.
+- CVE-2026-118764 (minimatch) is allowlisted in the VS Code extension's `ignoreCves` until `vscode-languageclient` runs with minimatch 11.0.1 or later or rlsp-yaml lets a pattern reach the client's minimatch; reason and triggers in the `Audit dependencies` step comment of `.github/workflows/vscode-extension.yml`; glob override plan.
+- The actions in `.github/workflows/vscode-extension.yml` are pinned to mutable major tags, not commit SHAs, including the publish job that uses `VSCE_PAT`; pre-existing, security Medium; glob override plan Task 2 security review.
 
 ## Bugs
 
@@ -128,6 +130,7 @@ share a parent line with one sub-item each.
 - The doc comment of `parse_node` in `rlsp-yaml-parser/src/loader.rs` says each level holds a frame of both collection loops; it holds the one that matches its collection; nesting plan Task 1 review.
 - `rlsp-yaml-parser/docs/architecture.md`: in "can build trees deeper than the limit, and it does not bound code that walks the loaded tree" the "it" reads as alias expansion, not the limit; nesting plan Task 7 review.
 - The core-limit comment in `.devcontainer/docker-compose.yml` lets "then" in "unless a process lowers its own limit to 0; the kernel then skips a piped handler" read as the 0 case; core-limit plan Task 1 review.
+- The `Audit dependencies` step comment in `.github/workflows/vscode-extension.yml` calls the other minimatch copies dev-only, but eslint and `@vscode/test-cli` share the bundled 10.2.6 copy; "its other dependents (mocha, eslint, `@vscode/test-cli`, c8) are dev-only" is precise; glob override plan Task 2 review.
 
 ## Tooling & CI
 
