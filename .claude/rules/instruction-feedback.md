@@ -86,4 +86,6 @@ file: it adds entries without asking, names them in the
 completion report, and removes one when it becomes a plan or
 the user drops it. It is no status log and no home for facts.
 A missed plan target goes there only after the user has
-lowered the target (`no-silent-target-weakening.md`).
+lowered the target (`no-silent-target-weakening.md`), and a
+defect the task introduced only after the user accepted it
+(`introduced-defects.md`).

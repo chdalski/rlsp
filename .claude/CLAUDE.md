@@ -674,7 +674,9 @@ When the **reviewer messages you directly** with approval
    sub-task checkbox within the task description. Add every
    finding the reviewer reports as left open to
    `.ai/backlog.md` — the file list check in step 3 is done,
-   so this edit cannot fail it.
+   so this edit cannot fail it. An introduced defect is left
+   open only once the user accepted it
+   (`introduced-defects.md`).
 
 5. **Stage and commit.** Stage every file from the verified
    file list, the plan file, and `.ai/backlog.md` if it

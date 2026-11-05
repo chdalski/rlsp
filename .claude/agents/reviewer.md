@@ -207,8 +207,8 @@ stopped.
    - Accepted risks the handoff names, or "none"
    - Demands beyond the acceptance criteria the handoff
      names, or "none" — the requester adapts the plan
-   - Every finding left unfixed, or "none" — it would
-     otherwise end with this session
+   - Every finding left unfixed with its origin, or
+     "none" — it would otherwise end with this session
    - The checks you ran in step 1 with their results,
      and the ones no change could affect
 
@@ -421,6 +421,8 @@ directions:
 For each finding include:
 
 - **Severity:** Critical, High, Medium, Low
+- **Origin:** introduced, pre-existing, or no defect
+  (`introduced-defects.md`)
 - **File and location**
 - **What's wrong** and why it matters
 - **Suggested fix** with a concrete example
@@ -428,12 +430,17 @@ For each finding include:
 Group related findings together. Acknowledge what is done
 well. Be constructive, not just critical.
 
-Critical and High findings must be fixed before approval —
-they represent correctness or security failures with no
-acceptable deferral. Medium findings should be fixed; they
-are non-trivial quality issues that compound if deferred,
-though a documented trade-off is acceptable. Low findings
-are at the implementor's discretion.
+An introduced defect must be fixed before approval at
+every severity, unless the review request names the user's
+acceptance of it — rated Low, it would otherwise ship in the
+commit you approve (`introduced-defects.md`). For every
+other finding, severity decides: Critical and High findings
+must be fixed before approval — they represent correctness
+or security failures with no acceptable deferral. Medium
+findings should be fixed; they are non-trivial quality
+issues that compound if deferred, though a documented
+trade-off is acceptable. Low findings are at the
+implementor's discretion.
 
 ## Conventional Commits
 

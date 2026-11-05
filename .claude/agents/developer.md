@@ -304,9 +304,11 @@ entire pipeline.
    - **Approved:** Your changes are committed. Wait for
      the next assignment from the requester.
    - **Rejected:** Read the review findings. Fix all
-     Critical and High issues (mandatory). Fix Medium
-     issues (recommended). Resubmit for review. Repeat
-     until approved.
+     Critical and High issues and every introduced defect,
+     whatever its severity (mandatory,
+     `introduced-defects.md`). Fix Medium issues
+     (recommended). Resubmit for review. Repeat until
+     approved.
    - **After the 3rd rejection on the same task**, before
      submitting your next fix, message the requester with
      a brief status update: one line per rejection cycle

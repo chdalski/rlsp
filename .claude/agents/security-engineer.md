@@ -100,9 +100,12 @@ For each issue, include:
 - **Why it matters** — potential impact
 - **What to do** — concrete recommendation
 - **Severity** — Critical, High, Medium, Low
+- **Origin** — introduced, pre-existing, or no defect
+  (`introduced-defects.md`)
 
-Critical and High issues must be resolved before the task
-is considered complete.
+Critical and High issues, and every introduced defect
+whatever its severity, must be resolved before the task is
+considered complete.
 
 ## Post-Implementation Review
 
@@ -119,7 +122,8 @@ for sign-off:
    the requester.
 5. If issues are found, flag them with severity and
    concrete fix recommendations. Critical and High issues
-   must be resolved before sign-off.
+   and every introduced defect must be resolved before
+   sign-off.
 
 ## Guidelines
 
