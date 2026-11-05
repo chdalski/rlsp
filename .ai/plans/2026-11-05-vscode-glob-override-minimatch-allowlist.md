@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-11-05)
 **Created:** 2026-11-05
 
 # VS Code Extension: Override glob and Allowlist the minimatch Advisory
@@ -25,7 +25,7 @@ trigger, and the project's audit rule says when such an exception is allowed.
 - [x] Task 2: The minimatch advisory is allowlisted under a stated rule
 - [x] `.ai/backlog.md` has a line for the event that ends the minimatch exception, pointing to the
       `Audit dependencies` step's comment
-- [ ] Push to `main` and confirm the full CI matrix is green
+- [x] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
