@@ -82,7 +82,7 @@ checklist gets a reviewer's full attention:
 |---|---|---|
 | `scope` | 1, 8, 9, 10, 11, 12 | Does the plan deliver what the user asked for, as one self-contained plan? |
 | `criteria` | 2, 3, 7, 14 | Can each criterion be verified without leaving a decision open? |
-| `impact` | 4, 5, 6, 13 | What does the change leave stale or break elsewhere? |
+| `impact` | 4, 5, 6, 13, 15 | What does the change leave stale or break elsewhere? |
 
 ## 1. Self-Containment
 
@@ -99,6 +99,11 @@ plan file.
 - If the plan supersedes another, is that noted in the
   Decisions section as a single line — not woven through
   the Goal and Context?
+- Does each term the plan coins, or carries over from code
+  under a new name, and uses in more than one task have
+  one definition in Context? A missing definition is
+  Advisory; a term with two readings that change what gets
+  built leaves a decision open (see Severity).
 
 ## 2. Escape Hatches in Acceptance Criteria
 
@@ -241,6 +246,12 @@ passes every other check while silently reducing scope.
 - Watch for subtle narrowing: the user says "all tests
   pass" and the goal says "conformance tests pass" — that
   excludes smoke tests, unit tests, and integration tests.
+- If Context names a specification or target design, does
+  each point where the plan departs from it appear in
+  Decisions with what the document prescribes? A clause
+  that lets the plan override the document wherever they
+  disagree is Blocking: it hides each departure from the
+  user at approval.
 
 ## 9. Goal-Task Alignment
 
@@ -263,6 +274,10 @@ adding up to the goal.
 - Could all tasks be completed successfully while the
   stated goal remains unmet? If yes, the tasks are
   insufficient.
+- Does the plan rest on a fact about something outside
+  the repository — an external system's behavior, data in
+  production — that names no source? If the fact is
+  false, every task can succeed while the Goal fails.
 
 ## 10. Format Compliance
 
@@ -273,6 +288,10 @@ plan-format.md.
   (Repository, Status, Created)?
 - Does the plan include all required sections (Goal,
   Context, Steps, Tasks, Decisions)?
+- Is the Goal one to three sentences that state what is
+  requested and why? The behaviors the tasks deliver
+  belong in their criteria, not in the Goal.
+- Does every Decisions entry give its reason?
 - Are Steps written as checkboxes (`- [ ]` / `- [x]`)?
 - Are Tasks ordered by dependency (foundational first)?
 - Does the filename follow the `YYYY-MM-DD-slug.md`
@@ -376,7 +395,8 @@ Flag text that no reader would act differently without, as
 defined in plan-format.md's "What Does Not Belong in a
 Plan":
 
-- Quotes of the user, or who decided what and when
+- Quotes of the user, or who decided what and when — not
+  the source of an outside fact (plan-format.md, Context)
 - Diagnosis stories, tool internals, or harness recipes
   where a stated fact or an acceptance criterion would do
 - Search results that prove nothing else needs changing
@@ -390,3 +410,17 @@ Plan":
   in Context that only one task needs
 
 Quote the text and give the shorter form, or say to cut it.
+
+## 15. Irreversible Data Changes
+
+This section applies only to tasks that delete or
+overwrite stored data beyond what reverting their commit
+restores — rows a migration or conversion rewrites or
+deletes, files outside the repository.
+
+- Does a Decisions entry name, for each such task, how a
+  wrong result would be noticed and what restores the
+  data — or that nothing does?
+
+A missing entry is Blocking: the user approves the loss
+only when the plan names it.

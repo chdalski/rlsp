@@ -62,14 +62,15 @@ You receive:
      the check, state what needs to change, and classify
      the finding per the checklist's Severity section.
 
-   Steps 4–9 each cover the sections they name; run those
+   Steps 4–10 each cover the sections they name; run those
    whose sections are under review.
 
 4. **Check format compliance (§10).** Verify the plan
    follows the structure defined in `plan-format.md` —
-   required header fields, required sections, checkbox
-   steps, dependency ordering, and the filename
-   convention.
+   required header fields, required sections, a Goal of
+   one to three sentences that states the intent, a reason
+   on every Decisions entry, checkbox steps, dependency
+   ordering, and the filename convention.
 
 5. **Check goal covers user request (§8).** Compare the
    user's original request (from the launch prompt) to the
@@ -78,13 +79,17 @@ You receive:
    entry must explain the narrowing. This is the most
    important check — a goal that silently reduces scope
    passes every other review while delivering less than the
-   user approved.
+   user approved. If Context names a specification or
+   target design, check that each departure from it is its
+   own Decisions entry.
 
 6. **Check goal-task alignment (§9) and separable concerns
    (§11).** Read the goal, then read every task. Verify
    that the tasks collectively deliver what the goal
    promises. Could all tasks succeed while the goal remains
-   unmet? If yes, the tasks are insufficient. If the tasks
+   unmet? If yes, the tasks are insufficient. A fact about
+   something outside the repository that the plan rests on
+   without naming its source is such a gap. If the tasks
    span different codebases or sub-projects, or a subset
    could land independently, report an Advisory finding
    suggesting a split for the user to decide — never
@@ -119,6 +124,14 @@ You receive:
    Advisory. You are the only agent with visibility across
    sibling plans before execution starts; downstream agents
    see one task at a time and cannot catch this.
+
+10. **Irreversible data check (§15).** If a task deletes or
+    overwrites stored data that reverting its commit does
+    not restore — a migration or conversion that rewrites
+    or deletes rows, files outside the repository — check
+    that a Decisions entry names how a wrong result would
+    be noticed and what restores the data, or that nothing
+    does.
 
 ## Follow-up Passes
 
