@@ -128,7 +128,7 @@ function majorMinorEqual(a: string, b: string): boolean {
 // again. These cases are the standing proof the comparison itself can
 // fail, independent of what package.json currently declares. Same
 // relationship as isAtLeast's literal suite to the lockfile-driven
-// fast-uri test in overrides.test.ts.
+// tests in overrides.test.ts.
 describe('majorMinorEqual', () => {
   it.each([
     // Patch differences are not load-bearing.

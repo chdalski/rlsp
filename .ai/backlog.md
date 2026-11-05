@@ -77,6 +77,7 @@ share a parent line with one sub-item each.
 - The table `flow_and_alias_keys_after_finished_entry_emit_libfyaml_events` in `tests/error_reporting.rs` has over 170 cases on several subjects; parser plan Task 4 test review.
 - `smoke/sequences.rs` `fast_path_skipped_bare_dash` duplicates `dash_followed_by_newline` in `sequence_empty_item_emits_empty_plain_scalar`; parser plan Task 5 test review.
 - Test cleanup in `src/loader.rs`: `document_of` and the inline `DocumentStart` cases could use `document_start()`, the stray-end cases of `an_event_stream_that_does_not_close_what_it_opened_is_an_error` could assert `Syntax`, and `an_unbalanced_event_stream_is_an_error` could use `assert_syntax_error`; parser plan Task 7 review.
+- `lockfileRules` in `rlsp-yaml/integrations/vscode/src/overrides.test.ts` is a tuple array checked by a coverage test; a `Record<GuardedPackage, LockfileRule>` would enforce a row per package at compile time; vscode override plan Task 1 review.
 - `has_mapping_with_odd_node_count` in `rlsp-yaml/tests/formatter_keeps_text.rs` repeats `check_well_formed` of `rlsp-yaml-parser/tests/support/mod.rs` across the crate boundary; parser plan Task 12 review.
 - `? !!str\n!zz : v\n? &x\n` has no case in `rlsp-yaml/tests/formatter_keeps_data.rs`; parser plan Task 12 review.
 - `a_dash_after_a_tag_does_not_load` in `rlsp-yaml/tests/formatter_keeps_comments.rs` does not pin `--- !t - b`, `&a !t - b`, `!t\t- b`, `!t -`, and `- !t - b`, and `: !\n?\n! : v\n` is not in `libfyaml_events.rs`; parser plan Task 13 review.

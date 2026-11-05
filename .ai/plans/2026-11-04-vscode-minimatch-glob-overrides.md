@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-11-04
 
 # VS Code Extension: Override minimatch and glob onto Their Patched Majors
@@ -25,7 +25,7 @@ in `src/overrides.test.ts` covers the new pins, so the audit passes with the gat
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: The override guard's lockfile tests are table-driven
+- [x] Task 1: The override guard's lockfile tests are table-driven
 - [ ] Task 2: minimatch and glob resolve only on their patched majors
 - [ ] Push to `main` and confirm the full CI matrix is green
 
@@ -37,23 +37,26 @@ The lockfile tests in `src/overrides.test.ts` hold one near-identical block per 
 comments list the packages again. One table gets an entry per package, so a new package is one
 entry; the guard fails for the same lockfile states as before.
 
-- [ ] One table holds, per guarded package, whether it must resolve and, where set, the majors it
+- [x] One table holds, per guarded package, whether it must resolve and, where set, the majors it
       may resolve on; one table-driven test checks every resolved version of each package against
       its floor and, where set, its majors, and the per-package lockfile tests are gone
-- [ ] The majors in the table are literals, not derived from `patchedFloors`: brace-expansion has 2
+- [x] The majors in the table are literals, not derived from `patchedFloors`: brace-expansion has 2
       and 5, serialize-javascript 7, source-map-js 1, and fast-uri none
-- [ ] The tests of `normalizeLineEndings`, `isAtLeast`, `parseVersion`, `isPatchedVersion`,
+- [x] The tests of `normalizeLineEndings`, `isAtLeast`, `parseVersion`, `isPatchedVersion`,
       `allPatched`, and `allResolvedVersions`, and the test of the exact overrides block, pass with
       their assertions unchanged
-- [ ] Each of three temporary edits to `pnpm-lock.yaml` makes the lockfile tests fail both at the
+- [x] Each of three temporary edits to `pnpm-lock.yaml` makes the lockfile tests fail both at the
       commit before this task and after it: an overridden package removed, a version below its
       floor, and a major the guard does not list; the handoff names each edit with both results
-- [ ] The comments and test titles in `src/overrides.test.ts` describe the guard after this task:
+- [x] The comments and test titles in `src/overrides.test.ts` describe the guard after this task:
       only the table and `patchedFloors` name the guarded packages, each package's advisories and
       floors stand at its `patchedFloors` row, and no text says that a package lacks a major check
       the table gives it; the comment in `src/engine-compat.test.ts` no longer points to a fast-uri
       test
-- [ ] `pnpm run build`, `pnpm run test`, `pnpm run typecheck`, `pnpm run lint`, and
+- [x] The decision whether a lockfile satisfies a package's row is a pure function, tested against
+      synthetic lockfile fragments, and a test checks that the table covers exactly the packages of
+      `patchedFloors`
+- [x] `pnpm run build`, `pnpm run test`, `pnpm run typecheck`, `pnpm run lint`, and
       `pnpm run format` pass
 
 ### Task 2: minimatch and glob resolve only on their patched majors
@@ -123,3 +126,6 @@ of brace-expansion and declares `^5.0.12`, its patched floor, so both brace-expa
 - **No allowlist:** the CVEs do not go into `pnpm.auditConfig.ignoreCves`, which holds only
   pre-existing dev-only lows. If build, lint, or a test breaks under the new majors, the task stops
   and the decision goes to the user. Declined: allowlisting, and an automatic fallback to it.
+- **Gate demands of Task 1:** the lockfile decision is a pure function with synthetic-fragment
+  cases, including a pre-release version and a vanished major, and a test checks that the table and
+  `patchedFloors` name the same packages.

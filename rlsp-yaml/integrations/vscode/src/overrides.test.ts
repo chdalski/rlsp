@@ -3,32 +3,14 @@ import * as path from 'path';
 import { describe, expect, it } from 'vitest';
 
 // Regression guard for the pnpm.overrides entries that patch npm security
-// advisories. Verified directly against the GitHub Advisory API:
-// - brace-expansion is covered by GHSA-6j4f-fj2g-mc7p (HIGH,
-//   CVE-2026-102276), GHSA-qhr7-859c-m2p7 (HIGH, CVE-2026-102278) and
-//   GHSA-q2hr-2g5m-vwhr (MEDIUM, CVE-2026-102277). The binding floor per
-//   major line is the highest of the three, the one set by
-//   GHSA-q2hr-2g5m-vwhr: `>= 2.0.0, < 2.1.7` (patched 2.1.7) and
-//   `>= 4.0.0, < 5.0.12` (patched 5.0.12). The same advisories also
-//   publish `< 1.1.21` (patched 1.1.21) and `>= 3.0.0, < 3.0.9` (patched
-//   3.0.9). Major 4 has no patched release at all -- every 4.x version is
-//   vulnerable and the fix is moving to major 5, so a missing major-4
-//   floor below means migrating off major 4 entirely, not that no floor
-//   has been found yet.
-// - serialize-javascript is covered by GHSA-m5mm-p8h7-m29v (LOW,
-//   CVE-2026-115897): `< 7.1.3`, patched 7.1.3 -- the binding advisory for
-//   the floor. It also covers the range of the earlier GHSA-gfhx-hw2g-v5hg
-//   (LOW, CVE-2026-97711): `>= 7.1.1, < 7.1.2`, patched 7.1.2. The override
-//   also forces @vscode/test-cli's mocha off its declared ^6.0.2 onto
-//   major 7, because the 6.x line carries older advisories.
-// - source-map-js is covered by GHSA-68fv-2mgg-jv7q (HIGH,
-//   CVE-2026-93749): `>= 1.0.0, < 1.2.2`, patched 1.2.2.
-// - fast-uri is covered by GHSA-5jgf-p345-68v8 / GHSA-fph4-wmhf-6fwf /
-//   GHSA-f65p-4m7j-42xc / GHSA-jqff-g426-hqxp, with verified patched
-//   floors of 3.1.6 and 4.1.3.
-// All of the above is reference data only, not executable acceptance --
-// see the patchedFloors table and isPatchedVersion below for which of
-// these floors this guard actually checks against.
+// advisories. The guarded packages, their advisories and their patched
+// floors live in one place, the patchedFloors table below; the
+// lockfileRules table declares which of those packages must resolve and on
+// which majors. A package is added to the guard by adding a row to each.
+//
+// The advisory data is reference data only, not executable acceptance --
+// see the patchedFloors table and isPatchedVersion below for which floors
+// this guard actually checks against.
 //
 // Before retiring any override: re-derive the current direct
 // dependents from the lockfile and check each one's own declared range
@@ -48,17 +30,14 @@ import { describe, expect, it } from 'vitest';
 //
 // The patchedFloors table (checked by isPatchedVersion below) only
 // contains the major lines vetted as reachable in this graph for each
-// package, not every major the advisories have patched -- for example
-// brace-expansion majors 1 and 3, and fast-uri major 2, each covered by
-// their own advisory floor but with no entry in that table. A major
-// absent from a package's row is unvetted, not safe, and the lookup
-// fails closed on it rather than falling back to another major or
-// another package; see patchedFloors/isPatchedVersion below for the
-// exact mechanics. The resolved-major-lines canary test below
-// independently fails the moment an unvetted brace-expansion major
-// appears in the lockfile at all; fast-uri, serialize-javascript and
-// source-map-js have no equivalent canary, so the fail-closed lookup is
-// their only backstop.
+// package, not every major the advisories have patched. A major absent
+// from a package's row is unvetted, not safe, and the lookup fails closed
+// on it rather than falling back to another major or another package; see
+// patchedFloors/isPatchedVersion below for the exact mechanics. The
+// lockfileRules table independently pins the exact set of majors each
+// package must resolve on, so an unvetted major, or a vetted one that
+// vanished, fails there with the majors named, not only through the floor
+// lookup.
 
 // Windows checkouts of this repository read text files with CRLF line
 // endings unless normalized at checkout (see ../.gitattributes, which
@@ -107,12 +86,12 @@ function isAtLeast(actual: string, floor: string): boolean {
 }
 
 // Direct unit coverage for isAtLeast/parseVersion. The lockfile-driven
-// tests below only ever exercise these against whatever fast-uri/
-// brace-expansion versions happen to be resolved right now -- once the
-// lockfile holds a non-vulnerable version, no floor value in those tests
-// can exercise the false branch again. These cases are the standing proof
-// that the comparison itself rejects vulnerable versions, independent of
-// what the lockfile currently resolves.
+// tests below only ever exercise these against whatever versions happen to
+// be resolved right now -- once the lockfile holds a non-vulnerable
+// version, no floor value in those tests can exercise the false branch
+// again. These cases are the standing proof that the comparison itself
+// rejects vulnerable versions, independent of what the lockfile currently
+// resolves.
 describe('isAtLeast', () => {
   it.each([
     // The exact regression this task closes: the pre-fix floor accepted
@@ -157,33 +136,44 @@ describe('parseVersion', () => {
 // graph. Keying the floor table by package name first -- rather than one
 // shared major -> floor map -- prevents one package's vetted floor for a
 // major line from leaking into another package's fail-closed default for
-// that same major: fast-uri's major-3/4 floors and brace-expansion's
-// major-2/5 floors never collide, because each package only ever looks up
-// its own row. The GuardedPackage union restricts the package parameter to
-// the packages this guard vets, so a typo in the package name is a
-// compile error rather than a silent miss.
+// that same major, because each package only ever looks up its own row.
+// The GuardedPackage union restricts the package parameter to the packages
+// this guard vets, so a typo in the package name is a compile error rather
+// than a silent miss.
 type GuardedPackage = 'brace-expansion' | 'fast-uri' | 'serialize-javascript' | 'source-map-js';
 
-// The single declared table of patched floors. brace-expansion majors 2
-// and 5 are the two lines reachable in this graph; their floors are set by
-// GHSA-q2hr-2g5m-vwhr, the newest of GHSA-6j4f-fj2g-mc7p /
-// GHSA-qhr7-859c-m2p7 / GHSA-q2hr-2g5m-vwhr (see header comment for the
-// advisories' full floor list, most of which is deliberately not wired in
-// here). fast-uri majors 3 and 4 are its two verified patched floors
-// (GHSA-5jgf-p345-68v8 / GHSA-fph4-wmhf-6fwf / GHSA-f65p-4m7j-42xc /
-// GHSA-jqff-g426-hqxp). serialize-javascript major 7 is the only line the
-// override permits; its floor is set by GHSA-m5mm-p8h7-m29v, which supersedes
-// the earlier GHSA-gfhx-hw2g-v5hg floor of 7.1.2. source-map-js
-// major 1 is its only published line; its floor is set by
-// GHSA-68fv-2mgg-jv7q. Any major line absent from a package's row --
-// including majors the advisories cover with floors of their own, like
-// brace-expansion 1 and 3, or fast-uri 2 -- has no entry, and
-// isPatchedVersion below fails closed on a missing entry rather than
-// falling back to any other row or major.
+// The single declared table of patched floors, with the advisories that set
+// each package's floors verified directly against the GitHub Advisory API.
+// A major line absent from a package's row -- including majors its
+// advisories cover with floors of their own -- is unvetted rather than
+// safe, and isPatchedVersion below fails closed on it instead of falling
+// back to any other row or major.
 const patchedFloors: Record<GuardedPackage, Record<number, string>> = {
+  // GHSA-6j4f-fj2g-mc7p (HIGH, CVE-2026-102276), GHSA-qhr7-859c-m2p7 (HIGH,
+  // CVE-2026-102278) and GHSA-q2hr-2g5m-vwhr (MEDIUM, CVE-2026-102277). The
+  // binding floor per major line is the highest of the three, the one set
+  // by GHSA-q2hr-2g5m-vwhr: `>= 2.0.0, < 2.1.7` (patched 2.1.7) and
+  // `>= 4.0.0, < 5.0.12` (patched 5.0.12). The same advisories also
+  // publish `< 1.1.21` (patched 1.1.21) and `>= 3.0.0, < 3.0.9` (patched
+  // 3.0.9); majors 1 and 3 are unvetted because nothing in this graph
+  // depends on them. Major 4 has no patched release at all -- every 4.x
+  // version is vulnerable and the fix is moving to major 5, so the missing
+  // major-4 row means migrating off major 4 entirely, not that no floor has
+  // been found yet.
   'brace-expansion': { 2: '2.1.7', 5: '5.0.12' },
+  // GHSA-5jgf-p345-68v8 / GHSA-fph4-wmhf-6fwf / GHSA-f65p-4m7j-42xc /
+  // GHSA-jqff-g426-hqxp, with verified patched floors of 3.1.6 and 4.1.3.
+  // Major 2 is covered by an advisory floor of its own but is unvetted.
   'fast-uri': { 3: '3.1.6', 4: '4.1.3' },
+  // GHSA-m5mm-p8h7-m29v (LOW, CVE-2026-115897): `< 7.1.3`, patched 7.1.3 --
+  // the binding advisory for the floor. It also covers the range of the
+  // earlier GHSA-gfhx-hw2g-v5hg (LOW, CVE-2026-97711): `>= 7.1.1, < 7.1.2`,
+  // patched 7.1.2. Major 7 is the only line the override permits; it also
+  // forces @vscode/test-cli's mocha off its declared ^6.0.2 onto major 7,
+  // because the 6.x line carries older advisories.
   'serialize-javascript': { 7: '7.1.3' },
+  // GHSA-68fv-2mgg-jv7q (HIGH, CVE-2026-93749): `>= 1.0.0, < 1.2.2`,
+  // patched 1.2.2. Major 1 is its only published line.
   'source-map-js': { 1: '1.2.2' },
 };
 
@@ -301,14 +291,11 @@ describe('isPatchedVersion', () => {
 // package must be patched, and the empty-set outcome is supplied by the
 // caller via the named onEmpty field rather than hardcoded per package --
 // a named field keeps the polarity legible at each call site, where a bare
-// positional boolean would not be. The brace-expansion,
-// serialize-javascript and source-map-js call sites pass onEmpty: false,
-// because their overridden packages are expected always to resolve -- an
-// empty set means an override silently went dead, which must fail loudly
-// rather than pass vacuously on `[].every(...)`. The
-// fast-uri call site passes onEmpty: true, because fast-uri carries no
-// override and its absence from the current graph is tolerated. See
-// header comment for the full reasoning behind each policy.
+// positional boolean would not be. The caller derives it from the package's
+// lockfileRules row: a package that must resolve passes onEmpty: false,
+// because an empty set means an override silently went dead, which must
+// fail loudly rather than pass vacuously on `[].every(...)`; a package
+// whose absence from the graph is tolerated passes onEmpty: true.
 function allPatched(
   versions: string[],
   packageName: GuardedPackage,
@@ -325,7 +312,7 @@ function allPatched(
 // onEmpty flag itself). Covers every package's aggregation cases, plus two
 // traps at the end that pass the *other* policy alongside an empty array --
 // proving onEmpty itself controls the outcome rather than a hardcoded
-// per-package branch that happens to match today's call sites.
+// per-package branch that happens to match today's lockfileRules.
 describe('allPatched', () => {
   it.each<[string[], GuardedPackage, boolean, boolean]>([
     // brace-expansion (onEmpty: false throughout).
@@ -351,8 +338,8 @@ describe('allPatched', () => {
     // handling.
     [['4.0.0'], 'brace-expansion', false, false],
     // Empty must fail: every overridden package is expected to resolve
-    // (see header comment on overrides.test.ts), so a vanished branch is
-    // itself a regression, not a pass.
+    // (see lockfileRules below), so a vanished branch is itself a
+    // regression, not a pass.
     [[], 'brace-expansion', false, false],
     // serialize-javascript (onEmpty: false throughout).
     [['7.1.3'], 'serialize-javascript', false, true],
@@ -372,8 +359,8 @@ describe('allPatched', () => {
     [['1.2.2', '2.0.0'], 'source-map-js', false, false],
     [[], 'source-map-js', false, false],
     // fast-uri (onEmpty: true throughout).
-    // Empty must pass -- the tolerated-absence behavior fast-uri's call
-    // site relies on.
+    // Empty must pass -- the tolerated-absence behavior fast-uri's
+    // lockfileRules row relies on.
     [[], 'fast-uri', true, true],
     [['3.1.6'], 'fast-uri', true, true],
     [['4.1.3'], 'fast-uri', true, true],
@@ -386,12 +373,11 @@ describe('allPatched', () => {
     // doesn't bypass isPatchedVersion's fail-closed default.
     [['5.0.0'], 'fast-uri', true, false],
     // onEmpty-flag traps: an empty array with the *other* package's
-    // historical policy. If allPatched ignored onEmpty
-    // and instead hardcoded a per-package branch internally, these two
-    // would keep passing with today's call sites but silently diverge the
-    // moment either call site's onEmpty argument changed -- these prove
-    // the flag itself is load-bearing right now, not incidentally
-    // correct.
+    // policy. If allPatched ignored onEmpty and instead hardcoded a
+    // per-package branch internally, these two would keep passing with
+    // today's lockfileRules but silently diverge the moment a row's
+    // mustResolve changed -- these prove the flag itself is load-bearing
+    // right now, not incidentally correct.
     [[], 'brace-expansion', true, true],
     [[], 'fast-uri', false, false],
   ])('allPatched(%j, %s, onEmpty=%s) === %s', (versions, packageName, onEmpty, expected) => {
@@ -493,64 +479,151 @@ describe('allResolvedVersions', () => {
   });
 });
 
-describe(
-  'pnpm.overrides regression guard (brace-expansion / fast-uri / serialize-javascript / ' +
-    'source-map-js)',
-  () => {
-    it('overrides block declares exactly the retained pins', () => {
-      expect(overridesOf(lockfile)).toEqual({
-        'serialize-javascript': '^7.1.3',
-        'source-map-js': '^1.2.2',
-        'brace-expansion@2': '^2.1.7',
-        'brace-expansion@5': '^5.0.12',
-      });
-    });
+// What the lockfile must hold for one guarded package. A package that must
+// resolve is an overridden one: an empty set means its override silently
+// went dead, which must fail loudly. Its majors are the exact set it must
+// resolve on -- equality, not a subset, so a listed major that vanished (a
+// dead override on one branch) fails just like an unlisted one that appeared.
+// A package whose absence from the graph is tolerated carries no majors
+// check; wherever it is present, its versions must still be patched.
+type LockfileRule =
+  | { readonly mustResolve: true; readonly majors: readonly number[] }
+  | { readonly mustResolve: false };
 
-    it('overrides block no longer declares the removed fast-uri pin', () => {
-      const overridesBlock = overridesBlockOf(lockfile);
-      expect(overridesBlock).not.toContain('fast-uri:');
-    });
+// One row per guarded package. The majors are literals, deliberately not
+// derived from patchedFloors: this is an independent canary, so widening a
+// floor row never silently widens what the lockfile may resolve.
+const lockfileRules: [GuardedPackage, LockfileRule][] = [
+  ['brace-expansion', { mustResolve: true, majors: [2, 5] }],
+  ['fast-uri', { mustResolve: false }],
+  ['serialize-javascript', { mustResolve: true, majors: [7] }],
+  ['source-map-js', { mustResolve: true, majors: [1] }],
+];
 
-    // Structural canary, independent of isPatchedVersion: even if a
-    // future edit broadened the predicate's accepted majors, this still
-    // fails the moment an unexpected major line -- one this guard has never
-    // vetted for this graph -- shows up in the lockfile at all.
-    it('brace-expansion resolves only the vetted major lines (2 and 5)', () => {
-      const majors = new Set(
-        allResolvedVersions(lockfile, 'brace-expansion').map((version) => parseVersion(version)[0]),
+// The decision behind the lockfile tests: every way the lockfile text breaks
+// the package's rule, as messages; empty when the lockfile holds. Returning
+// the violations rather than asserting lets the same decision run against
+// the real lockfile and against synthetic fragments below.
+function lockfileViolations(
+  lockfileText: string,
+  packageName: GuardedPackage,
+  rule: LockfileRule,
+): string[] {
+  const versions = allResolvedVersions(lockfileText, packageName);
+  const violations: string[] = [];
+  if (!allPatched(versions, packageName, { onEmpty: !rule.mustResolve })) {
+    violations.push(
+      `${packageName}: resolved versions [${versions.join(', ')}] are not all patched` +
+        (rule.mustResolve ? ' or none resolve' : ''),
+    );
+  }
+  if (rule.mustResolve) {
+    const resolved = new Set(versions.map((version) => parseVersion(version)[0]));
+    const expected = new Set(rule.majors);
+    if (resolved.size !== expected.size || [...expected].some((major) => !resolved.has(major))) {
+      violations.push(
+        `${packageName}: resolves on majors [${[...resolved].sort((a, b) => a - b).join(', ')}], ` +
+          `expected exactly [${[...expected].join(', ')}]`,
       );
-      expect(majors).toEqual(new Set([2, 5]));
-    });
+    }
+  }
+  return violations;
+}
 
-    it("brace-expansion's overridden major-2 branch resolves to at least the audited patched floor", () => {
-      const majorTwoVersions = allResolvedVersions(lockfile, 'brace-expansion').filter(
-        (version) => parseVersion(version)[0] === 2,
-      );
-      expect(allPatched(majorTwoVersions, 'brace-expansion', { onEmpty: false })).toBe(true);
-    });
+function ruleOf(packageName: GuardedPackage): LockfileRule {
+  const row = lockfileRules.find(([name]) => name === packageName);
+  if (!row) {
+    throw new Error(`no lockfileRules row for ${packageName}`);
+  }
+  return row[1];
+}
 
-    it("brace-expansion's overridden major-5 branch resolves to at least the audited patched floor", () => {
-      const majorFiveVersions = allResolvedVersions(lockfile, 'brace-expansion').filter(
-        (version) => parseVersion(version)[0] === 5,
-      );
-      expect(allPatched(majorFiveVersions, 'brace-expansion', { onEmpty: false })).toBe(true);
-    });
+function lockfileFragment(packageName: string, versions: string[]): string {
+  return [
+    'packages:',
+    ...versions.flatMap((version) => ['', `  ${packageName}@${version}:`, '    resolution: {}']),
+  ].join('\n');
+}
 
-    // Not filtered by major: every resolved version must pass, so a stray
-    // version on any line the table does not vet fails closed.
-    it('serialize-javascript is present and every resolved version is patched', () => {
-      const versions = allResolvedVersions(lockfile, 'serialize-javascript');
-      expect(allPatched(versions, 'serialize-javascript', { onEmpty: false })).toBe(true);
-    });
+// Boundary coverage for lockfileViolations and the lockfileRules rows,
+// independent of what the lockfile currently resolves: against a healthy
+// lockfile the decision would pass whether or not it can detect anything.
+describe('lockfileViolations', () => {
+  it.each<[GuardedPackage, string[], boolean]>([
+    // A package that must resolve, across the ways it can go wrong.
+    ['brace-expansion', ['2.1.7', '5.0.12'], true],
+    // A dead override on either branch.
+    ['brace-expansion', ['2.1.7'], false],
+    ['brace-expansion', ['5.0.12'], false],
+    ['brace-expansion', [], false],
+    // A major outside the vetted set, with or without its own advisory floor.
+    ['brace-expansion', ['2.1.7', '5.0.12', '4.0.0'], false],
+    ['brace-expansion', ['2.1.7', '5.0.12', '1.1.21'], false],
+    ['brace-expansion', ['2.1.7', '5.0.12', '3.0.9'], false],
+    // Below the floor on either branch.
+    ['brace-expansion', ['2.1.6', '5.0.12'], false],
+    ['brace-expansion', ['2.1.7', '5.0.11'], false],
+    ['serialize-javascript', ['7.1.3'], true],
+    ['serialize-javascript', [], false],
+    ['serialize-javascript', ['7.1.2'], false],
+    ['serialize-javascript', ['7.1.3', '6.0.2'], false],
+    ['source-map-js', ['1.2.2'], true],
+    ['source-map-js', [], false],
+    ['source-map-js', ['1.2.1'], false],
+    ['source-map-js', ['1.2.2', '2.0.0'], false],
+    // A package whose absence is tolerated: absent passes, present is checked.
+    ['fast-uri', [], true],
+    ['fast-uri', ['3.1.6', '4.1.3'], true],
+    ['fast-uri', ['3.1.5'], false],
+    ['fast-uri', ['5.0.0'], false],
+  ])('lockfileViolations(%s, %j) is clean === %s', (packageName, versions, clean) => {
+    const violations = lockfileViolations(
+      lockfileFragment(packageName, versions),
+      packageName,
+      ruleOf(packageName),
+    );
+    expect(violations.length === 0).toBe(clean);
+  });
 
-    it('source-map-js is present and every resolved version is patched', () => {
-      const versions = allResolvedVersions(lockfile, 'source-map-js');
-      expect(allPatched(versions, 'source-map-js', { onEmpty: false })).toBe(true);
-    });
+  it('does not swallow a pre-release version', () => {
+    expect(() =>
+      lockfileViolations(
+        lockfileFragment('serialize-javascript', ['7.2.0-beta.0']),
+        'serialize-javascript',
+        ruleOf('serialize-javascript'),
+      ),
+    ).toThrow('unexpected version format');
+  });
 
-    it('fast-uri is absent from the lockfile, or resolves to a patched version wherever present', () => {
-      const versions = allResolvedVersions(lockfile, 'fast-uri');
-      expect(allPatched(versions, 'fast-uri', { onEmpty: true })).toBe(true);
+  it('names the resolved and the expected majors when a branch vanished', () => {
+    expect(
+      lockfileViolations(
+        lockfileFragment('brace-expansion', ['2.1.7']),
+        'brace-expansion',
+        ruleOf('brace-expansion'),
+      ),
+    ).toEqual(['brace-expansion: resolves on majors [2], expected exactly [2, 5]']);
+  });
+
+  it('has a lockfileRules row for exactly the packages patchedFloors vets', () => {
+    expect(lockfileRules.map(([name]) => name).sort()).toEqual(Object.keys(patchedFloors).sort());
+  });
+});
+
+describe('pnpm.overrides regression guard', () => {
+  it('overrides block declares exactly the retained pins', () => {
+    expect(overridesOf(lockfile)).toEqual({
+      'serialize-javascript': '^7.1.3',
+      'source-map-js': '^1.2.2',
+      'brace-expansion@2': '^2.1.7',
+      'brace-expansion@5': '^5.0.12',
     });
-  },
-);
+  });
+
+  it.each(lockfileRules)(
+    '%s: the lockfile satisfies its lockfileRules row',
+    (packageName, rule) => {
+      expect(lockfileViolations(lockfile, packageName, rule)).toEqual([]);
+    },
+  );
+});
