@@ -1,6 +1,46 @@
 # Changelog
 
 
+## [0.12.0] - 2026-11-05
+
+### Bug Fixes
+
+- Load comment runs before a value on bounded stack (092b830)
+- End multi-line plain spans at last content (5937894)
+- Reject content after a finished value (65c32e0)
+- Load alias and flow keys after finished entry (685b1a4)
+- End a plain scalar at a comment line (0b75337)
+- Read every line-suffix comment with one helper (6a434b6)
+- Emit every comment as an event (b86edbc)
+- Print comments at every node position (5617720)
+- Keep the data of a file through format_yaml (8064dfd)
+- Pin that no comment is lost and fix data losses (1be1e63)
+- Read a plain scalar after --- like any root (1ea032e)
+- Report a % line inside a document as an error (d3f7e03)
+- Let a key read its own `:` (5d5a988)
+- Let a bare - look past comment lines (dc1b539)
+- Keep flow plain scalar text over lines (029f917)
+- Report a second root node in load (77600c5)
+- Keep every anchor and tag on its node (4497ce4)
+- Read flow plain continuation lines as text (c991232)
+- Keep an explicit key's state in its mapping (b0747db)
+- Reject a block sequence entry after a tag (354013d)
+- Keep the loader's stack frames small (3aba3e3)
+
+### Documentation
+
+- Require spec and libfyaml checks for parser changes (3b8cc3d)
+
+### Features
+
+- Store every comment event in the AST (1b9521f)
+- Lower the default nesting limit to 256 (259dbe3)
+
+### Refactoring
+
+- Prepend marker-line rest at one site (ffa2ddd)
+- Close all collections through one loop (388bedc)
+
 ## [0.11.3] - 2026-10-29
 
 ## [0.11.2] - 2026-10-11
