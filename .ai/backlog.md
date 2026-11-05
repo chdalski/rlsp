@@ -131,6 +131,7 @@ share a parent line with one sub-item each.
 
 ## Tooling & CI
 
+- The Node version comments in `.github/workflows/vscode-extension.yml` and `.github/workflows/coverage.yml` say to revisit when Node 26 becomes LTS (2026-10-28), a date that has passed; glob override plan design review.
 - `dtolnay/rust-toolchain` refs pin mutable branches; `packageManager` has no integrity hash; dependabot-followup plan.
 
 ## Open decisions
