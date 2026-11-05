@@ -140,7 +140,8 @@ describe('parseVersion', () => {
 // The GuardedPackage union restricts the package parameter to the packages
 // this guard vets, so a typo in the package name is a compile error rather
 // than a silent miss.
-type GuardedPackage = 'brace-expansion' | 'fast-uri' | 'serialize-javascript' | 'source-map-js';
+type GuardedPackage =
+  'brace-expansion' | 'fast-uri' | 'glob' | 'serialize-javascript' | 'source-map-js';
 
 // The single declared table of patched floors, with the advisories that set
 // each package's floors verified directly against the GitHub Advisory API.
@@ -165,6 +166,15 @@ const patchedFloors: Record<GuardedPackage, Record<number, string>> = {
   // GHSA-jqff-g426-hqxp, with verified patched floors of 3.1.6 and 4.1.3.
   // Major 2 is covered by an advisory floor of its own but is unvetted.
   'fast-uri': { 3: '3.1.6', 4: '4.1.3' },
+  // GHSA-3g3m-2fjr-6pw4 (MEDIUM, CVE-2026-118773): `>= 9.0.0, <= 14.0.1`,
+  // patched 14.0.2. The floor is 14.0.3 rather than the advisory's 14.0.2
+  // because glob 14.0.2 declares `minimatch ^11.0.0`, which admits the
+  // vulnerable minimatch 11.0.0 (GHSA-g3hv-75wg-m249, patched 11.0.1);
+  // glob 14.0.3 declares `^11.0.2`, so the declared range itself keeps that
+  // branch patched. The override is not scoped to a major: it lifts every
+  // glob dependent -- mocha's 10.x and @vscode/test-cli's and test-exclude's
+  // 13.x -- onto major 14, the only vetted line. Other majors are unvetted.
+  glob: { 14: '14.0.3' },
   // GHSA-m5mm-p8h7-m29v (LOW, CVE-2026-115897): `< 7.1.3`, patched 7.1.3 --
   // the binding advisory for the floor. It also covers the range of the
   // earlier GHSA-gfhx-hw2g-v5hg (LOW, CVE-2026-97711): `>= 7.1.1, < 7.1.2`,
@@ -239,6 +249,18 @@ describe('isPatchedVersion', () => {
     // Fail-closed default for a future major the advisories don't cover
     // at all.
     ['brace-expansion', '6.0.0', false],
+    // glob: the two majors the lockfile resolved before the override (10.x
+    // via mocha, 13.x via test-cli and test-exclude), the advisory's own
+    // floor 14.0.2 (one patch below ours), the floor, numeric-not-lexicographic
+    // (14.0.10 sorts below 14.0.3 as a string), a later minor, and a future
+    // major.
+    ['glob', '10.5.0', false],
+    ['glob', '13.0.6', false],
+    ['glob', '14.0.2', false],
+    ['glob', '14.0.3', true],
+    ['glob', '14.0.10', true],
+    ['glob', '14.1.0', true],
+    ['glob', '15.0.0', false],
     // serialize-javascript: one patch below the floor (7.1.2, the previous
     // floor, vulnerable per GHSA-m5mm-p8h7-m29v), the version
     // GHSA-gfhx-hw2g-v5hg names, a lower minor, the floor,
@@ -260,10 +282,10 @@ describe('isPatchedVersion', () => {
     ['source-map-js', '1.3.0', true],
     ['source-map-js', '0.9.9', false],
     ['source-map-js', '2.0.0', false],
-    // Cross-contamination traps: every other package's real patched floors,
-    // applied to each package. fast-uri's major-3/4 floors against
-    // brace-expansion, which has no major-3 floor at all and a different
-    // (fully-vulnerable) major-4 status.
+    // Cross-contamination traps: every package's real patched floors,
+    // applied to every other package.
+    // fast-uri's major-3/4 floors against brace-expansion, which has no
+    // major-3 floor at all and a different (fully-vulnerable) major-4 status.
     ['brace-expansion', '3.1.6', false],
     ['brace-expansion', '4.1.3', false],
     ['brace-expansion', '1.2.2', false],
@@ -282,6 +304,19 @@ describe('isPatchedVersion', () => {
     ['source-map-js', '4.1.3', false],
     ['source-map-js', '5.0.12', false],
     ['source-map-js', '7.1.3', false],
+    // glob's floors against the other packages, and the other packages'
+    // floors against glob: glob has no row for the majors the others vet,
+    // and none of the others has a major-14 row.
+    ['glob', '1.2.2', false],
+    ['glob', '2.1.7', false],
+    ['glob', '3.1.6', false],
+    ['glob', '4.1.3', false],
+    ['glob', '5.0.12', false],
+    ['glob', '7.1.3', false],
+    ['brace-expansion', '14.0.3', false],
+    ['fast-uri', '14.0.3', false],
+    ['serialize-javascript', '14.0.3', false],
+    ['source-map-js', '14.0.3', false],
   ])('isPatchedVersion(%s, %s) === %s', (packageName, version, expected) => {
     expect(isPatchedVersion(packageName, version)).toBe(expected);
   });
@@ -309,10 +344,12 @@ function allPatched(
 // what the lockfile currently resolves. isPatchedVersion's own floor/major
 // comparisons are already covered above; these cases are scoped to the
 // aggregation behavior only (empty-array, mixed-major array, and the
-// onEmpty flag itself). Covers every package's aggregation cases, plus two
-// traps at the end that pass the *other* policy alongside an empty array --
+// onEmpty flag itself). Covers every package's aggregation cases, plus traps
+// at the end: two that pass the *other* policy alongside an empty array --
 // proving onEmpty itself controls the outcome rather than a hardcoded
-// per-package branch that happens to match today's lockfileRules.
+// per-package branch that happens to match today's lockfileRules -- and two
+// that swap the package name, proving the per-package keying survives the
+// aggregation.
 describe('allPatched', () => {
   it.each<[string[], GuardedPackage, boolean, boolean]>([
     // brace-expansion (onEmpty: false throughout).
@@ -352,6 +389,18 @@ describe('allPatched', () => {
     // A patched sibling does not excuse an unchecked major.
     [['7.1.3', '6.0.2'], 'serialize-javascript', false, false],
     [[], 'serialize-javascript', false, false],
+    // glob (onEmpty: false throughout).
+    [['14.0.3'], 'glob', false, true],
+    // The advisory's own floor, which the lockfile would keep if the
+    // override stayed at ^14.0.2.
+    [['14.0.2'], 'glob', false, false],
+    // The lockfile before the override: both branches on unvetted majors.
+    [['10.5.0', '13.0.6'], 'glob', false, false],
+    // A patched sibling does not excuse an unchecked major.
+    [['14.0.3', '13.0.6'], 'glob', false, false],
+    [['14.0.3', '10.5.0'], 'glob', false, false],
+    [['15.0.0'], 'glob', false, false],
+    [[], 'glob', false, false],
     // source-map-js (onEmpty: false throughout).
     [['1.2.2'], 'source-map-js', false, true],
     [['1.2.1'], 'source-map-js', false, false],
@@ -380,6 +429,10 @@ describe('allPatched', () => {
     // right now, not incidentally correct.
     [[], 'brace-expansion', true, true],
     [[], 'fast-uri', false, false],
+    // Package-keying traps: a version patched for another package, handed to
+    // the aggregator under glob's name and the reverse, must not pass.
+    [['14.0.3'], 'serialize-javascript', false, false],
+    [['7.1.3'], 'glob', false, false],
   ])('allPatched(%j, %s, onEmpty=%s) === %s', (versions, packageName, onEmpty, expected) => {
     expect(allPatched(versions, packageName, { onEmpty })).toBe(expected);
   });
@@ -496,6 +549,9 @@ type LockfileRule =
 const lockfileRules: [GuardedPackage, LockfileRule][] = [
   ['brace-expansion', { mustResolve: true, majors: [2, 5] }],
   ['fast-uri', { mustResolve: false }],
+  // The unscoped glob override lifts every dependent onto major 14, so no
+  // other major may remain.
+  ['glob', { mustResolve: true, majors: [14] }],
   ['serialize-javascript', { mustResolve: true, majors: [7] }],
   ['source-map-js', { mustResolve: true, majors: [1] }],
 ];
@@ -563,6 +619,28 @@ describe('lockfileViolations', () => {
     // Below the floor on either branch.
     ['brace-expansion', ['2.1.6', '5.0.12'], false],
     ['brace-expansion', ['2.1.7', '5.0.11'], false],
+    // glob, lifted onto major 14 by an unscoped override.
+    ['glob', ['14.0.3'], true],
+    // Two patched versions of one major: the majors are a set, not a count.
+    ['glob', ['14.0.3', '14.1.0'], true],
+    ['glob', [], false],
+    ['glob', ['14.0.2'], false],
+    // The lockfile before the override.
+    ['glob', ['10.5.0', '13.0.6'], false],
+    // One dependent escaped the override.
+    ['glob', ['14.0.3', '10.5.0'], false],
+    ['glob', ['14.0.3', '13.0.6'], false],
+    // A major outside the vetted set, alone or beside the vetted one.
+    ['glob', ['14.0.3', '15.0.0'], false],
+    ['glob', ['15.0.0'], false],
+    // Another package's versions in glob's place.
+    ['glob', ['14.0.3', '7.1.3'], false],
+    ['glob', ['14.0.3', '5.0.12'], false],
+    // A glob version under every other package.
+    ['brace-expansion', ['2.1.7', '5.0.12', '14.0.3'], false],
+    ['serialize-javascript', ['7.1.3', '14.0.3'], false],
+    ['source-map-js', ['1.2.2', '14.0.3'], false],
+    ['fast-uri', ['14.0.3'], false],
     ['serialize-javascript', ['7.1.3'], true],
     ['serialize-javascript', [], false],
     ['serialize-javascript', ['7.1.2'], false],
@@ -605,6 +683,15 @@ describe('lockfileViolations', () => {
     ).toEqual(['brace-expansion: resolves on majors [2], expected exactly [2, 5]']);
   });
 
+  it('reports the pre-override glob resolution as both unpatched and on the wrong majors', () => {
+    expect(
+      lockfileViolations(lockfileFragment('glob', ['10.5.0', '13.0.6']), 'glob', ruleOf('glob')),
+    ).toEqual([
+      'glob: resolved versions [10.5.0, 13.0.6] are not all patched or none resolve',
+      'glob: resolves on majors [10, 13], expected exactly [14]',
+    ]);
+  });
+
   it('has a lockfileRules row for exactly the packages patchedFloors vets', () => {
     expect(lockfileRules.map(([name]) => name).sort()).toEqual(Object.keys(patchedFloors).sort());
   });
@@ -617,6 +704,7 @@ describe('pnpm.overrides regression guard', () => {
       'source-map-js': '^1.2.2',
       'brace-expansion@2': '^2.1.7',
       'brace-expansion@5': '^5.0.12',
+      glob: '^14.0.3',
     });
   });
 

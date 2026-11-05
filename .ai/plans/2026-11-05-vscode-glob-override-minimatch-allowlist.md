@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-11-05
 
 # VS Code Extension: Override glob and Allowlist the minimatch Advisory
@@ -21,7 +21,7 @@ trigger, and the project's audit rule says when such an exception is allowed.
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: glob resolves only on its patched major
+- [x] Task 1: glob resolves only on its patched major
 - [ ] Task 2: The minimatch advisory is allowlisted under a stated rule
 - [ ] `.ai/backlog.md` has a line for the event that ends the minimatch exception, pointing to the
       `Audit dependencies` step's comment
@@ -35,21 +35,21 @@ An override lifts glob from 10.5.0 (through mocha) and 13.0.6 (through `@vscode/
 test-exclude) onto major 14, and the guard covers the new pin. glob 14 brings its own minimatch 11;
 every other consumer keeps minimatch 9 or 10, so the brace-expansion overrides stay.
 
-- [ ] The overrides in `package.json` are exactly `serialize-javascript: ^7.1.3`,
+- [x] The overrides in `package.json` are exactly `serialize-javascript: ^7.1.3`,
       `source-map-js: ^1.2.2`, `brace-expansion@2: ^2.1.7`, `brace-expansion@5: ^5.0.12`, and
       `glob: ^14.0.3`, and `pnpm-lock.yaml` is regenerated from them
-- [ ] The lockfile resolves glob only on major 14 at 14.0.3 or later, and the minimatch that glob
+- [x] The lockfile resolves glob only on major 14 at 14.0.3 or later, and the minimatch that glob
       depends on at 11.0.2 or later; the handoff lists every package the lockfile adds or drops and
       shows each added package's version and integrity as the registry reports them
-- [ ] `pnpm run audit` reports no glob advisory
-- [ ] The guard's `patchedFloors` and `lockfileRules` cover glob (floor 14.0.3, must resolve, major
+- [x] `pnpm run audit` reports no glob advisory
+- [x] The guard's `patchedFloors` and `lockfileRules` cover glob (floor 14.0.3, must resolve, major
       14), its `patchedFloors` row names the advisory and why the floor is 14.0.3 rather than the
       advisory's 14.0.2, and the exact overrides test includes the glob pin
-- [ ] The cases of `isPatchedVersion`, `allPatched`, and `lockfileViolations` cover for glob the
+- [x] The cases of `isPatchedVersion`, `allPatched`, and `lockfileViolations` cover for glob the
       versions the lockfile resolved before this task, 14.0.2, 14.0.3, a later patch, and a later
       major, and the cross-package traps cover glob against the other packages' floors
-- [ ] The comments and test titles in `src/overrides.test.ts` describe the guard after this task
-- [ ] `pnpm run build`, `pnpm run test`, `pnpm run typecheck`, `pnpm run lint`, `pnpm run format`,
+- [x] The comments and test titles in `src/overrides.test.ts` describe the guard after this task
+- [x] `pnpm run build`, `pnpm run test`, `pnpm run typecheck`, `pnpm run lint`, `pnpm run format`,
       and `xvfb-run -a pnpm run test:integration` pass
 
 ### Task 2: The minimatch advisory is allowlisted under a stated rule
