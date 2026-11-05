@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Canceled
 **Created:** 2026-11-04
 
 # VS Code Extension: Override minimatch and glob onto Their Patched Majors
@@ -126,6 +126,10 @@ of brace-expansion and declares `^5.0.12`, its patched floor, so both brace-expa
 - **No allowlist:** the CVEs do not go into `pnpm.auditConfig.ignoreCves`, which holds only
   pre-existing dev-only lows. If build, lint, or a test breaks under the new majors, the task stops
   and the decision goes to the user. Declined: allowlisting, and an automatic fallback to it.
+- **Canceled after Task 1:** minimatch 11 removes `Minimatch.prototype.makeRe`, which
+  `vscode-languageclient` 11.0.0, its latest release, calls in the file-operation, pull-diagnostic,
+  and notebook filters bundled into the VSIX, so the Goal's minimatch override would ship broken
+  client code. A new plan overrides glob only and allowlists the minimatch advisory; Task 1 stays.
 - **Gate demands of Task 1:** the lockfile decision is a pure function with synthetic-fragment
   cases, including a pre-release version and a vanished major, and a test checks that the table and
   `patchedFloors` name the same packages.
