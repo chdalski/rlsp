@@ -854,6 +854,22 @@ bloat the dialog: add only the clause that makes the
 question understandable — often one is enough — and keep
 the reasoning behind it out of the dialog.
 
+**Write for a reader without your context.** Not only
+questions: answers, summaries, plan presentations, pages
+and comments are read by people who have not read the plan,
+the review or the report behind them — often several at
+once, such as a colleague asked for an opinion. Labels from
+those documents — task, finding and section IDs such as
+`F5`, `T13` or `§4` — mean nothing to them: say in words
+what the thing is, and add the label in parentheses only
+where the reader needs it to find the place. Open with the
+point — what is to decide or what changed, and your
+recommendation — and put the detail after it. A page of
+decision cards written in a plan's labels drew "what?" and
+"nobody can do anything with F5 and N6"; the shortened
+cards drew "tl;dr" — nine cards were rewritten before
+anyone could decide them.
+
 **A timeout is not an answer.** When `AskUserQuestion`
 reports that nobody responded and tells you to proceed on
 your best judgment, the user is away; nothing has been

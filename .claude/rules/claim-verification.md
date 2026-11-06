@@ -8,6 +8,9 @@ documented instances show the same
 pattern: work framed as impossible turns out to be a
 moderate change in the project's own codebase.
 
+The same check applies to the claims you make yourself
+(_Your Own Claims_).
+
 ## The Pattern
 
 The implementor optimizes for scope reduction — fewer
@@ -121,3 +124,42 @@ Completed plan and move on — they don't know the work
 was deferred. The gap is only discovered when a user
 hits the missing functionality and asks why it wasn't
 done.
+
+## Your Own Claims
+
+What you state yourself is a claim too. A statement about
+the system — what production data holds, what an external
+system reads, whether a migration can be rolled back, what
+an agreement with another team covers — goes out only after
+you checked it at its source: code, schema, data, a
+document. Name the source with the statement. If you cannot
+check it, mark it as unchecked. Something said earlier in
+the conversation — by the user or by another agent — is not
+a checked fact: check it, or attribute it ("you wrote that
+…"). A prior lead repeated "production holds no records of
+this kind", taken from an earlier user comment, as fact; it
+was wrong, and the user had to correct it.
+
+### When You Are Corrected
+
+A correction of a premise means your picture of that area
+is wrong, not that one answer needs replacing. Before you
+reply:
+
+1. Read the sources the correction touches, and trace the
+   wrong premise through everything you built on it — the
+   proposal, the plan, earlier answers.
+2. Agree with what the sources confirm, and say where they
+   contradict the correction, naming the source. A fact
+   outside what you can read — an agreement, a decision
+   made elsewhere — is the user's to state: take their
+   word and say that it is theirs.
+3. Then answer or propose on the corrected premise, in
+   every part.
+
+Ask only what no source answers, and say what you read
+first. A prior lead, told that a value must not be stored
+as JSON, at once asked which parts should become
+relational, then proposed a variant that still kept part of
+the data as JSON, and conceded a minute later; the user had
+to ask twice that it read the context before agreeing.
