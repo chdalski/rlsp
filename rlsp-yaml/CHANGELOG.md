@@ -1,6 +1,54 @@
 # Changelog
 
 
+## [0.15.0] - 2026-11-06
+
+### Bug Fixes
+
+- End multi-line plain spans at last content (5937894)
+- End a plain scalar at a comment line (0b75337)
+- Keep broken flow collections valid and their quotes (768434b)
+- Emit every comment as an event (b86edbc)
+- Print document-level comments from the AST (ce024d1)
+- Print comments at every node position (5617720)
+- Print a flow collection holding a comment as block (5b04cdf)
+- Keep comments of removed duplicate keys (023a225)
+- Fold only own-line comments (74371ba)
+- Keep the data of a file through format_yaml (8064dfd)
+- Pin that no comment is lost and fix data losses (1be1e63)
+- Read a plain scalar after --- like any root (1ea032e)
+- Report a % line inside a document as an error (d3f7e03)
+- Let a bare - look past comment lines (dc1b539)
+- Keep flow plain scalar text over lines (029f917)
+- Keep every anchor and tag on its node (4497ce4)
+- Read flow plain continuation lines as text (c991232)
+- Drop formatter workarounds for parser misreads (5900899)
+- Keep an explicit key's state in its mapping (b0747db)
+- Reject a block sequence entry after a tag (354013d)
+- Print collection keys with explicit entries in block form (893e823)
+- Keep the loader's stack frames small (3aba3e3)
+- Keep the formatter's stack frames small (a458393)
+- Count embedded content toward the validation depth (f215ab6)
+- Drive the server on a thread with an 8 MiB stack (0611e90)
+- Override glob onto patched major 14 (e6965c5)
+
+### Documentation
+
+- Name the dev container's blind spot in the canary doc (5034b71)
+
+### Features
+
+- Store every comment event in the AST (1b9521f)
+- Take the formatter's nesting limit as an option (af15406)
+- Lower the default nesting limit to 256 (259dbe3)
+- Add the maxNestingDepth server setting (8e1edbc)
+
+### Refactoring
+
+- Assemble node comments and colon with one helper (e48c355)
+- Build the server's format options in one place (39082bb)
+- Read the stored AST in code actions and colors (3f479ec)
+
 ## [0.14.0] - 2026-10-29
 
 ### Bug Fixes
