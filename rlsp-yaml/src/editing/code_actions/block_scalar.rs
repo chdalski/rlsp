@@ -9,6 +9,10 @@ use crate::editing::formatter::{YamlFormatOptions, format_subtree, prints_block_
 
 use super::{block_to_flow::node_loc, make_action};
 
+/// What YAML calls separation space: the only characters that may sit between a
+/// scalar and the end of its line.
+const BLANKS: [char; 2] = [' ', '\t'];
+
 pub(super) fn string_to_block_scalar(
     docs: &[Document<Span>],
     text: &str,
@@ -24,6 +28,7 @@ pub(super) fn string_to_block_scalar(
 
     let base_indent = key_col;
     let comment_end = trailing_comment_line_end(text, scalar, scalar_loc.end);
+    let blanks_end = trailing_blanks_end(text, scalar_loc.end);
 
     let make_block_action = |style: ScalarStyle, title: &str| -> Option<CodeAction> {
         let mut block_scalar = scalar.clone();
@@ -53,6 +58,7 @@ pub(super) fn string_to_block_scalar(
         // the header carries it.  When the header cannot carry it, the comment
         // stays where it is: after the replaced text, at the end of the line.
         let range_end = comment_end.filter(|_| prints_block_header(&block_scalar));
+        let edit_end = range_end.unwrap_or(blanks_end);
         if range_end.is_none()
             && let Node::Scalar {
                 meta: Some(meta), ..
@@ -69,8 +75,8 @@ pub(super) fn string_to_block_scalar(
             uri,
             vec![TextEdit {
                 range: Range::new(
-                    lsp_position(text, idx, scalar_loc.start),
-                    lsp_position(text, idx, range_end.unwrap_or(scalar_loc.end)),
+                    lsp_position(text, idx, scalar_loc.start)?,
+                    lsp_position(text, idx, edit_end)?,
                 ),
                 new_text,
             }],
@@ -95,18 +101,23 @@ pub(super) fn string_to_block_scalar(
 }
 
 /// The LSP position of a byte offset of `text`: the 0-based line and the column
-/// in UTF-16 code units.
-fn lsp_position(text: &str, index: &LineIndex, offset: u32) -> Position {
+/// in UTF-16 code units.  `None` when the offset is not a char boundary of
+/// `text`, so that no edit is built on a position that was guessed.
+fn lsp_position(text: &str, index: &LineIndex, offset: u32) -> Option<Position> {
     let line = index.line_column(offset).0.saturating_sub(1);
-    let before = text.get(..offset as usize).unwrap_or_default();
+    let before = text.get(..offset as usize)?;
     let line_start = before.rfind(['\n', '\r']).map_or(0, |i| i + 1);
-    let column: usize = before
-        .get(line_start..)
-        .unwrap_or_default()
-        .chars()
-        .map(char::len_utf16)
-        .sum();
-    Position::new(line, u32::try_from(column).unwrap_or(u32::MAX))
+    let column: usize = before.get(line_start..)?.chars().map(char::len_utf16).sum();
+    Some(Position::new(
+        line,
+        u32::try_from(column).unwrap_or(u32::MAX),
+    ))
+}
+
+/// The rest of the line of `text` from the byte offset `end`: up to the next
+/// line break (`\n`, `\r\n` or a lone `\r`) or the end of the text.
+fn rest_of_line(text: &str, end: usize) -> Option<&str> {
+    text.get(end..)?.split(['\n', '\r']).next()
 }
 
 /// The byte offset of the end of the line `scalar` ends on, when the rest of
@@ -116,15 +127,25 @@ fn lsp_position(text: &str, index: &LineIndex, offset: u32) -> Position {
 fn trailing_comment_line_end(text: &str, scalar: &Node<Span>, scalar_end: u32) -> Option<u32> {
     let comment = scalar.trailing_comment()?;
     let end = scalar_end as usize;
-    let rest_of_line = text.get(end..)?.split(['\n', '\r']).next()?;
-    let blanks = [' ', '\t'];
-    let matches = rest_of_line.starts_with(blanks)
-        && rest_of_line.trim_matches(blanks) == comment.trim_end_matches(blanks);
+    let rest = rest_of_line(text, end)?;
+    let matches =
+        rest.starts_with(BLANKS) && rest.trim_matches(BLANKS) == comment.trim_end_matches(BLANKS);
     if matches {
-        u32::try_from(end + rest_of_line.len()).ok()
+        u32::try_from(end + rest.len()).ok()
     } else {
         None
     }
+}
+
+/// The byte offset of the end of the line `scalar_end` is on, when the rest of
+/// that line is spaces and tabs only; `scalar_end` otherwise.  Blanks in front
+/// of a comment stay: they separate it from whatever precedes it.
+fn trailing_blanks_end(text: &str, scalar_end: u32) -> u32 {
+    let end = scalar_end as usize;
+    rest_of_line(text, end)
+        .filter(|rest| rest.trim_matches(BLANKS).is_empty())
+        .and_then(|rest| u32::try_from(end + rest.len()).ok())
+        .unwrap_or(scalar_end)
 }
 
 /// Walk the AST to find a qualifying scalar mapping value on the given parser line.
@@ -685,5 +706,329 @@ mod tests {
             "{result:?}"
         );
         assert!(result.ends_with("\nafter: 2 # keep\n"), "{result:?}");
+    }
+
+    // ---- Blanks after the converted scalar ----
+
+    /// Applies the action named `kind` for the scalar on `line` of `yaml` and
+    /// checks what every conversion keeps: the values (the converted one gains
+    /// the final line break of a block scalar), the comments, no blank at the
+    /// end of a line, and `tail` (the line break after the scalar and
+    /// everything behind it) byte for byte.
+    fn assert_converted(yaml: &str, line: usize, kind: &str, tail: &str) -> (String, TextEdit) {
+        assert!(
+            yaml.ends_with(tail),
+            "the tail must end the input: {yaml:?}"
+        );
+        let (result, edit) = apply_action(yaml, line, kind);
+        let expected: Vec<String> = scalar_values(yaml)
+            .into_iter()
+            .map(|v| {
+                if v.chars().count() >= 40 {
+                    format!("{v}\n")
+                } else {
+                    v
+                }
+            })
+            .collect();
+        assert_eq!(scalar_values(&result), expected, "values: {result:?}");
+        assert_eq!(count(&result, "# c"), count(yaml, "# c"), "{result:?}");
+        assert!(result.ends_with(tail), "tail: {result:?}");
+        // A line that ends in blanks is one of the input's own, or the header
+        // line, which carries the comment as it was written.
+        let source_lines: Vec<&str> = yaml.split(['\n', '\r']).collect();
+        assert!(
+            result.split(['\n', '\r']).all(|l| {
+                !l.ends_with([' ', '\t']) || source_lines.contains(&l) || l.contains("# c")
+            }),
+            "no new line may end in a blank: {result:?}"
+        );
+        assert!(
+            !edit.new_text.ends_with(['\n', '\r']),
+            "new_text must not end in a line break: {:?}",
+            edit.new_text
+        );
+        (result, edit)
+    }
+
+    // Blanks after the scalar, with or without a comment of its own, are not part
+    // of the value: left behind they would end the last line of the block scalar.
+    #[rstest]
+    #[case::double_quoted_one_space(format!("a: \"{LONG_TEXT}\" \nb: 1\n"), 0, "\nb: 1\n")]
+    #[case::double_quoted_many_spaces(format!("a: \"{LONG_TEXT}\"     \nb: 1\n"), 0, "\nb: 1\n")]
+    #[case::single_quoted(format!("a: '{LONG_TEXT}'  \nb: 1\n"), 0, "\nb: 1\n")]
+    #[case::plain(format!("a: {LONG_TEXT}  \nb: 1\n"), 0, "\nb: 1\n")]
+    #[case::tab(format!("a: \"{LONG_TEXT}\"\t\nb: 1\n"), 0, "\nb: 1\n")]
+    #[case::mixed_space_and_tab(format!("a: \"{LONG_TEXT}\" \t \t\nb: 1\n"), 0, "\nb: 1\n")]
+    #[case::sequence_item(format!("- \"{LONG_TEXT}\"  \n- x\n"), 0, "\n- x\n")]
+    #[case::nested_key(format!("x:\n  a: \"{LONG_TEXT}\"  \n  b: 1\n"), 1, "\n  b: 1\n")]
+    #[case::before_a_blank_line(format!("a: \"{LONG_TEXT}\"  \n\nb: 1\n"), 0, "\n\nb: 1\n")]
+    #[case::before_a_comment_line(
+        format!("a: \"{LONG_TEXT}\"  \n# next\nb: 1\n"),
+        0,
+        "\n# next\nb: 1\n"
+    )]
+    #[case::crlf(format!("a: \"{LONG_TEXT}\"  \r\nb: 1\r\n"), 0, "\r\nb: 1\r\n")]
+    #[case::lone_cr(format!("a: \"{LONG_TEXT}\"  \rb: 1\r"), 0, "\rb: 1\r")]
+    #[case::second_line_crlf(
+        format!("x: 1\r\na: \"{LONG_TEXT}\"  \r\nb: 1\r\n"),
+        1,
+        "\r\nb: 1\r\n"
+    )]
+    #[case::second_line_lone_cr(format!("x: 1\ra: \"{LONG_TEXT}\"  \rb: 1\r"), 1, "\rb: 1\r")]
+    #[case::end_of_input(format!("a: \"{LONG_TEXT}\"  "), 0, "")]
+    #[case::plain_end_of_input(format!("a: {LONG_TEXT}  "), 0, "")]
+    #[case::comment_many_blanks(format!("a: \"{LONG_TEXT}\"     # c\nb: 1\n"), 0, "\nb: 1\n")]
+    #[case::comment_mixed_blanks(
+        format!("a: \"{LONG_TEXT}\" \t # c   \nb: 1\n"),
+        0,
+        "\nb: 1\n"
+    )]
+    #[case::comment_single_quoted(format!("a: '{LONG_TEXT}'  # c  \nb: 1\n"), 0, "\nb: 1\n")]
+    #[case::comment_plain(format!("a: {LONG_TEXT}  # c  \nb: 1\n"), 0, "\nb: 1\n")]
+    #[case::comment_sequence_item(format!("- \"{LONG_TEXT}\"  # c  \n- x\n"), 0, "\n- x\n")]
+    #[case::comment_end_of_input(format!("a: \"{LONG_TEXT}\"  # c  "), 0, "")]
+    #[case::comment_lone_cr(format!("a: \"{LONG_TEXT}\"  # c  \rb: 1\r"), 0, "\rb: 1\r")]
+    #[case::neighbours_keep_their_blanks(
+        format!("before: 1  # keep  \na: \"{LONG_TEXT}\"   \nafter: 2  # keep  \n"),
+        1,
+        "\nafter: 2  # keep  \n"
+    )]
+    fn converting_drops_the_blanks_after_the_scalar(
+        #[case] yaml: String,
+        #[case] line: usize,
+        #[case] tail: &str,
+        #[values("literal", "folded")] kind: &str,
+    ) {
+        let (result, _) = assert_converted(&yaml, line, kind, tail);
+        if yaml.contains("before: 1") {
+            assert!(result.starts_with("before: 1  # keep  \na: "), "{result:?}");
+        }
+    }
+
+    // The next key keeps its own line and its data after a multi-line scalar.
+    #[rstest]
+    #[case::double_quoted(
+        "a: \"this is a long string\n  that exceeds forty chars\"\nb: 1\n",
+        0,
+        "\nb: 1\n"
+    )]
+    #[case::blanks(
+        "a: \"this is a long string\n  that exceeds forty chars\"  \nb: 1\n",
+        0,
+        "\nb: 1\n"
+    )]
+    #[case::blanks_and_comment(
+        "a: \"this is a long string\n  that exceeds forty chars\"  # c\nb: 1\n",
+        0,
+        "\nb: 1\n"
+    )]
+    #[case::single_quoted(
+        "a: 'this is a long string\n  that exceeds forty chars'  \nb: 1\n",
+        0,
+        "\nb: 1\n"
+    )]
+    #[case::three_lines(
+        "a: \"this is a long\n  string that exceeds\n  forty chars\"  \nb: 1\n",
+        0,
+        "\nb: 1\n"
+    )]
+    #[case::escaped_line_break(
+        "a: \"this is a long string \\\n  that exceeds forty chars\"  \nb: 1\n",
+        0,
+        "\nb: 1\n"
+    )]
+    #[case::blank_line_inside(
+        "a: \"first line is long enough for forty\n\n  second\"  \nb: 1\n",
+        0,
+        "\nb: 1\n"
+    )]
+    #[case::sequence_item(
+        "- \"this is a long string\n  that exceeds forty chars\"  \n- x\n",
+        0,
+        "\n- x\n"
+    )]
+    #[case::nested(
+        "x:\n  a: \"this is a long string\n    that exceeds forty chars\"  \ny: 1\n",
+        1,
+        "\ny: 1\n"
+    )]
+    #[case::crlf(
+        "a: \"this is a long string\r\n  that exceeds forty chars\"  \r\nb: 1\r\n",
+        0,
+        "\r\nb: 1\r\n"
+    )]
+    #[case::lone_cr(
+        "a: \"this is a long string\r  that exceeds forty chars\"  \rb: 1\r",
+        0,
+        "\rb: 1\r"
+    )]
+    #[case::end_of_input("a: \"this is a long string\n  that exceeds forty chars\"  ", 0, "")]
+    #[case::anchor(
+        "a: &x \"this is a long string\n  that exceeds forty chars\"  \nb: 1\n",
+        0,
+        "\nb: 1\n"
+    )]
+    #[case::plain(
+        "a: this is a long string that\n  exceeds forty chars  \nb: 1\n",
+        0,
+        "\nb: 1\n"
+    )]
+    #[case::plain_comment(
+        "a: this is a long string that\n  exceeds forty chars  # c\nb: 1\n",
+        0,
+        "\nb: 1\n"
+    )]
+    #[case::plain_crlf(
+        "a: this is a long string that\r\n  exceeds forty chars  \r\nb: 1\r\n",
+        0,
+        "\r\nb: 1\r\n"
+    )]
+    #[case::plain_end_of_input("a: this is a long string that\n  exceeds forty chars  ", 0, "")]
+    fn converting_a_multiline_scalar_keeps_the_next_key_on_its_own_line(
+        #[case] yaml: &str,
+        #[case] line: usize,
+        #[case] tail: &str,
+        #[values("literal", "folded")] kind: &str,
+    ) {
+        assert_converted(yaml, line, kind, tail);
+    }
+
+    // The anchor and the tag stay in front of the header.
+    #[rstest]
+    #[case::anchor(format!("a: &x \"{LONG_TEXT}\"  \nb: 1\n"), "a: &x ")]
+    #[case::tag(format!("a: !custom \"{LONG_TEXT}\"  \nb: 1\n"), "a: !custom ")]
+    #[case::anchor_tag_and_comment(
+        format!("a: &x !custom \"{LONG_TEXT}\"   # c\nb: 1\n"),
+        "a: &x !custom "
+    )]
+    #[case::multiline_anchor(
+        "a: &x \"this is a long string\n  that exceeds forty chars\"  \nb: 1\n".to_string(),
+        "a: &x "
+    )]
+    fn converting_keeps_the_properties_in_front_of_the_header(
+        #[case] yaml: String,
+        #[case] prefix: &str,
+        #[values("literal", "folded")] kind: &str,
+    ) {
+        let (result, _) = assert_converted(&yaml, 0, kind, "\nb: 1\n");
+        let rest = result.strip_prefix(prefix).expect("the properties stay");
+        assert!(rest.starts_with(['|', '>']), "{result:?}");
+    }
+
+    // The edit ends at the end of the line, counted in UTF-16 code units.
+    #[rstest]
+    #[case::emoji_in_key(format!("\u{1F600}: \"{LONG_TEXT}\"  \nb: 1\n"), 0)]
+    #[case::emoji_in_scalar(
+        "a: \"this is a long \u{1F600} string that exceeds forty chars\"  \nb: 1\n".to_string(),
+        0
+    )]
+    #[case::bmp_non_ascii_key(
+        format!("\u{43A}\u{43B}\u{44E}\u{447}: \"{LONG_TEXT}\"  # c\nb: 1\n"),
+        0
+    )]
+    #[case::emoji_in_comment(format!("a: \"{LONG_TEXT}\"  # \u{1F600}\nb: 1\n"), 0)]
+    fn converting_ends_the_edit_at_the_end_of_the_line_in_utf16(
+        #[case] yaml: String,
+        #[case] line: usize,
+        #[values("literal", "folded")] kind: &str,
+    ) {
+        let (_, edit) = apply_action(&yaml, line, kind);
+        let line_text = yaml.split('\n').nth(line).expect("the line exists");
+        let units: usize = line_text.chars().map(char::len_utf16).sum();
+        assert_eq!(edit.range.end.line as usize, line);
+        assert_eq!(edit.range.end.character as usize, units, "{edit:?}");
+    }
+
+    #[rstest]
+    fn converting_a_multiline_scalar_ends_the_edit_on_its_last_line_in_utf16(
+        #[values("literal", "folded")] kind: &str,
+    ) {
+        let yaml = "a: \"this is a long string\n  \u{1F600} that exceeds forty chars\"  \nb: 1\n";
+        let (_, edit) = assert_converted(yaml, 0, kind, "\nb: 1\n");
+        assert_eq!(edit.range.end, Position::new(1, 32), "{edit:?}");
+    }
+
+    // A value that cannot be a block scalar is printed double-quoted: the
+    // blanks before a comment that stays behind are its separator, and blanks
+    // at the end of the line go.
+    #[rstest]
+    #[case::one_blank(" ")]
+    #[case::many_blanks("     ")]
+    #[case::tab("\t")]
+    fn converting_a_value_without_a_header_keeps_the_separator_of_the_comment(
+        #[case] blanks: &str,
+    ) {
+        let yaml = format!(
+            "a: \"this is a long string that\\n \\nexceeds forty chars\"{blanks}# c\nb: 1\n"
+        );
+        let (result, edit) = apply_action(&yaml, 0, "literal");
+        assert_eq!(scalar_values(&result), scalar_values(&yaml));
+        assert!(
+            result.ends_with(&format!("\"{blanks}# c\nb: 1\n")),
+            "{result:?}"
+        );
+        assert!(!edit.new_text.contains("# c"), "{:?}", edit.new_text);
+    }
+
+    #[test]
+    fn converting_a_value_without_a_header_drops_the_blanks_at_the_end_of_the_line() {
+        let yaml = "a: \"this is a long string that\\n \\nexceeds forty chars\"  \nb: 1\n";
+        let (result, _) = apply_action(yaml, 0, "literal");
+        assert_eq!(scalar_values(&result), scalar_values(yaml));
+        assert!(result.ends_with("\"\nb: 1\n"), "{result:?}");
+    }
+
+    // Blanks inside the quotes are part of the value; the ones after the closing
+    // quote are not.
+    #[rstest]
+    fn converting_keeps_the_blanks_inside_the_quotes(#[values("literal", "folded")] kind: &str) {
+        let yaml = format!("a: \"{LONG_TEXT}   \"   \nb: 1\n");
+        let (result, _) = apply_action(&yaml, 0, kind);
+        let values = scalar_values(&result);
+        assert!(
+            values.contains(&format!("{LONG_TEXT}   "))
+                || values.contains(&format!("{LONG_TEXT}   \n")),
+            "{result:?}"
+        );
+        assert!(result.ends_with("\nb: 1\n"), "{result:?}");
+    }
+
+    // An offset that is not on a char boundary, or past the end, builds no
+    // position and moves no edit end: nothing is guessed.
+    #[rstest]
+    #[case::inside_a_char(1)]
+    #[case::past_the_end(100)]
+    fn offsets_off_the_text_build_no_position_and_move_no_end(#[case] offset: u32) {
+        let text = "\u{E9}: 1  \n";
+        let docs = parse_docs(text);
+        assert_eq!(
+            super::lsp_position(text, docs[0].line_index(), offset),
+            None
+        );
+        assert_eq!(super::trailing_blanks_end(text, offset), offset);
+    }
+
+    #[test]
+    fn trailing_blanks_end_stops_before_the_line_break() {
+        let text = "a: x \t \r\nb: 1\n";
+        assert_eq!(super::trailing_blanks_end(text, 4), 7);
+        assert_eq!(super::trailing_blanks_end("a: x \rb", 4), 5);
+        assert_eq!(super::trailing_blanks_end("a: x \u{A0}\n", 4), 4);
+        assert_eq!(super::trailing_blanks_end("a: x # c\n", 4), 4);
+    }
+
+    // A no-break space after the scalar is content, not a blank.
+    #[test]
+    fn converting_does_not_treat_a_no_break_space_as_a_blank() {
+        let yaml = format!("a: {LONG_TEXT}\u{A0}\nb: 1\n");
+        let (result, _) = apply_action(&yaml, 0, "literal");
+        assert!(
+            scalar_values(&result)
+                .iter()
+                .any(|v| v.starts_with(LONG_TEXT) && v.contains('\u{A0}')),
+            "{result:?}"
+        );
+        assert!(result.ends_with("\nb: 1\n"), "{result:?}");
     }
 }

@@ -26,7 +26,7 @@ with three defects of the same causes that the backlog does not list.
 - [x] Task 1: The unused-anchor diagnostic covers `&name`, and its quick fix deletes only the anchor
 - [x] Task 2: A multi-line quoted scalar's span ends at its closing quote
 - [x] Task 3: Semantic tokens skip multi-line quoted scalars
-- [ ] Task 4: The block-scalar action keeps trailing blanks out of the value
+- [x] Task 4: The block-scalar action keeps trailing blanks out of the value
 - [ ] Task 5: Color ranges come from the scalar's source text
 - [ ] Task 6: One modeline reader serves the three modeline keys
 - [ ] Task 7: Modelines and suppressions read source lines
@@ -113,10 +113,12 @@ check that skips multi-line scalars.
 The block-scalar conversion (`src/editing/code_actions/block_scalar.rs`) ends its edit at the
 scalar, so blanks after it without a comment end up on the value's last line.
 
-- [ ] Converting a scalar followed by blanks only, or by blanks and its own comment, leaves no
+- [x] Converting a scalar followed by blanks only, or by blanks and its own comment, leaves no
       trailing blank in the value, for the literal and the folded variant
-- [ ] Converting a multi-line quoted scalar leaves the next key on its own line with its data
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Converting a multi-line quoted scalar leaves the next key on its own line with its data
+- [x] An offset off the text gives no action instead of a position at column 0, and blanks before a
+      comment that the header cannot carry stay as the comment's separator
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 5: Color ranges come from the scalar's source text
 
@@ -270,6 +272,9 @@ literal like the `schemas` setting.
 - **Task 2's link criterion is narrowed:** an `!include` link of a multi-line quoted path takes the
   scalar's span and so ends at its closing quote, like hover and symbols; URL links do not read the
   span end and stay the same.
+
+- **Gate demands of Task 4:** the action's position conversion fails closed on an offset off the
+  text, and the blanks before a comment that stays after the replacement remain its separator.
 
 ## Task Notes
 

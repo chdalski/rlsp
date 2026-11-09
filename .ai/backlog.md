@@ -62,6 +62,7 @@ share a parent line with one sub-item each.
 - `validate_unused_anchors` stops at `MAX_DEPTH` (100) and reports an anchor as never used when its only alias is nested deeper; the quick fix refuses such anchors; server bug-fix plan Task 1 review.
 - The scalar branch of selection ranges (`rlsp-yaml/src/analysis/selection.rs` ~177-184) checks only `col >= start_col` on every line, never the end column, so a cursor after a multi-line scalar's last character or left of its start column on a continuation line selects it; server bug-fix plan Task 2 review.
 - `validators/duplicate_keys.rs` (~96-97) builds a duplicate key's range from the start line and the end column, wrong for multi-line keys; server bug-fix plan Task 2 security review.
+- The block-scalar action (`rlsp-yaml/src/editing/code_actions/block_scalar.rs`) prints the header and keeps the original trailing comment after the block text when a scalar has a `trailing_comment` but `trailing_comment_line_end` returns `None`, which would turn the comment into content; no input reaching this path is known; server bug-fix plan Task 4 security review.
 
 ## Tests
 
@@ -81,7 +82,8 @@ share a parent line with one sub-item each.
 - `? !!str\n!zz : v\n? &x\n` has no case in `rlsp-yaml/tests/formatter_keeps_data.rs`; parser plan Task 12 review.
 - `has_dangling_alias` in `rlsp-yaml/tests/unused_anchor_fix.rs` matches `A([^;]*);` anywhere in the data signature, so a value with an uppercase `A` counts as a dangling alias; collect anchor and alias names from the `load()` AST instead; server bug-fix plan Task 1 review.
 - The single- and double-quoted tail tests in `rlsp-yaml-parser/src/lexer/quoted.rs` could share a style parameter, and the span-test helpers of `tests/smoke/scalars.rs` and `tests/smoke/quoted_scalars.rs` are near-duplicates; server bug-fix plan Task 2 test review.
-- `multi_line_quoted_scalar_gets_no_string_token` in `rlsp-yaml/src/analysis/semantic_tokens.rs` repeats five of its six inputs in `tokens_around_quoted_scalar_have_exact_positions` with a weaker check; move `double_quoted_in_sequence` into the newer table and retire the older test; server bug-fix plan Task 3 review.
+- `multi_line_quoted_scalar_gets_no_string_token` in `rlsp-yaml/src/analysis/semantic_tokens.rs` repeats all six of its inputs in `tokens_around_quoted_scalar_have_exact_positions` with a weaker check; retire the older test; server bug-fix plan Task 3 review.
+- `converting_keeps_the_blanks_inside_the_quotes` in `rlsp-yaml/src/editing/code_actions/block_scalar.rs` accepts the value with or without a final `\n`, so it does not pin whether a block scalar or the double-quoted fallback results; server bug-fix plan Task 4 review.
 - `a_dash_after_a_tag_does_not_load` in `rlsp-yaml/tests/formatter_keeps_comments.rs` does not pin `--- !t - b`, `&a !t - b`, `!t\t- b`, `!t -`, and `- !t - b`, and `: !\n?\n! : v\n` is not in `libfyaml_events.rs`; parser plan Task 13 review.
 - `anchor_followed_by_inline_dash_returns_error` in `rlsp-yaml-parser/tests/smoke/anchors_and_aliases.rs` is a weaker duplicate of the `&a - b` case in `tests/error_reporting.rs`, and `tests/smoke/probe_dispatch.rs` refers to it; removal candidate, parser plan Task 13 review.
 - A comment before the `:` of an inner entry of a block key has no pinned placement in `rlsp-yaml/tests/formatter_keeps_comments.rs`; parser plan Task 14 review.

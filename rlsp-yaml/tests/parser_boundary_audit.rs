@@ -139,6 +139,20 @@ const ALLOW_LIST: &[AllowEntry] = &[
         },
     },
     AllowEntry {
+        file: "editing/code_actions/block_scalar.rs",
+        func: "rest_of_line",
+        marker: AllowMarker::CarveOut {
+            reason: "byte-range arithmetic on a parser-provided span: cuts the text from a span end to the next line break, reads no structure",
+        },
+    },
+    AllowEntry {
+        file: "editing/code_actions/block_scalar.rs",
+        func: "trailing_blanks_end",
+        marker: AllowMarker::CarveOut {
+            reason: "whitespace-preserving edit range: extends a span end over the spaces and tabs that end its line, reads no structure",
+        },
+    },
+    AllowEntry {
         file: "editing/code_actions/tab_to_spaces.rs",
         func: "tab_to_spaces",
         marker: AllowMarker::CarveOut {
