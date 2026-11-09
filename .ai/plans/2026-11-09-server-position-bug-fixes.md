@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-11-09
 
 # Server and Position Bug Fixes
@@ -23,7 +23,7 @@ with three defects of the same causes that the backlog does not list.
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: The unused-anchor diagnostic covers `&name`, and its quick fix deletes only the anchor
+- [x] Task 1: The unused-anchor diagnostic covers `&name`, and its quick fix deletes only the anchor
 - [ ] Task 2: A multi-line quoted scalar's span ends at its closing quote
 - [ ] Task 3: Semantic tokens skip multi-line quoted scalars
 - [ ] Task 4: The block-scalar action keeps trailing blanks out of the value
@@ -47,27 +47,31 @@ line for collections and empty nodes. The quick fix rewrites the node with `form
 misindents block scalars and merges the next line into them. The AST already holds the anchor's
 span as `Node::anchor_loc()`, as `navigation/references.rs` uses it.
 
-- [ ] The unused-anchor diagnostic's range is the span of `&name`, for scalars, collections, empty
+- [x] The unused-anchor diagnostic's range is the span of `&name`, for scalars, collections, empty
       nodes, and block scalars, in every document of a stream
-- [ ] A test feeds the diagnostics of `validate_unused_anchors` into the code-action handler and gets
+- [x] A test feeds the diagnostics of `validate_unused_anchors` into the code-action handler and gets
       "Delete unused anchor" for an anchored scalar, mapping, sequence, empty node, and block scalar
-- [ ] The quick fix deletes `&name` and the blanks after it, or the blanks before it when a line
+- [x] The quick fix deletes `&name` and the blanks after it, or the blanks before it when a line
       break, a comment, or the end of input follows; the rest of the document stays byte-identical:
       `key: &a value  # keep me` becomes `key: value  # keep me`, `a: &x |\n  line one\nb: 1\n`
       becomes `a: |\n  line one\nb: 1\n`, and `a: &x\n` becomes `a:\n`
-- [ ] An anchor with only blanks before and after it on its line is deleted with the line and its
+- [x] An anchor with only blanks before and after it on its line is deleted with the line and its
       line break: `&x\nk: v` and `&x  \nk: v` become `k: v`; a comment after it stays on the line:
       `&x # note\nk: v` becomes `# note\nk: v`
-- [ ] No action is offered where deleting the anchor would leave an entry of a flow collection
+- [x] No action is offered where deleting the anchor would leave an entry of a flow collection
       without a node, such as `[&a, b]`, `[b, &a]`, and `{&a, b}`; `{k: &a}` gets one
-- [ ] Each applied fix reloads to the same data as the input without the anchor
-- [ ] A `rlsp-yaml-disable-next-line` above the `&name` line suppresses the diagnostic for a
+- [x] Each applied fix reloads to the same data as the input without the anchor
+- [x] A `rlsp-yaml-disable-next-line` above the `&name` line suppresses the diagnostic for a
       collection and for an empty node
-- [ ] The tests that pinned the node ranges or the rewrite assert the new ranges and the applied
+- [x] The tests that pinned the node ranges or the rewrite assert the new ranges and the applied
       document; no comment says the diagnostic covers the node
-- [ ] `Node::clear_anchor` in `rlsp-yaml-parser/src/node.rs` keeps its behavior and test, and its doc
+- [x] `Node::clear_anchor` in `rlsp-yaml-parser/src/node.rs` keeps its behavior and test, and its doc
       comment says what it does without naming a code action
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] No action is offered for the anchored empty root of a document without `---`, where an alias
+      may exist (an alias found by a fresh check, or a walk that stops at the validator's depth
+      limit), or where a character outside the BMP precedes the anchor on its line; a leading BOM
+      stays when the anchor's line is deleted
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 2: A multi-line quoted scalar's span ends at its closing quote
 
@@ -254,3 +258,12 @@ literal like the `schemas` setting.
   `rlsp-yaml-parser/tests/smoke/scalars.rs`).
 - **A range differing only in line breaks gets an edit:** range formatting yields the lines of full
   formatting, line breaks included.
+- **Gate demands of Task 1:** the quick fix rechecks for an alias and is refused where the check stops
+  at the validator's depth limit, for a bare document's empty root, and where a character outside
+  the BMP precedes the anchor on its line (columns stay code points until the UTF-16 plan); the
+  flow-entry rule reads the AST; a leading BOM stays when the anchor's line is deleted.
+
+## Task Notes
+
+- **Task 1:** An anchor alone on its line before a comment loses the anchor and the blanks after
+  it; the blanks before it stay: `  &x # n\nk: v` becomes `  # n\nk: v`

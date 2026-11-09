@@ -318,8 +318,8 @@ impl<Loc> Node<Loc> {
         }
     }
 
-    /// Clear the anchor and `anchor_loc` on this node (used by code actions that
-    /// remove unused anchors).  No-op on `Node::Alias`.
+    /// Clear the anchor and `anchor_loc` on this node, leaving its other fields
+    /// untouched.  No-op on `Node::Alias`.
     pub fn clear_anchor(&mut self) {
         match self {
             Self::Scalar { meta, .. }

@@ -1364,3 +1364,57 @@ async fn folding_ranges_uses_default_5000_limit_when_setting_absent() {
         "should return folding ranges with default limit"
     );
 }
+
+// The unused-anchor diagnostic sits on the line of the `&name` token, so a
+// disable-next-line comment above that line suppresses it, whatever the anchored
+// node is and wherever the node starts or ends.
+#[tokio::test]
+async fn should_suppress_unused_anchor_on_the_line_of_the_anchor_token() {
+    let cases = [
+        (
+            "scalar",
+            "# rlsp-yaml-disable-next-line unusedAnchor\nk: &a v\n",
+            true,
+        ),
+        (
+            "collection",
+            "# rlsp-yaml-disable-next-line unusedAnchor\nk: &a\n  x: 1\n",
+            true,
+        ),
+        (
+            "empty node",
+            "# rlsp-yaml-disable-next-line unusedAnchor\na: &y\nb: 1\n",
+            true,
+        ),
+        (
+            "anchor alone on its line",
+            "k:\n  # rlsp-yaml-disable-next-line unusedAnchor\n  &a\n  x: 1\n",
+            true,
+        ),
+        (
+            "comment above the body line",
+            "k: &a\n# rlsp-yaml-disable-next-line unusedAnchor\n  x: 1\n",
+            false,
+        ),
+        (
+            "comment two lines above",
+            "# rlsp-yaml-disable-next-line unusedAnchor\n\nk: &a v\n",
+            false,
+        ),
+    ];
+    for (name, text, suppressed) in cases {
+        let (mut service, socket) = LspService::new(Backend::new);
+        tokio::spawn(socket.for_each(|_| async {}));
+        send(&mut service, initialize_request(1)).await;
+        send(&mut service, initialized_notification()).await;
+
+        let uri = "file:///test/suppression-unused-anchor.yaml";
+        send(&mut service, did_open_notification(uri, text)).await;
+
+        let diags = service
+            .inner()
+            .get_diagnostics(uri)
+            .expect("diagnostics should exist");
+        assert_eq!(has_code(&diags, "unusedAnchor"), !suppressed, "{name}");
+    }
+}

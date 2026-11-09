@@ -24,6 +24,7 @@ share a parent line with one sub-item each.
 - `fetch_schemastore_catalog` in `rlsp-yaml/src/schema.rs` calls `fetch_json` without `check_json_depth` or the raw budget, so only the 5 MiB cap and serde's depth limit of 128 apply (fixed URL, non-recursive consumer); security Low, nesting plan Task 11 security review.
 - CVE-2026-118764 (minimatch) is allowlisted in the VS Code extension's `ignoreCves` until `vscode-languageclient` runs with minimatch 11.0.1 or later or rlsp-yaml lets a pattern reach the client's minimatch; reason and triggers in the `Audit dependencies` step comment of `.github/workflows/vscode-extension.yml`; glob override plan.
 - The actions in `.github/workflows/vscode-extension.yml` are pinned to mutable major tags, not commit SHAs, including the publish job that uses `VSCE_PAT`; pre-existing, security Medium; glob override plan Task 2 security review.
+- `validate_unused_anchors` in `rlsp-yaml/src/validation/validators/anchors.rs` truncates a long anchor name with `&entry.name[..100]`, which panics when byte 100 is not a char boundary (`k: &a` followed by 60 `é`); a panic in a handler ends the server; server bug-fix plan Task 1 security review.
 
 ## Bugs
 
@@ -57,6 +58,8 @@ share a parent line with one sub-item each.
 - `[a,\n &x]` prints `[a, &x !!null ""]`: a tag appears in the output; parser plan Task 9 review.
 - The first single-line plain scalar is bounded by input size only, not `MAX_SCALAR_LEN`, and blank lines between keys are lost when a value gets fewer lines (`a: x\n  y\n\nb: 1\n`); parser plan Task 6 review.
 - A core tag `!!map` on a block key is dropped on format, with the same data; parser plan Task 14 review.
+- `load("\u{FEFF}\nk: v\n")` panics on a `debug_assert` in `rlsp-yaml-parser/src/event_iter/directives.rs` ("expected content after consuming blank/comment/directive lines"); server bug-fix plan Task 1 review.
+- `validate_unused_anchors` stops at `MAX_DEPTH` (100) and reports an anchor as never used when its only alias is nested deeper; the quick fix refuses such anchors; server bug-fix plan Task 1 review.
 
 ## Tests
 
@@ -74,6 +77,7 @@ share a parent line with one sub-item each.
 - `lockfileRules` in `rlsp-yaml/integrations/vscode/src/overrides.test.ts` is a tuple array checked by a coverage test; a `Record<GuardedPackage, LockfileRule>` would enforce a row per package at compile time; vscode override plan Task 1 review.
 - `has_mapping_with_odd_node_count` in `rlsp-yaml/tests/formatter_keeps_text.rs` repeats `check_well_formed` of `rlsp-yaml-parser/tests/support/mod.rs` across the crate boundary; parser plan Task 12 review.
 - `? !!str\n!zz : v\n? &x\n` has no case in `rlsp-yaml/tests/formatter_keeps_data.rs`; parser plan Task 12 review.
+- `has_dangling_alias` in `rlsp-yaml/tests/unused_anchor_fix.rs` matches `A([^;]*);` anywhere in the data signature, so a value with an uppercase `A` counts as a dangling alias; collect anchor and alias names from the `load()` AST instead; server bug-fix plan Task 1 review.
 - `a_dash_after_a_tag_does_not_load` in `rlsp-yaml/tests/formatter_keeps_comments.rs` does not pin `--- !t - b`, `&a !t - b`, `!t\t- b`, `!t -`, and `- !t - b`, and `: !\n?\n! : v\n` is not in `libfyaml_events.rs`; parser plan Task 13 review.
 - `anchor_followed_by_inline_dash_returns_error` in `rlsp-yaml-parser/tests/smoke/anchors_and_aliases.rs` is a weaker duplicate of the `&a - b` case in `tests/error_reporting.rs`, and `tests/smoke/probe_dispatch.rs` refers to it; removal candidate, parser plan Task 13 review.
 - A comment before the `:` of an inner entry of a block key has no pinned placement in `rlsp-yaml/tests/formatter_keeps_comments.rs`; parser plan Task 14 review.

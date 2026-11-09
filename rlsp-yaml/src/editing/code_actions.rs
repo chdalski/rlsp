@@ -60,7 +60,7 @@ pub fn code_actions(
             Some("flowSeq") => flow_seq_to_block(docs, text, diag, uri, options)
                 .into_iter()
                 .collect::<Vec<_>>(),
-            Some("unusedAnchor") => delete_unused_anchor(docs, text, diag, uri, options)
+            Some("unusedAnchor") => delete_unused_anchor(docs, text, diag, uri)
                 .into_iter()
                 .collect::<Vec<_>>(),
             Some("yaml11Boolean" | "schemaYaml11Boolean") => {

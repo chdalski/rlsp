@@ -20,8 +20,10 @@ struct AnchorEntry {
 /// - Anchors (`&name`) that are never referenced by any alias (marked with `DiagnosticTag::Unnecessary`)
 /// - Aliases (`*name`) that reference non-existent anchors (error severity)
 ///
-/// Anchors and aliases are scoped to individual YAML documents. Diagnostic ranges
-/// use the anchor-carrying node's `loc` span directly.
+/// Anchors and aliases are scoped to individual YAML documents. The range of an
+/// unused-anchor diagnostic is the `&name` token (`Node::anchor_loc`), not the
+/// node it anchors; the range of an unresolved-alias diagnostic is the alias
+/// node's span (`*name`).
 #[must_use]
 pub fn validate_unused_anchors(docs: &[Document<Span>]) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
@@ -77,6 +79,9 @@ pub fn validate_unused_anchors(docs: &[Document<Span>]) -> Vec<Diagnostic> {
     diagnostics
 }
 
+/// The deepest node level the unused-anchor validator and its quick fix look at.
+pub(crate) const MAX_DEPTH: usize = 100;
+
 /// Recursively walk the AST collecting anchor definitions and alias references.
 fn collect_anchors_and_aliases(
     node: &Node<Span>,
@@ -85,7 +90,6 @@ fn collect_anchors_and_aliases(
     depth: usize,
     idx: &LineIndex,
 ) {
-    const MAX_DEPTH: usize = 100;
     if depth > MAX_DEPTH {
         return;
     }
@@ -95,12 +99,11 @@ fn collect_anchors_and_aliases(
             let range = span_to_lsp(*loc, idx);
             aliases.push((name.clone(), range));
         }
-        Node::Scalar { loc, .. } | Node::Mapping { loc, .. } | Node::Sequence { loc, .. } => {
-            if let Some(name) = node.anchor() {
-                let range = span_to_lsp(*loc, idx);
+        Node::Scalar { .. } | Node::Mapping { .. } | Node::Sequence { .. } => {
+            if let (Some(name), Some(loc)) = (node.anchor(), node.anchor_loc()) {
                 anchors.push(AnchorEntry {
                     name: name.to_owned(),
-                    range,
+                    range: span_to_lsp(loc, idx),
                 });
             }
             match node {
@@ -126,6 +129,7 @@ mod tests {
     use std::fmt::Write as _;
 
     use rstest::rstest;
+    use tower_lsp::lsp_types::Position;
 
     use super::*;
     use crate::test_utils::parse_docs;
@@ -270,17 +274,16 @@ mod tests {
 
     #[test]
     fn should_produce_correct_range_with_unicode_in_text() {
-        // &unused anchors a Mapping whose content starts at line 2 (0-based), col 2.
-        let text = "name: 中文\ndata: &unused\n  key: val\n";
+        // The token follows multibyte text on its own line; columns count
+        // characters, not bytes.
+        let text = "name: 中文\n中文: &unused\n  key: val\n";
         let result = parse_anchors(text);
 
         assert_eq!(result.len(), 1);
         let diag = &result[0];
-        assert_eq!(diag.range.start.line, 2, "mapping content is on line 2");
-        assert_eq!(
-            diag.range.start.character, 2,
-            "mapping content starts at col 2"
-        );
+        assert_eq!(diag.range.start.line, 1, "the token is on line 1");
+        assert_eq!(diag.range.start.character, 4);
+        assert_eq!(diag.range.end.character, 11);
     }
 
     #[test]
@@ -317,15 +320,10 @@ mod tests {
 
         // Only doc2's &unused should be flagged
         assert_eq!(result.len(), 1);
-        // &unused anchors a Mapping whose content (  k: v) is on line 5 (0-based), col 2.
-        assert_eq!(
-            result[0].range.start.line, 5,
-            "mapping content is on line 5"
-        );
-        assert_eq!(
-            result[0].range.start.character, 2,
-            "mapping content starts at col 2"
-        );
+        // `b: &unused` is on line 4 (0-based), the token starts at col 3.
+        assert_eq!(result[0].range.start.line, 4, "the token is on line 4");
+        assert_eq!(result[0].range.start.character, 3);
+        assert_eq!(result[0].range.end.character, 10);
         assert!(
             result[0]
                 .tags
@@ -356,77 +354,127 @@ mod tests {
         assert_eq!(result[0].range.end.character, 20, "alias ends at col 20");
     }
 
-    #[test]
-    fn unused_anchor_on_block_mapping_node_loc_used() {
-        // The plan specifies using the anchor-carrying node's loc directly.
-        // &defaults anchors a Mapping; the Mapping's loc.start is at the content
-        // (line 1, col 2 in LSP), not at the &defaults token on line 0.
-        let text = "defaults: &defaults\n  key: val\n";
-        let result = parse_anchors(text);
-
-        assert_eq!(result.len(), 1);
-        let diag = &result[0];
-        assert_eq!(diag.range.start.line, 1, "mapping content is on line 1");
-        assert_eq!(
-            diag.range.start.character, 2,
-            "mapping content starts at col 2"
-        );
-        assert_eq!(diag.range.end.line, 2, "mapping content ends on line 2");
-        assert_eq!(diag.range.end.character, 0);
+    /// The characters of `range` (a range within one line) in `yaml`; lines end
+    /// at `\n`, `\r\n` or a lone `\r`.
+    fn text_of(yaml: &str, range: Range) -> String {
+        assert_eq!(range.start.line, range.end.line, "a one-line range");
+        yaml.replace("\r\n", "\n")
+            .replace('\r', "\n")
+            .split('\n')
+            .nth(range.start.line as usize)
+            .expect("the line exists")
+            .chars()
+            .skip(range.start.character as usize)
+            .take((range.end.character - range.start.character) as usize)
+            .collect()
     }
 
-    #[test]
-    fn unused_anchor_on_flow_sequence_node_loc_used() {
-        // &a anchors a Sequence; the Sequence's loc covers `[1, 2, 3]` starting at col 10.
-        let text = "items: &a [1, 2, 3]\n";
+    // The range of an unused-anchor diagnostic is the `&name` token, wherever
+    // the anchored node starts or ends.
+    #[rstest]
+    #[case::inline_scalar("key: &myanchor value\n", 0, 5, "&myanchor")]
+    #[case::scalar_before_a_comment("key: &anchor value # this is a comment\n", 0, 5, "&anchor")]
+    #[case::block_mapping("defaults: &defaults\n  key: val\n", 0, 10, "&defaults")]
+    #[case::block_sequence("list: &s\n  - 1\n", 0, 6, "&s")]
+    #[case::flow_sequence("items: &a [1, 2, 3]\n", 0, 7, "&a")]
+    #[case::literal_block_scalar("a: &x |\n  line one\nb: 1\n", 0, 3, "&x")]
+    #[case::block_scalar_header_comment("a: &x | # c\n  t\n", 0, 3, "&x")]
+    #[case::empty_value("a: &y\nb: 1\n", 0, 3, "&y")]
+    #[case::empty_sequence_item("- &y !t\n- x\n", 0, 2, "&y")]
+    #[case::empty_explicit_value("? k\n: &v\n", 1, 2, "&v")]
+    #[case::empty_value_at_the_end("a: &x", 0, 3, "&x")]
+    #[case::tag_after("&a !t v\n", 0, 0, "&a")]
+    #[case::tag_before("!t &a v\n", 0, 3, "&a")]
+    #[case::tag_before_a_block_mapping("k: !t &a\n  x: 1\n", 0, 6, "&a")]
+    #[case::mapping_key("&a k: v\n", 0, 0, "&a")]
+    #[case::key_in_sequence_item("- &a x: 1\n", 0, 2, "&a")]
+    #[case::mapping_in_sequence_item("- &a\n  x: 1\n", 0, 2, "&a")]
+    #[case::explicit_key("? &k\n: v\n", 0, 2, "&k")]
+    #[case::after_document_start("--- &x\nk: v\n", 0, 4, "&x")]
+    #[case::flow_mapping_value("{k: &a}", 0, 4, "&a")]
+    #[case::flow_sequence_item("[&a x]", 0, 1, "&a")]
+    #[case::multibyte_text_before("名前: &u v\n", 0, 4, "&u")]
+    #[case::multibyte_name("k: &ü v\n", 0, 3, "&ü")]
+    #[case::second_line("a: 1\nb: &y 2\n", 1, 3, "&y")]
+    #[case::crlf("a: 1\r\nb: &y 2\r\n", 1, 3, "&y")]
+    #[case::lone_cr("a: 1\rb: &y 2\r", 1, 3, "&y")]
+    #[case::block_mapping_crlf("k: &a\r\n  x: 1\r\n", 0, 3, "&a")]
+    fn unused_anchor_range_is_the_anchor_token(
+        #[case] text: &str,
+        #[case] line: u32,
+        #[case] start: u32,
+        #[case] token: &str,
+    ) {
         let result = parse_anchors(text);
 
-        assert_eq!(result.len(), 1);
+        assert_eq!(result.len(), 1, "{text:?}");
         let diag = &result[0];
-        assert_eq!(diag.range.start.line, 0);
+        let width = u32::try_from(token.chars().count()).unwrap();
         assert_eq!(
-            diag.range.start.character, 10,
-            "sequence starts at col 10 (the `[`)"
+            diag.range,
+            Range::new(
+                Position::new(line, start),
+                Position::new(line, start + width)
+            ),
+            "{text:?}"
         );
-        assert_eq!(diag.range.end.character, 18, "sequence ends at col 18");
+        assert_eq!(text_of(text, diag.range), token);
+        assert_eq!(
+            diag.code,
+            Some(NumberOrString::String("unusedAnchor".to_string()))
+        );
+        assert_eq!(diag.severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(diag.tags, Some(vec![DiagnosticTag::UNNECESSARY]));
+        assert_eq!(
+            diag.message,
+            format!("Anchor '{}' is never used", &token[1..])
+        );
     }
 
-    #[test]
-    fn unused_anchor_on_inline_scalar_node_loc_used() {
-        // &myanchor anchors a Scalar; the Scalar's loc covers `value` starting at col 15.
-        let text = "key: &myanchor value\n";
+    // Every unused anchor of a document gets its own token range, in the order
+    // of the document; documents are told apart by their lines.
+    #[rstest]
+    #[case::key_and_value("&k key: &v val\n", &[(0, 0, "&k"), (0, 8, "&v")])]
+    #[case::same_name_twice("a: &x 1\nb: &x 2\n", &[(0, 3, "&x"), (1, 3, "&x")])]
+    #[case::one_of_two_used("a: &used 1\nb: &unused 2\nc: *used\n", &[(1, 3, "&unused")])]
+    #[case::every_document("a: &x 1\n---\nb: &y 2\n---\nc: &z 3\n", &[(0, 3, "&x"), (2, 3, "&y"), (4, 3, "&z")])]
+    #[case::after_a_directive(
+        "%YAML 1.2\n---\na: &x 1\n...\n%YAML 1.2\n---\nb: &y 2\n",
+        &[(2, 3, "&x"), (6, 3, "&y")]
+    )]
+    #[case::multibyte_first_document("名前: 1\n---\n名前: &u v\n", &[(2, 4, "&u")])]
+    fn unused_anchor_ranges_of_several_anchors(
+        #[case] text: &str,
+        #[case] expected: &[(u32, u32, &str)],
+    ) {
         let result = parse_anchors(text);
 
-        assert_eq!(result.len(), 1);
-        let diag = &result[0];
-        assert_eq!(diag.range.start.line, 0);
-        assert_eq!(
-            diag.range.start.character, 15,
-            "scalar `value` starts at col 15"
-        );
-        assert_eq!(
-            diag.range.end.character, 20,
-            "scalar `value` ends at col 20"
-        );
+        let found: Vec<(u32, u32, String)> = result
+            .iter()
+            .map(|d| {
+                (
+                    d.range.start.line,
+                    d.range.start.character,
+                    text_of(text, d.range),
+                )
+            })
+            .collect();
+        let expected: Vec<(u32, u32, String)> = expected
+            .iter()
+            .map(|(line, col, token)| (*line, *col, (*token).to_owned()))
+            .collect();
+        assert_eq!(found, expected, "{text:?}");
     }
 
+    // The range covers the whole name even where the message shortens it.
     #[test]
-    fn unused_anchor_trailing_comment_node_loc_excludes_comment() {
-        // &anchor anchors a Scalar; the Scalar's loc covers `value` (col 13–18),
-        // not the trailing comment. Node loc is tighter than the full line.
-        let text = "key: &anchor value # this is a comment\n";
-        let result = parse_anchors(text);
+    fn unused_anchor_range_covers_a_long_name() {
+        let text = format!("data: &{}\n  k: v\n", "a".repeat(200));
+        let result = parse_anchors(&text);
 
         assert_eq!(result.len(), 1);
-        let diag = &result[0];
-        assert_eq!(
-            diag.range.start.character, 13,
-            "scalar `value` starts at col 13"
-        );
-        assert_eq!(
-            diag.range.end.character, 18,
-            "scalar `value` ends at col 18, before comment"
-        );
+        assert_eq!(result[0].range.start.character, 6);
+        assert_eq!(result[0].range.end.character, 6 + 201);
     }
 
     #[test]
@@ -443,17 +491,15 @@ mod tests {
 
     #[test]
     fn unused_anchor_second_document_correct_line() {
-        // &unused anchors a Mapping in doc2; the Mapping's content (  k: v) is
-        // on line 5 (0-based), col 2 — one line below `b: &unused` on line 4.
+        // The `&unused` token of doc2 is on line 4 (0-based), not on the line of
+        // the mapping it anchors.
         let text = "a: &used\n  k: v\nref: *used\n---\nb: &unused\n  k: v\n";
         let result = parse_anchors(text);
 
         assert_eq!(result.len(), 1);
         let diag = &result[0];
-        assert_eq!(diag.range.start.line, 5, "mapping content is on line 5");
-        assert_eq!(
-            diag.range.start.character, 2,
-            "mapping content starts at col 2"
-        );
+        assert_eq!(diag.range.start.line, 4, "the token is on line 4");
+        assert_eq!(diag.range.start.character, 3);
+        assert_eq!(diag.range.end.character, 10);
     }
 }
