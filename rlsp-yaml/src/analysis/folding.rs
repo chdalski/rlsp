@@ -484,6 +484,32 @@ mod tests {
         );
     }
 
+    // A multi-line quoted scalar folds exactly like the plain scalar of the same
+    // layout: the fold of its mapping or document ends where the scalar's text
+    // ends, not on the line after.
+    #[rstest]
+    #[case::mapping_value("k: \"a\n b\"\nz: 1\n", "k: a\n b\nz: 1\n")]
+    #[case::nested_mapping_value("a:\n  k: \"a\n   b\"\n", "a:\n  k: a\n   b\n")]
+    #[case::single_quoted_value("k: 'a\n b'\nz: 1\n", "k: a\n b\nz: 1\n")]
+    #[case::sequence_item("- \"a\n b\"\n- z\n", "- a\n b\n- z\n")]
+    #[case::root_of_a_document_stream("\"a\n b\"\n---\nx\n", "a\n b\n---\nx\n")]
+    #[case::root_of_a_document_stream_with_end("\"a\n b\"\n...\n---\nx\n", "a\n b\n...\n---\nx\n")]
+    fn multi_line_quoted_scalar_folds_like_the_plain_scalar(
+        #[case] quoted: &str,
+        #[case] plain: &str,
+    ) {
+        let folds = |text: &str| ranges_as_tuples(&folding_ranges(&load_docs(text), text));
+        assert_eq!(folds(quoted), folds(plain));
+    }
+
+    #[test]
+    fn multi_line_quoted_root_in_a_document_stream_folds_its_own_lines() {
+        let text = "\"a\n b\"\n---\nx\n";
+        let tuples = ranges_as_tuples(&folding_ranges(&load_docs(text), text));
+        assert!(tuples.contains(&(0, 1)), "{tuples:?}");
+        assert!(!tuples.contains(&(0, 2)), "{tuples:?}");
+    }
+
     fn comment_folds(yaml: &str) -> Vec<(u32, u32)> {
         let docs = load_docs(yaml);
         let comment_ranges: Vec<FoldingRange> = folding_ranges(&docs, yaml)

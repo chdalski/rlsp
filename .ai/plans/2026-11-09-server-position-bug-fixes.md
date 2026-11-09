@@ -24,7 +24,7 @@ with three defects of the same causes that the backlog does not list.
 - [x] Clarify scope with the user
 - [x] Design review of the approach
 - [x] Task 1: The unused-anchor diagnostic covers `&name`, and its quick fix deletes only the anchor
-- [ ] Task 2: A multi-line quoted scalar's span ends at its closing quote
+- [x] Task 2: A multi-line quoted scalar's span ends at its closing quote
 - [ ] Task 3: Semantic tokens skip multi-line quoted scalars
 - [ ] Task 4: The block-scalar action keeps trailing blanks out of the value
 - [ ] Task 5: Color ranges come from the scalar's source text
@@ -79,22 +79,24 @@ span as `Node::anchor_loc()`, as `navigation/references.rs` uses it.
 end a multi-line scalar's span after the line break, and after a trailing comment, instead of at
 the closing quote. The wrong span reaches both `parse_events()` and `load()`.
 
-- [ ] The span of a multi-line single- or double-quoted scalar ends right after its closing quote,
+- [x] The span of a multi-line single- or double-quoted scalar ends right after its closing quote,
       in block and flow context, with `\n`, `\r\n`, and `\r` breaks, and with a trailing comment,
       in the events of `parse_events()` and in the nodes of `load()`
-- [ ] `["a\n b"\n]` and `["a\n b", c]` yield the same events as before this task, apart from the
+- [x] `["a\n b"\n]` and `["a\n b", c]` yield the same events as before this task, apart from the
       scalar's span
-- [ ] The span of a mapping or sequence whose last entry is a multi-line quoted scalar is the same
+- [x] The span of a mapping or sequence whose last entry is a multi-line quoted scalar is the same
       as before this task
-- [ ] The event kinds and values and the loaded data of the yaml-test-suite conformance tests are
+- [x] The event kinds and values and the loaded data of the yaml-test-suite conformance tests are
       unchanged, and the tests that pinned the old scalar spans assert the new ones
-- [ ] In `rlsp-yaml`, the hover range, document-symbol range, and selection range of a multi-line
-      quoted scalar end at its closing quote; its document links, the folding ranges, and the
-      completion context of a mapping whose last entry is such a scalar are the same as before this
-      task
-- [ ] Completion with the cursor on each line of `"a\n b"\n` and of `"a\n b"\n...\n`, the `...`
+- [x] In `rlsp-yaml`, the hover range, document-symbol range, selection range, and `!include` link
+      range of a multi-line quoted scalar end at its closing quote; its URL links, the folding
+      ranges, and the completion context of a mapping whose last entry is such a scalar are the
+      same as before this task
+- [x] Completion with the cursor on each line of `"a\n b"\n` and of `"a\n b"\n...\n`, the `...`
       line included, gives the same result as on the same line of `a\n b\n` and `a\n b\n...\n`
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] A multi-line quoted scalar gets no semantic string token once its span ends at the closing
+      quote
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 3: Semantic tokens skip multi-line quoted scalars
 
@@ -262,6 +264,12 @@ literal like the `schemas` setting.
   at the validator's depth limit, for a bare document's empty root, and where a character outside
   the BMP precedes the anchor on its line (columns stay code points until the UTF-16 plan); the
   flow-entry rule reads the AST; a leading BOM stays when the anchor's line is deleted.
+
+- **Gate demands of Task 2:** the semantic-token guard for multi-line scalars moves ahead of the
+  quoted branch in this task, so the shorter span gives no string token of meaningless length.
+- **Task 2's link criterion is narrowed:** an `!include` link of a multi-line quoted path takes the
+  scalar's span and so ends at its closing quote, like hover and symbols; URL links do not read the
+  span end and stay the same.
 
 ## Task Notes
 

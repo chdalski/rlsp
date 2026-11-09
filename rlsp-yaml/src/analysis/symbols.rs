@@ -1338,6 +1338,31 @@ mod tests {
         assert_eq!(a.range.end, Position::new(2, 3));
     }
 
+    #[rstest]
+    #[case::double_quoted("k: \"a\n b\"\nz: 1\n")]
+    #[case::single_quoted("k: 'a\n b'\nz: 1\n")]
+    #[case::double_quoted_with_comment("k: \"a\n b\" # c\nz: 1\n")]
+    fn multiline_quoted_value_range_ends_at_the_closing_quote(#[case] text: &str) {
+        let docs = parse_docs(text);
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+
+        let k = find_symbol(&symbols, "k").expect("should have 'k' symbol");
+        assert_eq!(k.range.end, Position::new(1, 3));
+        assert_eq!(k.selection_range.start, Position::new(0, 0));
+        assert_eq!(k.selection_range.end, Position::new(0, 1));
+        let z = find_symbol(&symbols, "z").expect("should have 'z' symbol");
+        assert_eq!(z.range.start.line, 2);
+    }
+
+    #[test]
+    fn multiline_quoted_sequence_item_range_ends_at_the_closing_quote() {
+        let docs = parse_docs("- \"a\n b\"\n- z\n");
+        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
+
+        let first = symbols.first().expect("should have first item symbol");
+        assert_eq!(first.range.end, Position::new(1, 3));
+    }
+
     #[test]
     fn multiline_plain_sequence_item_range_ends_at_last_content_byte() {
         let docs = parse_docs("- v\n  w\n\n- z\n");

@@ -480,3 +480,94 @@ fn loader_flow_key_continued_by_an_anchor_spans() {
     assert_eq!((key.start, key.end), (1, 8));
     assert_eq!((value.start, value.end), (10, 11));
 }
+
+/// YAML 1.2.2 [109] `c-double-quoted` / [120] `c-single-quoted`: the `loc` of a
+/// multi-line quoted scalar ends right after its closing quote.  The
+/// enclosing collection's `loc.end` is unaffected.
+#[rstest]
+#[case::mapping_value_double("k: \"a\n b\"\n", 3, 9, 10)]
+#[case::mapping_value_single("k: 'a\n b'\n", 3, 9, 10)]
+#[case::mapping_value_comment_then_entry("k: \"a\n b\" # c\nz: 1\n", 3, 9, 19)]
+#[case::mapping_value_crlf("k: \"a\r\n b\"\r\nz: 1\r\n", 3, 10, 18)]
+#[case::mapping_value_cr("k: \"a\r b\"\rz: 1\r", 3, 9, 15)]
+#[case::mapping_value_multibyte("k: \"é\n ü\"\nz: 1\n", 3, 11, 17)]
+#[case::sequence_item("- \"a\n b\"\n- z\n", 2, 8, 13)]
+#[case::flow_sequence("[\"a\n b\"\n]", 1, 7, 8)]
+#[case::flow_sequence_item("[\"a\n b\", c]", 1, 7, 10)]
+#[case::flow_sequence_single_quoted("['a\n b', c]", 1, 7, 10)]
+#[case::flow_mapping_value("{k: \"a\n b\"}", 4, 10, 10)]
+fn loader_multiline_quoted_scalar_loc_ends_at_closing_quote(
+    #[case] input: &str,
+    #[case] scalar_start: u32,
+    #[case] scalar_end: u32,
+    #[case] container_end: u32,
+) {
+    let docs = load(input).unwrap();
+    let Some((child, container)) = first_child_and_container_loc(&docs[0].root) else {
+        panic!("expected a non-empty collection");
+    };
+    let Node::Scalar { loc, .. } = child else {
+        panic!("expected Scalar, got {child:?}");
+    };
+    assert_eq!(
+        (loc.start, loc.end),
+        (scalar_start, scalar_end),
+        "scalar loc"
+    );
+    assert_eq!(container.end, container_end, "collection loc.end");
+    assert!(
+        loc.end <= container.end,
+        "a child's loc must lie inside its parent's"
+    );
+}
+
+/// A multi-line quoted scalar as the root of a document ends at its closing
+/// quote, so the next document's marker is not part of it.
+#[test]
+fn loader_multiline_quoted_root_loc_ends_at_closing_quote() {
+    let docs = load("\"a\n b\"\n---\nx\n").unwrap();
+    let Node::Scalar { loc, .. } = &docs[0].root else {
+        panic!("expected Scalar");
+    };
+    assert_eq!((loc.start, loc.end), (0, 6));
+}
+
+/// The scalars next to a multi-line quoted scalar keep their `loc`.
+#[rstest]
+#[case::flow_sequence_sibling("[\"a\n b\", c]", 9, 10)]
+#[case::flow_mapping_value("{\"a\n b\": 1}", 9, 10)]
+fn loader_multiline_quoted_scalar_leaves_sibling_loc_unchanged(
+    #[case] input: &str,
+    #[case] sibling_start: u32,
+    #[case] sibling_end: u32,
+) {
+    let docs = load(input).unwrap();
+    let sibling = match &docs[0].root {
+        Node::Sequence { items, .. } => &items[1],
+        Node::Mapping { entries, .. } => &entries[0].1,
+        other @ (Node::Scalar { .. } | Node::Alias { .. }) => {
+            panic!("expected a collection, got {other:?}")
+        }
+    };
+    let Node::Scalar { loc, .. } = sibling else {
+        panic!("expected Scalar, got {sibling:?}");
+    };
+    assert_eq!((loc.start, loc.end), (sibling_start, sibling_end));
+}
+
+/// Apart from `loc`, the loaded nodes of a multi-line quoted scalar are those
+/// of its one-line form: value, style, and the comments around it.
+#[test]
+fn loader_multiline_quoted_scalar_keeps_comments_and_value() {
+    let docs = load("k: \"a\n b\" # c\n# d\nz: 1\n").unwrap();
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected Mapping");
+    };
+    let Node::Scalar { value, style, .. } = &entries[0].1 else {
+        panic!("expected Scalar");
+    };
+    assert_eq!(value, "a b");
+    assert_eq!(*style, rlsp_yaml_parser::ScalarStyle::DoubleQuoted);
+    assert_eq!(entries[0].1.trailing_comment(), Some("# c"));
+    assert_eq!(entries[1].0.leading_comments(), ["# d"]);
+}

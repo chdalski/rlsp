@@ -211,6 +211,12 @@ fn classify_scalar_node(
         ScalarStyle::Plain | ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted => {}
     }
 
+    // A token cannot span lines, and the span of a multi-line plain or quoted
+    // scalar ends on its last line, so `length` above would be meaningless.
+    if end_line != start_line {
+        return None;
+    }
+
     // Quoted strings.
     match style {
         ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted => {
@@ -223,12 +229,6 @@ fn classify_scalar_node(
             });
         }
         ScalarStyle::Plain | ScalarStyle::Literal(_) | ScalarStyle::Folded(_) => {}
-    }
-
-    // A token cannot span lines, and the span of a multi-line plain scalar ends
-    // on its last line, so `length` above would be meaningless.
-    if end_line != start_line {
-        return None;
     }
 
     // Plain scalar — classify by content.
@@ -816,6 +816,26 @@ mod tests {
             [(expected_line, expected_start, expected_len)],
             "input: {text:?}"
         );
+    }
+
+    // A token cannot span lines: a multi-line quoted scalar gets no string
+    // token, whatever columns its start and end have.  A single-line one
+    // keeps its token.
+    #[rstest]
+    #[case::double_quoted("a: \"x\n    y\"\nb: 1\n", 0)]
+    #[case::single_quoted("a: 'x\n    y'\nb: 1\n", 0)]
+    #[case::double_quoted_in_sequence("- \"x\n    y\"\n- 1\n", 0)]
+    #[case::double_quoted_with_comment("a: \"x\n    y\" # c\nb: 1\n", 0)]
+    #[case::single_line_double_quoted("a: \"xy\"\nb: 1\n", 1)]
+    #[case::single_line_single_quoted("a: 'xy'\nb: 1\n", 1)]
+    fn multi_line_quoted_scalar_gets_no_string_token(
+        #[case] text: &str,
+        #[case] expected_string_tokens: usize,
+    ) {
+        let docs = parse_docs(text);
+        let abs = absolute(&semantic_tokens(&docs, text));
+        let strings = abs.iter().filter(|t| t.3 == TOKEN_STRING).count();
+        assert_eq!(strings, expected_string_tokens, "tokens: {abs:?}");
     }
 
     // (d3) No other token lies inside the comment's interval on its line

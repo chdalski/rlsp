@@ -242,8 +242,12 @@ impl<'input> Lexer<'input> {
                 if !tail.is_empty() {
                     self.pending_multiline_tail = Some((tail, close_pos));
                 }
-                let end_pos = self.current_pos;
-                return Ok(Some((Cow::Owned(owned), Span::from_pos(open_pos, end_pos))));
+                // The scalar ends at its closing quote; `current_pos` is past
+                // the whole line, after any break or comment.
+                return Ok(Some((
+                    Cow::Owned(owned),
+                    Span::from_pos(open_pos, close_pos),
+                )));
             }
             // Non-closing continuation: trim trailing whitespace per YAML §7.3.3.
             let line_str = if cont_value.has_escape {
@@ -342,14 +346,14 @@ impl<'input> Lexer<'input> {
             } => {
                 // Multi-line: accumulate.
                 let mut owned = value.into_string();
-                self.collect_double_quoted_continuations(
+                let close_pos = self.collect_double_quoted_continuations(
                     &mut owned,
                     line_continuation,
-                    open_pos,
                     block_context_indent,
                 )?;
-                let end_pos = self.current_pos;
-                (Cow::Owned(owned), Span::from_pos(open_pos, end_pos))
+                // The scalar ends at its closing quote; `current_pos` is past
+                // the whole line, after any break or comment.
+                (Cow::Owned(owned), Span::from_pos(open_pos, close_pos))
             }
         };
         Ok(Some((value, span)))
@@ -360,13 +364,14 @@ impl<'input> Lexer<'input> {
     /// `owned` is the accumulated content so far (from the first line).
     /// `line_continuation` indicates whether the first line ended with `\<LF>`
     /// (which suppresses the fold space).
+    ///
+    /// Returns the position right after the closing `"`.
     pub(super) fn collect_double_quoted_continuations(
         &mut self,
         owned: &mut String,
         mut line_continuation: bool,
-        open_pos: Pos,
         block_context_indent: Option<usize>,
-    ) -> Result<(), Error> {
+    ) -> Result<Pos, Error> {
         let mut pending_blanks: usize = 0;
 
         loop {
@@ -473,7 +478,7 @@ impl<'input> Lexer<'input> {
                     if !tail.is_empty() {
                         self.pending_multiline_tail = Some((tail, close_pos));
                     }
-                    return Ok(());
+                    return Ok(close_pos);
                 }
                 DoubleQuotedLine::Incomplete {
                     value,
@@ -487,8 +492,6 @@ impl<'input> Lexer<'input> {
                         ));
                     }
                     line_continuation = next_cont;
-                    // continue loop
-                    let _ = open_pos;
                 }
             }
         }
@@ -1002,6 +1005,66 @@ mod tests {
             .pending_multiline_tail
             .map(|(tail, pos)| (tail, pos.byte_offset));
         assert_eq!(tail, expected);
+    }
+
+    // Double-quoted counterpart of `single_quoted_stores_tail_after_closing_quote`
+    // for scalars that close on a later line.
+    #[rstest]
+    #[case::multiline_closing_line_tail("\"a\n  b\" w", Some((" w", 7)))]
+    #[case::multiline_closing_line_comment("\"a\n b\" # c", Some((" # c", 6)))]
+    #[case::multiline_nothing_after_quote("\"a\n b\"", None)]
+    fn double_quoted_stores_tail_after_closing_quote(
+        #[case] input: &str,
+        #[case] expected: Option<(&str, usize)>,
+    ) {
+        let mut lexer = make_lexer(input);
+        let _ = lexer.try_consume_double_quoted(None);
+        let tail = lexer
+            .pending_multiline_tail
+            .map(|(tail, pos)| (tail, pos.byte_offset));
+        assert_eq!(tail, expected);
+    }
+
+    // YAML 1.2.2 [109] `c-double-quoted` / [120] `c-single-quoted`: the scalar
+    // ends at its closing quote, not after the line break or a comment that
+    // follows it on the closing line.
+    #[rstest]
+    #[case::sq_lf("'a\n b'\n", 0, 6)]
+    #[case::sq_eof("'a\n b'", 0, 6)]
+    #[case::sq_crlf("'a\r\n b'\r\n", 0, 7)]
+    #[case::sq_cr("'a\r b'\r", 0, 6)]
+    #[case::sq_comment("'a\n b'  # c\n", 0, 6)]
+    #[case::sq_trailing_whitespace("'a\n b'   \n", 0, 6)]
+    #[case::sq_blank_line("'a\n\n b'\n", 0, 7)]
+    #[case::sq_escaped_quote_on_closing_line("'a\n b''c'\n", 0, 9)]
+    #[case::sq_quote_alone_on_closing_line("'a\n'\n", 0, 4)]
+    #[case::sq_multibyte("'é\n ü'\n", 0, 8)]
+    #[case::sq_indented_start("  'a\n b'\n", 2, 8)]
+    #[case::sq_single_line_comment("'q' # c", 0, 3)]
+    #[case::dq_lf("\"a\n b\"\n", 0, 6)]
+    #[case::dq_eof("\"a\n b\"", 0, 6)]
+    #[case::dq_crlf("\"a\r\n b\"\r\n", 0, 7)]
+    #[case::dq_cr("\"a\r b\"\r", 0, 6)]
+    #[case::dq_comment("\"a\n b\"  # c\n", 0, 6)]
+    #[case::dq_trailing_whitespace("\"a\n b\"   \n", 0, 6)]
+    #[case::dq_blank_line("\"a\n\n b\"\n", 0, 7)]
+    #[case::dq_three_lines("\"a\n b\n c\"\n", 0, 9)]
+    #[case::dq_tab_indent("\"a\n\tb\"\n", 0, 6)]
+    #[case::dq_escaped_line_break("\"a\\\n b\"\n", 0, 7)]
+    #[case::dq_whitespace_only_closing_line("\"a\n  \"\n", 0, 6)]
+    #[case::dq_multibyte_with_comment("\"é\n ü\" # c\n", 0, 8)]
+    #[case::dq_single_line_tail("\"q\" w", 0, 3)]
+    fn quoted_span_ends_at_closing_quote(
+        #[case] input: &str,
+        #[case] start: u32,
+        #[case] end: u32,
+    ) {
+        let span = if input.trim_start().starts_with('\'') {
+            sq(input).1
+        } else {
+            dq(input).1
+        };
+        assert_eq!((span.start, span.end), (start, end));
     }
 
     // A tail that no caller took must not survive into the next scalar.

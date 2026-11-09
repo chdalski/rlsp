@@ -778,6 +778,31 @@ url3: https://another-valid.com
         );
     }
 
+    // A multi-line quoted scalar: a URL on its first line keeps its link, and an
+    // `!include` link covers the scalar up to its closing quote.
+    #[test]
+    fn url_in_multi_line_quoted_scalar_keeps_its_first_line_range() {
+        let text = "k: \"http://a.b/c\n d\"\nz: 1\n";
+        let result = find_document_links(&load_docs(text), None);
+
+        assert_eq!(
+            links_as_tuples(&result),
+            [(0, 4, 16, "http://a.b/c".to_owned())]
+        );
+    }
+
+    #[test]
+    fn include_link_of_multi_line_quoted_scalar_ends_at_the_closing_quote() {
+        let text = "k: !include \"a\n  b.yaml\"\nz: 1\n";
+        let b = base("file:///dir/doc.yaml");
+        let result = find_document_links(&load_docs(text), Some(&b));
+
+        assert_eq!(result.len(), 1);
+        let range = result[0].range;
+        assert_eq!(range.start, Position::new(0, 12));
+        assert_eq!(range.end, Position::new(1, 9));
+    }
+
     // !include inside quotes → no link (tag-based: parser won't tag a quoted string as !include)
     #[test]
     fn should_skip_include_inside_double_quotes() {

@@ -60,6 +60,8 @@ share a parent line with one sub-item each.
 - A core tag `!!map` on a block key is dropped on format, with the same data; parser plan Task 14 review.
 - `load("\u{FEFF}\nk: v\n")` panics on a `debug_assert` in `rlsp-yaml-parser/src/event_iter/directives.rs` ("expected content after consuming blank/comment/directive lines"); server bug-fix plan Task 1 review.
 - `validate_unused_anchors` stops at `MAX_DEPTH` (100) and reports an anchor as never used when its only alias is nested deeper; the quick fix refuses such anchors; server bug-fix plan Task 1 review.
+- The scalar branch of selection ranges (`rlsp-yaml/src/analysis/selection.rs` ~177-184) checks only `col >= start_col` on every line, never the end column, so a cursor after a multi-line scalar's last character or left of its start column on a continuation line selects it; server bug-fix plan Task 2 review.
+- `validators/duplicate_keys.rs` (~96-97) builds a duplicate key's range from the start line and the end column, wrong for multi-line keys; server bug-fix plan Task 2 security review.
 
 ## Tests
 
@@ -78,6 +80,7 @@ share a parent line with one sub-item each.
 - `has_mapping_with_odd_node_count` in `rlsp-yaml/tests/formatter_keeps_text.rs` repeats `check_well_formed` of `rlsp-yaml-parser/tests/support/mod.rs` across the crate boundary; parser plan Task 12 review.
 - `? !!str\n!zz : v\n? &x\n` has no case in `rlsp-yaml/tests/formatter_keeps_data.rs`; parser plan Task 12 review.
 - `has_dangling_alias` in `rlsp-yaml/tests/unused_anchor_fix.rs` matches `A([^;]*);` anywhere in the data signature, so a value with an uppercase `A` counts as a dangling alias; collect anchor and alias names from the `load()` AST instead; server bug-fix plan Task 1 review.
+- The single- and double-quoted tail tests in `rlsp-yaml-parser/src/lexer/quoted.rs` could share a style parameter, and the span-test helpers of `tests/smoke/scalars.rs` and `tests/smoke/quoted_scalars.rs` are near-duplicates; server bug-fix plan Task 2 test review.
 - `a_dash_after_a_tag_does_not_load` in `rlsp-yaml/tests/formatter_keeps_comments.rs` does not pin `--- !t - b`, `&a !t - b`, `!t\t- b`, `!t -`, and `- !t - b`, and `: !\n?\n! : v\n` is not in `libfyaml_events.rs`; parser plan Task 13 review.
 - `anchor_followed_by_inline_dash_returns_error` in `rlsp-yaml-parser/tests/smoke/anchors_and_aliases.rs` is a weaker duplicate of the `&a - b` case in `tests/error_reporting.rs`, and `tests/smoke/probe_dispatch.rs` refers to it; removal candidate, parser plan Task 13 review.
 - A comment before the `:` of an inner entry of a block key has no pinned placement in `rlsp-yaml/tests/formatter_keeps_comments.rs`; parser plan Task 14 review.
@@ -126,6 +129,7 @@ share a parent line with one sub-item each.
 - The doc comment of `parse_node` in `rlsp-yaml-parser/src/loader.rs` says each level holds a frame of both collection loops; it holds the one that matches its collection; nesting plan Task 1 review.
 - `rlsp-yaml-parser/docs/architecture.md`: in "can build trees deeper than the limit, and it does not bound code that walks the loaded tree" the "it" reads as alias expansion, not the limit; nesting plan Task 7 review.
 - The core-limit comment in `.devcontainer/docker-compose.yml` lets "then" in "unless a process lowers its own limit to 0; the kernel then skips a piped handler" read as the 0 case; core-limit plan Task 1 review.
+- The doc comment of `cursor_positions` in `rlsp-yaml/src/completion.rs` names a parameter `text` that is called `yaml`; server bug-fix plan Task 2 review.
 - The `Audit dependencies` step comment in `.github/workflows/vscode-extension.yml` calls the other minimatch copies dev-only, but eslint and `@vscode/test-cli` share the bundled 10.2.6 copy; "its other dependents (mocha, eslint, `@vscode/test-cli`, c8) are dev-only" is precise; glob override plan Task 2 review.
 
 ## Tooling & CI

@@ -786,4 +786,53 @@ mod tests {
             "expected a selection range [0:0..0:3] for '日本語' (3 codepoints, not 9 bytes)"
         );
     }
+
+    /// The selection chain of `yaml` at `position` as `(start, end)` pairs of
+    /// `(line, character)`, innermost first.
+    fn chain(yaml: &str, position: Position) -> Vec<((u32, u32), (u32, u32))> {
+        let docs = parse_docs(yaml);
+        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[position]);
+        let mut ranges = Vec::new();
+        let mut current = result.first();
+        while let Some(sr) = current {
+            ranges.push((
+                (sr.range.start.line, sr.range.start.character),
+                (sr.range.end.line, sr.range.end.character),
+            ));
+            current = sr.parent.as_deref();
+        }
+        ranges
+    }
+
+    // A multi-line quoted scalar's range ends at its closing quote, so a cursor
+    // on the next entry selects that entry and not the quoted value.
+    #[rstest]
+    #[case::on_the_closing_line("k: \"a\n    b\"\nz: 1\n", pos(1, 4), ((0, 3), (1, 6)))]
+    #[case::on_the_opening_line("k: 'a\n    b'\nz: 1\n", pos(0, 4), ((0, 3), (1, 6)))]
+    #[case::next_entry("k: \"a\n    b\"\nz: 1\n", pos(2, 3), ((2, 3), (2, 4)))]
+    fn multi_line_quoted_scalar_selection_innermost_range(
+        #[case] text: &str,
+        #[case] position: Position,
+        #[case] expected: ((u32, u32), (u32, u32)),
+    ) {
+        assert_eq!(chain(text, position).first(), Some(&expected));
+    }
+
+    #[test]
+    fn multi_line_quoted_scalar_entry_range_ends_at_the_closing_quote() {
+        let ranges = chain("k: \"a\n    b\"\nz: 1\n", pos(1, 4));
+        assert!(
+            ranges.contains(&((0, 0), (1, 6))),
+            "expected the entry range (0,0)-(1,6) in {ranges:?}"
+        );
+    }
+
+    #[test]
+    fn next_entry_chain_does_not_include_the_multi_line_quoted_value() {
+        let ranges = chain("k: \"a\n    b\"\nz: 1\n", pos(2, 3));
+        assert!(
+            !ranges.contains(&((0, 3), (1, 6))) && !ranges.contains(&((0, 0), (1, 6))),
+            "unexpected range of the first entry in {ranges:?}"
+        );
+    }
 }

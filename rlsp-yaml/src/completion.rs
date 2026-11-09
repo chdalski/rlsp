@@ -1205,4 +1205,110 @@ mod tests {
         assert!(ls.contains(&"own_key"), "got: {ls:?}");
         assert!(!ls.contains(&"branch_key"), "got: {ls:?}");
     }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Multi-line quoted scalars: the scalar's span ends at its closing quote
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /// The cursor location of `docs` at `position` without the nodes it holds
+    /// (their spans differ between a quoted and a plain scalar).
+    fn location_summary(docs: &[Document<Span>], position: Position) -> String {
+        match locate_cursor(docs, position) {
+            CursorLocation::OnKey {
+                key,
+                enclosing_path,
+                ..
+            } => format!("OnKey {key} {enclosing_path:?}"),
+            CursorLocation::OnValue {
+                key,
+                enclosing_path,
+            } => format!("OnValue {key} {enclosing_path:?}"),
+            CursorLocation::InBlankMapping { enclosing_path, .. } => {
+                format!("InBlankMapping {enclosing_path:?}")
+            }
+            CursorLocation::InSequenceItem {
+                enclosing_path,
+                index,
+                ..
+            } => format!("InSequenceItem {index} {enclosing_path:?}"),
+            CursorLocation::InBlankSequence {
+                enclosing_path,
+                index,
+                ..
+            } => format!("InBlankSequence {index} {enclosing_path:?}"),
+            CursorLocation::OutsideAny => "OutsideAny".to_owned(),
+        }
+    }
+
+    /// Every cursor position of `text` from `first_line` to one line past its
+    /// end, at columns 0, 2 and 4.
+    fn cursor_positions(yaml: &str, first_line: u32) -> Vec<Position> {
+        let lines = u32::try_from(yaml.lines().count()).expect("small test input");
+        (first_line..=lines + 1)
+            .flat_map(|line| [0, 2, 4].map(|column| pos(line, column)))
+            .collect()
+    }
+
+    // A document whose root is a multi-line quoted scalar completes nothing on
+    // any of its lines, `...` line included, as the plain scalar does.
+    #[rstest]
+    #[case::double_quoted("\"a\n b\"\n", "a\n b\n")]
+    #[case::single_quoted("'a\n b'\n", "a\n b\n")]
+    #[case::with_document_end("\"a\n b\"\n...\n", "a\n b\n...\n")]
+    #[case::with_document_end_and_next("\"a\n b\"\n...\nk: v\n", "a\n b\n...\nk: v\n")]
+    fn multi_line_quoted_root_completes_like_the_plain_root(
+        #[case] quoted: &str,
+        #[case] plain: &str,
+    ) {
+        let schema = ParsedSchema::new(object_schema(vec![("z", string_schema())]));
+        let quoted_docs = parse_docs(quoted);
+        let plain_docs = parse_docs(plain);
+        for position in cursor_positions(quoted, 0) {
+            assert_eq!(
+                location_summary(&quoted_docs, position),
+                location_summary(&plain_docs, position),
+                "location at {position:?} in {quoted:?}"
+            );
+            assert_eq!(
+                labels(&complete_at(&quoted_docs, position, Some(&schema))),
+                labels(&complete_at(&plain_docs, position, Some(&schema))),
+                "items at {position:?} in {quoted:?}"
+            );
+        }
+    }
+
+    // Below a mapping whose last entry is a multi-line quoted scalar, the cursor
+    // is placed as below the same mapping with a plain scalar.
+    #[rstest]
+    #[case::document_end("k: \"a\n b\"\n...\n", "k: a\n b\n...\n")]
+    #[case::blank_line("k: \"a\n b\"\n\n", "k: a\n b\n\n")]
+    #[case::next_entry("k: \"a\n b\"\nz: 1\n", "k: a\n b\nz: 1\n")]
+    #[case::single_quoted("k: 'a\n b'\n\n", "k: a\n b\n\n")]
+    #[case::nested("p:\n  k: \"a\n   b\"\n\n", "p:\n  k: a\n   b\n\n")]
+    fn mapping_with_multi_line_quoted_last_entry_completes_like_the_plain_one(
+        #[case] quoted: &str,
+        #[case] plain: &str,
+    ) {
+        let schema = ParsedSchema::new(object_schema(vec![
+            ("k", string_schema()),
+            ("z", string_schema()),
+            ("p", string_schema()),
+        ]));
+        let quoted_docs = parse_docs(quoted);
+        let plain_docs = parse_docs(plain);
+        // The lines below the scalar; the scalar's own lines differ in columns.
+        let first_line = if quoted.starts_with("p:") { 3 } else { 2 };
+        for position in cursor_positions(quoted, first_line) {
+            assert_eq!(
+                location_summary(&quoted_docs, position),
+                location_summary(&plain_docs, position),
+                "location at {position:?} in {quoted:?}"
+            );
+            assert_eq!(
+                labels(&complete_at(&quoted_docs, position, Some(&schema))),
+                labels(&complete_at(&plain_docs, position, Some(&schema))),
+                "items at {position:?} in {quoted:?}"
+            );
+        }
+    }
 }

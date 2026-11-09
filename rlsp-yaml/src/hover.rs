@@ -2652,4 +2652,41 @@ mod tests {
         let hover = hover_at(&docs, pos(3, 0), None);
         assert!(hover.is_none_or(|h| !hover_content(&h).contains("v w")));
     }
+
+    // A multi-line quoted value ends at its closing quote: the cursor on the
+    // closing line inside the quotes shows it; behind the quote it does not.
+    #[rstest]
+    #[case::double_quoted("k: \"a\n b\"\n")]
+    #[case::single_quoted("k: 'a\n b'\n")]
+    fn hover_on_the_closing_line_of_a_multiline_quoted_value_shows_the_value(#[case] text: &str) {
+        let docs = parse_docs(text);
+        let hover = hover_at(&docs, pos(1, 2), None).expect("should return hover");
+        assert!(hover_content(&hover).contains("a b"));
+    }
+
+    #[rstest]
+    #[case::behind_the_quote(pos(1, 3))]
+    #[case::next_line(pos(2, 0))]
+    fn hover_behind_a_multiline_quoted_value_shows_nothing(#[case] cursor: Position) {
+        let docs = parse_docs("k: \"a\n b\"\n");
+        assert!(hover_at(&docs, cursor, None).is_none());
+    }
+
+    #[test]
+    fn hover_on_the_comment_after_a_multiline_quoted_value_shows_nothing() {
+        let docs = parse_docs("k: \"a\n b\" # c\n");
+        assert!(hover_at(&docs, pos(1, 5), None).is_none());
+    }
+
+    #[test]
+    fn hover_on_the_item_after_a_multiline_quoted_item_shows_that_item() {
+        let docs = parse_docs("[\"a\n b\", c]\n");
+        let hover = hover_at(&docs, pos(1, 5), None).expect("should return hover");
+        let content = hover_content(&hover);
+        assert!(
+            content.contains("[1]") && content.contains('c'),
+            "{content}"
+        );
+        assert!(!content.contains("a b"), "{content}");
+    }
 }

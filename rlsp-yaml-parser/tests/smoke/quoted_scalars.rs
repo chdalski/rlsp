@@ -303,3 +303,184 @@ fn single_quoted_block_value_blank_continuation_line_accepted() {
         .nth(1);
     assert_eq!(scalar, Some("foo\nbar"));
 }
+
+// YAML 1.2.2 [109] `c-double-quoted` / [120] `c-single-quoted`: a multi-line
+// quoted scalar's span ends right after its closing quote, not after the line
+// break or the comment that follows it.  The enclosing collection's end comes
+// from its own end event and is unaffected.
+// Expected: (scalar start, scalar end, ends of the MappingEnd/SequenceEnd events).
+#[rstest]
+#[case::dq_lf("\"a\n b\"\n", 0, 6, &[])]
+#[case::sq_lf("'a\n b'\n", 0, 6, &[])]
+#[case::dq_crlf("\"a\r\n b\"\r\n", 0, 7, &[])]
+#[case::dq_cr("\"a\r b\"\r", 0, 6, &[])]
+#[case::sq_crlf("'a\r\n b'\r\n", 0, 7, &[])]
+#[case::sq_cr("'a\r b'\r", 0, 6, &[])]
+#[case::dq_eof("\"a\n b\"", 0, 6, &[])]
+#[case::dq_comment("\"a\n b\" # c\n", 0, 6, &[])]
+#[case::sq_comment("'a\n b'  # c\n", 0, 6, &[])]
+#[case::dq_trailing_whitespace("\"a\n b\"   \n", 0, 6, &[])]
+#[case::dq_blank_line("\"a\n\n b\"\n", 0, 7, &[])]
+#[case::dq_three_lines("\"a\n b\n c\"\n", 0, 9, &[])]
+#[case::dq_tab_indent("\"a\n\tb\"\n", 0, 6, &[])]
+#[case::dq_escaped_line_break("\"a\\\n b\"\n", 0, 7, &[])]
+#[case::sq_escaped_quote("'a\n b''c'\n", 0, 9, &[])]
+#[case::sq_quote_alone_on_closing_line("'a\n'\n", 0, 4, &[])]
+#[case::dq_multibyte("\"é\n ü\"\n", 0, 8, &[])]
+#[case::mapping_value_dq("k: \"a\n b\"\n", 3, 9, &[10])]
+#[case::mapping_value_sq("k: 'a\n b'\n", 3, 9, &[10])]
+#[case::mapping_value_eof("k: \"a\n b\"", 3, 9, &[9])]
+#[case::mapping_value_then_entry("k: \"a\n b\"\nz: 1\n", 3, 9, &[15])]
+#[case::mapping_value_comment_then_entry("k: \"a\n b\" # c\nz: 1\n", 3, 9, &[19])]
+#[case::mapping_value_crlf("k: \"a\r\n b\"\r\nz: 1\r\n", 3, 10, &[18])]
+#[case::mapping_value_multibyte("k: \"é\n ü\"\nz: 1\n", 3, 11, &[17])]
+#[case::sequence_item("- \"a\n b\"\n", 2, 8, &[9])]
+#[case::sequence_item_then_item("- \"a\n b\"\n- z\n", 2, 8, &[13])]
+#[case::nested_mapping("x:\n  k: \"a\n   b\"\ny: 1\n", 8, 16, &[17, 22])]
+#[case::tagged_value("k: !!str \"a\n b\"\n", 9, 15, &[16])]
+#[case::anchored_value("k: &x \"a\n b\"\n", 6, 12, &[13])]
+#[case::explicit_key("? \"a\n b\"\n: v\n", 2, 8, &[13])]
+fn multiline_quoted_scalar_span_ends_at_closing_quote(
+    #[case] input: &str,
+    #[case] scalar_start: u32,
+    #[case] scalar_end: u32,
+    #[case] collection_ends: &[u32],
+) {
+    let results: Vec<(Event<'_>, Span)> = parse_to_vec(input)
+        .into_iter()
+        .map(|r| r.unwrap_or_else(|e| unreachable!("unexpected parse error: {e}")))
+        .collect();
+
+    let multiline = results
+        .iter()
+        .find_map(|(ev, span)| {
+            matches!(
+                ev,
+                Event::Scalar {
+                    style: ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted,
+                    ..
+                }
+            )
+            .then_some(span)
+        })
+        .unwrap_or_else(|| unreachable!("expected a quoted scalar"));
+    assert_eq!(
+        (multiline.start, multiline.end),
+        (scalar_start, scalar_end),
+        "scalar span"
+    );
+    let source = &input[multiline.start as usize..multiline.end as usize];
+    assert!(
+        source.len() >= 2 && source.starts_with(['"', '\'']) && source.ends_with(['"', '\'']),
+        "scalar span must cover the quoted text, got {source:?}"
+    );
+
+    let ends: Vec<u32> = results
+        .iter()
+        .filter(|(ev, _)| matches!(ev, Event::MappingEnd | Event::SequenceEnd))
+        .map(|(_, span)| span.end)
+        .collect();
+    assert_eq!(ends, collection_ends, "collection end spans");
+}
+
+// The same in a flow collection, where the flow parser rebuilds the text after
+// the closing quote itself.  Expected: (start, end) of every scalar.
+#[rstest]
+#[case::dq_then_bracket("[\"a\n b\"\n]", &[(1, 7)])]
+#[case::dq_then_plain_item("[\"a\n b\", c]", &[(1, 7), (9, 10)])]
+#[case::sq_then_plain_item("['a\n b', c]", &[(1, 7), (9, 10)])]
+#[case::between_plain_items("[x, \"a\n b\", y]", &[(1, 2), (4, 10), (12, 13)])]
+#[case::two_multiline_items("[\"a\n b\", 'c\n d']", &[(1, 7), (9, 15)])]
+#[case::comment_after_quote("[\"a\n b\" # c\n]", &[(1, 7)])]
+#[case::crlf("[\"a\r\n b\"\r\n]", &[(1, 8)])]
+#[case::cr("[\"a\r b\"\r]", &[(1, 7)])]
+#[case::mapping_value("{k: \"a\n b\"}", &[(1, 2), (4, 10)])]
+#[case::mapping_key("{\"a\n b\": 1}", &[(1, 7), (9, 10)])]
+#[case::flow_in_block_mapping("k: [\"a\n  b\", c]\nz: 1\n", &[(0, 1), (4, 11), (13, 14), (16, 17), (19, 20)])]
+fn multiline_quoted_scalar_span_in_flow_ends_at_closing_quote(
+    #[case] input: &str,
+    #[case] scalar_spans: &[(u32, u32)],
+) {
+    let spans: Vec<(u32, u32)> = parse_to_vec(input)
+        .into_iter()
+        .filter_map(|r| match r {
+            Ok((Event::Scalar { .. }, span)) => Some((span.start, span.end)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(spans, scalar_spans);
+}
+
+// The span change moves no other event: every event that is not the scalar
+// keeps its span (kind, start, end).
+#[rstest]
+#[case::flow_sequence("[\"a\n b\"\n]", &[("SequenceStart", 0, 0), ("SequenceEnd", 8, 8), ("DocumentEnd", 9, 9), ("StreamEnd", 9, 9)])]
+#[case::flow_sequence_item("[\"a\n b\", c]", &[("SequenceStart", 0, 0), ("SequenceEnd", 10, 10), ("DocumentEnd", 11, 11), ("StreamEnd", 11, 11)])]
+#[case::root("\"a\n b\"\n", &[("DocumentEnd", 7, 7), ("StreamEnd", 7, 7)])]
+#[case::root_with_document_end("\"a\n b\"\n...\n", &[("DocumentEnd", 7, 10), ("StreamEnd", 11, 11)])]
+#[case::root_comment("\"a\n b\" # c\n", &[("Comment", 7, 10), ("DocumentEnd", 11, 11), ("StreamEnd", 11, 11)])]
+#[case::root_single_quoted_comment("'a\n b'  # c\n", &[("Comment", 8, 11), ("DocumentEnd", 12, 12), ("StreamEnd", 12, 12)])]
+#[case::flow_mapping("{k: \"a\n b\"}", &[("MappingStart", 0, 0), ("MappingEnd", 10, 10), ("DocumentEnd", 11, 11), ("StreamEnd", 11, 11)])]
+fn multiline_quoted_scalar_leaves_other_event_spans_unchanged(
+    #[case] input: &str,
+    #[case] expected: &[(&str, u32, u32)],
+) {
+    let actual: Vec<(&str, u32, u32)> = parse_to_vec(input)
+        .into_iter()
+        .filter_map(|r| {
+            let (event, span) = r.unwrap_or_else(|e| unreachable!("unexpected parse error: {e}"));
+            let kind = match event {
+                Event::SequenceStart { .. } => "SequenceStart",
+                Event::SequenceEnd => "SequenceEnd",
+                Event::MappingStart { .. } => "MappingStart",
+                Event::MappingEnd => "MappingEnd",
+                Event::DocumentEnd { .. } => "DocumentEnd",
+                Event::StreamEnd => "StreamEnd",
+                Event::Comment { .. } => "Comment",
+                Event::StreamStart
+                | Event::Alias { .. }
+                | Event::DocumentStart { .. }
+                | Event::Scalar { .. } => return None,
+            };
+            Some((kind, span.start, span.end))
+        })
+        .collect();
+    assert_eq!(actual, expected);
+}
+
+// Apart from the scalar's span, the events of a multi-line quoted scalar are
+// those of its one-line form.
+#[rstest]
+#[case::flow_sequence("[\"a\n b\"\n]", "[\"a b\"]")]
+#[case::flow_sequence_item("[\"a\n b\", c]", "[\"a b\", c]")]
+#[case::block_value_comment("k: \"a\n b\" # c\nz: 1\n", "k: \"a b\" # c\nz: 1\n")]
+#[case::single_quoted("k: 'a\n b' # c\nz: 1\n", "k: 'a b' # c\nz: 1\n")]
+fn multiline_quoted_scalar_events_match_one_line_form(
+    #[case] multiline: &str,
+    #[case] one_line: &str,
+) {
+    assert_eq!(event_variants(multiline), event_variants(one_line));
+}
+
+// Trailing content after the closing quote is reported at the tail, which does
+// not move with the scalar's span.
+#[rstest]
+#[case::root("\"a\n b\" x\n", 6, 2, 3)]
+#[case::root_single_quoted("'a\n b' x\n", 6, 2, 3)]
+#[case::mapping_value("k: \"a\n b\" x\n", 9, 2, 3)]
+fn multiline_quoted_scalar_tail_error_position(
+    #[case] input: &str,
+    #[case] byte_offset: usize,
+    #[case] line: usize,
+    #[case] column: usize,
+) {
+    let error = parse_to_vec(input)
+        .into_iter()
+        .find_map(Result::err)
+        .unwrap_or_else(|| unreachable!("expected an error for {input:?}"));
+    assert_eq!(error.message, "unexpected content after quoted scalar");
+    assert_eq!(
+        (error.pos.byte_offset, error.pos.line, error.pos.column),
+        (byte_offset, line, column)
+    );
+}
