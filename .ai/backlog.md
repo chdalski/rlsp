@@ -33,9 +33,6 @@ share a parent line with one sub-item each.
 - Inline `--- v` path: `--- v\n# d\nw\n` loses `w`, `--- x\n  y\n` gives two scalars, and `--- x\n  @y\n` (also `,y`, `` `y ``, `%y`) is an error since comment plan Task 11 while libfyaml yields `x @y`; `block` document start handling; libfyaml comparison.
 - A property line before a flow key goes on the key, not the new mapping (`&y\n[x]: 2\n`); libfyaml comparison.
 - `- a\0\n- b\n` yields events after the error (`block/sequence.rs`); BOM in a plain scalar errors here and loads in libfyaml; libfyaml comparison.
-- Multi-line quoted scalars end their span after the line break (`try_consume_single_quoted`, `try_consume_double_quoted` in `lexer/quoted.rs`), so their value tokens have a wrong length (`classify_scalar_node`); span plan, comment plan Task 7.
-- Block-scalar code action moves a trailing comment and trailing spaces into the literal value (`editing/code_actions/block_scalar.rs`); span plan.
-- picomatch `?` patterns stay literal in the SchemaStore catalog (11 winget patterns); SchemaStore plan.
 - U+FEFF in a comment body loads though [75] `nb-char` excludes it (libfyaml accepts it too), and `bnf-§6.md` [75] says Strict-conformant; comment plan Task 2.
 - `["q"\t# c\n]\n` and `["q"\t, b]\n` are rejected as tab indentation in flow context while libfyaml accepts them; comment plan Task 4 review.
 - `? ?\n    k\n` emits no value event for the outer key while libfyaml emits an empty scalar; comment plan Task 4 review.
@@ -44,10 +41,8 @@ share a parent line with one sub-item each.
 - Semantic token lengths count code points, not UTF-16 units; comment plan Task 4.
 - `format_subtree` in `formatter.rs` indents a literal's blank lines with `base_indent`, so code actions produce whitespace-only lines (the value stays); comment plan Task 6 review.
 - An empty root document in the middle prints a blank line (`---\n\n---`) in `render_documents`, and `a:\n  # c\n` prints `a: ` with a trailing space; comment plan Task 6.
-- The server reads the modeline and suppressions with `str::lines()`, so they have no effect with `line_ending = cr`; comment plan Task 6 security review.
 - The formatter drops `%YAML` and `%TAG` directives, and blank-line pairing then loses every blank line in the rest of the file; comment plan Task 6 security review.
 - An own-line comment between `k:` and its scalar value prints after the entry, so a suppression comment there hits the neighbour; comment plan Task 7 security review.
-- `delete_anchor` misindents a block scalar's content lines; comment plan Task 7.
 - `- ` keeps a trailing space for null items and nested sequences; comment plan Task 7 test review.
 - `? ? a\n  : 1\n: v\n` is misread by the parser (the formatter avoids the form), and `a:\n!t : 1\n` belongs to the silent data change entry; comment plan Task 8 security review.
 - `? b\n` prints `b: ` with a trailing space, as `- ` does for nested sequences; comment plan Task 9 review.
@@ -55,7 +50,6 @@ share a parent line with one sub-item each.
 - Marker line and flow, rejected here and loaded by libfyaml: `--- :`, `--- : a`, `--- &a {a: 1}`, `--- &a [a: 1]`, `--- &a !t {a: 1}`, `--- &a {a: *a}`, `[!!null , b]`, `[&a , b]`, `[!t , b]`, `{?}`, `[?]`, implicit collection keys over the length limit; comment plan Task 11 review.
 - Flow keys differing from libfyaml: multi-line implicit keys `[ {a: 1,\n b: 2} : v ]` and `[ [a,\n b] : v ]` load here; `[ ? a, b: c ]` yields item `a`; `{ ? {a: b}, c: d }` omits the first entry's empty value; `? ? a` omits the null tag on its empty value, which `data_signature` hides; comment plan Task 11 review.
 - `{ a: b: c }` and `{ ? a : b : c }` load as `{ a: b, c:  }` while libfyaml reports a missing comma; `a: 1\n? ?\n`, `- :\n  - x\n  ? ?`, and `- \ta: 1` are rejected while libfyaml accepts them; `? \ta\n: \tb` is accepted while libfyaml rejects it; comment plan Task 12 review.
-- `validate_unused_anchors` ranges its diagnostic over the anchored node's `loc`, not `&name`, so empty nodes and collections get a later line; other code actions that read that range are suspect; comment plan Task 12.
 - `format_yaml` takes about 2.4 times as long as release 0.14.0 on a 1.7 MB file (230 ms against 94 ms), since the comment plan added reloads and passes; profile it; comment plan measurement.
 - The directive error reports one line late (`a: 1\n...\n%a\n` at 4:0), `%` in flow context says "not yet supported", and `a: 'x\n%y'` loads while `a: "x\n%y"` errors; parser plan Task 3.
 - On an error in the key's own `:` comment (`*a : # \x07`), the alias or flow events queued before it are no longer emitted, because `next()` in `base.rs` clears the queue; error kind and position stay; parser plan Task 4 review.
@@ -63,8 +57,6 @@ share a parent line with one sub-item each.
 - `[a,\n &x]` prints `[a, &x !!null ""]`: a tag appears in the output; parser plan Task 9 review.
 - The first single-line plain scalar is bounded by input size only, not `MAX_SCALAR_LEN`, and blank lines between keys are lost when a value gets fewer lines (`a: x\n  y\n\nb: 1\n`); parser plan Task 6 review.
 - A core tag `!!map` on a block key is dropped on format, with the same data; parser plan Task 14 review.
-- `range_formatting` in `rlsp-yaml/src/server.rs` joins `formatted.lines()` with `\n`, so editorconfig `end_of_line = crlf` and `insert_final_newline = false` have no effect there; nesting plan Task 3 review.
-- `scan_scalar_for_colors` in `rlsp-yaml/src/decorators/color.rs` shifts the range of a color in a quoted scalar one character left (`primary: '#ff0000'` gives 9..16, not 10..17), so a colorPresentation edit overwrites the quote; `tests/lsp_lifecycle/document_color.rs` pins today's range; nesting plan Task 4 review.
 
 ## Tests
 
