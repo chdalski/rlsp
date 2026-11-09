@@ -838,6 +838,106 @@ mod tests {
         assert_eq!(strings, expected_string_tokens, "tokens: {abs:?}");
     }
 
+    // The whole token list around a quoted scalar, as absolute
+    // `(line, start, length, type, modifiers)`: a multi-line one contributes
+    // no token and leaves the tokens after it on its last line where they are;
+    // a single-line one keeps its string token.  Continuation lines are
+    // indented deeper than the opening column so that the end column exceeds
+    // the start column and only the multi-line guard can reject the scalar.
+    #[rstest]
+    #[case::block_mapping_double(
+        "a: \"x\n    y\"\nb: 1\n",
+        &[(0, 0, 1, TOKEN_PROPERTY, 0), (2, 0, 1, TOKEN_PROPERTY, 0), (2, 3, 1, TOKEN_NUMBER, 0)],
+    )]
+    #[case::block_mapping_single(
+        "a: 'x\n    y'\nb: 1\n",
+        &[(0, 0, 1, TOKEN_PROPERTY, 0), (2, 0, 1, TOKEN_PROPERTY, 0), (2, 3, 1, TOKEN_NUMBER, 0)],
+    )]
+    #[case::block_mapping_double_with_comment(
+        "a: \"x\n    y\" # c\nb: 1\n",
+        &[
+            (0, 0, 1, TOKEN_PROPERTY, 0),
+            (1, 7, 3, TOKEN_COMMENT, 0),
+            (2, 0, 1, TOKEN_PROPERTY, 0),
+            (2, 3, 1, TOKEN_NUMBER, 0),
+        ],
+    )]
+    #[case::block_sequence_single_with_comment(
+        "- 'x\n    y' # c\n- 1\n",
+        &[(1, 7, 3, TOKEN_COMMENT, 0), (2, 2, 1, TOKEN_NUMBER, 0)],
+    )]
+    #[case::block_sequence_double(
+        "- \"x\n    y\"\n- 1\n",
+        &[(2, 2, 1, TOKEN_NUMBER, 0)],
+    )]
+    #[case::flow_mapping_double_next_key(
+        "{a: \"x\n      y\", b: 1}",
+        &[(0, 1, 1, TOKEN_PROPERTY, 0), (1, 10, 1, TOKEN_PROPERTY, 0), (1, 13, 1, TOKEN_NUMBER, 0)],
+    )]
+    #[case::flow_mapping_single_next_key(
+        "{a: 'x\n      y', b: 1}",
+        &[(0, 1, 1, TOKEN_PROPERTY, 0), (1, 10, 1, TOKEN_PROPERTY, 0), (1, 13, 1, TOKEN_NUMBER, 0)],
+    )]
+    #[case::flow_sequence_double_next_item(
+        "[\"x\n      y\", 1]",
+        &[(1, 10, 1, TOKEN_NUMBER, 0)],
+    )]
+    #[case::flow_sequence_single_next_keyword(
+        "['x\n      y', true]",
+        &[(1, 10, 4, TOKEN_KEYWORD, 0)],
+    )]
+    #[case::multi_line_quoted_flow_key(
+        "{\"x\n      y\": 1}",
+        &[(1, 10, 1, TOKEN_NUMBER, 0)],
+    )]
+    #[case::anchor_survives(
+        "a: &x \"p\n    q\"\n",
+        &[(0, 0, 1, TOKEN_PROPERTY, 0), (0, 3, 2, TOKEN_VARIABLE, MOD_DECLARATION)],
+    )]
+    #[case::tag_survives(
+        "a: !!str \"p\n    q\"\n",
+        &[(0, 0, 1, TOKEN_PROPERTY, 0), (0, 3, 5, TOKEN_TYPE, 0)],
+    )]
+    #[case::single_line_double(
+        "a: \"xy\"\nb: 1\n",
+        &[
+            (0, 0, 1, TOKEN_PROPERTY, 0),
+            (0, 3, 4, TOKEN_STRING, 0),
+            (1, 0, 1, TOKEN_PROPERTY, 0),
+            (1, 3, 1, TOKEN_NUMBER, 0),
+        ],
+    )]
+    #[case::single_line_single(
+        "a: 'xy'\nb: 1\n",
+        &[
+            (0, 0, 1, TOKEN_PROPERTY, 0),
+            (0, 3, 4, TOKEN_STRING, 0),
+            (1, 0, 1, TOKEN_PROPERTY, 0),
+            (1, 3, 1, TOKEN_NUMBER, 0),
+        ],
+    )]
+    #[case::single_line_multibyte_counts_characters(
+        "a: \"é日\"\nb: 1\n",
+        &[
+            (0, 0, 1, TOKEN_PROPERTY, 0),
+            (0, 3, 4, TOKEN_STRING, 0),
+            (1, 0, 1, TOKEN_PROPERTY, 0),
+            (1, 3, 1, TOKEN_NUMBER, 0),
+        ],
+    )]
+    #[case::single_line_sequence_item(
+        "- \"xy\"\n- 1\n",
+        &[(0, 2, 4, TOKEN_STRING, 0), (1, 2, 1, TOKEN_NUMBER, 0)],
+    )]
+    fn tokens_around_quoted_scalar_have_exact_positions(
+        #[case] text: &str,
+        #[case] expected: &[(u32, u32, u32, u32, u32)],
+    ) {
+        let docs = parse_docs(text);
+        let abs = absolute(&semantic_tokens(&docs, text));
+        assert_eq!(abs, expected, "input: {text:?}");
+    }
+
     // (d3) No other token lies inside the comment's interval on its line
     #[rstest]
     #[case::double_quoted_value("a: \"q\" # c\n")]

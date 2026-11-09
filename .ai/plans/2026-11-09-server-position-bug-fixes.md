@@ -25,7 +25,7 @@ with three defects of the same causes that the backlog does not list.
 - [x] Design review of the approach
 - [x] Task 1: The unused-anchor diagnostic covers `&name`, and its quick fix deletes only the anchor
 - [x] Task 2: A multi-line quoted scalar's span ends at its closing quote
-- [ ] Task 3: Semantic tokens skip multi-line quoted scalars
+- [x] Task 3: Semantic tokens skip multi-line quoted scalars
 - [ ] Task 4: The block-scalar action keeps trailing blanks out of the value
 - [ ] Task 5: Color ranges come from the scalar's source text
 - [ ] Task 6: One modeline reader serves the three modeline keys
@@ -103,10 +103,10 @@ the closing quote. The wrong span reaches both `parse_events()` and `load()`.
 The quoted branch of `classify_scalar_node` (`src/analysis/semantic_tokens.rs`) returns before the
 check that skips multi-line scalars.
 
-- [ ] A multi-line quoted scalar gets no string token, as a multi-line plain scalar does, and the
+- [x] A multi-line quoted scalar gets no string token, as a multi-line plain scalar does, and the
       tokens after it on its last line keep their positions
-- [ ] A single-line quoted scalar keeps its token
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] A single-line quoted scalar keeps its token
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 4: The block-scalar action keeps trailing blanks out of the value
 
