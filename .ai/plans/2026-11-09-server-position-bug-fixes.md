@@ -27,7 +27,7 @@ with three defects of the same causes that the backlog does not list.
 - [x] Task 2: A multi-line quoted scalar's span ends at its closing quote
 - [x] Task 3: Semantic tokens skip multi-line quoted scalars
 - [x] Task 4: The block-scalar action keeps trailing blanks out of the value
-- [ ] Task 5: Color ranges come from the scalar's source text
+- [x] Task 5: Color ranges come from the scalar's source text
 - [ ] Task 6: One modeline reader serves the three modeline keys
 - [ ] Task 7: Modelines and suppressions read source lines
 - [ ] Task 8: Context actions and block-to-flow read source lines
@@ -129,13 +129,16 @@ edit, which a client applies to the range that `documentColor` reported (LSP 3.1
 `ColorPresentation.textEdit`,
 https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#colorPresentation).
 
-- [ ] `documentColor` reports each color at its place in the source: `primary: '#ff0000'` gives
+- [x] `documentColor` reports each color at its place in the source: `primary: '#ff0000'` gives
       0:10..17, `a: |\n  red\n  blue\n` gives 1:2..5 and 2:2..6, and the same holds for folded,
       double-quoted, and multi-line plain and quoted scalars
-- [ ] A color in a block scalar's header comment or in a comment after a quoted scalar is not
-      reported, and a color written only through escapes is not reported either
-- [ ] The tests that pinned the shifted ranges assert the source ranges
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] A color in a block scalar's header comment or in a comment after a quoted scalar is not
+      reported, and neither is a color written only through escapes or a color function broken
+      across a line break, such as `a: rgb(1,\n  2, 3)`
+- [x] The tests that pinned the shifted ranges assert the source ranges
+- [x] A color function's range counts characters, not bytes, and a function longer than 128
+      characters is not reported, so the scan stays linear in the scalar's size
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 6: One modeline reader serves the three modeline keys
 
@@ -244,6 +247,10 @@ literal like the `schemas` setting.
 - **Colors from the source text:** no mapping from decoded offsets back to the source exists, and
   the parser crate may not add one for this. A color that exists only through escapes is no longer
   reported. Declined: correcting the decoded-value scan.
+- **Colors are matched within one source line:** a color function broken across a line break in a
+  plain, quoted, or folded scalar is no longer reported, though the decoded-value scan found it at
+  a wrong range; matching across lines needed a lookahead that made the scan quadratic. Declined:
+  ranges that span lines.
 - **Range formatting slices the full-format output:** range and full formatting then agree on every
   line. Without an editorconfig `end_of_line`, range formatting writes LF; a client that inserts
   text without matching the document's line breaks gets mixed breaks in that range. Declined: the
@@ -275,6 +282,12 @@ literal like the `schemas` setting.
 
 - **Gate demands of Task 4:** the action's position conversion fails closed on an offset off the
   text, and the blanks before a comment that stays after the replacement remain its separator.
+
+- **Gate demands of Task 5:** `try_color_function` counts characters, not bytes; the search for `)`
+  stops after 128 characters; text and AST are read under one lock; double-quoted escapes are
+  masked so a name joined through an escape is not reported, and lines joined by an escaped line
+  break are scanned together with matches kept within one source line; linearity tests cover large
+  scalars.
 
 ## Task Notes
 

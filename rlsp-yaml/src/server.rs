@@ -1737,13 +1737,21 @@ impl LanguageServer for Backend {
         }
 
         let uri = params.text_document.uri;
-        let docs = if let Ok(store) = self.document_store.lock() {
-            store.get_documents(&uri).cloned()
+        // One lock for both: the spans of the AST fit only the text they were
+        // loaded from.
+        let (text, docs) = if let Ok(store) = self.document_store.lock() {
+            (
+                store.get(&uri).map(str::to_string),
+                store.get_documents(&uri).cloned(),
+            )
         } else {
             return Ok(Vec::new());
         };
+        let Some(text) = text else {
+            return Ok(Vec::new());
+        };
 
-        let colors = crate::decorators::color::find_colors(docs.as_deref().unwrap_or(&[]))
+        let colors = crate::decorators::color::find_colors(docs.as_deref().unwrap_or(&[]), &text)
             .into_iter()
             .map(|m| ColorInformation {
                 range: m.range,

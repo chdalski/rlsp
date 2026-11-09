@@ -63,6 +63,7 @@ share a parent line with one sub-item each.
 - The scalar branch of selection ranges (`rlsp-yaml/src/analysis/selection.rs` ~177-184) checks only `col >= start_col` on every line, never the end column, so a cursor after a multi-line scalar's last character or left of its start column on a continuation line selects it; server bug-fix plan Task 2 review.
 - `validators/duplicate_keys.rs` (~96-97) builds a duplicate key's range from the start line and the end column, wrong for multi-line keys; server bug-fix plan Task 2 security review.
 - The block-scalar action (`rlsp-yaml/src/editing/code_actions/block_scalar.rs`) prints the header and keeps the original trailing comment after the block text when a scalar has a `trailing_comment` but `trailing_comment_line_end` returns `None`, which would turn the comment into content; no input reaching this path is known; server bug-fix plan Task 4 security review.
+- `LineIndex::line_column` in `rlsp-yaml-parser/src/pos.rs` costs time in proportion to the column per call, so a long line with many color matches (or other per-match position lookups) grows with the square of its length; server bug-fix plan Task 5 security review.
 
 ## Tests
 
@@ -104,6 +105,7 @@ share a parent line with one sub-item each.
   - `rlsp-yaml/tests/editorconfig_integration.rs`: A2 only checks its local copy `make_options_from_ec`, and B1 to B3 and C1 to C3 repeat the `line_ending_*` and `insert_final_newline_*` unit tests of `formatter.rs`; nesting plan Task 3 test review.
   - fold `collection_keys_nested_as_deep_as_the_parser_accepts_keep_their_data` (400 levels) into the rstest `explicit_keys_nested_as_deep_as_the_parser_accepts_keep_their_data` in `rlsp-yaml/tests/formatter_keeps_data.rs`; nesting plan Task 6 review.
   - `rlsp-yaml`: `should_not_panic_on_deeply_nested_yaml` and the three default-nesting tests in `src/parser.rs` (partly repeated by the rstest case 256), and the four `get_max_items_computed_*` tests in `src/server.rs`; nesting plan Task 8 test review.
+  - `rlsp-yaml/src/decorators/color.rs`: `hex_color_in_value_detected_despite_hash`, `range_positions_correct`, `css_named_color_in_value_position_is_detected`, `quoted_string_color_value_produces_correct_range`, and `hex_in_value_position_produces_correct_range` overlap the source-range table; server bug-fix plan Task 5 test review.
   - `should_publish_no_schema_diagnostics_when_schema_exceeds_depth_limit` in `rlsp-yaml/tests/lsp_lifecycle/schema_fetch.rs` partly overlaps `schema_beyond_the_json_depth_limit_is_refused` in `stack_depth.rs`; nesting plan Task 11 test review.
 
 ## Cleanup

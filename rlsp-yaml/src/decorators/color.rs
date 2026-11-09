@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 
-use rlsp_yaml_parser::LineIndex;
-use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::{Document, Node};
-use tower_lsp::lsp_types::{Color, ColorPresentation, Position, Range};
+use rlsp_yaml_parser::{LineBuffer, LineIndex, ScalarStyle, Span};
+use tower_lsp::lsp_types::{Color, ColorPresentation, Range};
+
+use crate::lsp_util::span_to_lsp;
 
 /// A color found at a specific range in the document.
 pub struct ColorMatch {
@@ -174,18 +175,22 @@ static NAMED_COLORS: &[(&str, [u8; 3])] = &[
 
 /// Scan `docs` for color values in YAML value positions and return all matches.
 ///
+/// `text` is the source `docs` were loaded from. Each match is reported at its
+/// place in `text`, because a client replaces that range when the user picks
+/// another color.
+///
 /// Comments are not represented in the AST, so colors in comments are never
 /// returned (deliberate behavior change from the text-scanning predecessor).
 ///
-/// For multi-line scalars, tokens that would straddle a line boundary within
-/// `node.value` are skipped; single-line tokens on any line of a block scalar
-/// are still returned.
+/// The source lines of each scalar are scanned one by one, so a token that
+/// straddles a line break is skipped. A color that exists only through escapes
+/// of a double-quoted scalar has no place in the source and is not reported.
 #[must_use]
-pub fn find_colors(docs: &[Document<Span>]) -> Vec<ColorMatch> {
+pub fn find_colors(docs: &[Document<Span>], text: &str) -> Vec<ColorMatch> {
     let mut results = Vec::new();
     for doc in docs {
         let idx = doc.line_index();
-        walk_node_value(&doc.root, &mut results, idx);
+        walk_node_value(&doc.root, text, &mut results, idx);
     }
     results
 }
@@ -272,59 +277,212 @@ const fn hsl_to_u32(v: f32) -> u32 {
 // ──────────────────────────────────────────────────────────────────────────────
 
 /// Walk `node` as a VALUE position, collecting color matches.
-fn walk_node_value(node: &Node<Span>, results: &mut Vec<ColorMatch>, idx: &LineIndex) {
+fn walk_node_value(node: &Node<Span>, text: &str, results: &mut Vec<ColorMatch>, idx: &LineIndex) {
     match node {
-        Node::Scalar { value, loc, .. } => {
-            scan_scalar_for_colors(value, *loc, results, idx);
+        Node::Scalar { style, loc, .. } => {
+            scan_scalar_for_colors(*style, *loc, text, results, idx);
         }
         Node::Mapping { entries, .. } => {
             for (_key, value) in entries {
-                walk_node_value(value, results, idx);
+                walk_node_value(value, text, results, idx);
             }
         }
         Node::Sequence { items, .. } => {
             for item in items {
-                walk_node_value(item, results, idx);
+                walk_node_value(item, text, results, idx);
             }
         }
         Node::Alias { .. } => {}
     }
 }
 
-/// Scan a scalar's decoded `value` string for color patterns.
+/// The longest color function in characters. A function that is longer is not
+/// reported; the limit keeps the search for its closing parenthesis, and with
+/// it the scan of a long line, linear in the size of the line.
+const MAX_COLOR_FUNCTION_LEN: usize = 128;
+
+/// One character of a scalar's source, or one escape sequence that stands for
+/// a character, with the byte offsets in the document it covers.
+#[derive(Clone, Copy)]
+struct Cell {
+    start: u32,
+    end: u32,
+    ch: char,
+}
+
+/// Scan a scalar's source text for color patterns, one source line at a time:
+/// a color never reaches over a line break.
 ///
-/// `loc` is the source span of the scalar (start column points at the opening
-/// quote character for quoted scalars, or the first content character for plain
-/// scalars). For multi-line block scalars, `node.value` may contain `\n`
-/// characters; tokens that straddle a line boundary are skipped.
-fn scan_scalar_for_colors(value: &str, loc: Span, results: &mut Vec<ColorMatch>, idx: &LineIndex) {
-    // Split the value on newlines so each line gets an independent scan.
-    // For single-line scalars this produces exactly one segment.
-    let start_line_0 = idx.line_column(loc.start).0.saturating_sub(1) as usize;
-    let start_col = idx.line_column(loc.start).1 as usize;
-    for (segment_idx, segment) in value.split('\n').enumerate() {
-        let line_idx = start_line_0 + segment_idx;
-        // Column base: first segment starts at start_col; subsequent
-        // segments start at column 0 (block scalar continuation lines).
-        let col_base = if segment_idx == 0 { start_col } else { 0 };
-        scan_line_for_colors(segment, line_idx, col_base, results);
+/// A block scalar's span starts at its `|` or `>` header, whose line (with any
+/// comment) is not content and is skipped. A span that does not fit `text`
+/// skips the scalar: nothing is guessed about where its colors lie.
+fn scan_scalar_for_colors(
+    style: ScalarStyle,
+    loc: Span,
+    text: &str,
+    results: &mut Vec<ColorMatch>,
+    idx: &LineIndex,
+) {
+    let Some(source) = text.get(loc.start as usize..loc.end as usize) else {
+        return;
+    };
+    let is_block = matches!(style, ScalarStyle::Literal(_) | ScalarStyle::Folded(_));
+    let mut lines = ScalarLines {
+        lines: LineBuffer::new(source),
+        base: loc.start,
+        escapes: style == ScalarStyle::DoubleQuoted,
+        after_escaped_break: false,
+    };
+    if is_block {
+        let _header = lines.lines.consume_next();
+    }
+    for cells in lines {
+        scan_cells(&cells, results, idx);
     }
 }
 
+/// The lines of a scalar's source as cells. Source lines that an escaped line
+/// break joins make up one line, as they read in the scalar's value.
+struct ScalarLines<'a> {
+    lines: LineBuffer<'a>,
+    /// Offset of the scalar's first byte in the document.
+    base: u32,
+    /// Whether backslash escapes are in effect (double-quoted scalars).
+    escapes: bool,
+    /// Whether the previous line ended in an escaped line break.
+    after_escaped_break: bool,
+}
+
+impl Iterator for ScalarLines<'_> {
+    type Item = Vec<Cell>;
+
+    fn next(&mut self) -> Option<Vec<Cell>> {
+        let mut cells = self.source_line()?;
+        while self.after_escaped_break {
+            let Some(joined) = self.source_line() else {
+                break;
+            };
+            cells.extend(joined);
+        }
+        Some(cells)
+    }
+}
+
+impl ScalarLines<'_> {
+    /// The cells of the next source line, escapes masked.
+    fn source_line(&mut self) -> Option<Vec<Cell>> {
+        let line = self.lines.consume_next()?;
+        // Offsets within the scalar's source fit `u32` because its span does.
+        let at =
+            |offset: usize| u32::try_from(offset).map_or(u32::MAX, |o| self.base.saturating_add(o));
+        let mut cells: Vec<Cell> = line
+            .content
+            .char_indices()
+            .map(|(o, ch)| Cell {
+                start: at(line.offset + o),
+                end: at(line.offset + o + ch.len_utf8()),
+                ch,
+            })
+            .collect();
+        if self.after_escaped_break {
+            // The leading blanks of the line after an escaped line break are
+            // not content.
+            let blanks = cells
+                .iter()
+                .take_while(|c| matches!(c.ch, ' ' | '\t'))
+                .count();
+            cells.drain(..blanks);
+        }
+        if self.escapes {
+            self.after_escaped_break = mask_escapes(&mut cells);
+        }
+        Some(cells)
+    }
+}
+
+/// Stands for an escape that decodes to a letter, digit, or `_`: a color token
+/// never ends or starts next to it. It is no ASCII letter, hex digit, or `_`,
+/// so it never becomes part of a token.
+const WORD_PLACEHOLDER: char = 'é';
+
+/// Stands for an escape that decodes to a character that is no word character.
+const BOUNDARY_PLACEHOLDER: char = '\\';
+
+/// Replace each escape sequence in the `cells` of a double-quoted scalar's line
+/// by one placeholder cell that covers the sequence, so a color token is
+/// matched against what the escapes decode to at its borders. An escaped line
+/// break at the end of the line is dropped; returns whether there was one.
+fn mask_escapes(cells: &mut Vec<Cell>) -> bool {
+    let mut masked = Vec::with_capacity(cells.len());
+    let mut i = 0;
+    let mut escaped_break = false;
+    while let Some(&cell) = cells.get(i) {
+        if cell.ch != '\\' {
+            masked.push(cell);
+            i += 1;
+            continue;
+        }
+        let Some(kind) = cells.get(i + 1).map(|c| c.ch) else {
+            escaped_break = true;
+            break;
+        };
+        let digits = match kind {
+            'x' => 2,
+            'u' => 4,
+            'U' => 8,
+            _ => 0,
+        };
+        let decoded = if digits == 0 {
+            None
+        } else {
+            cells
+                .get(i + 2..i + 2 + digits)
+                .and_then(|hex| {
+                    hex.iter().try_fold(0u32, |acc, c| {
+                        c.ch.to_digit(16).map(|value| (acc << 4) | value)
+                    })
+                })
+                .and_then(char::from_u32)
+        };
+        let (placeholder, length) = match decoded {
+            Some(c) if c.is_alphanumeric() || c == '_' => (WORD_PLACEHOLDER, 2 + digits),
+            Some(_) => (BOUNDARY_PLACEHOLDER, 2 + digits),
+            // A simple escape decodes to no word character. A malformed
+            // numeric escape is a load error and cannot reach here.
+            None => (BOUNDARY_PLACEHOLDER, 2),
+        };
+        let last = cells.get(i + length - 1).unwrap_or(&cell);
+        masked.push(Cell {
+            start: cell.start,
+            end: last.end,
+            ch: placeholder,
+        });
+        i += length;
+    }
+    *cells = masked;
+    escaped_break
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
-// Line-level scanner (unchanged logic, span-based coordinates)
+// Line-level scanner
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// Scan `scan_str` (a single line of a scalar value) for color patterns.
-/// `line_idx` and `col_offset` are used to produce absolute LSP positions.
-fn scan_line_for_colors(
-    scan_str: &str,
-    line_idx: usize,
-    col_offset: usize,
-    results: &mut Vec<ColorMatch>,
-) {
+/// Scan the `cells` of one line of a scalar's value for color patterns. A
+/// color that lies over more than one source line is not reported.
+fn scan_cells(cells: &[Cell], results: &mut Vec<ColorMatch>, idx: &LineIndex) {
+    let chars: Vec<char> = cells.iter().map(|c| c.ch).collect();
+    let mut push_match = |from: usize, len: usize, color: Color| {
+        if let (Some(start), Some(end)) = (
+            cells.get(from).map(|c| c.start),
+            cells.get(from + len - 1).map(|c| c.end),
+        ) {
+            let range = span_to_lsp(Span { start, end }, idx);
+            if range.start.line == range.end.line {
+                results.push(ColorMatch { range, color });
+            }
+        }
+    };
     let mut i = 0;
-    let chars: Vec<char> = scan_str.chars().collect();
 
     while i < chars.len() {
         let ch = chars.get(i).copied().unwrap_or('\0');
@@ -333,41 +491,26 @@ fn scan_line_for_colors(
         if ch == '#'
             && let Some((color, len)) = try_hex(chars.get(i + 1..).unwrap_or(&[]))
         {
-            let start_col = col_offset + i;
-            let end_col = start_col + 1 + len;
-            results.push(ColorMatch {
-                range: make_range(line_idx, start_col, line_idx, end_col),
-                color,
-            });
+            push_match(i, 1 + len, color);
             i += 1 + len;
             continue;
         }
 
         // Try function-form: rgb/rgba/hsl/hsla
         if let Some((color, len)) = try_color_function(chars.get(i..).unwrap_or(&[])) {
-            let start_col = col_offset + i;
-            let end_col = start_col + len;
-            results.push(ColorMatch {
-                range: make_range(line_idx, start_col, line_idx, end_col),
-                color,
-            });
+            push_match(i, len, color);
             i += len;
             continue;
         }
 
         // Try named color (only at word boundary)
-        let prev = i.checked_sub(1).and_then(|p| chars.get(p).copied());
-        let at_word_start = prev.is_none_or(|c| !c.is_alphanumeric() && c != '_');
+        let before = i.checked_sub(1).and_then(|p| chars.get(p).copied());
+        let at_word_start = before.is_none_or(|c| !c.is_alphanumeric() && c != '_');
         if at_word_start
             && ch.is_ascii_alphabetic()
             && let Some((color, len)) = try_named_color(chars.get(i..).unwrap_or(&[]))
         {
-            let start_col = col_offset + i;
-            let end_col = start_col + len;
-            results.push(ColorMatch {
-                range: make_range(line_idx, start_col, line_idx, end_col),
-                color,
-            });
+            push_match(i, len, color);
             i += len;
             continue;
         }
@@ -439,32 +582,42 @@ fn parse_hex_color(hex: &str) -> Option<Color> {
 /// Attempt to parse a CSS color function: `rgb(...)`, `rgba(...)`, `hsl(...)`, `hsla(...)`.
 /// Returns `(Color, chars_consumed)` or `None`.
 fn try_color_function(chars: &[char]) -> Option<(Color, usize)> {
-    let s: String = chars.iter().collect();
-    let lower = s.to_lowercase();
-
-    let prefix = if lower.starts_with("rgba(") {
-        "rgba("
-    } else if lower.starts_with("rgb(") {
-        "rgb("
-    } else if lower.starts_with("hsla(") {
-        "hsla("
-    } else if lower.starts_with("hsl(") {
-        "hsl("
-    } else {
+    // Every function name starts with one of these; checking first spares the
+    // copy of the window at every other position.
+    if !matches!(chars.first(), Some('r' | 'R' | 'h' | 'H')) {
         return None;
+    }
+    let window = chars.get(..MAX_COLOR_FUNCTION_LEN).unwrap_or(chars);
+    let name_len = window
+        .iter()
+        .take_while(|c| c.is_ascii_alphabetic())
+        .count();
+    let name: String = window
+        .get(..name_len)?
+        .iter()
+        .map(char::to_ascii_lowercase)
+        .collect();
+    if window.get(name_len) != Some(&'(') {
+        return None;
+    }
+    let is_rgb = match name.as_str() {
+        "rgb" | "rgba" => true,
+        "hsl" | "hsla" => false,
+        _ => return None,
     };
+    let has_alpha = name.ends_with('a');
 
-    let close = s[prefix.len()..].find(')')?;
-    let args_str = &s[prefix.len()..prefix.len() + close];
-    let total_len = prefix.len() + close + 1;
+    // Counted in characters, as the callers advance in characters.
+    let close = name_len + 1 + window.get(name_len + 1..)?.iter().position(|&c| c == ')')?;
+    let args: String = window.get(name_len + 1..close)?.iter().collect();
 
-    let color = if prefix.starts_with("rgb") {
-        parse_rgb_args(args_str, prefix.starts_with("rgba"))?
+    let color = if is_rgb {
+        parse_rgb_args(&args, has_alpha)?
     } else {
-        parse_hsl_args(args_str, prefix.starts_with("hsla"))?
+        parse_hsl_args(&args, has_alpha)?
     };
 
-    Some((color, total_len))
+    Some((color, close + 1))
 }
 
 fn parse_component(s: &str) -> Option<f32> {
@@ -576,19 +729,6 @@ fn try_named_color(chars: &[char]) -> Option<(Color, usize)> {
     None
 }
 
-fn make_range(start_line: usize, start_col: usize, end_line: usize, end_col: usize) -> Range {
-    Range {
-        start: Position {
-            line: u32::try_from(start_line).unwrap_or(u32::MAX),
-            character: u32::try_from(start_col).unwrap_or(u32::MAX),
-        },
-        end: Position {
-            line: u32::try_from(end_line).unwrap_or(u32::MAX),
-            character: u32::try_from(end_col).unwrap_or(u32::MAX),
-        },
-    }
-}
-
 // ──────────────────────────────────────────────────────────────────────────────
 // Color math
 // ──────────────────────────────────────────────────────────────────────────────
@@ -663,9 +803,36 @@ fn rgb_to_hsl(red: f32, green: f32, blue: f32) -> (f32, f32, f32) {
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
+    use tower_lsp::lsp_types::Position;
 
     use super::*;
     use crate::test_utils::parse_docs;
+
+    fn colors_of(yaml: &str) -> Vec<ColorMatch> {
+        find_colors(&parse_docs(yaml), yaml)
+    }
+
+    fn range(start_line: u32, start_col: u32, end_line: u32, end_col: u32) -> Range {
+        Range::new(
+            Position::new(start_line, start_col),
+            Position::new(end_line, end_col),
+        )
+    }
+
+    /// The text a client would replace for a single-line `range`: columns are
+    /// codepoints, lines end at `\n`, `\r\n`, or a lone `\r`.
+    fn text_under(yaml: &str, range: Range) -> String {
+        assert_eq!(range.start.line, range.end.line, "single-line range");
+        yaml.replace("\r\n", "\n")
+            .replace('\r', "\n")
+            .split('\n')
+            .nth(range.start.line as usize)
+            .expect("range line exists")
+            .chars()
+            .skip(range.start.character as usize)
+            .take((range.end.character - range.start.character) as usize)
+            .collect()
+    }
 
     fn approx_eq(a: f32, b: f32) -> bool {
         (a - b).abs() < 0.01
@@ -684,10 +851,254 @@ mod tests {
     #[case::unknown_named_color("color: notacolor\n")]
     // Comments produce no AST nodes, so no matches — deliberate behavior after AST retrofit.
     #[case::comment_line_skipped("# this is a comment with red\n")]
+    #[case::block_literal_header_comment("a: | # red\n  x\n")]
+    #[case::block_folded_header_comment("a: >- # red\n  x\n")]
+    #[case::comment_after_double_quoted("a: \"x\" # red\n")]
+    #[case::comment_after_single_quoted("a: 'x' # red\n")]
+    #[case::escape_after_name("a: \"red\\x41\"\n")]
+    #[case::escape_before_name("a: \"\\x41red\"\n")]
+    #[case::unicode_escape_before_name("a: \"\\u0041red\"\n")]
+    #[case::long_unicode_escape_after_name("a: \"red\\U00000041\"\n")]
+    #[case::name_through_hex_escape("a: \"\\x72ed\"\n")]
+    #[case::name_through_partial_escape("a: \"r\\x65d\"\n")]
+    #[case::name_through_unicode_escapes("a: \"\\u0072\\u0065\\u0064\"\n")]
+    #[case::hex_before_escape("a: \"#fff\\x41\"\n")]
+    #[case::name_joined_by_escaped_break_before("a: \"a\\\n  red\"\n")]
+    #[case::name_joined_by_escaped_break_after("a: \"red\\\n  s\"\n")]
+    #[case::function_over_plain_line_break("a: rgb(1,\n  2, 3)\n")]
+    #[case::function_over_single_quoted_line_break("a: 'rgb(1,\n  2, 3)'\n")]
+    #[case::function_over_double_quoted_line_break("a: \"rgb(1,\n  2, 3)\"\n")]
+    #[case::name_over_escaped_line_break("a: \"re\\\n  d\"\n")]
+    #[case::hex_over_escaped_line_break("a: \"#ff\\\n  f\"\n")]
+    #[case::function_over_escaped_line_break("a: \"rgb(1,\\\n  2, 3)\"\n")]
+    #[case::function_over_folded_line_break("a: >\n  rgb(1,\n  2, 3)\n")]
+    #[case::function_over_literal_line_break("a: |\n  rgb(1,\n  2, 3)\n")]
+    #[case::name_over_plain_line_break("a: re\n  d\n")]
+    #[case::empty_block_scalar("a: |\n")]
+    #[case::empty_block_scalar_before_entry("a: |\nb: x\n")]
     fn find_colors_returns_empty(#[case] text: &str) {
-        let docs = parse_docs(text);
-        let colors = find_colors(&docs);
+        let colors = colors_of(text);
         assert!(colors.is_empty(), "expected no colors for: {text:?}");
+    }
+
+    // Each case lists `(line, start column, end column, source text)` of every
+    // color in the order reported. The source text is what a client replaces,
+    // so it is read back from the text under the range.
+    #[rstest]
+    // Single-line scalars
+    #[case::plain("color: red\n", &[(0, 7, 10, "red")])]
+    #[case::single_quoted("color: 'red'\n", &[(0, 8, 11, "red")])]
+    #[case::double_quoted("color: \"red\"\n", &[(0, 8, 11, "red")])]
+    #[case::single_quoted_hex("primary: '#ff0000'\n", &[(0, 10, 17, "#ff0000")])]
+    #[case::double_quoted_hex("color: \"#ff0000\"\n", &[(0, 8, 15, "#ff0000")])]
+    #[case::single_quoted_with_doubled_quote("c: 'it''s red'\n", &[(0, 10, 13, "red")])]
+    #[case::two_colors_in_one_scalar("a: \"red red\"\n", &[(0, 4, 7, "red"), (0, 8, 11, "red")])]
+    #[case::two_entries("a: red\nb: red\n", &[(0, 3, 6, "red"), (1, 3, 6, "red")])]
+    #[case::quoted_key_is_no_value("'red': blue\n", &[(0, 7, 11, "blue")])]
+    #[case::comment_after_plain("a: red # blue\n", &[(0, 3, 6, "red")])]
+    #[case::comment_after_single_quoted("a: 'red' # blue\n", &[(0, 4, 7, "red")])]
+    #[case::comment_after_double_quoted("a: \"red\" # blue\n", &[(0, 4, 7, "red")])]
+    // Properties and aliases
+    #[case::anchor_name_is_no_color("a: &red blue\n", &[(0, 8, 12, "blue")])]
+    #[case::tag_before_value("a: !!str red\n", &[(0, 9, 12, "red")])]
+    #[case::tag_name_is_no_color("a: !red blue\n", &[(0, 8, 12, "blue")])]
+    #[case::alias_is_no_scalar("a: &x blue\nb: *x\n", &[(0, 6, 10, "blue")])]
+    // Flow collections
+    #[case::flow_sequence("[red, 'blue']\n", &[(0, 1, 4, "red"), (0, 7, 11, "blue")])]
+    #[case::flow_mapping("{a: red, b: \"blue\"}\n", &[(0, 4, 7, "red"), (0, 13, 17, "blue")])]
+    #[case::flow_sequence_over_lines("[ 'red',\n  \"blue\" ]\n", &[(0, 3, 6, "red"), (1, 3, 7, "blue")])]
+    // Block scalars
+    #[case::literal("a: |\n  red\n  blue\n", &[(1, 2, 5, "red"), (2, 2, 6, "blue")])]
+    #[case::folded("a: >\n  red\n  blue\n", &[(1, 2, 5, "red"), (2, 2, 6, "blue")])]
+    #[case::literal_with_indent_indicator("a: |2\n    red\n", &[(1, 4, 7, "red")])]
+    #[case::hash_in_block_content("a: |\n  # red\n", &[(1, 4, 7, "red")])]
+    #[case::block_with_blank_line("a: |\n  red\n\n  blue\n", &[(1, 2, 5, "red"), (3, 2, 6, "blue")])]
+    #[case::nested_block("m:\n  a: |\n    red\n", &[(2, 4, 7, "red")])]
+    #[case::block_in_sequence("- |\n  red\n", &[(1, 2, 5, "red")])]
+    #[case::keep_chomping("a: |+\n  red\n\n\n", &[(1, 2, 5, "red")])]
+    #[case::comment_after_block("a: |\n  red\n# blue\n", &[(1, 2, 5, "red")])]
+    #[case::tab_in_block("a: |\n  \tred\n", &[(1, 3, 6, "red")])]
+    #[case::block_with_tag("a: !!str |\n  red\n", &[(1, 2, 5, "red")])]
+    #[case::block_with_anchor("a: &x |\n  red\n", &[(1, 2, 5, "red")])]
+    #[case::multibyte_in_block("a: |\n  é red\n", &[(1, 4, 7, "red")])]
+    // Multi-line plain and quoted scalars
+    #[case::plain_over_lines("a: x\n  red\n  blue\n", &[(1, 2, 5, "red"), (2, 2, 6, "blue")])]
+    #[case::plain_color_on_first_line("a: red\n  blue\n", &[(0, 3, 6, "red"), (1, 2, 6, "blue")])]
+    #[case::double_quoted_over_lines("a: \"red\n  blue\"\n", &[(0, 4, 7, "red"), (1, 2, 6, "blue")])]
+    #[case::double_quoted_blank_line("a: \"x\n\n  red\"\n", &[(2, 2, 5, "red")])]
+    #[case::single_quoted_over_lines("a: 'x\n  red\n  blue'\n", &[(1, 2, 5, "red"), (2, 2, 6, "blue")])]
+    // Multibyte characters count as one column each: the columns are codepoints,
+    // the convention of every position of the server (`LineIndex`), not UTF-16
+    // code units. A later move to UTF-16 changes the astral case on purpose.
+    #[case::cyrillic_key("ключ: red\n", &[(0, 6, 9, "red")])]
+    #[case::astral_character_before("a: \"😀 red\"\n", &[(0, 6, 9, "red")])]
+    // Line breaks
+    #[case::crlf_block("a: |\r\n  red\r\n  blue\r\n", &[(1, 2, 5, "red"), (2, 2, 6, "blue")])]
+    #[case::crlf_plain("a: x\r\n  red\r\n  blue\r\n", &[(1, 2, 5, "red"), (2, 2, 6, "blue")])]
+    #[case::crlf_quoted("a: \"x\r\n  red\"\r\n", &[(1, 2, 5, "red")])]
+    #[case::lone_cr_block("a: |\r  red\r  blue\r", &[(1, 2, 5, "red"), (2, 2, 6, "blue")])]
+    // Several documents
+    #[case::second_document("a: red\n---\nb: |\n  blue\n", &[(0, 3, 6, "red"), (3, 2, 6, "blue")])]
+    #[case::three_documents(
+        "a: 'red'\n---\nb: \"blue\"\n---\nc: green\n",
+        &[(0, 4, 7, "red"), (2, 4, 8, "blue"), (4, 3, 8, "green")]
+    )]
+    // A multibyte character inside a function counts as one column
+    #[case::no_break_space_in_rgb(
+        "a: rgb(1,\u{a0}2,3) x\n",
+        &[(0, 3, 14, "rgb(1,\u{a0}2,3)")]
+    )]
+    #[case::color_after_function_with_no_break_space(
+        "a: rgb(1,\u{a0}2,3) red\n",
+        &[(0, 3, 14, "rgb(1,\u{a0}2,3)"), (0, 15, 18, "red")]
+    )]
+    #[case::ideographic_space_in_hsl(
+        "a: hsl(0,\u{3000}100%, 50%)\n",
+        &[(0, 3, 20, "hsl(0,\u{3000}100%, 50%)")]
+    )]
+    // Escapes of a double-quoted scalar that decode to no word character
+    #[case::newline_escape_before("a: \"\\nred\"\n", &[(0, 6, 9, "red")])]
+    #[case::newline_escape_after("a: \"red\\n\"\n", &[(0, 4, 7, "red")])]
+    #[case::tab_escape_between("a: \"red\\tblue\"\n", &[(0, 4, 7, "red"), (0, 9, 13, "blue")])]
+    #[case::escaped_quotes("a: \"\\\"red\\\"\"\n", &[(0, 6, 9, "red")])]
+    #[case::escaped_backslash_after("a: \"red\\\\\"\n", &[(0, 4, 7, "red")])]
+    #[case::space_escape_after("a: \"red\\x20\"\n", &[(0, 4, 7, "red")])]
+    #[case::no_break_space_escape_before("a: \"\\u00a0red\"\n", &[(0, 10, 13, "red")])]
+    #[case::escaped_break_after_space("a: \"x \\\n  red\"\n", &[(1, 2, 5, "red")])]
+    #[case::escaped_break_before_comma(
+        "a: \"red\\\n  , blue\"\n",
+        &[(0, 4, 7, "red"), (1, 4, 8, "blue")]
+    )]
+    #[case::escaped_break_before_closing_quote("a: \"red\\\n  \"\n", &[(0, 4, 7, "red")])]
+    #[case::hex_before_escaped_break_and_comma("a: \"#fff\\\n  , x\"\n", &[(0, 4, 8, "#fff")])]
+    #[case::name_over_escaped_break_then_a_color_in_the_same_line(
+        "a: \"r\\\n  ed blue\"\n",
+        &[(1, 5, 9, "blue")]
+    )]
+    #[case::chain_of_escaped_breaks_before_comma(
+        "a: \"red\\\n  \\\n  , x\"\n",
+        &[(0, 4, 7, "red")]
+    )]
+    fn color_range_matches_source_position(
+        #[case] text: &str,
+        #[case] expected: &[(u32, u32, u32, &str)],
+    ) {
+        let colors = colors_of(text);
+        let reported: Vec<(Range, String)> = colors
+            .iter()
+            .map(|c| (c.range, text_under(text, c.range)))
+            .collect();
+        let expected: Vec<(Range, String)> = expected
+            .iter()
+            .map(|&(line, from, to, token)| (range(line, from, line, to), token.to_owned()))
+            .collect();
+        assert_eq!(reported, expected, "colors of {text:?}");
+    }
+
+    #[test]
+    fn color_function_longer_than_the_limit_is_not_reported() {
+        let text = format!("a: rgb(1,{}2, 3)\n", " ".repeat(MAX_COLOR_FUNCTION_LEN));
+        assert!(colors_of(&text).is_empty());
+    }
+
+    #[test]
+    fn color_function_one_over_the_limit_is_not_reported() {
+        // The function is "rgb(1,", the padding, and "2, 3)".
+        let padding = MAX_COLOR_FUNCTION_LEN - "rgb(1,".len() - "2, 3)".len() + 1;
+        let text = format!("a: rgb(1,{}2, 3)\n", " ".repeat(padding));
+        assert!(colors_of(&text).is_empty());
+    }
+
+    #[test]
+    fn color_function_up_to_the_limit_is_reported() {
+        let padding = MAX_COLOR_FUNCTION_LEN - "rgb(1,".len() - "2, 3)".len();
+        let text = format!("a: rgb(1,{}2, 3)\n", " ".repeat(padding));
+        let colors = colors_of(&text);
+        assert_eq!(colors.len(), 1);
+        assert_eq!(text_under(&text, colors[0].range).chars().count(), 128);
+    }
+
+    // The scans of large scalars finish: no quadratic work in the size of a
+    // line or a scalar. Nothing here asserts a time; a quadratic scan does not
+    // end in any useful time at these sizes.
+    #[rstest]
+    #[case::one_long_plain_line(format!("a: {}\n", "rgb(".repeat(100_000)))]
+    #[case::folded_scalar_of_many_lines(format!("a: >\n{}", "  rgb(rgb(rgb(\n".repeat(50_000)))]
+    #[case::plain_scalar_of_many_short_lines(format!("a: x\n{}", "  r\n".repeat(100_000)))]
+    #[case::literal_scalar_of_many_lines(format!("a: |\n{}", "  rgb(rgb(\n".repeat(50_000)))]
+    #[case::quoted_scalar_of_many_escaped_breaks(format!("a: \"x\\\n{}  \"\n", "  \\\n".repeat(100_000)))]
+    #[case::quoted_scalar_of_many_lines(format!("a: \"x\n{}\"\n", "  hsl(hsl(\n".repeat(50_000)))]
+    fn large_scalars_without_colors_are_scanned_in_linear_time(#[case] text: String) {
+        assert!(colors_of(&text).is_empty());
+    }
+
+    #[test]
+    fn large_folded_scalar_reports_every_color() {
+        let text = format!("a: >\n{}", "  red rgb(1, 2, 3)\n".repeat(20_000));
+        assert_eq!(colors_of(&text).len(), 40_000);
+    }
+
+    #[test]
+    fn colors_in_block_scalar_keep_their_order_and_values() {
+        let colors = colors_of("a: |\n  red\n  blue\n");
+        assert_eq!(colors.len(), 2);
+        assert!(color_eq(
+            &colors[0].color,
+            &Color {
+                red: 1.0,
+                green: 0.0,
+                blue: 0.0,
+                alpha: 1.0
+            }
+        ));
+        assert!(color_eq(
+            &colors[1].color,
+            &Color {
+                red: 0.0,
+                green: 0.0,
+                blue: 1.0,
+                alpha: 1.0
+            }
+        ));
+    }
+
+    #[test]
+    fn text_shorter_than_the_spans_reports_nothing() {
+        let docs = parse_docs("a: red\n");
+        assert!(find_colors(&docs, "a").is_empty());
+    }
+
+    #[test]
+    fn span_start_inside_a_multibyte_character_reports_nothing() {
+        let docs = parse_docs("a: red\n");
+        // The scalar starts at byte 3, in the middle of the second "é".
+        assert!(find_colors(&docs, "ééé").is_empty());
+    }
+
+    #[test]
+    fn no_documents_report_nothing() {
+        assert!(find_colors(&[], "").is_empty());
+    }
+
+    #[test]
+    fn byte_order_mark_does_not_shift_the_range_from_the_scalars_position() {
+        // The offsets of the spans and of the LineIndex both count the BOM,
+        // so the color sits where `span_to_lsp` puts its scalar.
+        let text = "\u{feff}color: red\n";
+        let colors = colors_of(text);
+        assert_eq!(colors.len(), 1);
+        let docs = parse_docs(text);
+        let Node::Mapping { entries, .. } = &docs[0].root else {
+            panic!("a mapping");
+        };
+        let Node::Scalar { loc, .. } = &entries[0].1 else {
+            panic!("a scalar");
+        };
+        assert_eq!(
+            colors[0].range,
+            span_to_lsp(*loc, docs[0].line_index()),
+            "the color is the whole scalar"
+        );
     }
 
     // ── Hex colors ──────────────────────────────────────────────────────────
@@ -695,8 +1106,7 @@ mod tests {
     #[test]
     fn hex_3_digit_expands_correctly() {
         // Hex colors must be quoted in YAML — unquoted # is a comment marker.
-        let docs = parse_docs("color: '#fff'\n");
-        let colors = find_colors(&docs);
+        let colors = colors_of("color: '#fff'\n");
         assert_eq!(colors.len(), 1);
         assert!(color_eq(
             &colors[0].color,
@@ -712,8 +1122,7 @@ mod tests {
     #[test]
     fn hex_6_digit_parses_correctly() {
         // Hex colors must be quoted in YAML — unquoted # is a comment marker.
-        let docs = parse_docs("color: '#FF0000'\n");
-        let colors = find_colors(&docs);
+        let colors = colors_of("color: '#FF0000'\n");
         assert_eq!(colors.len(), 1);
         assert!(color_eq(
             &colors[0].color,
@@ -729,8 +1138,7 @@ mod tests {
     #[test]
     fn hex_8_digit_parses_with_alpha() {
         // Hex colors must be quoted in YAML — unquoted # is a comment marker.
-        let docs = parse_docs("color: '#00ff00ff'\n");
-        let colors = find_colors(&docs);
+        let colors = colors_of("color: '#00ff00ff'\n");
         assert_eq!(colors.len(), 1);
         assert!(color_eq(
             &colors[0].color,
@@ -747,8 +1155,7 @@ mod tests {
 
     #[test]
     fn named_color_red_matched() {
-        let docs = parse_docs("color: red\n");
-        let colors = find_colors(&docs);
+        let colors = colors_of("color: red\n");
         assert_eq!(colors.len(), 1);
         assert!(color_eq(
             &colors[0].color,
@@ -763,8 +1170,7 @@ mod tests {
 
     #[test]
     fn named_color_aliceblue_matched() {
-        let docs = parse_docs("bg: aliceblue\n");
-        let colors = find_colors(&docs);
+        let colors = colors_of("bg: aliceblue\n");
         assert_eq!(colors.len(), 1);
         assert!(color_eq(
             &colors[0].color,
@@ -779,8 +1185,7 @@ mod tests {
 
     #[test]
     fn named_color_case_insensitive() {
-        let docs = parse_docs("color: RED\n");
-        let colors = find_colors(&docs);
+        let colors = colors_of("color: RED\n");
         assert_eq!(colors.len(), 1);
         assert!(color_eq(
             &colors[0].color,
@@ -797,8 +1202,7 @@ mod tests {
 
     #[test]
     fn rgb_integer_parses_correctly() {
-        let docs = parse_docs("color: rgb(255, 0, 0)\n");
-        let colors = find_colors(&docs);
+        let colors = colors_of("color: rgb(255, 0, 0)\n");
         assert_eq!(colors.len(), 1);
         assert!(color_eq(
             &colors[0].color,
@@ -813,8 +1217,7 @@ mod tests {
 
     #[test]
     fn rgb_percentage_parses_correctly() {
-        let docs = parse_docs("color: rgb(100%, 0%, 0%)\n");
-        let colors = find_colors(&docs);
+        let colors = colors_of("color: rgb(100%, 0%, 0%)\n");
         assert_eq!(colors.len(), 1);
         assert!(color_eq(
             &colors[0].color,
@@ -829,8 +1232,7 @@ mod tests {
 
     #[test]
     fn rgba_with_alpha_parses_correctly() {
-        let docs = parse_docs("color: rgba(0, 0, 0, 0.5)\n");
-        let colors = find_colors(&docs);
+        let colors = colors_of("color: rgba(0, 0, 0, 0.5)\n");
         assert_eq!(colors.len(), 1);
         assert!(color_eq(
             &colors[0].color,
@@ -848,8 +1250,7 @@ mod tests {
     #[test]
     fn hsl_red_parses_to_red() {
         // hsl(0, 100%, 50%) = red
-        let docs = parse_docs("color: hsl(0, 100%, 50%)\n");
-        let colors = find_colors(&docs);
+        let colors = colors_of("color: hsl(0, 100%, 50%)\n");
         assert_eq!(colors.len(), 1);
         assert!(color_eq(
             &colors[0].color,
@@ -865,8 +1266,7 @@ mod tests {
     #[test]
     fn hsla_semi_transparent_green() {
         // hsla(120, 100%, 50%, 0.5) = semi-transparent green
-        let docs = parse_docs("color: hsla(120, 100%, 50%, 0.5)\n");
-        let colors = find_colors(&docs);
+        let colors = colors_of("color: hsla(120, 100%, 50%, 0.5)\n");
         assert_eq!(colors.len(), 1);
         let c = &colors[0].color;
         assert!(approx_eq(c.red, 0.0));
@@ -912,8 +1312,7 @@ mod tests {
     #[test]
     fn color_in_value_detected_not_in_key() {
         // Key "red:" should not be detected; value "blue" should be
-        let docs = parse_docs("red: blue\n");
-        let colors = find_colors(&docs);
+        let colors = colors_of("red: blue\n");
         assert_eq!(colors.len(), 1);
         assert!(color_eq(
             &colors[0].color,
@@ -929,15 +1328,13 @@ mod tests {
     #[test]
     fn hex_color_in_value_detected_despite_hash() {
         // Hex colors must be quoted in YAML — unquoted # is a comment marker.
-        let docs = parse_docs("color: '#ff0000'\n");
-        let colors = find_colors(&docs);
+        let colors = colors_of("color: '#ff0000'\n");
         assert_eq!(colors.len(), 1);
     }
 
     #[test]
     fn range_positions_correct() {
-        let docs = parse_docs("color: red\n");
-        let colors = find_colors(&docs);
+        let colors = colors_of("color: red\n");
         assert_eq!(colors.len(), 1);
         assert_eq!(colors[0].range.start.line, 0);
         // "color: " is 7 chars, so "red" starts at column 7
@@ -950,15 +1347,13 @@ mod tests {
     #[test]
     fn hex_in_value_position_produces_correct_range() {
         // Hex must be quoted to avoid YAML treating # as comment.
-        // "color: '#ff0000'" — quoted value; node.(idx.line_column(loc.start).1 as usize) = 7 (at the ').
-        // node.value = "#ff0000"; match starts at offset 0 → start_col = 7.
-        // #ff0000 is 7 chars → end_col = 7 + 7 = 14.
-        let docs = parse_docs("color: '#ff0000'\n");
-        let colors = find_colors(&docs);
+        // "color: '#ff0000'" — the opening quote is at column 7, so the
+        // 7-character color starts at column 8 and ends at column 15.
+        let colors = colors_of("color: '#ff0000'\n");
         assert_eq!(colors.len(), 1);
         assert_eq!(colors[0].range.start.line, 0);
-        assert_eq!(colors[0].range.start.character, 7);
-        assert_eq!(colors[0].range.end.character, 14);
+        assert_eq!(colors[0].range.start.character, 8);
+        assert_eq!(colors[0].range.end.character, 15);
         assert!(color_eq(
             &colors[0].color,
             &Color {
@@ -973,8 +1368,7 @@ mod tests {
     #[test]
     fn css_named_color_in_value_position_is_detected() {
         // "color: blue" — value scalar "blue" at column 7
-        let docs = parse_docs("color: blue\n");
-        let colors = find_colors(&docs);
+        let colors = colors_of("color: blue\n");
         assert_eq!(colors.len(), 1);
         assert_eq!(colors[0].range.start.line, 0);
         assert_eq!(colors[0].range.start.character, 7);
@@ -992,32 +1386,26 @@ mod tests {
 
     #[test]
     fn quoted_string_color_value_produces_correct_range() {
-        // "color: 'red'" — quoted scalar; node.(idx.line_column(loc.start).1 as usize) points at the
-        // opening quote character. node.value = "red" (decoded, no quotes).
-        // Byte offset 0 in node.value → column = opening_quote_col + 0.
-        // Range: start at opening quote, end 3 chars later (length of "red").
-        let docs = parse_docs("color: 'red'\n");
-        let colors = find_colors(&docs);
+        // "color: 'red'" — the opening quote is at column 7; the color itself
+        // (without the quotes) spans columns 8 to 11.
+        let colors = colors_of("color: 'red'\n");
         assert_eq!(colors.len(), 1);
         assert_eq!(colors[0].range.start.line, 0);
-        // (idx.line_column(loc.start).1 as usize) for a single-quoted scalar is at the opening quote
-        assert_eq!(colors[0].range.start.character, 7);
-        assert_eq!(colors[0].range.end.character, 10);
+        assert_eq!(colors[0].range.start.character, 8);
+        assert_eq!(colors[0].range.end.character, 11);
     }
 
     #[test]
     fn hex_color_in_comment_produces_no_match() {
         // A comment-only document produces zero AST nodes; no colors can match.
-        let docs = parse_docs("# #ff0000\n");
-        let colors = find_colors(&docs);
+        let colors = colors_of("# #ff0000\n");
         assert!(colors.is_empty(), "comment colors must not be detected");
     }
 
     #[test]
     fn color_pattern_as_mapping_key_is_not_matched() {
         // "red: true" — key "red" must NOT produce a match; value "true" is not a color.
-        let docs = parse_docs("red: true\n");
-        let colors = find_colors(&docs);
+        let colors = colors_of("red: true\n");
         assert!(
             colors.is_empty(),
             "mapping key color pattern must not be matched; got {colors:?} matches",
@@ -1029,8 +1417,7 @@ mod tests {
 
     #[test]
     fn color_in_sequence_item_is_detected() {
-        let docs = parse_docs("colors:\n  - red\n  - blue\n");
-        let colors = find_colors(&docs);
+        let colors = colors_of("colors:\n  - red\n  - blue\n");
         assert_eq!(
             colors.len(),
             2,
@@ -1041,8 +1428,7 @@ mod tests {
     #[test]
     fn freestanding_top_level_scalar_is_scanned() {
         // A bare document scalar is a value and must be scanned.
-        let docs = parse_docs("red\n");
-        let colors = find_colors(&docs);
+        let colors = colors_of("red\n");
         assert_eq!(colors.len(), 1);
         assert!(color_eq(
             &colors[0].color,
@@ -1057,8 +1443,7 @@ mod tests {
 
     #[test]
     fn color_in_nested_mapping_value_is_detected() {
-        let docs = parse_docs("theme:\n  primary: blue\n");
-        let colors = find_colors(&docs);
+        let colors = colors_of("theme:\n  primary: blue\n");
         assert_eq!(colors.len(), 1);
         assert_eq!(colors[0].range.start.line, 1);
         assert_eq!(colors[0].range.start.character, 11);
@@ -1069,12 +1454,15 @@ mod tests {
     fn multi_line_scalar_with_tokens_on_each_line() {
         // Block literal scalar with multiple color names on separate lines.
         // Tokens on single lines are found; none straddle a '\n' boundary.
-        let docs = parse_docs("color: |\n  red\n  blue\n");
-        let colors = find_colors(&docs);
+        let colors = colors_of("color: |\n  red\n  blue\n");
         assert_eq!(
             colors.len(),
             2,
             "both colors on separate lines must be detected"
+        );
+        assert_eq!(
+            colors.iter().map(|c| c.range).collect::<Vec<_>>(),
+            vec![range(1, 2, 1, 5), range(2, 2, 2, 6)]
         );
     }
 }
