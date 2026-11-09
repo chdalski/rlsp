@@ -102,6 +102,25 @@ State facts as they are now ("labels of the form
 Observe` renders"), not as the investigation that
 established them.
 
+A fact about something outside the repository that the
+plan rests on — how an external system behaves, what data
+production holds — is the exception: the code cannot show
+it, so name its source, such as the documentation, the
+query that was run, or who confirmed it. A fact without a
+source is an open question: settle it before approval, or
+make checking it a step that gates the tasks resting on
+it. A prior plan stated such a fact without a source; had
+it been false, its goal would have failed with every task
+done.
+
+A term the plan coins, or carries over from code under a
+new name, and uses in more than one task gets one
+definition in Context — a sentence, or the type or
+function it stands for in code. A resuming lead and the
+user at approval do not share the conversation the term
+came from, and a term with two readings leaves a decision
+open.
+
 ### Steps
 
 A checklist of concrete steps. Use `- [ ]` for pending
@@ -254,6 +273,23 @@ later task goes into Task Notes.
   for two fields
 ```
 
+A departure from a specification or target design that
+Context names is a decision of its own: state what the
+document prescribes and why the plan does otherwise. A
+clause that lets the plan override the document wherever
+they disagree names no departure, so neither the reviewers
+nor the user at approval see what the plan reverses. A
+prior plan overrode its target design with such a clause;
+an outside review found departures that no entry named.
+
+A task that deletes or overwrites stored data beyond what
+reverting its commit restores — rows a migration or
+conversion rewrites, files outside the repository — needs
+an entry on the way back: how a wrong result would be
+noticed and what restores the data, or that nothing does.
+Reverting the code does not bring such data back, so the
+user approves the loss only if the plan names it.
+
 Only record decisions that someone resuming this plan
 would need to know. Skip obvious ones — documenting every
 micro-decision adds noise that makes important decisions
@@ -306,7 +342,8 @@ of these readers act differently without it? If not, cut
 it. In particular, leave out:
 
 - **Conversation records** — quotes of the user, who said
-  or chose what, and when.
+  or chose what, and when. The source of an outside fact
+  (see Context) is not a conversation record.
 - **Investigation narratives** — how a defect was
   diagnosed, why a tool behaves as it does, scripts or
   harnesses built along the way. If a task needs a way to
