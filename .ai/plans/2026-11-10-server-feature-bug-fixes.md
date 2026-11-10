@@ -33,7 +33,7 @@ and the pre-existing bugs found in the same code are each fixed where they arise
 - [x] Clarify scope with the user
 - [x] Design review of the approach
 - [x] Task 1: Long names in validator messages are cut at a character boundary
-- [ ] Task 2: References and rename share one anchor and alias walk
+- [x] Task 2: References and rename share one anchor and alias walk
 - [ ] Task 3: The unused-anchor validator and its quick fix read the whole document
 - [ ] Task 4: The other validators read the whole document
 - [ ] Task 5: No selection range misses its position
@@ -70,10 +70,10 @@ alias walk and its helpers (`collect_anchor_alias_entries`, `collect_node`, `con
 `span_contains`, `span_to_range`), and `span_to_range` repeats `lsp_util::span_to_lsp`. Task 3 makes
 the unused-anchor validator use the same walk. Behavior is unchanged.
 
-- [ ] One copy of the walk and its helpers serves references and rename, and code in
+- [x] One copy of the walk and its helpers serves references and rename, and code in
       `src/validation/` can call the walk
-- [ ] Navigation converts spans to ranges only through `lsp_util::span_to_lsp`
-- [ ] The unit tests of `src/navigation/references.rs` and `src/navigation/rename.rs` and the tests in
+- [x] Navigation converts spans to ranges only through `lsp_util::span_to_lsp`
+- [x] The unit tests of `src/navigation/references.rs` and `src/navigation/rename.rs` and the tests in
       `tests/lsp_lifecycle/navigation.rs` and `tests/lsp_lifecycle/rename.rs` pass with their
       assertions unchanged
 

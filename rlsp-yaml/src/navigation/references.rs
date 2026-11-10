@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 
-use rlsp_yaml_parser::node::{Document, Node};
-use rlsp_yaml_parser::{LineIndex, Pos, Span};
-use tower_lsp::lsp_types::{Location, Position, Range, Url};
+use rlsp_yaml_parser::Span;
+use rlsp_yaml_parser::node::Document;
+use tower_lsp::lsp_types::{Location, Position, Url};
 
-type NamedSpans = Vec<(String, Span)>;
+use super::{collect_anchor_alias_entries, containing_document, lsp_to_pos, span_contains};
+use crate::lsp_util::span_to_lsp;
 
 /// Go-to-definition: cursor on `*alias` returns the location of the matching `&anchor`.
 ///
@@ -26,7 +27,7 @@ pub fn goto_definition(docs: &[Document<Span>], uri: &Url, position: Position) -
 
     Some(Location {
         uri: uri.clone(),
-        range: span_to_range(anchor_entry.1, idx),
+        range: span_to_lsp(anchor_entry.1, idx),
     })
 }
 
@@ -69,7 +70,7 @@ pub fn find_references(
             .find(|(n, _)| n == name)
             .map(|(_, loc)| Location {
                 uri: uri.clone(),
-                range: span_to_range(*loc, idx),
+                range: span_to_lsp(*loc, idx),
             })
     } else {
         None
@@ -80,112 +81,10 @@ pub fn find_references(
         .filter(|(n, _)| n == name)
         .map(|(_, loc)| Location {
             uri: uri.clone(),
-            range: span_to_range(*loc, idx),
+            range: span_to_lsp(*loc, idx),
         });
 
     declaration.into_iter().chain(alias_locations).collect()
-}
-
-/// Walk a single document and collect `(name, span)` pairs for every anchor
-/// token and every alias token.
-///
-/// Anchor spans come from `Node::*.anchor_loc` (the `&name` token span).
-/// Alias spans come from `Node::Alias.loc` (the `*name` token span).
-fn collect_anchor_alias_entries(doc: &Document<Span>) -> (NamedSpans, NamedSpans) {
-    let mut anchors = Vec::new();
-    let mut aliases = Vec::new();
-    collect_node(&doc.root, &mut anchors, &mut aliases);
-    (anchors, aliases)
-}
-
-fn collect_node(node: &Node<Span>, anchors: &mut NamedSpans, aliases: &mut NamedSpans) {
-    match node {
-        Node::Scalar { .. } | Node::Mapping { .. } | Node::Sequence { .. } => {
-            if let (Some(name), Some(loc)) = (node.anchor(), node.anchor_loc()) {
-                anchors.push((name.to_owned(), loc));
-            }
-        }
-        Node::Alias { name, loc, .. } => {
-            aliases.push((name.clone(), *loc));
-        }
-    }
-    match node {
-        Node::Mapping { entries, .. } => {
-            for (k, v) in entries {
-                collect_node(k, anchors, aliases);
-                collect_node(v, anchors, aliases);
-            }
-        }
-        Node::Sequence { items, .. } => {
-            for item in items {
-                collect_node(item, anchors, aliases);
-            }
-        }
-        Node::Scalar { .. } | Node::Alias { .. } => {}
-    }
-}
-
-/// Find the document whose root span contains the cursor (per-document scoping).
-fn containing_document(
-    docs: &[Document<Span>],
-    cursor: Pos,
-) -> Option<(&Document<Span>, &LineIndex)> {
-    docs.iter().find_map(|doc| {
-        let idx = doc.line_index();
-        if span_contains(node_loc(&doc.root), cursor, idx) {
-            Some((doc, idx))
-        } else {
-            None
-        }
-    })
-}
-
-/// Returns the location span of a node.
-const fn node_loc(node: &Node<Span>) -> Span {
-    match node {
-        Node::Scalar { loc, .. }
-        | Node::Mapping { loc, .. }
-        | Node::Sequence { loc, .. }
-        | Node::Alias { loc, .. } => *loc,
-    }
-}
-
-/// Returns `true` when `cursor` is within `span` using half-open `[start, end)`.
-fn span_contains(span: Span, cursor: Pos, idx: &LineIndex) -> bool {
-    let start = (
-        idx.line_column(span.start).0 as usize,
-        idx.line_column(span.start).1 as usize,
-    );
-    let end = (
-        idx.line_column(span.end).0 as usize,
-        idx.line_column(span.end).1 as usize,
-    );
-    let pos = (cursor.line, cursor.column);
-    pos >= start && pos < end
-}
-
-/// Convert an LSP `Position` (0-based line, 0-based character) to a parser `Pos`
-/// (1-based line, 0-based column).
-const fn lsp_to_pos(position: Position) -> Pos {
-    Pos {
-        byte_offset: 0,
-        line: position.line as usize + 1,
-        column: position.character as usize,
-    }
-}
-
-/// Convert a parser `Span` to an LSP `Range`.
-fn span_to_range(loc: Span, idx: &LineIndex) -> Range {
-    Range::new(
-        Position::new(
-            idx.line_column(loc.start).0.saturating_sub(1),
-            idx.line_column(loc.start).1,
-        ),
-        Position::new(
-            idx.line_column(loc.end).0.saturating_sub(1),
-            idx.line_column(loc.end).1,
-        ),
-    )
 }
 
 #[cfg(test)]

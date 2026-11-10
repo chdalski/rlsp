@@ -2,9 +2,12 @@
 
 use std::collections::HashMap;
 
-use rlsp_yaml_parser::node::{Document, Node};
-use rlsp_yaml_parser::{LineIndex, Pos, Span};
+use rlsp_yaml_parser::Span;
+use rlsp_yaml_parser::node::Document;
 use tower_lsp::lsp_types::{Position, Range, TextEdit, Url, WorkspaceEdit};
+
+use super::{collect_anchor_alias_entries, containing_document, lsp_to_pos, span_contains};
+use crate::lsp_util::span_to_lsp;
 
 /// Prepare rename: validates cursor is on anchor/alias, returns name range.
 ///
@@ -23,7 +26,7 @@ pub fn prepare_rename(docs: &[Document<Span>], position: Position) -> Option<Ran
                 .iter()
                 .find(|(_, loc)| span_contains(*loc, cursor, idx))
         })
-        .map(|(_, loc)| span_to_range(*loc, idx))
+        .map(|(_, loc)| span_to_lsp(*loc, idx))
 }
 
 /// Rename: returns edits for all occurrences of anchor and aliases.
@@ -60,7 +63,7 @@ pub fn rename(
         .iter()
         .filter(|(n, _)| n == name)
         .map(|(_, loc)| TextEdit {
-            range: span_to_range(*loc, idx),
+            range: span_to_lsp(*loc, idx),
             new_text: format!("&{new_name}"),
         });
 
@@ -68,7 +71,7 @@ pub fn rename(
         .iter()
         .filter(|(n, _)| n == name)
         .map(|(_, loc)| TextEdit {
-            range: span_to_range(*loc, idx),
+            range: span_to_lsp(*loc, idx),
             new_text: format!("*{new_name}"),
         });
 
@@ -91,105 +94,6 @@ fn is_valid_anchor_name(name: &str) -> bool {
 /// Check if a character is valid in a YAML anchor/alias name.
 const fn is_anchor_name_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.'
-}
-
-type NamedSpans = Vec<(String, Span)>;
-
-/// Walk a single document and collect `(name, span)` pairs for every anchor
-/// token and every alias token.
-fn collect_anchor_alias_entries(doc: &Document<Span>) -> (NamedSpans, NamedSpans) {
-    let mut anchors = Vec::new();
-    let mut aliases = Vec::new();
-    collect_node(&doc.root, &mut anchors, &mut aliases);
-    (anchors, aliases)
-}
-
-fn collect_node(node: &Node<Span>, anchors: &mut NamedSpans, aliases: &mut NamedSpans) {
-    match node {
-        Node::Scalar { .. } | Node::Mapping { .. } | Node::Sequence { .. } => {
-            if let (Some(name), Some(loc)) = (node.anchor(), node.anchor_loc()) {
-                anchors.push((name.to_owned(), loc));
-            }
-        }
-        Node::Alias { name, loc, .. } => {
-            aliases.push((name.clone(), *loc));
-        }
-    }
-    match node {
-        Node::Mapping { entries, .. } => {
-            for (k, v) in entries {
-                collect_node(k, anchors, aliases);
-                collect_node(v, anchors, aliases);
-            }
-        }
-        Node::Sequence { items, .. } => {
-            for item in items {
-                collect_node(item, anchors, aliases);
-            }
-        }
-        Node::Scalar { .. } | Node::Alias { .. } => {}
-    }
-}
-
-/// Find the document whose root span contains the cursor.
-fn containing_document(
-    docs: &[Document<Span>],
-    cursor: Pos,
-) -> Option<(&Document<Span>, &LineIndex)> {
-    docs.iter().find_map(|doc| {
-        let idx = doc.line_index();
-        if span_contains(node_loc(&doc.root), cursor, idx) {
-            Some((doc, idx))
-        } else {
-            None
-        }
-    })
-}
-
-const fn node_loc(node: &Node<Span>) -> Span {
-    match node {
-        Node::Scalar { loc, .. }
-        | Node::Mapping { loc, .. }
-        | Node::Sequence { loc, .. }
-        | Node::Alias { loc, .. } => *loc,
-    }
-}
-
-fn span_contains(span: Span, cursor: Pos, idx: &LineIndex) -> bool {
-    let start = (
-        idx.line_column(span.start).0 as usize,
-        idx.line_column(span.start).1 as usize,
-    );
-    let end = (
-        idx.line_column(span.end).0 as usize,
-        idx.line_column(span.end).1 as usize,
-    );
-    let pos = (cursor.line, cursor.column);
-    pos >= start && pos < end
-}
-
-/// Convert an LSP `Position` (0-based line, 0-based character) to a parser `Pos`
-/// (1-based line, 0-based column).
-const fn lsp_to_pos(position: Position) -> Pos {
-    Pos {
-        byte_offset: 0,
-        line: position.line as usize + 1,
-        column: position.character as usize,
-    }
-}
-
-/// Convert a parser `Span` to an LSP `Range`.
-fn span_to_range(loc: Span, idx: &LineIndex) -> Range {
-    Range::new(
-        Position::new(
-            idx.line_column(loc.start).0.saturating_sub(1),
-            idx.line_column(loc.start).1,
-        ),
-        Position::new(
-            idx.line_column(loc.end).0.saturating_sub(1),
-            idx.line_column(loc.end).1,
-        ),
-    )
 }
 
 #[cfg(test)]
