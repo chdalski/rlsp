@@ -77,7 +77,7 @@ mod tests {
     use tower_lsp::lsp_types::{Position, Range};
 
     use super::*;
-    use crate::test_utils::{nested_flow, parse_docs};
+    use crate::test_utils::{assert_loads, nested_flow, parse_docs, staircase, text_of};
 
     fn parse_anchors(yaml: &str) -> Vec<Diagnostic> {
         validate_unused_anchors(&parse_docs(yaml))
@@ -227,10 +227,6 @@ mod tests {
     // makes no difference.  `d` is the number of flow sequences around the
     // node, inside the root mapping.
 
-    fn assert_loads(yaml: &str) {
-        assert!(rlsp_yaml_parser::load(yaml).is_ok(), "the text loads");
-    }
-
     fn codes_of(diagnostics: &[Diagnostic]) -> Vec<&str> {
         diagnostics
             .iter()
@@ -254,15 +250,6 @@ mod tests {
 
     fn flow_mapping_key(d: usize) -> String {
         format!("a: &x 1\nb: {}\n", nested_flow(d, "{*x : 1}"))
-    }
-
-    /// `d` lines of `entry`, each indented one level deeper than the last.
-    fn staircase(d: usize, entry: &str) -> String {
-        let mut lines = String::new();
-        for level in 0..d {
-            writeln!(lines, "{}{entry}", "  ".repeat(level)).unwrap();
-        }
-        lines
     }
 
     fn block_mappings(d: usize) -> String {
@@ -446,21 +433,6 @@ mod tests {
         );
         assert_eq!(result[0].range.start.character, 5, "alias starts at col 5");
         assert_eq!(result[0].range.end.character, 20, "alias ends at col 20");
-    }
-
-    /// The characters of `range` (a range within one line) in `yaml`; lines end
-    /// at `\n`, `\r\n` or a lone `\r`.
-    fn text_of(yaml: &str, range: Range) -> String {
-        assert_eq!(range.start.line, range.end.line, "a one-line range");
-        yaml.replace("\r\n", "\n")
-            .replace('\r', "\n")
-            .split('\n')
-            .nth(range.start.line as usize)
-            .expect("the line exists")
-            .chars()
-            .skip(range.start.character as usize)
-            .take((range.end.character - range.start.character) as usize)
-            .collect()
     }
 
     // The range of an unused-anchor diagnostic is the `&name` token, wherever

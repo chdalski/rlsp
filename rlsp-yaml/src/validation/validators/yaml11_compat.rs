@@ -14,12 +14,15 @@ use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Posit
 ///
 /// Only plain (unquoted) scalars are checked. Quoted scalars are already
 /// unambiguously strings in both versions.
+///
+/// Walks the whole tree, so its stack use follows the nesting depth, which the
+/// loader bounds. Pass documents from a nesting-limited, non-`Resolved` load.
 #[must_use]
 pub fn validate_yaml11_compat(docs: &[Document<Span>]) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     for doc in docs {
         let idx = doc.line_index();
-        collect_yaml11_diagnostics(&doc.root, &mut diagnostics, 0, idx);
+        collect_yaml11_diagnostics(&doc.root, &mut diagnostics, idx);
     }
     diagnostics
 }
@@ -28,14 +31,8 @@ pub fn validate_yaml11_compat(docs: &[Document<Span>]) -> Vec<Diagnostic> {
 fn collect_yaml11_diagnostics(
     node: &Node<Span>,
     diagnostics: &mut Vec<Diagnostic>,
-    depth: usize,
     idx: &LineIndex,
 ) {
-    const MAX_DEPTH: usize = 100;
-    if depth > MAX_DEPTH {
-        return;
-    }
-
     match node {
         Node::Scalar {
             value, style, loc, ..
@@ -87,13 +84,13 @@ fn collect_yaml11_diagnostics(
         }
         Node::Mapping { entries, .. } => {
             for (key, value) in entries {
-                collect_yaml11_diagnostics(key, diagnostics, depth + 1, idx);
-                collect_yaml11_diagnostics(value, diagnostics, depth + 1, idx);
+                collect_yaml11_diagnostics(key, diagnostics, idx);
+                collect_yaml11_diagnostics(value, diagnostics, idx);
             }
         }
         Node::Sequence { items, .. } => {
             for item in items {
-                collect_yaml11_diagnostics(item, diagnostics, depth + 1, idx);
+                collect_yaml11_diagnostics(item, diagnostics, idx);
             }
         }
         Node::Alias { .. } => {}
@@ -106,7 +103,7 @@ mod tests {
     use tower_lsp::lsp_types::{DiagnosticSeverity, NumberOrString};
 
     use super::*;
-    use crate::test_utils::parse_docs;
+    use crate::test_utils::{assert_loads, nested_flow, parse_docs, staircase, text_of};
     use crate::validation::ValidationSettings;
 
     fn parse_yaml11(text: &str) -> Vec<Diagnostic> {
@@ -418,5 +415,80 @@ mod tests {
             .len(),
             "flow-style diagnostics must not differ based on v1.1 keyword presence"
         );
+    }
+
+    // ---- YAML 1.1 Compatibility Validator: Nesting Depth ----
+    //
+    // The validator reads whole documents: a scalar is checked wherever it
+    // sits.  `d` is the number of collections around the node.
+
+    fn yaml11_diagnostics(yaml: &str) -> Vec<Diagnostic> {
+        assert_loads(yaml);
+        validate_yaml11_compat(&parse_docs(yaml))
+    }
+
+    #[rstest]
+    #[case::boolean("yes", "yaml11Boolean")]
+    #[case::octal("0755", "yaml11Octal")]
+    fn a_yaml11_scalar_at_any_depth_is_reported(
+        #[case] value: &str,
+        #[case] code: &str,
+        #[values(0, 99, 100, 101, 255)] d: usize,
+    ) {
+        let yaml = format!("a: {}\n", nested_flow(d, value));
+        let result = yaml11_diagnostics(&yaml);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].code,
+            Some(NumberOrString::String(code.to_string()))
+        );
+        assert_eq!(result[0].range.start.line, 0);
+        assert_eq!(
+            result[0].range.start.character,
+            u32::try_from(3 + d).unwrap()
+        );
+        assert_eq!(text_of(&yaml, result[0].range), value);
+    }
+
+    fn yes_in_flow(d: usize) -> String {
+        format!("a: {}\n", nested_flow(d, "yes"))
+    }
+
+    fn yes_as_block_mapping_value(d: usize) -> String {
+        format!("{}{}k: yes\n", staircase(d, "k:"), "  ".repeat(d))
+    }
+
+    fn yes_as_block_mapping_key(d: usize) -> String {
+        format!("{}{}yes: 1\n", staircase(d, "k:"), "  ".repeat(d))
+    }
+
+    fn yes_in_block_sequence(d: usize) -> String {
+        format!("{}{}- yes\n", staircase(d, "-"), "  ".repeat(d))
+    }
+
+    #[rstest]
+    #[case::flow_sequences(yes_in_flow)]
+    #[case::block_mapping_value(yes_as_block_mapping_value)]
+    #[case::block_mapping_key(yes_as_block_mapping_key)]
+    #[case::block_sequences(yes_in_block_sequence)]
+    fn a_yaml11_scalar_is_reported_in_each_nesting_form(
+        #[case] build: fn(usize) -> String,
+        #[values(101, 200)] d: usize,
+    ) {
+        let result = yaml11_diagnostics(&build(d));
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].code,
+            Some(NumberOrString::String("yaml11Boolean".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_quoted_yaml11_scalar_at_depth_gives_no_diagnostic() {
+        let yaml = format!("a: {}\n", nested_flow(255, "\"yes\""));
+
+        assert!(yaml11_diagnostics(&yaml).is_empty());
     }
 }

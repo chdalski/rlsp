@@ -11,30 +11,23 @@ use crate::lsp_util::span_to_lsp;
 /// Returns warning diagnostics for map keys that are not in alphabetical order.
 /// Uses case-sensitive lexicographic comparison. Diagnostic ranges use the key
 /// node's `loc` span directly.
+///
+/// Walks the whole tree, so its stack use follows the nesting depth, which the
+/// loader bounds. Pass documents from a nesting-limited, non-`Resolved` load.
 #[must_use]
 pub fn validate_key_ordering(docs: &[Document<Span>]) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
     for doc in docs {
         let idx = doc.line_index();
-        check_yaml_ordering(&doc.root, &mut diagnostics, 0, idx);
+        check_yaml_ordering(&doc.root, &mut diagnostics, idx);
     }
 
     diagnostics
 }
 
-/// Recursively check YAML nodes for key ordering, with depth limit.
-fn check_yaml_ordering(
-    node: &Node<Span>,
-    diagnostics: &mut Vec<Diagnostic>,
-    depth: usize,
-    idx: &LineIndex,
-) {
-    const MAX_DEPTH: usize = 100;
-    if depth > MAX_DEPTH {
-        return;
-    }
-
+/// Recursively check YAML nodes for key ordering.
+fn check_yaml_ordering(node: &Node<Span>, diagnostics: &mut Vec<Diagnostic>, idx: &LineIndex) {
     match node {
         Node::Mapping { entries, .. } => {
             // Collect (key_string, key_loc) pairs, skipping null keys.
@@ -74,12 +67,12 @@ fn check_yaml_ordering(
 
             // Recursively check nested structures.
             for (_, value) in entries {
-                check_yaml_ordering(value, diagnostics, depth + 1, idx);
+                check_yaml_ordering(value, diagnostics, idx);
             }
         }
         Node::Sequence { items, .. } => {
             for item in items {
-                check_yaml_ordering(item, diagnostics, depth + 1, idx);
+                check_yaml_ordering(item, diagnostics, idx);
             }
         }
         Node::Scalar { .. } | Node::Alias { .. } => {}
@@ -92,6 +85,7 @@ mod tests {
     use tower_lsp::lsp_types::DiagnosticSeverity;
 
     use super::*;
+    use crate::test_utils::{assert_loads, nested_flow, staircase, text_of};
 
     // ---- Map Key Order Validator: Happy Paths / Nested Structures / Edge Cases ----
 
@@ -219,5 +213,48 @@ mod tests {
             result[0].range.start.character > 0,
             "alpha's column in flow mapping is non-zero"
         );
+    }
+
+    // ---- Map Key Order Validator: Nesting Depth ----
+    //
+    // The validator reads whole documents: a mapping is checked wherever it
+    // sits.  `d` is the number of collections around the mapping.
+
+    fn out_of_order_in_flow(d: usize) -> String {
+        format!("a: {}\n", nested_flow(d, "{b: 1, a: 2}"))
+    }
+
+    fn out_of_order_in_block_mapping(d: usize) -> String {
+        let indent = "  ".repeat(d);
+        format!("{}{indent}b: 1\n{indent}a: 2\n", staircase(d, "k:"))
+    }
+
+    fn out_of_order_in_block_sequence(d: usize) -> String {
+        let indent = "  ".repeat(d);
+        format!("{}{indent}- b: 1\n{indent}  a: 2\n", staircase(d, "-"))
+    }
+
+    #[rstest]
+    #[case::flow(out_of_order_in_flow, 0)]
+    #[case::block_mappings(out_of_order_in_block_mapping, 1)]
+    #[case::block_sequences(out_of_order_in_block_sequence, 1)]
+    fn out_of_order_keys_at_any_depth_are_reported(
+        #[case] build: fn(usize) -> String,
+        #[case] line_offset: usize,
+        #[values(0, 99, 100, 101, 254)] d: usize,
+    ) {
+        let yaml = build(d);
+        assert_loads(&yaml);
+        let result = validate_key_ordering(&rlsp_yaml_parser::load(&yaml).unwrap());
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].code,
+            Some(NumberOrString::String("mapKeyOrder".to_string()))
+        );
+        assert_eq!(result[0].message, "Key 'a' is out of alphabetical order");
+        let line = if line_offset == 0 { 0 } else { d + 1 };
+        assert_eq!(result[0].range.start.line, u32::try_from(line).unwrap());
+        assert_eq!(text_of(&yaml, result[0].range), "a");
     }
 }

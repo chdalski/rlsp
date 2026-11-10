@@ -64,6 +64,7 @@ share a parent line with one sub-item each.
 
 ## Tests
 
+- The "Nesting Depth" test comments in `custom_tags_validation.rs`, `duplicate_keys.rs`, `flow_style.rs`, `key_ordering.rs`, and `yaml11_compat.rs` (`rlsp-yaml/src/validation/validators/`) say `d` is the number of collections around the node, while the root mapping adds one more; server-feature bug-fix plan Task 4 review.
 - The depth tests of the unused-anchor validator and quick fix count `d` as the flow sequences inside the root mapping, so the cases named 99 and 255 sit at depths 100 and 256; server-feature bug-fix plan Task 3 review.
 - `document_symbol_request` in `rlsp-yaml/tests/lsp_lifecycle/nesting_depth.rs` duplicates the helper in `navigation.rs`, and its `server()` overlaps `helpers::start_server` (it drops the log instead of collecting it); nesting plan Task 9 and Task 11 test reviews.
 - The stdio framing (`read_one_message`, `read_content_length`, `send`, `recv_matching`, `is_response_to`) exists in both `rlsp-yaml/tests/claude_code_stdio_smoke.rs` and `tests/lsp_lifecycle/stack_depth.rs`; extract it to a shared `tests/common` module; nesting plan Task 11 review.
@@ -150,6 +151,7 @@ share a parent line with one sub-item each.
 
 ## Open decisions
 
+- `unknownTag` and `tagTypeMismatch` diagnostics (`rlsp-yaml/src/validation/validators/custom_tags_validation.rs`) cover the tagged node's span, which starts after the tag token, not the tag itself; covering the tag would change the visible range; server-feature bug-fix plan Task 4 review, for the user's decision.
 - Completion inserts a schema property name that YAML reads as another key (`a: b`, `#x`, `- k`, `true`, an empty name) without quotes, in the single-property items and the "(all required)" snippet of `rlsp-yaml/src/completion/schema_completions.rs`; quoting it would reuse the formatter's `needs_quoting` and `escape_double_quoted` (`editing/formatter/scalar_render.rs`) and changes the inserted text; server-feature bug-fix plan design review, for the user's decision.
 - Selection ranges give no range for a position in the indentation of a multi-line scalar's continuation line (`k: aaa\n  bbb\n` at (1,1)) or on a comment line inside or between entries, though the scalar, entry, or mapping range contains it; selecting the innermost node whose range contains the position would change that (`rlsp-yaml/src/analysis/selection.rs`); server-feature bug-fix plan design review, for the user's decision.
 - Flat arena AST as a possible goal for a 1.0 of `rlsp-yaml-parser`: about 30 to 50% faster `load()` and far less memory in the spike, no depth limit from the stack; `rlsp-yaml` would need a port (479 `Node` patterns in 40 files, an edit API for the formatter); branch `spike/flat-ast` (a09dad39), report `.ai/reports/2026-11-02-loader-depth-spikes.md`; user request.

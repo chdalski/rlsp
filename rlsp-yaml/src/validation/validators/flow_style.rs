@@ -16,6 +16,9 @@ use crate::validation::{DiagnosticCategory, ValidationSettings};
 /// `settings.severity_for(FlowStyle)` is `None` (disabled). Empty collections
 /// (`{}`, `[]`) produce no diagnostic. Uses the parser AST so plain scalars
 /// containing `{`/`[` (e.g. `${{ env.VAR }}`) are never false-flagged.
+///
+/// Walks the whole tree, so its stack use follows the nesting depth, which the
+/// loader bounds. Pass documents from a nesting-limited, non-`Resolved` load.
 #[must_use]
 pub fn validate_flow_style(
     docs: &[Document<Span>],
@@ -27,7 +30,7 @@ pub fn validate_flow_style(
     let mut diagnostics = Vec::new();
     for doc in docs {
         let idx = doc.line_index();
-        collect_flow_style_diagnostics(&doc.root, &mut diagnostics, severity, 0, idx);
+        collect_flow_style_diagnostics(&doc.root, &mut diagnostics, severity, idx);
     }
     diagnostics
 }
@@ -37,14 +40,8 @@ fn collect_flow_style_diagnostics(
     node: &Node<Span>,
     diagnostics: &mut Vec<Diagnostic>,
     severity: DiagnosticSeverity,
-    depth: usize,
     idx: &LineIndex,
 ) {
-    const MAX_DEPTH: usize = 100;
-    if depth > MAX_DEPTH {
-        return;
-    }
-
     match node {
         Node::Mapping {
             style: CollectionStyle::Flow,
@@ -60,14 +57,14 @@ fn collect_flow_style_diagnostics(
                 idx,
             ));
             for (key, value) in entries {
-                collect_flow_style_diagnostics(key, diagnostics, severity, depth + 1, idx);
-                collect_flow_style_diagnostics(value, diagnostics, severity, depth + 1, idx);
+                collect_flow_style_diagnostics(key, diagnostics, severity, idx);
+                collect_flow_style_diagnostics(value, diagnostics, severity, idx);
             }
         }
         Node::Mapping { entries, .. } => {
             for (key, value) in entries {
-                collect_flow_style_diagnostics(key, diagnostics, severity, depth + 1, idx);
-                collect_flow_style_diagnostics(value, diagnostics, severity, depth + 1, idx);
+                collect_flow_style_diagnostics(key, diagnostics, severity, idx);
+                collect_flow_style_diagnostics(value, diagnostics, severity, idx);
             }
         }
         Node::Sequence {
@@ -84,12 +81,12 @@ fn collect_flow_style_diagnostics(
                 idx,
             ));
             for item in items {
-                collect_flow_style_diagnostics(item, diagnostics, severity, depth + 1, idx);
+                collect_flow_style_diagnostics(item, diagnostics, severity, idx);
             }
         }
         Node::Sequence { items, .. } => {
             for item in items {
-                collect_flow_style_diagnostics(item, diagnostics, severity, depth + 1, idx);
+                collect_flow_style_diagnostics(item, diagnostics, severity, idx);
             }
         }
         Node::Scalar { .. } | Node::Alias { .. } => {}
@@ -127,7 +124,7 @@ mod tests {
     use tower_lsp::lsp_types::DiagnosticSeverity;
 
     use super::*;
-    use crate::test_utils::parse_docs;
+    use crate::test_utils::{assert_loads, parse_docs, staircase, text_of};
     use crate::validation::ValidationSettings;
 
     // ---- Flow Style Validator: Happy Paths / Edge Cases / Empty Collections ----
@@ -157,6 +154,7 @@ mod tests {
     #[case::both_types_on_two_lines("config: {key: value}\nitems: [a, b]\n", 2)]
     #[case::nested_flow_styles("data: {outer: [inner]}\n", 2)]
     #[case::multi_document("doc1: {a: 1}\n---\ndoc2: [x]\n", 2)]
+    #[case::sibling_sequences_in_flow_sequence("data: [[1, 2], [3, 4]]\n", 3)]
     #[case::outer_nonempty_inner_empty("data: {a: {}}\n", 1)]
     #[case::mixed_empty_nonempty("a: {}\nb: {x: 1}\n", 1)]
     #[case::flow_detected_after_single_quote_ends("msg: 'quoted' \nreal: {a: 1}\n", 1)]
@@ -370,15 +368,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn deeply_nested_flow_seq_count() {
-        // [[1, 2], [3, 4]] → 3 diagnostics: outer seq + two inner seqs.
-        let docs = parse_docs("data: [[1, 2], [3, 4]]\n");
-        let result = validate_flow_style(&docs, &ValidationSettings::default());
-
-        assert_eq!(result.len(), 3);
-    }
-
     // ---- Flow Style Validator: empty-collection edge cases ----
 
     #[test]
@@ -459,5 +448,70 @@ jobs:
         let result = validate_flow_style(&docs, &ValidationSettings::default());
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
+    }
+
+    // ---- Flow Style Validator: Nesting Depth ----
+    //
+    // The validator reads whole documents: a flow collection is reported
+    // wherever it sits.  `d` is the number of collections around the node.
+
+    fn flow_codes_and_texts(yaml: &str) -> Vec<(String, String)> {
+        assert_loads(yaml);
+        validate_flow_style(&parse_docs(yaml), &ValidationSettings::default())
+            .into_iter()
+            .map(|d| {
+                let Some(NumberOrString::String(code)) = d.code else {
+                    panic!("a code is set");
+                };
+                (code, text_of(yaml, d.range))
+            })
+            .collect()
+    }
+
+    #[rstest]
+    #[case::sequences("flowSeq", "[", "]", "[1]")]
+    #[case::mappings("flowMap", "{k: ", "}", "{k: 1}")]
+    fn flow_collections_at_every_depth_are_all_reported(
+        #[case] code: &str,
+        #[case] open: &str,
+        #[case] close: &str,
+        #[case] deepest: &str,
+        #[values(0, 99, 100, 101, 255)] d: usize,
+    ) {
+        let yaml = format!("a: {}1{}\n", open.repeat(d), close.repeat(d));
+        let found = flow_codes_and_texts(&yaml);
+
+        assert_eq!(found.len(), d);
+        assert!(found.iter().all(|(c, _)| c == code));
+        if d > 0 {
+            assert_eq!(found.last().unwrap().1, deepest);
+        }
+    }
+
+    #[rstest]
+    #[case::block_mappings("k:", "k: {a: 1}", "flowMap", "{a: 1}")]
+    #[case::block_sequences("-", "- [a]", "flowSeq", "[a]")]
+    fn a_flow_collection_below_block_nesting_is_reported(
+        #[case] step: &str,
+        #[case] last: &str,
+        #[case] code: &str,
+        #[case] shown: &str,
+        #[values(0, 99, 100, 101, 254)] d: usize,
+    ) {
+        let yaml = format!("{}{}{last}\n", staircase(d, step), "  ".repeat(d));
+        let found = flow_codes_and_texts(&yaml);
+
+        assert_eq!(found, [(code.to_string(), shown.to_string())]);
+    }
+
+    #[test]
+    fn a_flow_collection_inside_a_complex_key_at_depth_is_reported() {
+        let indent = "  ".repeat(101);
+        let yaml = format!("{}{indent}? {{a: 1}}\n{indent}: v\n", staircase(101, "k:"));
+
+        assert_eq!(
+            flow_codes_and_texts(&yaml),
+            [("flowMap".to_string(), "{a: 1}".to_string())]
+        );
     }
 }

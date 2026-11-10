@@ -16,6 +16,9 @@ use crate::validation::ValidationSettings;
 /// even when duplicate.
 ///
 /// Each document and each nested mapping is scoped independently.
+///
+/// Walks the whole tree, so its stack use follows the nesting depth, which the
+/// loader bounds. Pass documents from a nesting-limited, non-`Resolved` load.
 #[must_use]
 pub fn validate_duplicate_keys(
     docs: &[Document<Span>],
@@ -28,7 +31,7 @@ pub fn validate_duplicate_keys(
     let mut diagnostics = Vec::new();
     for doc in docs {
         let idx = doc.line_index();
-        check_node_for_duplicate_keys(&doc.root, &mut diagnostics, severity, 0, idx);
+        check_node_for_duplicate_keys(&doc.root, &mut diagnostics, severity, idx);
     }
     diagnostics
 }
@@ -38,14 +41,8 @@ fn check_node_for_duplicate_keys(
     node: &Node<Span>,
     diagnostics: &mut Vec<Diagnostic>,
     severity: DiagnosticSeverity,
-    depth: usize,
     idx: &LineIndex,
 ) {
-    const MAX_DEPTH: usize = 100;
-    if depth > MAX_DEPTH {
-        return;
-    }
-
     match node {
         Node::Mapping { entries, .. } => {
             let mut seen: HashSet<String> = HashSet::new();
@@ -67,13 +64,13 @@ fn check_node_for_duplicate_keys(
                     }
                 }
                 // Recurse into the key (e.g. complex keys) and value
-                check_node_for_duplicate_keys(key, diagnostics, severity, depth + 1, idx);
-                check_node_for_duplicate_keys(value, diagnostics, severity, depth + 1, idx);
+                check_node_for_duplicate_keys(key, diagnostics, severity, idx);
+                check_node_for_duplicate_keys(value, diagnostics, severity, idx);
             }
         }
         Node::Sequence { items, .. } => {
             for item in items {
-                check_node_for_duplicate_keys(item, diagnostics, severity, depth + 1, idx);
+                check_node_for_duplicate_keys(item, diagnostics, severity, idx);
             }
         }
         Node::Scalar { .. } | Node::Alias { .. } => {}
@@ -111,6 +108,7 @@ mod tests {
     use tower_lsp::lsp_types::{DiagnosticSeverity, NumberOrString};
 
     use super::*;
+    use crate::test_utils::{assert_loads, nested_flow, staircase, text_of};
     use crate::validation::ValidationSettings;
 
     fn parse_duplicate(text: &str) -> Vec<Diagnostic> {
@@ -442,5 +440,58 @@ spec:
         for diag in &result {
             assert_eq!(diag.severity, Some(DiagnosticSeverity::WARNING));
         }
+    }
+
+    // ---- Duplicate Key Validator: Nesting Depth ----
+    //
+    // The validator reads whole documents: a mapping is checked wherever it
+    // sits.  `d` is the number of collections around the mapping.
+
+    fn duplicate_in_flow(d: usize) -> String {
+        format!("a: {}\n", nested_flow(d, "{x: 1, x: 2}"))
+    }
+
+    fn duplicate_in_block_mapping(d: usize) -> String {
+        let indent = "  ".repeat(d);
+        format!("{}{indent}x: 1\n{indent}x: 2\n", staircase(d, "k:"))
+    }
+
+    fn duplicate_in_block_sequence(d: usize) -> String {
+        let indent = "  ".repeat(d);
+        format!("{}{indent}- x: 1\n{indent}  x: 2\n", staircase(d, "-"))
+    }
+
+    #[rstest]
+    #[case::flow(duplicate_in_flow, 0)]
+    #[case::block_mappings(duplicate_in_block_mapping, 1)]
+    #[case::block_sequences(duplicate_in_block_sequence, 1)]
+    fn a_duplicate_key_at_any_depth_is_reported(
+        #[case] build: fn(usize) -> String,
+        #[case] line_offset: usize,
+        #[values(0, 99, 100, 101, 254)] d: usize,
+    ) {
+        let yaml = build(d);
+        assert_loads(&yaml);
+        let result = parse_duplicate(&yaml);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].message, "Duplicate key: 'x'");
+        let line = if line_offset == 0 { 0 } else { d + 1 };
+        assert_eq!(result[0].range.start.line, u32::try_from(line).unwrap());
+        assert_eq!(text_of(&yaml, result[0].range), "x");
+    }
+
+    #[test]
+    fn a_duplicate_key_inside_a_complex_key_at_depth_is_reported() {
+        let indent = "  ".repeat(101);
+        let yaml = format!(
+            "{}{indent}? {{x: 1, x: 2}}\n{indent}: v\n",
+            staircase(101, "k:")
+        );
+        assert_loads(&yaml);
+        let result = parse_duplicate(&yaml);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].message, "Duplicate key: 'x'");
     }
 }

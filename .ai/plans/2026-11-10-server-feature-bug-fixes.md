@@ -35,7 +35,7 @@ and the pre-existing bugs found in the same code are each fixed where they arise
 - [x] Task 1: Long names in validator messages are cut at a character boundary
 - [x] Task 2: References and rename share one anchor and alias walk
 - [x] Task 3: The unused-anchor validator and its quick fix read the whole document
-- [ ] Task 4: The other validators read the whole document
+- [x] Task 4: The other validators read the whole document
 - [ ] Task 5: No selection range misses its position
 - [ ] Task 6: A selection-range response has one entry per position
 - [ ] Task 7: A duplicate-key diagnostic covers the whole key
@@ -110,14 +110,17 @@ Task 2 shares.
 what lies deeper: 101 nested block mappings with `k: {a: 1}` at the bottom get no `flowMap`
 diagnostic.
 
-- [ ] Each of the five validators reports a node at depth 101 and at depth 255 as it reports the same
+- [x] Each of the five validators reports a node at depth 101 and at depth 255 as it reports the same
       node at depth 1
-- [ ] No validator in `src/validation/validators/` stops its walk at a depth of its own, and no
+- [x] No validator in `src/validation/validators/` stops its walk at a depth of its own, and no
       comment or doc there says one does
-- [ ] Through the server, 101 nested block mappings with `k: {a: 1}` at the bottom publish the
+- [x] Through the server, 101 nested block mappings with `k: {a: 1}` at the bottom publish the
       `flowMap` diagnostic
-- [ ] The cases of `tests/lsp_lifecycle/stack_depth.rs` pass, the ignored 512-level release cases
+- [x] The cases of `tests/lsp_lifecycle/stack_depth.rs` pass, the ignored 512-level release cases
       included, run as their `#[ignore]` notes describe
+- [x] The public function of each of the five validators states in its doc comment that the
+      document must be loaded with a finite nesting limit and not in resolved mode
+- [x] The depth-test helpers serve all validator tests from `src/test_utils.rs`
 
 ### Task 5: No selection range misses its position
 
@@ -224,6 +227,9 @@ ends at its first `}`.
 - **Gate demands on Task 3:** the shared walk borrows names instead of copying them — copying made
   the quick fix about three times slower with 5 000 unused anchors; and the quick fix has its own
   stack-depth cases — the anchor-and-alias document never reaches the fix, since its anchor is used.
+- **Gate demands on Task 4:** the five validators document the load they rely on, since only that
+  load bounds their walks now; and the depth-test helpers moved to `src/test_utils.rs` instead of
+  being copied into five test modules.
 - **Truncation:** the shared rule keeps the `...` suffix of both messages; the `…` helpers in
   `server.rs` and `completion/formatting.rs` cap a total length with another suffix and stay apart.
 - **Selection:** Task 5 only leaves out ranges that do not contain the position and adds none.

@@ -22,6 +22,9 @@ use super::custom_tag::{CustomTag, TagNodeType};
 ///
 /// Diagnostic ranges use the tagged node's full `loc` span. Quoted scalars are never
 /// flagged because the parser stores `tag: None` for them.
+///
+/// Walks the whole tree, so its stack use follows the nesting depth, which the
+/// loader bounds. Pass documents from a nesting-limited, non-`Resolved` load.
 #[must_use]
 pub fn validate_custom_tags(docs: &[Document<Span>], allowed: &[CustomTag]) -> Vec<Diagnostic> {
     if allowed.is_empty() {
@@ -37,7 +40,7 @@ pub fn validate_custom_tags(docs: &[Document<Span>], allowed: &[CustomTag]) -> V
 
     for doc in docs {
         let idx = doc.line_index();
-        collect_tag_diagnostics(&doc.root, &tag_map, &mut diagnostics, 0, idx);
+        collect_tag_diagnostics(&doc.root, &tag_map, &mut diagnostics, idx);
     }
 
     diagnostics
@@ -48,14 +51,8 @@ fn collect_tag_diagnostics<'a>(
     node: &'a Node<Span>,
     tag_map: &HashMap<&str, &'a CustomTag>,
     diagnostics: &mut Vec<Diagnostic>,
-    depth: usize,
     idx: &LineIndex,
 ) {
-    const MAX_DEPTH: usize = 100;
-    if depth > MAX_DEPTH {
-        return;
-    }
-
     // Check the tag and loc fields on this node (all non-Alias variants carry them).
     let tag_and_loc = match node {
         Node::Scalar { tag, loc, .. }
@@ -117,13 +114,13 @@ fn collect_tag_diagnostics<'a>(
     match node {
         Node::Mapping { entries, .. } => {
             for (key, value) in entries {
-                collect_tag_diagnostics(key, tag_map, diagnostics, depth + 1, idx);
-                collect_tag_diagnostics(value, tag_map, diagnostics, depth + 1, idx);
+                collect_tag_diagnostics(key, tag_map, diagnostics, idx);
+                collect_tag_diagnostics(value, tag_map, diagnostics, idx);
             }
         }
         Node::Sequence { items, .. } => {
             for item in items {
-                collect_tag_diagnostics(item, tag_map, diagnostics, depth + 1, idx);
+                collect_tag_diagnostics(item, tag_map, diagnostics, idx);
             }
         }
         Node::Scalar { .. } | Node::Alias { .. } => {}
@@ -135,7 +132,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::test_utils::parse_docs;
+    use crate::test_utils::{assert_loads, nested_flow, parse_docs, staircase, text_of};
 
     fn tags_no_type(names: &[&str]) -> Vec<CustomTag> {
         names
@@ -449,5 +446,96 @@ mod tests {
             matches!(result[0].code.as_ref(), Some(NumberOrString::String(s)) if s == "tagTypeMismatch")
         );
         assert_eq!(result[0].range.start.line, 1, "inner is on line 1");
+    }
+
+    // ---- Custom Tags Validator: Nesting Depth ----
+    //
+    // The validator reads whole documents: a tag is checked wherever it sits.
+    // `d` is the number of collections around the node.
+
+    fn tag_diagnostics(yaml: &str, allowed: &[CustomTag]) -> Vec<Diagnostic> {
+        assert_loads(yaml);
+        validate_custom_tags(&parse_docs(yaml), allowed)
+    }
+
+    fn sequence_tag() -> CustomTag {
+        CustomTag {
+            name: "!seq".to_string(),
+            expected_type: Some(TagNodeType::Sequence),
+        }
+    }
+
+    #[rstest]
+    fn an_unknown_tag_at_any_depth_is_reported(#[values(0, 99, 100, 101, 255)] d: usize) {
+        let yaml = format!("a: {}\n", nested_flow(d, "!bad x"));
+        let result = tag_diagnostics(&yaml, &tags_no_type(&["!ok"]));
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].code,
+            Some(NumberOrString::String("unknownTag".to_string()))
+        );
+        assert_eq!(result[0].message, "Unknown tag: !bad");
+        assert_eq!(result[0].range.start.line, 0);
+        // The range is the scalar's, which starts after the tag.
+        let column = u32::try_from("a: !bad ".len() + d).unwrap();
+        assert_eq!(result[0].range.start.character, column);
+        assert_eq!(text_of(&yaml, result[0].range), "x");
+    }
+
+    #[rstest]
+    fn a_tag_type_mismatch_at_any_depth_is_reported(#[values(0, 101, 255)] d: usize) {
+        let yaml = format!("a: {}\n", nested_flow(d, "!seq x"));
+        let result = tag_diagnostics(&yaml, &[sequence_tag()]);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].code,
+            Some(NumberOrString::String("tagTypeMismatch".to_string()))
+        );
+        assert_eq!(
+            result[0].message,
+            "Tag !seq expects a sequence but got a scalar"
+        );
+        assert_eq!(text_of(&yaml, result[0].range), "x");
+    }
+
+    #[rstest]
+    fn an_allowed_tag_at_depth_gives_no_diagnostic(#[values(101, 255)] d: usize) {
+        let yaml = format!("a: {}\n", nested_flow(d, "!ok x"));
+
+        assert!(tag_diagnostics(&yaml, &tags_no_type(&["!ok"])).is_empty());
+    }
+
+    fn tag_in_flow(d: usize) -> String {
+        format!("a: {}\n", nested_flow(d, "!bad x"))
+    }
+
+    fn tag_in_block_mapping_value(d: usize) -> String {
+        format!("{}{}k: !bad x\n", staircase(d, "k:"), "  ".repeat(d))
+    }
+
+    fn tag_on_block_mapping_key(d: usize) -> String {
+        format!("{}{}!bad k: 1\n", staircase(d, "k:"), "  ".repeat(d))
+    }
+
+    fn tag_in_block_sequence(d: usize) -> String {
+        format!("{}{}- !bad x\n", staircase(d, "-"), "  ".repeat(d))
+    }
+
+    #[rstest]
+    #[case::flow_sequences(tag_in_flow)]
+    #[case::block_mapping_value(tag_in_block_mapping_value)]
+    #[case::block_mapping_key(tag_on_block_mapping_key)]
+    #[case::block_sequences(tag_in_block_sequence)]
+    fn an_unknown_tag_is_reported_in_each_nesting_form(
+        #[case] build: fn(usize) -> String,
+        #[values(101, 200)] d: usize,
+    ) {
+        let yaml = build(d);
+        let result = tag_diagnostics(&yaml, &tags_no_type(&["!ok"]));
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].message, "Unknown tag: !bad");
     }
 }

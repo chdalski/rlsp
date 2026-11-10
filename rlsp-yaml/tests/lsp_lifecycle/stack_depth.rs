@@ -41,6 +41,9 @@ use super::on_type_formatting::on_type_formatting_request;
 use super::rename::{prepare_rename_request, rename_request};
 use super::selection_ranges::selection_range_request;
 use super::semantic_tokens::semantic_tokens_request;
+use super::validators_integration::{
+    expected_probe_findings, probe_findings, validator_options, validator_probe,
+};
 use super::watched_files::did_change_watched_files_notification;
 
 const SCHEMA_URL: &str = "http://schema.invalid/s.json";
@@ -399,6 +402,21 @@ fn assert_anchors_resolved(published: &str, shape: Shape) {
     );
 }
 
+/// The flow-style validator reads the whole document: a flow document reports
+/// one collection per level, however deep, and the other shapes none.
+fn assert_flow_style_reaches_the_bottom(published: &str, shape: Shape, levels: usize) {
+    let (flow_maps, flow_seqs) = match shape {
+        Shape::FlowMappings => (levels, 0),
+        Shape::FlowSequences => (0, levels),
+        Shape::BlockMappings
+        | Shape::BlockSequences
+        | Shape::QuestionKeys
+        | Shape::AnchorAndAlias => (0, 0),
+    };
+    assert_eq!(count(published, "flowMap"), flow_maps, "{shape:?}");
+    assert_eq!(count(published, "flowSeq"), flow_seqs, "{shape:?}");
+}
+
 fn codes(diagnostics: &[Diagnostic]) -> Vec<&str> {
     diagnostics
         .iter()
@@ -539,6 +557,7 @@ async fn survive_every_request(shape: Shape, levels: usize) {
         "{shape:?}: the document did not load: {diagnostics:?}"
     );
     assert_anchors_resolved(&codes(&diagnostics).join(","), shape);
+    assert_flow_style_reaches_the_bottom(&codes(&diagnostics).join(","), shape, levels);
 
     send_every_request(&mut service, shape, levels, Some(Formatter::Default)).await;
     let enforcing = settings(&proxy, levels, Formatter::EnforceBlockStyle);
@@ -933,6 +952,46 @@ fn the_anchor_fix_survives_512_levels() {
     });
 }
 
+// ---- the validators, at the bottom of a document ----
+
+/// A document of `levels` levels whose deepest mapping gives each of the five
+/// validators a finding, see [`validator_probe`]. The probe's own mapping and
+/// its flow mapping are the last two levels.
+async fn survive_validators(levels: usize) {
+    let (mut service, _log) = start_server(validator_options(levels)).await;
+    let depth = levels - 2;
+    send(
+        &mut service,
+        did_open_notification(URI, &validator_probe(depth)),
+    )
+    .await;
+
+    let diagnostics = diagnostics_of(&service, URI);
+    assert_eq!(
+        probe_findings(&diagnostics),
+        expected_probe_findings(depth),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn the_validators_reach_the_bottom_on_2_mib() {
+    run_on_stack("validators".to_string(), TWO_MIB, || {
+        survive_validators(DEFAULT_LEVELS)
+    });
+}
+
+#[test]
+#[ignore = "needs a release build and a process of its own: \
+            cargo test --release -p rlsp-yaml --test lsp_lifecycle -- --ignored --exact \
+            --test-threads=1 stack_depth::the_validators_reach_the_bottom_at_512_levels"]
+fn the_validators_reach_the_bottom_at_512_levels() {
+    assert_release_build();
+    run_on_stack("validators-512".to_string(), RELEASE_STACK, || {
+        survive_validators(MAX_LEVELS)
+    });
+}
+
 // ---- the upper end of the setting, in a release build ----
 
 /// A release build has to run these: the stack of a debug build is far above
@@ -1191,6 +1250,7 @@ fn shipped_server_survives_512_levels_over_stdio(#[case] shape: Shape) {
         "{shape:?}: the document did not load: {diagnostics}"
     );
     assert_anchors_resolved(&diagnostics.to_string(), shape);
+    assert_flow_style_reaches_the_bottom(&diagnostics.to_string(), shape, MAX_LEVELS);
     for (call, request) in requests(shape, MAX_LEVELS, &diagnostics) {
         let result = server.request(&request);
         check(shape, call, MAX_LEVELS, &result, Formatter::Default);

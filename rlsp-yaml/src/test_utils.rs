@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MIT
 
+use std::fmt::Write as _;
+
 use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::Document;
-use tower_lsp::lsp_types::Url;
+use tower_lsp::lsp_types::{Range, Url};
 
 /// Parse YAML text into documents. Returns an empty vec on parse error.
 #[must_use]
@@ -51,4 +53,45 @@ pub fn vscode_manifest_properties() -> serde_json::Map<String, serde_json::Value
 #[must_use]
 pub fn nested_flow(depth: usize, leaf: &str) -> String {
     format!("{}{leaf}{}", "[".repeat(depth), "]".repeat(depth))
+}
+
+/// `depth` lines of `entry`, each indented one level deeper than the last.
+#[must_use]
+pub fn staircase(depth: usize, entry: &str) -> String {
+    let mut lines = String::new();
+    for level in 0..depth {
+        writeln!(lines, "{}{entry}", "  ".repeat(level)).unwrap();
+    }
+    lines
+}
+
+/// Assert that `yaml` loads. `parse_docs` returns no documents on a load
+/// error, so a test that expects no diagnostics from a deep document passes
+/// vacuously unless it first shows that the document loads.
+///
+/// # Panics
+///
+/// Panics when `yaml` does not load.
+pub fn assert_loads(yaml: &str) {
+    assert!(rlsp_yaml_parser::load(yaml).is_ok(), "the text loads");
+}
+
+/// The characters of `range` (a range within one line) in `yaml`; lines end
+/// at `\n`, `\r\n` or a lone `\r`.
+///
+/// # Panics
+///
+/// Panics when the range spans lines or its line does not exist.
+#[must_use]
+pub fn text_of(yaml: &str, range: Range) -> String {
+    assert_eq!(range.start.line, range.end.line, "a one-line range");
+    yaml.replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .split('\n')
+        .nth(range.start.line as usize)
+        .expect("the line exists")
+        .chars()
+        .skip(range.start.character as usize)
+        .take((range.end.character - range.start.character) as usize)
+        .collect()
 }

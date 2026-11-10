@@ -7,7 +7,7 @@ use rstest::rstest;
 use serde_json::json;
 use tower_lsp::LspService;
 use tower_lsp::jsonrpc::Request;
-use tower_lsp::lsp_types::{DiagnosticSeverity, NumberOrString};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString};
 
 use super::completion::completion_request;
 use super::configuration::did_change_configuration_notification;
@@ -1555,4 +1555,87 @@ async fn should_publish_unused_anchor_for_long_multibyte_name_and_keep_serving(
     let resp = send(&mut service, hover_request(2, uri, 0, 0)).await;
     let resp = resp.expect("server should answer a request after the anchor was opened");
     assert!(resp.is_ok(), "hover should not return an error: {resp:?}");
+}
+
+// ---- the validators read the whole document ----
+
+const URI: &str = "file:///test/probe.yaml";
+
+/// The options that turn on every validator the probe feeds.
+pub fn validator_options(max_nesting_depth: usize) -> serde_json::Value {
+    json!({
+        "maxNestingDepth": max_nesting_depth,
+        "keyOrdering": true,
+        "flowStyle": "warning",
+        "duplicateKeys": "error",
+        "customTags": ["!x"],
+    })
+}
+
+/// `depth` nested block mappings; the last one holds four entries that give
+/// the five validators a finding each, see [`expected_probe_findings`].
+pub fn validator_probe(depth: usize) -> String {
+    let indent = "  ".repeat(depth);
+    let mut yaml = String::new();
+    for level in 0..depth {
+        writeln!(yaml, "{}k:", "  ".repeat(level)).expect("writing to a String");
+    }
+    write!(
+        yaml,
+        "{indent}b: {{p: 1}}\n{indent}a: yes\n{indent}c: !bad x\n{indent}c: 2\n"
+    )
+    .expect("writing to a String");
+    yaml
+}
+
+/// The (code, line) pairs the probe of `depth` must publish.
+pub fn expected_probe_findings(depth: usize) -> Vec<(String, u32)> {
+    let line = |offset: usize| u32::try_from(depth + offset).expect("a line fits in u32");
+    let mut expected = vec![
+        ("flowMap".to_string(), line(0)),
+        ("mapKeyOrder".to_string(), line(1)),
+        ("yaml11Boolean".to_string(), line(1)),
+        ("unknownTag".to_string(), line(2)),
+        ("duplicateKey".to_string(), line(3)),
+    ];
+    expected.sort();
+    expected
+}
+
+/// The (code, line) pairs of `diagnostics`, sorted.
+pub fn probe_findings(diagnostics: &[Diagnostic]) -> Vec<(String, u32)> {
+    let mut found: Vec<(String, u32)> = diagnostics
+        .iter()
+        .map(|d| {
+            let code = match &d.code {
+                Some(NumberOrString::String(code)) => code.clone(),
+                other => format!("{other:?}"),
+            };
+            (code, d.range.start.line)
+        })
+        .collect();
+    found.sort();
+    found
+}
+
+#[rstest]
+#[tokio::test]
+async fn all_five_validators_report_at_any_depth(#[values(0, 99, 100, 101, 200)] depth: usize) {
+    let (mut service, _log) = start_server(validator_options(256)).await;
+
+    send(
+        &mut service,
+        did_open_notification(URI, &validator_probe(depth)),
+    )
+    .await;
+
+    let diagnostics = service
+        .inner()
+        .get_diagnostics(URI)
+        .expect("diagnostics should exist");
+    assert_eq!(
+        probe_findings(&diagnostics),
+        expected_probe_findings(depth),
+        "{diagnostics:?}"
+    );
 }
