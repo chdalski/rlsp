@@ -44,6 +44,7 @@ each fixed where they arise.
 - [ ] Task 9: A BOM does not hide a modeline or a suppression comment on line 1
 - [ ] Task 10: The "(all required)" snippet inserts names and defaults as written
 - [ ] Task 11: The "Delete unused anchor" quick fix answers a request with one pass over the document
+- [ ] Task 12: A position on a node's text selects that node, not an earlier sibling
 - [ ] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
@@ -236,13 +237,40 @@ once per request, answers every diagnostic.
       `tests/unused_anchor_fix.rs`, and the unused-anchor cases of `tests/lsp_lifecycle/code_actions.rs`
       pass with their assertions unchanged
 
+### Task 12: A position on a node's text selects that node, not an earlier sibling
+
+`collect_ancestor_spans` (`src/analysis/selection.rs`) takes the first sibling whose lines hold the
+position's line and that yields a range. A block collection's range ends at column 0 of the next
+sibling's first line, and flow siblings share a line, so an earlier sibling that does not contain
+the position wins, and the sibling that holds it is never tried: for `- a: 1\n  b: "p\n    q"\n- c\n`
+at (3,2) the chain belonged to the first item before Task 5 and is the document root alone after
+it. The sibling whose range contains the position is tried first; the other siblings follow in
+document order as before.
+
+- [ ] `a:\n- k: 1\nb: 2\n` at (2,3) gets the chain `2` (2,3)-(2,4), the entry `b` (2,0)-(2,4), and
+      the document root
+- [ ] `{a: 1, b: 2}` at (0,7) gets the key `b` (0,7)-(0,8), the entry (0,7)-(0,11), and the root
+      (0,0)-(0,11); at (0,10) it gets the value `2` (0,10)-(0,11), the entry, and the root
+- [ ] `[a, b]` at (0,4) and `- a: 1\n  b: "p\n    q"\n- c\n` at (3,2) get the scalar under the
+      position as their innermost range
+- [ ] A position that gets no node range before this task gets none: (3,0) and (3,1) of
+      `- a: 1\n  b: "p\n    q"\n- c\n`, `k: aaa\n  bbb\n` at (1,1), and
+      `key: value\n# a comment\nother: data\n` at (1,5); `{a: 1, b: 2}` at (0,6) keeps the root as
+      its only range
+- [ ] The every-position test of Task 5 covers these inputs and still holds
+- [ ] Through the server, `- a: 1\n  b: "p\n    q"\n- c: 2\n` at (3,2)
+      (`tests/lsp_lifecycle/selection_ranges.rs`) gets the key `c` (3,2)-(3,3), the entry
+      (3,2)-(3,6), the item (3,2)-(4,0), and the root (0,0)-(4,0)
+- [ ] The selection cases of `tests/lsp_lifecycle/stack_depth.rs` pass, the ignored 512-level release
+      cases included
+
 ## Decisions
 
-- **Run rules:** a pre-existing bug found while fixing Tasks 4, 6, or 11 goes to `.ai/backlog.md`, and
-  one found while fixing another task becomes a new task of this plan — Tasks 4, 6, and 11 are
-  already bugs found in this code, and attaching only one generation of found bugs lets the run end.
-  A fix whose correct behavior is open, or that changes visible behavior beyond its bug, goes to the
-  backlog's Open decisions, since the user decides those.
+- **Run rules:** a pre-existing bug found while fixing Tasks 4, 6, 11, or 12 goes to `.ai/backlog.md`,
+  and one found while fixing another task becomes a new task of this plan — Tasks 4, 6, 11, and 12
+  are already bugs found in this code, and attaching only one generation of found bugs lets the run
+  end. A fix whose correct behavior is open, or that changes visible behavior beyond its bug, goes to
+  the backlog's Open decisions, since the user decides those.
 - **Semantic-token positions:** the backlog entry that semantic-token lengths count code points, not
   UTF-16 units, is not fixed here. Every position the server sends and reads counts code points, the
   tokens' start columns included, so a fix in the semantic tokens alone would still misplace them; a
@@ -261,7 +289,8 @@ once per request, answers every diagnostic.
   `server.rs` and `completion/formatting.rs` cap a total length with another suffix and stay apart.
 - **Selection:** Task 5 only leaves out ranges that do not contain the position and adds none.
   Selecting a node for a position that gets no range today, such as the indentation of a continuation
-  line or a comment line, changes visible behavior beyond the bug.
+  line or a comment line, changes visible behavior beyond the bug. Task 12 changes which sibling is
+  tried first, not which positions get a node range.
 - **Anchor index:** the quick fix keys its index by the anchor's range and keeps the shared alias
   walk of navigation, so the fix and the validator count an anchor as used by the same rule; its
   actions, edits, and their order stay as they are.
