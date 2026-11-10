@@ -7,9 +7,10 @@
 ## Goal
 
 Several language-server features of `rlsp-yaml` crash the server, report wrong diagnostics, return
-ranges that miss their position, or insert text other than the schema's names. The bugs that
-`.ai/backlog.md` lists for these features, apart from the semantic-token positions (see Decisions),
-and the pre-existing bugs found in the same code are each fixed where they arise.
+ranges that miss their position, insert text other than the schema's names, or take time with the
+square of the document's size. The bugs that `.ai/backlog.md` lists for these features, apart from
+the semantic-token positions (see Decisions), and the pre-existing bugs found in the same code are
+each fixed where they arise.
 
 ## Context
 
@@ -42,6 +43,7 @@ and the pre-existing bugs found in the same code are each fixed where they arise
 - [ ] Task 8: The block-scalar action never turns a comment into content
 - [ ] Task 9: A BOM does not hide a modeline or a suppression comment on line 1
 - [ ] Task 10: The "(all required)" snippet inserts names and defaults as written
+- [ ] Task 11: The "Delete unused anchor" quick fix answers a request with one pass over the document
 - [ ] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
@@ -209,13 +211,38 @@ ends at its first `}`.
       (`tests/lsp_lifecycle/completion.rs`, schema served by the fake proxy) returns the escaped
       snippet
 
+### Task 11: The "Delete unused anchor" quick fix answers a request with one pass over the document
+
+`code_actions` (`src/editing/code_actions.rs`) answers each `unusedAnchor` diagnostic in the requested
+range on its own, and `delete_unused_anchor` (`src/editing/code_actions/delete_anchor.rs`) walks the
+document again for each one: `find_anchor` until the anchor, then `has_alias` over the whole
+document. A request whose range covers a document with N unused anchors therefore costs time with
+the square of N, about 0.8 s for 5 000 in a release build. One index of the anchors, built at most
+once per request, answers every diagnostic.
+
+- [ ] One `code_actions` call with all `unusedAnchor` diagnostics of
+      `&k key: &v val\nl: [&a, b]\nm: &x 1\nn: &x 2\n---\no: &y 1\np: *y\n`, plus an `unusedAnchor`
+      diagnostic at `&y`, whose anchor has an alias, returns the same actions, edits, and order as one
+      call per diagnostic, joined in diagnostic order
+- [ ] Through the server, a code-action request over all lines of a document of the 2 000 lines
+      `k0: &a0 v` to `k1999: &a1999 v` returns 2 000 "Delete unused anchor" actions in line order,
+      the action of line i removing `&ai ` from line i
+- [ ] A benchmark group in `benches/insight.rs` measures `code_actions` over the whole range of a
+      document with 1 000, 2 000, 4 000, and 8 000 unused anchors; each doubling raises the time by
+      at most 2.5 times, and the review request reports the four times
+- [ ] The quick-fix cases of `tests/lsp_lifecycle/stack_depth.rs` pass, the ignored 512-level release
+      case included
+- [ ] The unit tests of `src/editing/code_actions/delete_anchor.rs` and `src/editing/code_actions.rs`,
+      `tests/unused_anchor_fix.rs`, and the unused-anchor cases of `tests/lsp_lifecycle/code_actions.rs`
+      pass with their assertions unchanged
+
 ## Decisions
 
-- **Run rules:** a pre-existing bug found while fixing Tasks 4 or 6 goes to `.ai/backlog.md`, and one
-  found while fixing another task becomes a new task of this plan — Tasks 4 and 6 are already bugs
-  found in this code, and attaching only one generation of found bugs lets the run end. A fix whose
-  correct behavior is open, or that changes visible behavior beyond its bug, goes to the backlog's
-  Open decisions, since the user decides those.
+- **Run rules:** a pre-existing bug found while fixing Tasks 4, 6, or 11 goes to `.ai/backlog.md`, and
+  one found while fixing another task becomes a new task of this plan — Tasks 4, 6, and 11 are
+  already bugs found in this code, and attaching only one generation of found bugs lets the run end.
+  A fix whose correct behavior is open, or that changes visible behavior beyond its bug, goes to the
+  backlog's Open decisions, since the user decides those.
 - **Semantic-token positions:** the backlog entry that semantic-token lengths count code points, not
   UTF-16 units, is not fixed here. Every position the server sends and reads counts code points, the
   tokens' start columns included, so a fix in the semantic tokens alone would still misplace them; a
@@ -235,6 +262,9 @@ ends at its first `}`.
 - **Selection:** Task 5 only leaves out ranges that do not contain the position and adds none.
   Selecting a node for a position that gets no range today, such as the indentation of a continuation
   line or a comment line, changes visible behavior beyond the bug.
+- **Anchor index:** the quick fix keys its index by the anchor's range and keeps the shared alias
+  walk of navigation, so the fix and the validator count an anchor as used by the same rule; its
+  actions, edits, and their order stay as they are.
 - **BOM:** the modeline and suppression readers skip it; `source_lines` keeps it, because its other
   callers count columns from the line text, and the BOM takes one column there.
 - **Block-scalar guard:** when the trailing comment cannot be found on the line, the action is not

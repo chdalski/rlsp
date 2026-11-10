@@ -13,7 +13,7 @@ share a parent line with one sub-item each.
 
 ## Security
 
-- The "Delete unused anchor" quick fix walks the whole document twice per `unusedAnchor` diagnostic (`find_anchor`, `has_alias` in `rlsp-yaml/src/editing/code_actions/delete_anchor.rs`), so a code-action request costs time with the square of the number of unused anchors (about 1 s for 5 000); pre-existing, security Low; server-feature bug-fix plan Task 3 review.
+- The diagnostic-driven code actions other than "Delete unused anchor" search the document again for each diagnostic in the requested range, so a request over the whole document costs time with the square of the number of diagnostics: `find_flow_mapping` and `find_flow_sequence` in `flow_to_block.rs` (and `source_lines(text).nth` in `block_to_flow.rs`) for `flowMap`/`flowSeq`, `find_yaml11_bool_scalar` and `count_yaml11_bool_on_line` in `yaml11_bool.rs`, `find_yaml11_octal_scalar` in `yaml11_octal.rs` (`rlsp-yaml/src/editing/code_actions/`); the pair `yaml11_bool.rs`/`yaml11_octal.rs` holds near-copies; pre-existing, security Low; server-feature bug-fix plan design review of Task 11.
 - The unresolved-alias message in `rlsp-yaml/src/validation/validators/anchors.rs` and the key copies in `duplicate_keys.rs` hold the name uncut, so a megabyte-long alias or key name gives a megabyte-long message; hardening, security Low; server-feature bug-fix plan Task 1 security review.
 - Alias expansion depth: `max_nesting_depth` does not bound the expanded tree in resolved mode; `expand_node`, `Clone`, `Drop` in `loader.rs`; stack-overflow investigation.
 - `REGEX_CACHE` unbounded and `validate_schema` on the async executor (`src/schema/pattern.rs`); schema queue.
