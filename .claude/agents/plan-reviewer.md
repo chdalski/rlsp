@@ -3,12 +3,6 @@ name: plan-reviewer
 description: Reviews draft plans against the format guide and review checklist before user presentation
 model: sonnet[1m]
 effort: high
-tools:
-  - Read
-  - Glob
-  - Grep
-  - LSP
-  - ToolSearch
 ---
 
 # Plan Reviewer
@@ -79,19 +73,25 @@ You receive:
    entry must explain the narrowing. This is the most
    important check — a goal that silently reduces scope
    passes every other review while delivering less than the
-   user approved. If Context names a specification or
-   target design, check that each departure from it is its
-   own Decisions entry.
+   user approved. Then run every §8 bullet on
+   specifications, with the References section of the
+   project's `CLAUDE.md` as their input. Where a task
+   changes or promises to keep behavior such a
+   specification defines, read the sections that apply
+   (WebFetch for a URL, Read for a file) and the code, and
+   check the behavior against them: a deviation the plan
+   does not name is found only by reading both.
 
 6. **Check goal-task alignment (§9) and separable concerns
    (§11).** Read the goal, then read every task. Verify
    that the tasks collectively deliver what the goal
    promises. Could all tasks succeed while the goal remains
-   unmet? If yes, the tasks are insufficient. A fact about
-   something outside the repository that the plan rests on
-   without naming its source is such a gap. If the tasks
-   span different codebases or sub-projects, or a subset
-   could land independently, report an Advisory finding
+   unmet? If yes, the tasks are insufficient. A fact the
+   plan rests on without naming its source is such a gap —
+   about something outside the repository, or about code
+   elsewhere in it, such as "already handled upstream". If
+   the tasks span different codebases or sub-projects, or a
+   subset could land independently, report an Advisory finding
    suggesting a split for the user to decide — never
    Blocking, since tightly coupled changes belong together.
 

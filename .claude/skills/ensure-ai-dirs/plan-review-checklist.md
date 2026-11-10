@@ -252,6 +252,17 @@ passes every other check while silently reducing scope.
   that lets the plan override the document wherever they
   disagree is Blocking: it hides each departure from the
   user at approval.
+- Does the References section of the project's
+  `CLAUDE.md` list a specification that defines behavior a
+  task adds, changes, or promises to keep unchanged?
+  Context must name it, and each task resting on it the
+  sections that apply — Blocking if not: every later check
+  works from Context.
+- Does the plan leave a known deviation from such a
+  specification in place — as a Non-Goal, out of scope, or
+  for a separate plan — or promise to keep behavior that
+  breaks it, without a Decisions entry naming the clause?
+  Blocking.
 
 ## 9. Goal-Task Alignment
 
@@ -274,10 +285,14 @@ adding up to the goal.
 - Could all tasks be completed successfully while the
   stated goal remains unmet? If yes, the tasks are
   insufficient.
-- Does the plan rest on a fact about something outside
-  the repository — an external system's behavior, data in
-  production — that names no source? If the fact is
-  false, every task can succeed while the Goal fails.
+- Does the plan rest on a fact that names no source —
+  about something outside the repository (an external
+  system's behavior, data in production) or about code
+  elsewhere in it ("already handled upstream", "the caller
+  validates it")? If the fact is false, every task can
+  succeed while the Goal fails. A prior plan stated that
+  the server already converted positions to the protocol's
+  encoding; it did not, and the claim passed every gate.
 
 ## 10. Format Compliance
 
@@ -396,18 +411,20 @@ defined in plan-format.md's "What Does Not Belong in a
 Plan":
 
 - Quotes of the user, or who decided what and when — not
-  the source of an outside fact (plan-format.md, Context)
+  the source of a fact (plan-format.md, Context)
 - Diagnosis stories, tool internals, or harness recipes
   where a stated fact or an acceptance criterion would do
 - Search results that prove nothing else needs changing
 - Narration of the planning or review process
 - Execution logs beyond checkbox state
-- Project rules restated from a `CLAUDE.md` file
+- Project rules restated from a `CLAUDE.md` file — not a
+  specification from References, which Context names
 - Clauses that exclude a reading the code or a project rule
   already excludes — except the remove-only clause §5 asks
   for and a Decisions entry that declines a review finding
 - A fact stated in Context and again in a task, or a fact
-  in Context that only one task needs
+  in Context that only one task needs — except a
+  specification §8 requires in Context
 
 Quote the text and give the shorter form, or say to cut it.
 

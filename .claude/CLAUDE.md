@@ -196,9 +196,12 @@ After clarification is complete:
    before writing every input state in which the planned
    design computes something different from the current
    code — per changed path, including states only test
-   data reaches. Each is a behavior change the plan must
-   settle: ask the user where _Ask about trade-offs_ says
-   so, and record each outcome in Decisions. A prior plan
+   data reaches — and check what it keeps against each
+   specification Context names: a clause it breaks is a
+   Decisions entry (plan-format). Each is a behavior
+   change the plan must settle: ask the user where _Ask
+   about trade-offs_ says so, and record each outcome in
+   Decisions. A prior plan
    promised identical results and left such states open;
    the plan-reviewer found them one per pass.
 
@@ -258,10 +261,9 @@ After clarification is complete:
    c. **Follow-up pass: the revision only.** Launch one
       `plan-reviewer` with the Blocking findings of the
       previous pass and the output of
-      `diff -u <copy> <plan>` — it has no Bash to produce
-      the diff itself. It checks that the revision resolves
-      those findings and holds up against the rest of the
-      plan; it does not review unchanged text again. Repeat
+      `diff -u <copy> <plan>`. It checks that the revision
+      resolves those findings and holds up against the rest
+      of the plan; it does not review unchanged text again. Repeat
       b–c until a pass reports no Blocking findings other
       than trade-off findings you collected, or every
       remaining one is declined.

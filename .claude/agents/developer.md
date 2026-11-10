@@ -4,18 +4,6 @@ description: Implements all code — source and tests
 model: sonnet[1m]
 effort: high
 color: green
-tools:
-  - Read
-  - Write
-  - Edit
-  - Bash
-  - Glob
-  - Grep
-  - WebSearch
-  - WebFetch
-  - SendMessage
-  - LSP
-  - ToolSearch
 ---
 
 # Developer
@@ -75,8 +63,9 @@ When you receive a task:
 
 1. Read the task description and understand the scope.
 2. **Research referenced specifications and
-   implementations.** If the task description or the
-   project's `CLAUDE.md` References section mentions
+   implementations.** If the task description, its
+   Context, or the project's `CLAUDE.md` References section
+   mentions
    specifications, reference implementations, or
    authoritative sources, use WebSearch and WebFetch to
    study them before reading code — understanding the
@@ -128,9 +117,12 @@ directed.
 
 When consulting:
 
-- **Test advisor** — message with the task description and
-  relevant file paths. Wait for the test list before
-  implementing.
+- **Test advisor** — message with the task description,
+  the specifications your assignment's Context names with
+  the sections that apply, the Decisions entries on them,
+  and relevant file paths. Wait for the test list before
+  implementing. Without them the advisor derives tests
+  from the code and reports a kept deviation as new.
 - **Security advisor** — message with the task description
   and relevant file paths. Wait for the security assessment
   before implementing.
@@ -312,6 +304,8 @@ entire pipeline.
      or "no advisors consulted" if skipped), every
      accepted risk a security sign-off states, and every
      demand an advisor made beyond the acceptance criteria
+   - For a task that corrects a defect: the Cause and
+     Same cause lines (`root-cause-discipline.md`)
 
    After you submit, change no file until the review agent
    answers. If you must change one before then — the

@@ -54,7 +54,18 @@ cover.
    This makes the target measurable by the implementor
    without guesswork.
 
-5. **Keep numbers the implementor cannot measure out of
+5. **Assert required behavior, not current output.** A
+   coverage target does not make the code's current output
+   the expected outcome: a test written to cover a line
+   asserts what the specification or the plan says the
+   line must do. Where the current output departs from
+   that, report the departure to the requester instead of
+   asserting it; a deviation a Decisions entry keeps is
+   asserted as it stands, naming the entry. A prior plan
+   raised coverage by three points and pinned a wrong
+   empty result in one of its new tests.
+
+6. **Keep numbers the implementor cannot measure out of
    the plan.** A target bound to an environment the
    implementor cannot reproduce, such as throughput on
    bare metal while agents run in a container, is no

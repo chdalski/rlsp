@@ -94,6 +94,21 @@ A handoff with no Cause line, or one that restates the
 symptom ("the test was failing"), signals that diagnosis
 is incomplete.
 
+A fix handoff — the handoff of a task that corrects a
+defect, not a resubmission that answers review findings —
+also carries a **Same cause:** line: where else the
+condition can occur — copies of the faulty code, sibling
+functions, other callers of the faulty helper — how you
+searched, and what you found. Fix an instance the task's
+scope covers in the task. Name any other in the line: the
+review lists it as a finding left open (pre-existing, with
+its baseline check), so it reaches the user and
+`.ai/backlog.md` instead of staying in the handoff. A
+prior fix made one text truncation safe for multi-byte
+characters and said so in its commit message; the same
+byte-slicing bug sat in the same file, 660 lines away, for
+eight months and crashed the server on ordinary names.
+
 ## Reviewer Backstop
 
 When reviewing a diff that consists primarily of one of
@@ -116,6 +131,12 @@ the symptom rather than identifying its source, reject
 and ask for it. The change may still be the right
 answer — but the reasoning has to be explicit, not
 assumed from the fact that the symptom went away.
+
+Reject any fix handoff that lacks the Cause or the Same
+cause line, whatever its diff holds, and check the Same
+cause line against your own search (`LSP`
+`findReferences`, Grep): a search the implementor ran too
+narrowly finds only the instance already fixed.
 
 ## Why This Matters
 

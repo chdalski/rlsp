@@ -35,6 +35,15 @@ the testing strategy is non-obvious:
   establish testing patterns for a module. The TE should
   validate the approach before the pattern propagates to
   future tests
+- A specification named in the plan's Context or the
+  project's References defines behavior the task adds,
+  changes, or promises to keep unchanged — a protocol, a
+  file format, a standard. This holds for pattern-following,
+  refactoring and test-only tasks too: tests derived from
+  the task and the current code confirm the implementation,
+  and in a prior project retrofits that copied an
+  established pattern carried its protocol violations into
+  every feature, each one approved
 
 ## When to Consult the Security Engineer
 
@@ -62,7 +71,9 @@ getting it wrong includes security implications:
 
 Skip both advisors when the task is **low risk and low
 uncertainty** — the implementation is straightforward and
-the blast radius is contained:
+the blast radius is contained — and no specification
+defines the behavior it touches (see the test-engineer
+trigger above, which also covers test-only tasks):
 
 - **Pure functions with existing test patterns** — no I/O,
   no side effects, no external input, and the codebase
