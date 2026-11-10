@@ -149,22 +149,35 @@ After clarification is complete:
    half-finished code. Do not skip it for a small change —
    whether the design matters depends on the code around
    the change, not on the change's size. Before writing the
-   plan, put every proposal to the user in the question
+   plan, put its proposals to the user in the question
    round (_Asking the User_); a proposal taken after review
-   adds tasks that need a follow-up pass (step 6b–d). As
-   soon as the user
-   decides the first proposal, create the plan file with
-   its Goal and that decision in Decisions, and keep
-   adding to it: uncommitted on disk, it survives a crashed
-   session, which the conversation does not. It is neither
-   reviewed nor approved until step 7.
-   A proposal that revises the approach the
-   user chose during clarification is new information from
-   the code — put it to the user like the others. A
-   proposal adopted as a separate plan before this change
-   gets its own plan, queued ahead of this change and
-   completed first, whose Goal names the change it
-   prepares; then plan this change with a fresh
+   adds tasks that need a follow-up pass (step 6b–d):
+   - **The Shape proposals as one design.** Explain how
+     the change will be built on one example that runs
+     through all of it, and offer two options: build it
+     so, or change a part, which you then ask about on its
+     own. Shape proposals are parts of one design — asked
+     one by one, each costs the user a decision on a part
+     that makes sense only with the others. A design you
+     cannot explain on one example is too large for one
+     question: ask it part by part.
+   - **On its own** each preparatory refactor and larger
+     redesign, since it adds tasks or plans, and each Shape
+     proposal that competes with another proposal, carries
+     a cost or risk the user bears, or revises a decision
+     the user made. A proposal that revises the approach
+     the user chose during clarification is new information
+     from the code, not a reason to leave it out.
+
+   As soon as the user decides the first proposal, create
+   the plan file with its Goal and that decision in
+   Decisions, and keep adding to it: uncommitted on disk,
+   it survives a crashed session, which the conversation
+   does not. It is neither reviewed nor approved until
+   step 7. A proposal adopted as a separate plan before
+   this change gets its own plan, queued ahead of this
+   change and completed first, whose Goal names the change
+   it prepares; then plan this change with a fresh
    `design-advisor` report, since the first one judged the
    code before the refactor. One adopted as a separate plan
    after goes into this plan's Non-Goals, marked
