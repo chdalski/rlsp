@@ -3,6 +3,7 @@ use std::fmt::Write as _;
 
 use futures::StreamExt;
 use rlsp_yaml::server::Backend;
+use rstest::rstest;
 use serde_json::json;
 use tower_lsp::LspService;
 use tower_lsp::jsonrpc::Request;
@@ -442,6 +443,105 @@ fn has_code(diags: &[tower_lsp::lsp_types::Diagnostic], code: &str) -> bool {
     diags
         .iter()
         .any(|d| matches!(&d.code, Some(NumberOrString::String(s)) if s == code))
+}
+
+/// Open `lines` joined (and ended) by `line_break` and return the diagnostics
+/// the server stored for it.
+async fn diagnostics_for_lines(
+    lines: &[&str],
+    line_break: &str,
+) -> Vec<tower_lsp::lsp_types::Diagnostic> {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/line-breaks.yaml";
+    let text: String = lines.iter().flat_map(|line| [*line, line_break]).collect();
+    send(&mut service, did_open_notification(uri, &text)).await;
+
+    service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist")
+}
+
+// Line breaks: every comment and modeline works the same for `\n`, `\r\n`, and
+// a lone `\r`.
+
+#[rstest]
+#[case::lf("\n")]
+#[case::crlf("\r\n")]
+#[case::lone_cr("\r")]
+#[tokio::test]
+async fn should_suppress_the_line_after_disable_next_line_for_every_line_break(
+    #[case] line_break: &str,
+) {
+    let suppressed = diagnostics_for_lines(
+        &[
+            "key: a",
+            "# rlsp-yaml-disable-next-line duplicateKey",
+            "key: b",
+        ],
+        line_break,
+    )
+    .await;
+    assert!(!has_code(&suppressed, "duplicateKey"), "{suppressed:?}");
+
+    // A blank line between the comment and the duplicate keeps the comment from
+    // reaching it, and the diagnostic sits on the line the suppression counts.
+    let reached = diagnostics_for_lines(
+        &[
+            "key: a",
+            "# rlsp-yaml-disable-next-line duplicateKey",
+            "",
+            "key: b",
+        ],
+        line_break,
+    )
+    .await;
+    let duplicate_lines: Vec<u32> = reached
+        .iter()
+        .filter(|d| d.code == Some(NumberOrString::String("duplicateKey".to_string())))
+        .map(|d| d.range.start.line)
+        .collect();
+    assert_eq!(duplicate_lines, vec![3], "{reached:?}");
+}
+
+#[rstest]
+#[case::lf("\n")]
+#[case::crlf("\r\n")]
+#[case::lone_cr("\r")]
+#[tokio::test]
+async fn should_suppress_every_line_after_disable_file_for_every_line_break(
+    #[case] line_break: &str,
+) {
+    let suppressed = diagnostics_for_lines(
+        &["# rlsp-yaml-disable-file", "key: a", "key: b"],
+        line_break,
+    )
+    .await;
+    assert!(!has_code(&suppressed, "duplicateKey"), "{suppressed:?}");
+
+    let reported = diagnostics_for_lines(&["# a comment", "key: a", "key: b"], line_break).await;
+    assert!(has_code(&reported, "duplicateKey"), "{reported:?}");
+}
+
+#[rstest]
+#[case::lf("\n")]
+#[case::crlf("\r\n")]
+#[case::lone_cr("\r")]
+#[tokio::test]
+async fn should_apply_the_yaml_version_modeline_for_every_line_break(#[case] line_break: &str) {
+    let v1_1 = diagnostics_for_lines(
+        &["# yaml-language-server: $yamlVersion=1.1", "enabled: yes"],
+        line_break,
+    )
+    .await;
+    assert!(!has_code(&v1_1, "yaml11Boolean"), "{v1_1:?}");
+
+    let v1_2 = diagnostics_for_lines(&["# a comment", "enabled: yes"], line_break).await;
+    assert!(has_code(&v1_2, "yaml11Boolean"), "{v1_2:?}");
 }
 
 // Section 1: disable-next-line — specific code

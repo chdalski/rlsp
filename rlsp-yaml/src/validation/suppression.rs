@@ -2,6 +2,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::lsp_util::source_lines;
+
 const NEXT_LINE_PREFIX: &str = "# rlsp-yaml-disable-next-line";
 const FILE_PREFIX: &str = "# rlsp-yaml-disable-file";
 
@@ -73,7 +75,7 @@ pub fn build_suppression_map(text: &str) -> SuppressionMap {
     let mut line_suppressions: HashMap<u32, SuppressionRule> = HashMap::new();
     let mut file_suppression: Option<SuppressionRule> = None;
 
-    for (idx, line) in text.lines().enumerate() {
+    for (idx, line) in source_lines(text).enumerate() {
         let trimmed = line.trim();
 
         if let Some(rest) = trimmed.strip_prefix(NEXT_LINE_PREFIX) {
@@ -334,5 +336,120 @@ mod tests {
         let text = "# rlsp-yaml-disable-file\nkey: value\n";
         let map = build_suppression_map(text);
         assert!(map.is_suppressed(99, "any-code"));
+    }
+
+    // ── Section 8: line breaks ────────────────────────────────────────────────
+    //
+    // Lines are numbered the way `LineIndex` numbers them: `\n`, `\r\n`, and a
+    // lone `\r` each end one line.
+
+    #[rstest]
+    #[case::lf("\n")]
+    #[case::crlf("\r\n")]
+    #[case::lone_cr("\r")]
+    fn disable_next_line_with_codes_targets_the_following_line(#[case] line_break: &str) {
+        let text =
+            format!("# rlsp-yaml-disable-next-line code-a{line_break}key: value{line_break}");
+        let map = build_suppression_map(&text);
+        assert!(!map.is_suppressed(0, "code-a"));
+        assert!(map.is_suppressed(1, "code-a"));
+        assert!(!map.is_suppressed(1, "code-b"));
+        assert!(!map.is_suppressed(2, "code-a"));
+    }
+
+    #[rstest]
+    #[case::lf("\n")]
+    #[case::crlf("\r\n")]
+    #[case::lone_cr("\r")]
+    fn disable_next_line_without_codes_suppresses_all_on_the_following_line(
+        #[case] line_break: &str,
+    ) {
+        let text = format!("# rlsp-yaml-disable-next-line{line_break}key: value{line_break}");
+        let map = build_suppression_map(&text);
+        assert!(!map.is_suppressed(0, "any-code"));
+        assert!(map.is_suppressed(1, "any-code"));
+        assert!(!map.is_suppressed(2, "any-code"));
+    }
+
+    #[rstest]
+    #[case::lf("\n")]
+    #[case::crlf("\r\n")]
+    #[case::lone_cr("\r")]
+    fn disable_file_without_codes_suppresses_all_for_every_break(#[case] line_break: &str) {
+        let text =
+            format!("# rlsp-yaml-disable-file{line_break}key: a{line_break}key: b{line_break}");
+        let map = build_suppression_map(&text);
+        assert!(map.is_suppressed(0, "any-code"));
+        assert!(map.is_suppressed(2, "any-code"));
+    }
+
+    #[rstest]
+    #[case::lf("\n")]
+    #[case::crlf("\r\n")]
+    #[case::lone_cr("\r")]
+    fn disable_file_with_codes_suppresses_only_those_codes_for_every_break(
+        #[case] line_break: &str,
+    ) {
+        let text = format!(
+            "# rlsp-yaml-disable-file code-a{line_break}key: a{line_break}key: b{line_break}"
+        );
+        let map = build_suppression_map(&text);
+        assert!(map.is_suppressed(2, "code-a"));
+        assert!(!map.is_suppressed(2, "code-b"));
+    }
+
+    #[test]
+    fn mixed_breaks_number_lines_like_line_index() {
+        let text =
+            "a\r\n# rlsp-yaml-disable-next-line c1\n b\r# rlsp-yaml-disable-next-line c2\rd\r\n";
+        let map = build_suppression_map(text);
+        assert!(map.is_suppressed(2, "c1"));
+        assert!(map.is_suppressed(4, "c2"));
+        for line in [0, 1, 3, 5] {
+            assert!(!map.is_suppressed(line, "c1"), "c1 on line {line}");
+            assert!(!map.is_suppressed(line, "c2"), "c2 on line {line}");
+        }
+        assert!(!map.is_suppressed(4, "c1"));
+        assert!(!map.is_suppressed(2, "c2"));
+    }
+
+    #[test]
+    fn consecutive_next_line_comments_with_lone_cr_each_suppress_their_next_line() {
+        let text = "# rlsp-yaml-disable-next-line c\r# rlsp-yaml-disable-next-line c\rkey: value\r";
+        let map = build_suppression_map(text);
+        assert!(!map.is_suppressed(0, "c"));
+        assert!(map.is_suppressed(1, "c"));
+        assert!(map.is_suppressed(2, "c"));
+    }
+
+    #[test]
+    fn first_file_comment_wins_with_lone_cr() {
+        let text = "# rlsp-yaml-disable-file code-a\r# rlsp-yaml-disable-file code-b\rkey: value\r";
+        let map = build_suppression_map(text);
+        assert!(map.is_suppressed(2, "code-a"));
+        assert!(!map.is_suppressed(2, "code-b"));
+    }
+
+    #[test]
+    fn disable_next_line_on_last_line_with_trailing_lone_cr_adds_no_suppression_before_it() {
+        let text = "key: value\r# rlsp-yaml-disable-next-line code-a\r";
+        let map = build_suppression_map(text);
+        assert!(!map.is_suppressed(0, "code-a"));
+        assert!(!map.is_suppressed(1, "code-a"));
+    }
+
+    #[test]
+    fn indented_comment_with_lone_cr_is_recognised() {
+        let text = "  # rlsp-yaml-disable-next-line code-a\r key: v\r";
+        let map = build_suppression_map(text);
+        assert!(map.is_suppressed(1, "code-a"));
+    }
+
+    #[test]
+    fn unicode_line_separator_does_not_end_a_line() {
+        let text = "# rlsp-yaml-disable-next-line code-a\u{2028}key: value\n";
+        let map = build_suppression_map(text);
+        assert!(!map.is_suppressed(1, "code-a"));
+        assert!(map.is_suppressed(1, "code-a\u{2028}key: value"));
     }
 }

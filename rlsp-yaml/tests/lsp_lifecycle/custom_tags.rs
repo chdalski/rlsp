@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 use futures::StreamExt;
 use rlsp_yaml::server::Backend;
+use rstest::rstest;
 use serde_json::json;
 use tower_lsp::LspService;
 use tower_lsp::jsonrpc::Request;
@@ -130,5 +131,45 @@ async fn should_emit_no_diagnostic_when_tag_type_annotation_matches_node() {
     assert!(
         !has_tag_diag,
         "scalar !include matches expected type scalar — no tag diagnostics expected, got: {diags:?}"
+    );
+}
+
+#[rstest]
+#[case::lf("\n")]
+#[case::crlf("\r\n")]
+#[case::lone_cr("\r")]
+#[tokio::test]
+async fn should_allow_exactly_the_tags_of_the_modeline_for_every_line_break(
+    #[case] line_break: &str,
+) {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/tags-modeline-breaks.yaml";
+    let text = [
+        "# yaml-language-server: $tags=!include,!ref",
+        "a: !include x",
+        "b: !ref y",
+        "c: !other z",
+        "",
+    ]
+    .join(line_break);
+    send(&mut service, did_open_notification(uri, &text)).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+    let unknown_tag_lines: Vec<u32> = diags
+        .iter()
+        .filter(|d| matches!(d.code.as_ref(), Some(NumberOrString::String(s)) if s == "unknownTag"))
+        .map(|d| d.range.start.line)
+        .collect();
+    assert_eq!(
+        unknown_tag_lines,
+        vec![3],
+        "only !other is unknown; !include and !ref come from the modeline, got: {diags:?}"
     );
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 use futures::StreamExt;
 use rlsp_yaml::server::Backend;
+use rstest::rstest;
 use serde_json::json;
 use tower_lsp::LspService;
 use tower_lsp::jsonrpc::Request;
@@ -298,5 +299,44 @@ async fn should_accept_document_matching_only_the_twenty_fifth_one_of_branch() {
     assert!(
         !messages.iter().any(|m| m.contains("oneOf")),
         "the 25th oneOf branch matches; got: {messages:?}"
+    );
+}
+
+// ---- modeline schema URL ends at its line ----
+
+#[rstest]
+#[case::lf("\n")]
+#[case::crlf("\r\n")]
+#[case::lone_cr("\r")]
+#[tokio::test]
+async fn should_fetch_the_modeline_schema_url_without_text_of_the_next_line(
+    #[case] line_break: &str,
+) {
+    let proxy = FakeProxy::start(Reply::ok(Some("application/json"), "{}".to_string()));
+    let (mut service, _log) = start_server(json!({
+        "httpProxy": proxy.url(),
+        "schemaStore": false,
+    }))
+    .await;
+
+    let text = format!(
+        "# yaml-language-server: $schema=http://{SCHEMA_HOST}/schema.json{line_break}key: value{line_break}"
+    );
+    send(
+        &mut service,
+        did_open_notification("file:///test/modeline-break.yaml", &text),
+    )
+    .await;
+
+    let requests: Vec<String> = proxy
+        .seen()
+        .into_iter()
+        .filter(|line| line.starts_with("GET "))
+        .collect();
+    assert_eq!(
+        requests,
+        vec!["GET /schema.json HTTP/1.1".to_string()],
+        "saw: {:?}",
+        proxy.seen()
     );
 }

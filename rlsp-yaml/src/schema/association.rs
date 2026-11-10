@@ -5,6 +5,8 @@ use std::collections::BTreeMap;
 use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::{Document, Node};
 
+use crate::lsp_util::source_lines;
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Schema association — modeline
 // ──────────────────────────────────────────────────────────────────────────────
@@ -31,7 +33,7 @@ pub fn extract_schema_url(text: &str) -> Option<String> {
 /// line with surrounding whitespace trimmed, and may be empty. Each extractor
 /// decides which of the values it takes.
 fn modeline_values<'a>(text: &'a str, prefix: &'static str) -> impl Iterator<Item = &'a str> {
-    text.lines()
+    source_lines(text)
         .take(10)
         .filter_map(move |line| line.trim().strip_prefix(prefix).map(str::trim))
 }
@@ -631,7 +633,11 @@ mod tests {
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     fn n_lines(n: usize) -> String {
-        "key: value\n".repeat(n)
+        n_lines_with(n, "\n")
+    }
+
+    fn n_lines_with(n: usize, line_break: &str) -> String {
+        format!("key: value{line_break}").repeat(n)
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -670,6 +676,30 @@ mod tests {
         "# yaml-language-server: $schema=https://example.com/schema.json\r\nkey: value\r\n",
         "https://example.com/schema.json"
     )]
+    #[case::lone_cr_line_ending(
+        "# yaml-language-server: $schema=https://example.com/schema.json\rkey: value\r",
+        "https://example.com/schema.json"
+    )]
+    #[case::lone_cr_modeline_on_second_line(
+        "key: value\r# yaml-language-server: $schema=https://example.com/schema.json\r",
+        "https://example.com/schema.json"
+    )]
+    #[case::lone_cr_modeline_without_trailing_break(
+        "key: value\r# yaml-language-server: $schema=https://example.com/schema.json",
+        "https://example.com/schema.json"
+    )]
+    #[case::mixed_breaks(
+        "key: a\r\nother: b\r# yaml-language-server: $schema=https://example.com/schema.json\nz: 1",
+        "https://example.com/schema.json"
+    )]
+    #[case::lone_cr_first_nonempty_of_several(
+        "# yaml-language-server: $schema=https://example.com/a.json\r# yaml-language-server: $schema=https://example.com/b.json\r",
+        "https://example.com/a.json"
+    )]
+    #[case::lone_cr_empty_value_then_nonempty_value(
+        "# yaml-language-server: $schema=\r# yaml-language-server: $schema=https://example.com/b.json\r",
+        "https://example.com/b.json"
+    )]
     #[case::equals_sign_inside_url(
         "# yaml-language-server: $schema=https://example.com/s.json?a=b\n",
         "https://example.com/s.json?a=b"
@@ -693,6 +723,31 @@ mod tests {
             extract_schema_url(&text),
             Some("https://example.com/schema.json".to_string())
         );
+    }
+
+    #[rstest]
+    #[case::crlf("\r\n")]
+    #[case::lone_cr("\r")]
+    fn extract_schema_url_counts_crlf_and_lone_cr_lines_to_the_tenth_line(
+        #[case] line_break: &str,
+    ) {
+        let text = n_lines_with(9, line_break)
+            + "# yaml-language-server: $schema=https://example.com/schema.json";
+        assert_eq!(
+            extract_schema_url(&text),
+            Some("https://example.com/schema.json".to_string())
+        );
+    }
+
+    #[rstest]
+    #[case::crlf("\r\n")]
+    #[case::lone_cr("\r")]
+    fn extract_schema_url_returns_none_beyond_tenth_crlf_and_lone_cr_line(
+        #[case] line_break: &str,
+    ) {
+        let text = n_lines_with(10, line_break)
+            + "# yaml-language-server: $schema=https://example.com/schema.json";
+        assert_eq!(extract_schema_url(&text), None);
     }
 
     #[rstest]
@@ -747,6 +802,26 @@ mod tests {
         "# yaml-language-server: $tags=!a\n# yaml-language-server: $tags=!b\n",
         vec!["!a"]
     )]
+    #[case::lone_cr_line_ending(
+        "# yaml-language-server: $tags=!include,!ref\rkey: value\r",
+        vec!["!include", "!ref"]
+    )]
+    #[case::lone_cr_modeline_on_second_line(
+        "key: value\r# yaml-language-server: $tags=!include,!ref\r",
+        vec!["!include", "!ref"]
+    )]
+    #[case::lone_cr_modeline_without_trailing_break(
+        "key: value\r# yaml-language-server: $tags=!include",
+        vec!["!include"]
+    )]
+    #[case::mixed_breaks(
+        "key: a\r\nother: b\r# yaml-language-server: $tags=!include\nz: 1",
+        vec!["!include"]
+    )]
+    #[case::lone_cr_first_modeline_wins(
+        "# yaml-language-server: $tags=!a\r# yaml-language-server: $tags=!b\r",
+        vec!["!a"]
+    )]
     fn extract_custom_tags_returns_tags(#[case] text: &str, #[case] expected: Vec<&str>) {
         assert_eq!(
             extract_custom_tags(text),
@@ -764,6 +839,9 @@ mod tests {
     #[case::separator_only_first_modeline_ends_search(
         "# yaml-language-server: $tags= , ,\n# yaml-language-server: $tags=!include\n"
     )]
+    #[case::lone_cr_empty_first_modeline_ends_search(
+        "# yaml-language-server: $tags=\r# yaml-language-server: $tags=!include\r"
+    )]
     fn extract_custom_tags_returns_empty(#[case] text: &str) {
         assert_eq!(extract_custom_tags(text), Vec::<String>::new());
     }
@@ -777,6 +855,18 @@ mod tests {
     #[test]
     fn extract_custom_tags_returns_empty_beyond_line_10() {
         let text = n_lines(10) + "# yaml-language-server: $tags=!include\n";
+        assert_eq!(extract_custom_tags(&text), Vec::<String>::new());
+    }
+
+    #[test]
+    fn extract_custom_tags_reads_ten_lone_cr_lines() {
+        let text = n_lines_with(9, "\r") + "# yaml-language-server: $tags=!include";
+        assert_eq!(extract_custom_tags(&text), vec!["!include".to_string()]);
+    }
+
+    #[test]
+    fn extract_custom_tags_returns_empty_beyond_ten_lone_cr_lines() {
+        let text = n_lines_with(10, "\r") + "# yaml-language-server: $tags=!include";
         assert_eq!(extract_custom_tags(&text), Vec::<String>::new());
     }
 
@@ -806,6 +896,23 @@ mod tests {
         "# yaml-language-server: $yamlVersion=1.1\n# yaml-language-server: $yamlVersion=1.2\n",
         "1.1"
     )]
+    #[case::lone_cr_line_ending("# yaml-language-server: $yamlVersion=1.2\rkey: value\r", "1.2")]
+    #[case::lone_cr_modeline_on_second_line(
+        "key: value\r# yaml-language-server: $yamlVersion=1.2\r",
+        "1.2"
+    )]
+    #[case::lone_cr_modeline_without_trailing_break(
+        "key: value\r# yaml-language-server: $yamlVersion=1.1",
+        "1.1"
+    )]
+    #[case::mixed_breaks(
+        "key: a\r\nother: b\r# yaml-language-server: $yamlVersion=1.1\nz: 1",
+        "1.1"
+    )]
+    #[case::lone_cr_invalid_then_valid(
+        "# yaml-language-server: $yamlVersion=2.0\r# yaml-language-server: $yamlVersion=1.2\r",
+        "1.2"
+    )]
     fn extract_yaml_version_returns_some(#[case] text: &str, #[case] expected: &str) {
         assert_eq!(extract_yaml_version(text), Some(expected.to_string()));
     }
@@ -834,6 +941,70 @@ mod tests {
     fn extract_yaml_version_returns_none_beyond_tenth_line() {
         let text = n_lines(10) + "# yaml-language-server: $yamlVersion=1.1\n";
         assert_eq!(extract_yaml_version(&text), None);
+    }
+
+    #[test]
+    fn extract_yaml_version_reads_ten_lone_cr_lines() {
+        let text = n_lines_with(9, "\r") + "# yaml-language-server: $yamlVersion=1.1";
+        assert_eq!(extract_yaml_version(&text), Some("1.1".to_string()));
+    }
+
+    #[test]
+    fn extract_yaml_version_returns_none_beyond_ten_lone_cr_lines() {
+        let text = n_lines_with(10, "\r") + "# yaml-language-server: $yamlVersion=1.1";
+        assert_eq!(extract_yaml_version(&text), None);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // modeline values never hold a line break
+    // ══════════════════════════════════════════════════════════════════════════
+
+    mod modeline_properties {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig {
+                cases: 2048,
+                ..ProptestConfig::default()
+            })]
+
+            /// A modeline value ends at its line, whichever break ends it, so
+            /// no extracted value holds text of a later line.
+            #[test]
+            fn extracted_values_hold_no_line_break(
+                parts in prop::collection::vec(
+                    prop::sample::select(vec![
+                        "# yaml-language-server: $schema=https://example.com/s.json",
+                        "# yaml-language-server: $tags=!a,!b",
+                        "# yaml-language-server: $yamlVersion=1.2",
+                        "key: value",
+                        "",
+                    ]),
+                    0..8,
+                ),
+                breaks in prop::collection::vec(
+                    prop::sample::select(vec!["\n", "\r\n", "\r"]),
+                    8,
+                ),
+            ) {
+                let text: String = parts
+                    .iter()
+                    .zip(&breaks)
+                    .flat_map(|(part, line_break)| [*part, *line_break])
+                    .collect();
+
+                let values = extract_schema_url(&text)
+                    .into_iter()
+                    .chain(extract_custom_tags(&text))
+                    .chain(extract_yaml_version(&text));
+
+                for value in values {
+                    prop_assert!(!value.contains(['\r', '\n']), "{value:?}");
+                }
+            }
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════════

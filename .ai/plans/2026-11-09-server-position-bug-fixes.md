@@ -29,7 +29,7 @@ with three defects of the same causes that the backlog does not list.
 - [x] Task 4: The block-scalar action keeps trailing blanks out of the value
 - [x] Task 5: Color ranges come from the scalar's source text
 - [x] Task 6: One modeline reader serves the three modeline keys
-- [ ] Task 7: Modelines and suppressions read source lines
+- [x] Task 7: Modelines and suppressions read source lines
 - [ ] Task 8: Context actions and block-to-flow read source lines
 - [ ] Task 9: Range and full formatting keep the formatter's line breaks
 - [ ] Task 10: File patterns match characters, not bytes
@@ -159,12 +159,12 @@ The modeline reader and `build_suppression_map` (`src/validation/suppression.rs`
 `str::lines()`, which keeps a lone `\r` inside the line, while the diagnostics they filter number
 lines like `LineIndex`.
 
-- [ ] The modeline reader and the suppression map read source lines through one function in
+- [x] The modeline reader and the suppression map read source lines through one function in
       `src/lsp_util.rs` built on `LineBuffer`
-- [ ] In a document with lone `\r` breaks, `$schema`, the custom-tags modeline, `$yamlVersion`,
+- [x] In a document with lone `\r` breaks, `$schema`, the custom-tags modeline, `$yamlVersion`,
       `rlsp-yaml-disable-next-line`, and `rlsp-yaml-disable-file` take effect as they do with `\n`,
       through `didOpen`, and the schema URL and tags hold no text of a later line
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 8: Context actions and block-to-flow read source lines
 

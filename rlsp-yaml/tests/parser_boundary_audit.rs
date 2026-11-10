@@ -111,6 +111,13 @@ const ALLOW_LIST: &[AllowEntry] = &[
         },
     },
     AllowEntry {
+        file: "lsp_util.rs",
+        func: "source_lines",
+        marker: AllowMarker::CarveOut {
+            reason: "pre-parse lexical: splits text into source lines for the modeline and suppression-comment scans, reads no structure",
+        },
+    },
+    AllowEntry {
         file: "editing/formatter/blank_lines.rs",
         func: "find_comment_on_line",
         marker: AllowMarker::CarveOut {

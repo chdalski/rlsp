@@ -64,6 +64,7 @@ share a parent line with one sub-item each.
 - `validators/duplicate_keys.rs` (~96-97) builds a duplicate key's range from the start line and the end column, wrong for multi-line keys; server bug-fix plan Task 2 security review.
 - The block-scalar action (`rlsp-yaml/src/editing/code_actions/block_scalar.rs`) prints the header and keeps the original trailing comment after the block text when a scalar has a `trailing_comment` but `trailing_comment_line_end` returns `None`, which would turn the comment into content; no input reaching this path is known; server bug-fix plan Task 4 security review.
 - `LineIndex::line_column` in `rlsp-yaml-parser/src/pos.rs` costs time in proportion to the column per call, so a long line with many color matches (or other per-match position lookups) grows with the square of its length; server bug-fix plan Task 5 security review.
+- A BOM before line 1 keeps a modeline on that line (`$schema`, custom tags, `$yamlVersion`) from matching, since `lsp_util::source_lines` does not strip it; server bug-fix plan Task 7 security review.
 
 ## Tests
 
