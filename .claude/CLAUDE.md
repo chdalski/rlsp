@@ -51,12 +51,14 @@ addressing stale state early avoids wasted effort:
 2. **Understand** — read relevant files if needed (you
    have access to Read, Glob, Grep, `LSP`, and all other
    tools — `code-navigation.md` says which answers what).
-3. **Ask** — use `AskUserQuestion` for all structured
-   questions. Present your understanding as regular text,
-   then use `AskUserQuestion` for confirmations and open
-   questions — structured options are harder to miss than
-   questions buried in prose.
-4. **Repeat** — continue until all ambiguities are resolved.
+3. **Ask** what your research cannot start without — what
+   is to be built, while that is open. Present your
+   understanding as regular text, then use
+   `AskUserQuestion` for these questions — structured
+   options are harder to miss than questions buried in
+   prose. Every other question waits for the question
+   round (_Asking the User_).
+4. **Repeat** — continue until what is to be built is clear.
 
 Do not assume what the user wants. Do not skip
 clarification for "simple" tasks — misunderstanding a task
@@ -84,7 +86,7 @@ may not know how this is usually done. Before planning,
 check it against established, proven practice and common
 sense; if a better-proven approach exists, say so with the
 concrete reason and trade-off, and offer both as options.
-Raise it once, during clarification — then the user
+Raise it once, in the question round — then the user
 decides, and the decision stands: do not reopen it later
 unless new information surfaces. Agreeing silently passes
 a weak design into the plan, and every later gate checks
@@ -147,9 +149,10 @@ After clarification is complete:
    half-finished code. Do not skip it for a small change —
    whether the design matters depends on the code around
    the change, not on the change's size. Before writing the
-   plan, ask via `AskUserQuestion` about every proposal; a
-   proposal taken after review adds tasks that need a
-   follow-up pass (step 6b–d). As soon as the user
+   plan, put every proposal to the user in the question
+   round (_Asking the User_); a proposal taken after review
+   adds tasks that need a follow-up pass (step 6b–d). As
+   soon as the user
    decides the first proposal, create the plan file with
    its Goal and that decision in Decisions, and keep
    adding to it: uncommitted on disk, it survives a crashed
@@ -840,19 +843,48 @@ harder to misread or skip than questions buried in prose.
 Each call supports 1-4 questions with 2-4 options each
 (plus an automatic "Other" option for free text).
 
+**Ask in one round, one question at a time.** Collect the
+questions that come up while you research and plan — open
+points from clarification, the design-advisor's proposals,
+behavior changes, questions a rule or skill requires — and
+put them to the user together: once the design-advisor
+report is in, or before you write a plan that gets none.
+Open the round with a short list — how many questions, one
+line on each, and that they come from the research and the
+design-advisor's report on how to build it. Then ask one
+question per `AskUserQuestion` call, each after the ones it
+depends on. When an answer raises a new question — a changed
+design needs a fresh design-advisor report — add it and say
+why it came up. A prior lead asked a dozen questions in
+eight dialogs as they arose, after the user had considered
+the task settled; the user asked where all the questions
+came from.
+
 **Each question stands on its own.** An explanation written
 above the dialog has often scrolled out of view and is
-missed, or there is none, and the user cannot tell what the
-question is about. So write every question so the user can
-answer it from the dialog alone. When a question would be
-hard to understand without an explanation, name its
-subject and say in a clause what it is or what the problem
-is, and why you ask. A question that is already clear stays
-as it is. An option marked `(Recommended)` states the
-reason for the recommendation in its description. Do not
-bloat the dialog: add only the clause that makes the
-question understandable — often one is enough — and keep
-the reasoning behind it out of the dialog.
+missed, or there is none. So the dialog carries what the
+user needs to decide, written for someone who has not
+followed your research:
+
+- **The question** says in a sentence or two what is to
+  decide and why it comes up — the purpose before the
+  mechanism.
+- **An example** shows one concrete case from the user's
+  domain — data, a screen, a run they know — and what each
+  option makes of it, before and after. Put it in each
+  option's `preview`; code goes there only next to the
+  example, when the decision is about the code's structure.
+- **Each option** says what it means for the user — visible
+  behavior, cost, risk; the one marked `(Recommended)` gives
+  its reason.
+
+A question that is clear without an example — a yes or no
+on a step the user knows — stays as it is. Simplify, but
+keep the difference between the options: the user decides
+on it. Judge a question by whether the user can decide from
+it, not by its length: told not to bloat the dialog, a prior
+lead cut three design proposals to one line each with code
+previews, and the user had to ask what they were about.
 
 **Write for a reader without your context.** Not only
 questions: answers, summaries, plan presentations, pages
@@ -862,9 +894,16 @@ once, such as a colleague asked for an opinion. Labels from
 those documents — task, finding and section IDs such as
 `F5`, `T13` or `§4` — mean nothing to them: say in words
 what the thing is, and add the label in parentheses only
-where the reader needs it to find the place. Open with the
-point — what is to decide or what changed, and your
-recommendation — and put the detail after it. A page of
+where the reader needs it to find the place. Name things
+with the terms the user and the project's docs use — its
+glossary, if it has one — not with names you, the code or
+a report coined; when another term is unavoidable, say at
+once what it means. Write in the register of ASD-STE100
+Simplified Technical English, whatever language you write
+in: short sentences, one statement each, common words.
+Open with the point — what is to decide or what changed,
+and your recommendation — and put the detail after it. A
+page of
 decision cards written in a plan's labels drew "what?" and
 "nobody can do anything with F5 and N6"; the shortened
 cards drew "tl;dr" — nine cards were rewritten before
@@ -879,14 +918,13 @@ A prior lead guessed such an answer, and the user had to
 object.
 
 **Put findings one at a time, each with a fix.** Present
-findings one question at a time, or a few that belong
-together, each with its background, why it is a problem, and
-the concrete change you propose: for documentation the new
-wording, for a follow-up plan what it would do. For a
-decision about code, show the changed code in the option's
-`preview` field. A category is not a solution: a prior lead
-listed 29 findings as a table with labels, and the user could
-decide none of them.
+findings one question at a time, each with its background,
+why it is a problem, and the concrete change you propose:
+for documentation the new wording, for a follow-up plan what
+it would do. For a decision about code, show the changed
+code in the option's `preview` field. A category is not a
+solution: a prior lead listed 29 findings as a table with
+labels, and the user could decide none of them.
 
 **A question from the user is not an order.** Answer it
 directly in two or three plain sentences, give background
