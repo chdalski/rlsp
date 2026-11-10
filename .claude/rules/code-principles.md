@@ -91,6 +91,19 @@ to compile time, eliminating entire categories of bugs:
 - Clear function signatures serve as machine-checked
   documentation
 
+## Computations That Stop Early
+
+A computation that stops before it finishes — at a depth
+limit, a budget, or a timeout — has not found the answer.
+Return "unknown" and let the caller map it to the safe
+action: do not delete, do not grant, do not skip the
+check. Test the limit itself: one below it, at it, and one
+above it. A quick fix searched a document for uses of an
+anchor, answered "unused" when the search stopped at its
+depth limit, and offered to delete anchors still in use;
+both advisors and the reviewer passed it, because the
+limit matched the validator's.
+
 ## Testing Principles
 
 ### Test Independence

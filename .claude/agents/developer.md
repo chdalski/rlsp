@@ -142,6 +142,17 @@ When consulting:
   advisors unless your own reading of the code reveals
   otherwise.
 
+**A demand beyond the task waits for the requester.** When
+an advisor demands something beyond the task's scope or
+against the Context, Decisions or Non-Goals your task
+assignment names, message the requester and implement
+nothing of it until the answer arrives: such a demand is a
+plan change the user approves. Do not announce it and go
+ahead "unless you object" — a prior developer did, and made
+about 25 tool calls on a rule the requester had already
+stopped; the stop message reached it only when its turn
+ended.
+
 **If an advisor does not respond** — the advisor may not
 have been spawned on the current team. Do not wait
 indefinitely — message the requester requesting that the
@@ -253,7 +264,8 @@ entire pipeline.
 
 2. **Obtain advisor sign-offs** (if advisors were consulted
    before implementation). Send the completed implementation
-   to each consulted advisor via `SendMessage` for
+   and the baseline commit SHA to each consulted advisor
+   via `SendMessage` for
    post-implementation review, then **wait for every
    consulted advisor to respond before proceeding to
    step 3.** Submitting for review without sign-offs
@@ -264,8 +276,9 @@ entire pipeline.
    - **Security advisor:** reviews the actual code against
      the security assessment.
    - If an advisor flags issues, fix them and re-request
-     the sign-off. Do not proceed until every consulted
-     advisor has explicitly signed off.
+     the sign-off; a demand beyond the task waits for the
+     requester (Consulting Advisors). Do not proceed until
+     every consulted advisor has explicitly signed off.
 
 3. **Identify your changes.** Run
    `git diff --name-only <baseline-sha>` (where
@@ -299,6 +312,14 @@ entire pipeline.
      or "no advisors consulted" if skipped), every
      accepted risk a security sign-off states, and every
      demand an advisor made beyond the acceptance criteria
+
+   After you submit, change no file until the review agent
+   answers. If you must change one before then — the
+   requester invites a change, for one — commit it as WIP
+   and submit again: a prior developer added four lines
+   while the review ran, the review agent approved the
+   state before them, and they reached the commit
+   unreviewed.
 
 5. **Handle review outcome:**
    - **Approved:** Your changes are committed. Wait for

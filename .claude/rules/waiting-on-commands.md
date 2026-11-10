@@ -71,6 +71,21 @@ with the same flaws.
    a PID you recorded, or match the exact process name with
    `pgrep -x`.
 
+4. **Judge a run by its exit status, not by filtered
+   output.** Do not cut a build or test run with `head`,
+   `tail` or `grep` and read success from what is left: the
+   pipe hides the command's exit status, and `head` can end
+   the run before it reaches a failure. A developer ran
+   `cargo test 2>&1 | grep -E "^test result|FAILED|failed"
+   | head -30`: passing tests whose names contain "failed"
+   filled the thirty lines, the failing test binary never
+   showed, and the developer reported all tests passing.
+   Run the command unfiltered, or write its output to a file
+   outside the working tree (`log=$(mktemp)`) and search
+   that — a file inside it enters `git status` and the state
+   a review records — and report its exit status with the
+   result.
+
 ## Why This Matters
 
 A watch loop that misses its end condition looks exactly

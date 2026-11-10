@@ -100,7 +100,8 @@ For each issue, include:
 - **Why it matters** — potential impact
 - **What to do** — concrete recommendation
 - **Severity** — Critical, High, Medium, Low
-- **Origin** — introduced, pre-existing, or no defect
+- **Origin** — introduced, pre-existing with the baseline
+  check that shows it, or no defect
   (`introduced-defects.md`)
 
 Critical and High issues, and every introduced defect
@@ -133,7 +134,9 @@ for sign-off:
   system loads relevant security guidance automatically
   based on the files being touched.
 - Use Bash only for running security scanning and analysis
-  tools (e.g., static analyzers), not for editing files.
+  tools (e.g., static analyzers) and read-only git commands
+  such as `git show <baseline>:<path>`, not for editing
+  files.
 - Do not write code. Advise the requester on what to
   implement and what to test.
 - If blocked, message the requester.

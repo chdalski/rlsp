@@ -368,7 +368,8 @@ rounds.
   because the demand only tightens the task. The reviewer's
   approval names it, and the task's commit carries the plan
   change. Name it in the report at the plan's end. A demand
-  beyond the task's scope is a revision.
+  beyond the task's scope, or one against the plan's
+  Context, Decisions or Non-Goals, is a revision.
 - **Cancellation** — the Goal no longer holds. Set the Status
   to `Canceled`, add the reason as a Decisions entry in the
   same commit, and write a new plan. Committed tasks stay.
@@ -596,6 +597,7 @@ The reviewer messages you on approval with:
 - The composed commit message
 - The baseline commit SHA (from the developer's handoff)
 - The verified file list
+- The approved state, a tree
 - A review summary with the checks run and their results
 - Accepted risks from the security sign-off, or "none"
 - Demands a gate made beyond the acceptance criteria, or
@@ -629,8 +631,8 @@ Your intervention supersedes the in-flight fix.
 
 The trigger for the After Reviewer Approval sequence is a
 direct `SendMessage` from the `reviewer` containing the
-commit message, baseline SHA, verified file list, and
-review summary. Nothing else is an approval:
+commit message, baseline SHA, verified file list, approved
+state, and review summary. Nothing else is an approval:
 
 - **Developer messages are not approvals**, even when they
   inline or relay the reviewer's verdict. A developer
@@ -646,6 +648,11 @@ review summary. Nothing else is an approval:
   direct message has not arrived, the approval has not
   arrived — even if every field appears verbatim
   elsewhere.
+- **An approval that leaves a defect open as
+  pre-existing without its baseline check is incomplete.**
+  Ask the reviewer for the check before you squash; until
+  then the defect counts as introduced
+  (`introduced-defects.md`).
 
 **Why:** a production session committed ~90 seconds before
 the reviewer's actual approval message arrived, because
@@ -672,18 +679,25 @@ When the **reviewer messages you directly** with approval
    the reviewer's approval message. This moves HEAD back
    to the baseline and unstages all WIP-committed changes
    into the working tree — all changes are now unstaged,
-   and step 5 controls exactly what gets committed. Do not
-   use `--soft` — it leaves WIP changes staged, and
+   and steps 3 and 5 control exactly what gets committed.
+   Do not use `--soft` — it leaves WIP changes staged, and
    `git commit` would include all of them regardless of
-   the file list in step 5. If the approval message
-   indicates no baseline SHA (no WIP commits were made),
-   skip this step.
+   the file list. If the approval message indicates no
+   baseline SHA (no WIP commits were made), skip this step.
 
-3. **Verify the file list.** Run `git status --porcelain`
-   and confirm it matches the verified file list from the
-   reviewer's approval message. The reviewer already
-   cross-referenced the developer's reported files — this
-   is a final consistency check after the squash.
+3. **Verify the file list and its content.** Run
+   `git status --porcelain` and confirm it matches the
+   verified file list from the reviewer's approval message.
+   Then stage exactly those files (`git add <paths>`) and
+   run `git diff --cached --stat <approved-tree> -- <paths>`.
+   It must print nothing: the name check lets a change
+   inside a listed file pass, and any output is a change the
+   reviewer has not seen. A prior lead squashed while the
+   developer was still adding four lines to a listed file,
+   and they entered the commit unreviewed. On output,
+   unstage (`git reset -q`), ask the reviewer for a
+   follow-up pass from `<approved-tree>`, and start again at
+   step 1 on its new approval.
 
 4. **Update the plan.** Mark all checkboxes for the
    completed task — both the step-level checkbox and every
@@ -691,13 +705,15 @@ When the **reviewer messages you directly** with approval
    finding the reviewer reports as left open to
    `.ai/backlog.md` — the file list check in step 3 is done,
    so this edit cannot fail it. An introduced defect is left
-   open only once the user accepted it
+   open only once the user accepted it, and a pre-existing
+   one with the baseline check its finding names
    (`introduced-defects.md`).
 
-5. **Stage and commit.** Stage every file from the verified
-   file list, the plan file, and `.ai/backlog.md` if it
-   changed, using `git add` with
-   specific paths. Never use `git add .` or `git add -A`.
+5. **Stage and commit.** Stage the plan file and
+   `.ai/backlog.md` if it changed, using `git add` with
+   specific paths — the verified files are staged since
+   step 3, and staging them again would take in an edit made
+   since the check. Never use `git add .` or `git add -A`.
    Commit with the reviewer's composed commit message,
    appending a `Plan:` trailer as the final line — the
    plan's filename without `.md` (e.g.
@@ -916,11 +932,10 @@ Simplified Technical English, whatever language you write
 in: short sentences, one statement each, common words.
 Open with the point — what is to decide or what changed,
 and your recommendation — and put the detail after it. A
-page of
-decision cards written in a plan's labels drew "what?" and
-"nobody can do anything with F5 and N6"; the shortened
-cards drew "tl;dr" — nine cards were rewritten before
-anyone could decide them.
+page of decision cards written in a plan's labels drew
+"what?" and "nobody can do anything with F5 and N6"; the
+shortened cards drew "tl;dr" — nine cards were rewritten
+before anyone could decide them.
 
 **A timeout is not an answer.** When `AskUserQuestion`
 reports that nobody responded and tells you to proceed on

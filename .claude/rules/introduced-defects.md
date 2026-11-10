@@ -30,8 +30,13 @@ out its one-line fix.
   defect. Check that before you say so: read the code at the
   task's baseline (`git show <baseline>:<path>`; without
   commits in the task, the baseline is `HEAD`) or run the
-  case there. A defect in lines the change adds is
-  introduced, even when it looks like a known one.
+  case there, and name that command and its result with the
+  finding. Until you have, the defect counts as introduced.
+  A defect in lines the change adds is introduced, even when
+  it looks like a known one. A prior reviewer labeled a
+  defect "pre-existing, not verified at baseline" and
+  approved; the function it lay in did not exist at the
+  baseline.
 
 ## The Rule
 
