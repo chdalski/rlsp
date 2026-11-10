@@ -33,7 +33,7 @@ with the defects that the backlog does not list in the code these fixes rewrite.
 - [x] Task 7: Modelines and suppressions read source lines
 - [x] Task 8: Context actions and block-to-flow read source lines
 - [x] Task 9: Range and full formatting keep the formatter's line breaks
-- [ ] Task 10: File patterns match characters, not bytes
+- [x] Task 10: File patterns match characters, not bytes
 - [ ] Task 11: `?` in SchemaStore catalog patterns matches one character
 - [ ] Push to `main` and confirm the full CI matrix is green
 
@@ -222,11 +222,11 @@ the range, the edit duplicates or loses text. `formatting` computes its end posi
 The glob matcher of `FilePatterns` (`src/schema/association.rs`) compares bytes; a wildcard for
 one character needs it to compare characters. Behavior is unchanged.
 
-- [ ] A glob's literals and wildcards stand for characters, so a token can match exactly one
+- [x] A glob's literals and wildcards stand for characters, so a token can match exactly one
       character; the doc comments of the matcher speak of characters
-- [ ] The glob tests and proptests in `association.rs` pass with their assertions unchanged, apart
+- [x] The glob tests and proptests in `association.rs` pass with their assertions unchanged, apart
       from the type of a literal in a test helper
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 11: `?` in SchemaStore catalog patterns matches one character
 
@@ -345,6 +345,11 @@ literal like the `schemas` setting.
   end of text). The interim line-count guard and its helper were removed; the edit is tested
   against an independent oracle; the stack-depth test reads the edit's end line only for range
   formatting, so a truncated full-format edit still fails it. An empty document gets no edit.
+
+- **Gate demands of Task 10:** the matcher streams the path's characters instead of collecting
+  them, the length limits stay in bytes, no normalization or case folding is added, and the
+  segment-start flag follows the last character read; the exhaustive and proptest comparisons with
+  the byte-based reference matcher also run over multibyte alphabets.
 
 ## Task Notes
 

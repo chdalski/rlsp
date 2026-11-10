@@ -468,10 +468,10 @@ pub fn match_schema_by_filename(
 /// One element of a compiled glob.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Token {
-    Literal(u8),
-    /// `*`: any run of bytes other than `/`.
+    Literal(char),
+    /// `*`: any run of characters other than `/`.
     Star,
-    /// `**`, and the `/` after it if there is one: any run of bytes.
+    /// `**`, and the `/` after it if there is one: any run of characters.
     /// With `at_segment_start` the run has to end where a path segment begins.
     DoubleStar {
         at_segment_start: bool,
@@ -512,32 +512,35 @@ impl Glob {
     /// `schemas` pattern can compile to; a longer glob, which only the
     /// `SchemaStore` catalog can bring, takes them from the heap.
     fn is_match(&self, candidate: &str) -> bool {
-        let text = candidate.as_bytes();
-        if !self.ends_with_trailing_literals(text) {
+        if !self.ends_with_trailing_literals(candidate) {
             return false;
         }
         let states = self.tokens.len() + 1;
         let mut stack = ([false; STACK_STATES], [false; STACK_STATES]);
         if let (Some(reached), Some(next)) = (stack.0.get_mut(..states), stack.1.get_mut(..states))
         {
-            return self.simulate(text, reached, next);
+            return self.simulate(candidate, reached, next);
         }
-        self.simulate(text, &mut vec![false; states], &mut vec![false; states])
+        self.simulate(
+            candidate,
+            &mut vec![false; states],
+            &mut vec![false; states],
+        )
     }
 
-    /// The literal tokens at the end of the glob match exactly the last bytes
-    /// of the text, whatever precedes them: a literal consumes one byte, and
-    /// only wildcards can match nothing. A necessary condition for a match,
-    /// checked in as many steps as the glob has trailing literal bytes or the
-    /// text has bytes, whichever is fewer, before the simulation that costs
-    /// glob length times text length.
-    fn ends_with_trailing_literals(&self, text: &[u8]) -> bool {
-        let mut text_end = text.iter().rev();
+    /// The literal tokens at the end of the glob match exactly the last
+    /// characters of the text, whatever precedes them: a literal consumes one
+    /// character, and only wildcards can match nothing. A necessary condition
+    /// for a match, checked in as many steps as the glob has trailing literals
+    /// or the text has characters, whichever is fewer, before the simulation
+    /// that costs glob length times text length.
+    fn ends_with_trailing_literals(&self, candidate: &str) -> bool {
+        let mut text_end = candidate.chars().rev();
         self.tokens
             .iter()
             .rev()
             .map_while(|token| match token {
-                Token::Literal(literal) => Some(literal),
+                Token::Literal(literal) => Some(*literal),
                 Token::Star | Token::DoubleStar { .. } => None,
             })
             .all(|literal| text_end.next() == Some(literal))
@@ -548,28 +551,28 @@ impl Glob {
     /// `reached` and `next` hold one state per token and one for the end.
     fn simulate<'a>(
         &self,
-        text: &[u8],
+        candidate: &str,
         mut reached: &'a mut [bool],
         mut next: &'a mut [bool],
     ) -> bool {
         debug_assert_eq!(reached.len(), self.tokens.len() + 1);
         debug_assert_eq!(next.len(), reached.len());
         mark(reached, 0);
-        self.skip_empty_runs(reached, text, 0);
-        for (position, &byte) in text.iter().enumerate() {
+        self.skip_empty_runs(reached, true);
+        for character in candidate.chars() {
             next.fill(false);
             for (index, token) in self.tokens.iter().enumerate() {
                 if !reached.get(index).copied().unwrap_or(false) {
                     continue;
                 }
                 match *token {
-                    Token::Literal(literal) if literal == byte => mark(next, index + 1),
-                    Token::Star if byte != b'/' => mark(next, index),
+                    Token::Literal(literal) if literal == character => mark(next, index + 1),
+                    Token::Star if character != '/' => mark(next, index),
                     Token::DoubleStar { .. } => mark(next, index),
                     Token::Literal(_) | Token::Star => {}
                 }
             }
-            self.skip_empty_runs(next, text, position + 1);
+            self.skip_empty_runs(next, character == '/');
             std::mem::swap(&mut reached, &mut next);
             if !reached.contains(&true) {
                 return false;
@@ -579,9 +582,9 @@ impl Glob {
     }
 
     /// A wildcard may match nothing: from each reached wildcard, also reach
-    /// the token after it, where `position` in `text` allows it.
-    fn skip_empty_runs(&self, reached: &mut [bool], text: &[u8], position: usize) {
-        let at_segment_start = position == 0 || text.get(position - 1) == Some(&b'/');
+    /// the token after it, where the text allows it: `at_segment_start` tells
+    /// whether the text so far is empty or ends with a `/`.
+    fn skip_empty_runs(&self, reached: &mut [bool], at_segment_start: bool) {
         for (index, token) in self.tokens.iter().enumerate() {
             let can_end_here = match *token {
                 Token::Literal(_) => false,
@@ -606,14 +609,14 @@ fn mark(states: &mut [bool], index: usize) {
 /// Split `pattern` into tokens. A `**/` ends only at the start of a path
 /// segment.
 fn tokenize(pattern: &str) -> impl Iterator<Item = Token> + '_ {
-    let mut bytes = pattern.bytes().peekable();
+    let mut characters = pattern.chars().peekable();
     std::iter::from_fn(move || {
-        let byte = bytes.next()?;
-        Some(match byte {
-            b'*' if bytes.next_if_eq(&b'*').is_some() => Token::DoubleStar {
-                at_segment_start: bytes.next_if_eq(&b'/').is_some(),
+        let character = characters.next()?;
+        Some(match character {
+            '*' if characters.next_if_eq(&'*').is_some() => Token::DoubleStar {
+                at_segment_start: characters.next_if_eq(&'/').is_some(),
             },
-            b'*' => Token::Star,
+            '*' => Token::Star,
             literal => Token::Literal(literal),
         })
     })
@@ -1338,6 +1341,28 @@ mod tests {
     }
 
     #[test]
+    fn match_schema_by_filename_measures_the_path_in_bytes() {
+        let entries = schemas(&[("https://a.test/s.json", &["*.yaml"])]);
+        let path =
+            |two_byte_characters: usize| format!("/{}.yaml", "\u{e9}".repeat(two_byte_characters));
+        let longest = (MAX_PATH_BYTES - "/.yaml".len()) / 2;
+        assert_eq!(path(longest).len(), MAX_PATH_BYTES);
+        assert_eq!(
+            match_schema_by_filename(&path(longest), &entries),
+            Some("https://a.test/s.json".to_string())
+        );
+        assert_eq!(match_schema_by_filename(&path(longest + 1), &entries), None);
+    }
+
+    #[test]
+    fn file_patterns_accept_a_four_byte_glob_at_the_limit_and_refuse_one_more() {
+        let glob = "\u{1F600}".repeat(MAX_PATTERN_BYTES / 4);
+        assert_eq!(glob.len(), MAX_PATTERN_BYTES);
+        assert!(FilePatterns::new(std::slice::from_ref(&glob)).is_some());
+        assert_eq!(FilePatterns::new(&[glob + "\u{1F600}"]), None);
+    }
+
+    #[test]
     fn file_patterns_matches_applies_no_path_limit() {
         let path = |extension: &str| format!("/{}{extension}", "a".repeat(MAX_PATH_BYTES));
         let patterns = file_patterns(&["**", "!*.json"]);
@@ -1492,39 +1517,53 @@ mod tests {
         Glob::anywhere(pattern).is_match(text)
     }
 
-    fn literal(byte: u8) -> Token {
-        Token::Literal(byte)
+    fn literal(character: char) -> Token {
+        Token::Literal(character)
     }
 
     const SEGMENT_START: Token = Token::DoubleStar {
         at_segment_start: true,
     };
-    const ANY_BYTE: Token = Token::DoubleStar {
+    const ANY_RUN: Token = Token::DoubleStar {
         at_segment_start: false,
     };
 
     #[rstest]
     #[case::empty("", vec![])]
-    #[case::double_star_alone_ends_anywhere("**", vec![ANY_BYTE])]
+    #[case::double_star_alone_ends_anywhere("**", vec![ANY_RUN])]
     #[case::double_star_slash_ends_at_a_segment_start("**/", vec![SEGMENT_START])]
-    #[case::second_slash_stays_literal("**//", vec![SEGMENT_START, literal(b'/')])]
-    #[case::three_stars_are_a_double_star_and_a_star("***", vec![ANY_BYTE, Token::Star])]
+    #[case::second_slash_stays_literal("**//", vec![SEGMENT_START, literal('/')])]
+    #[case::three_stars_are_a_double_star_and_a_star("***", vec![ANY_RUN, Token::Star])]
     #[case::three_stars_and_a_slash_do_not_fold_the_slash(
         "***/",
-        vec![ANY_BYTE, Token::Star, literal(b'/')]
+        vec![ANY_RUN, Token::Star, literal('/')]
     )]
-    #[case::star_slash_is_a_star_and_a_literal("*/", vec![Token::Star, literal(b'/')])]
+    #[case::star_slash_is_a_star_and_a_literal("*/", vec![Token::Star, literal('/')])]
     #[case::mixed(
         "a**/b*c**d",
         vec![
-            literal(b'a'),
+            literal('a'),
             SEGMENT_START,
-            literal(b'b'),
+            literal('b'),
             Token::Star,
-            literal(b'c'),
-            ANY_BYTE,
-            literal(b'd'),
+            literal('c'),
+            ANY_RUN,
+            literal('d'),
         ]
+    )]
+    #[case::multibyte_literal_is_one_token("é", vec![literal('é')])]
+    #[case::four_byte_literal_is_one_token("\u{1F600}", vec![literal('\u{1F600}')])]
+    #[case::multibyte_literal_between_wildcards(
+        "*é**/\u{20ac}",
+        vec![Token::Star, literal('é'), SEGMENT_START, literal('\u{20ac}')]
+    )]
+    #[case::double_star_slash_after_a_multibyte_literal(
+        "é**/",
+        vec![literal('é'), SEGMENT_START]
+    )]
+    #[case::multibyte_literal_after_three_stars(
+        "***é",
+        vec![ANY_RUN, Token::Star, literal('é')]
     )]
     fn anywhere_glob_tokenizes_double_stars_left_to_right(
         #[case] pattern: &str,
@@ -1622,6 +1661,50 @@ mod tests {
     #[case::multibyte_literal_with_only_the_last_byte_in_common("*é", "\u{2a9}", false)]
     #[case::multibyte_trailing_literal_longer_than_the_text("*éé", "é", false)]
     #[case::multibyte_trailing_literal_before_an_ascii_tail("*é.yaml", "é.yaml", true)]
+    #[case::star_matches_a_run_of_multibyte_characters("*.yaml", "é\u{20ac}\u{1F600}.yaml", true)]
+    #[case::star_stops_at_a_slash_after_a_multibyte_character("a*", "aé/b", false)]
+    #[case::star_matches_a_multibyte_character_before_a_name_end("a*", "aéb", true)]
+    #[case::star_between_multibyte_literals("é*\u{20ac}", "éx\u{1F600}\u{20ac}", true)]
+    #[case::star_between_multibyte_literals_stops_at_a_slash("é*\u{20ac}", "é/\u{20ac}", false)]
+    #[case::star_between_multibyte_literals_needs_the_order("é*\u{20ac}", "\u{20ac}é", false)]
+    #[case::star_may_match_nothing_between_multibyte_literals("é*\u{20ac}", "é\u{20ac}", true)]
+    #[case::double_star_slash_ends_after_a_slash_following_a_multibyte_segment("**/c", "é/c", true)]
+    #[case::double_star_slash_does_not_end_right_after_a_multibyte_character("**/c", "éc", false)]
+    #[case::double_star_slash_mid_glob_after_a_multibyte_segment("é**/c", "é/c", true)]
+    #[case::double_star_slash_mid_glob_directly_after_a_multibyte_literal("é**/c", "éc", false)]
+    #[case::double_star_slash_mid_glob_inside_a_multibyte_name("é**/c", "éxc", false)]
+    #[case::double_star_slash_ending_the_glob_after_a_multibyte_character("a**/", "aé", false)]
+    #[case::double_star_slash_ending_the_glob_after_a_multibyte_name("a**/", "aé/", true)]
+    #[case::double_star_slash_ending_the_glob_after_a_four_byte_name("a**/", "a\u{1F600}/", true)]
+    #[case::double_star_slash_at_the_start_before_a_multibyte_name("**/é", "é", true)]
+    #[case::double_star_slash_before_a_multibyte_name_inside_a_segment("**/é", "xé", false)]
+    #[case::a_multibyte_name_after_a_slash_is_a_segment_start("é*", "a/éb", true)]
+    #[case::a_multibyte_name_inside_a_segment_is_not("é*", "aéb", false)]
+    #[case::double_star_without_slash_ends_inside_a_multibyte_name("a**b", "aéb", true)]
+    #[case::trailing_multibyte_literal_differs_in_the_last_byte_only("*é", "è", false)]
+    #[case::three_byte_trailing_literal_matches("*\u{20ac}", "x\u{20ac}", true)]
+    #[case::three_byte_trailing_literal_differs_in_the_last_byte_only(
+        "*\u{20ac}",
+        "x\u{20ad}",
+        false
+    )]
+    #[case::four_byte_trailing_literal_matches("*\u{1F600}", "x\u{1F600}", true)]
+    #[case::four_byte_trailing_literal_differs_in_the_last_byte_only(
+        "*\u{1F600}",
+        "x\u{1F601}",
+        false
+    )]
+    #[case::four_byte_trailing_literals_longer_than_the_text(
+        "*\u{1F600}\u{1F600}",
+        "\u{1F600}",
+        false
+    )]
+    #[case::trailing_literal_mixes_ascii_and_multibyte("*aé", "éaé", true)]
+    #[case::trailing_literal_mixes_ascii_and_multibyte_and_misses("*aé", "éa", false)]
+    #[case::trailing_multibyte_then_ascii_literal("*éa", "xéa", true)]
+    #[case::multibyte_trailing_literal_is_the_whole_text("*é", "é", true)]
+    #[case::trailing_multibyte_literal_with_a_slash_matches("*é/é", "xé/é", true)]
+    #[case::trailing_multibyte_literal_with_a_slash_misses("*é/é", "a/é", false)]
     fn anywhere_glob_follows_the_documented_syntax(
         #[case] pattern: &str,
         #[case] text: &str,
@@ -1753,13 +1836,28 @@ mod tests {
         all
     }
 
-    /// Every glob of up to six bytes and every text of up to seven bytes over
-    /// `a`, `/` and `*`: each `**/`, `***` and `**//` next to the end of the
-    /// text is covered, with no luck of the draw.
-    #[test]
-    fn anywhere_glob_agrees_with_the_reference_model_on_every_short_glob_and_text() {
-        let texts = strings_over(&['a', '/'], 7);
-        for pattern in strings_over(&['a', '/', '*'], 6) {
+    /// Every glob of up to `glob_len` characters and every text of up to
+    /// `text_len` characters over the alphabets: each `**/`, `***` and `**//`
+    /// next to the end of the text is covered, with no luck of the draw. The
+    /// reference works on bytes, so the cases with wider characters compare
+    /// the matcher's characters with the bytes of their UTF-8 encoding.
+    #[rstest]
+    #[case::ascii(&['a', '/', '*'], 6, &['a', '/'], 7)]
+    #[case::two_byte(&['\u{e9}', '/', '*'], 6, &['\u{e9}', '/'], 7)]
+    #[case::mixed_widths(
+        &['a', '\u{e9}', '\u{20ac}', '\u{1F600}', '/', '*'],
+        4,
+        &['a', '\u{e9}', '\u{20ac}', '\u{1F600}', '/'],
+        5
+    )]
+    fn anywhere_glob_agrees_with_the_reference_model_on_every_short_glob_and_text(
+        #[case] glob_alphabet: &[char],
+        #[case] glob_len: usize,
+        #[case] text_alphabet: &[char],
+        #[case] text_len: usize,
+    ) {
+        let texts = strings_over(text_alphabet, text_len);
+        for pattern in strings_over(glob_alphabet, glob_len) {
             let glob = Glob::anywhere(&pattern);
             for text in &texts {
                 assert_eq!(
@@ -1808,6 +1906,11 @@ mod tests {
         vec!["/d/".to_string() + &"\u{e9}".repeat(MAX_PATTERN_BYTES / 2)],
         vec!["/d/".to_string() + &"\u{e9}".repeat(MAX_PATTERN_BYTES / 2 - 1) + "\u{e8}"],
     )]
+    #[case::four_byte_letters(
+        "\u{1F600}".repeat(MAX_PATTERN_BYTES / 4),
+        vec!["/d/".to_string() + &"\u{1F600}".repeat(MAX_PATTERN_BYTES / 4)],
+        vec!["/d/".to_string() + &"\u{1F600}".repeat(MAX_PATTERN_BYTES / 4 - 1) + "\u{1F601}"],
+    )]
     fn file_patterns_at_the_pattern_limit_agree_with_the_backtracking_matcher(
         #[case] pattern: String,
         #[case] matching: Vec<String>,
@@ -1849,11 +1952,15 @@ mod tests {
             #[test]
             fn anywhere_glob_agrees_with_the_reference_model(
                 parts in prop::collection::vec(
-                    prop::sample::select(vec!["a", "b", "\u{e9}", "/", "!", ".", "*", "**", "**/"]),
+                    prop::sample::select(vec![
+                        "a", "b", "\u{e9}", "\u{20ac}", "\u{1F600}", "/", "!", ".", "*", "**", "**/",
+                    ]),
                     0..6,
                 ),
-                suffix in prop::sample::select(vec!["", ".y", "b", "/b", "\u{e9}", "a.yaml"]),
-                text_body in "[ab\u{e9}/!.]{0,12}",
+                suffix in prop::sample::select(vec![
+                    "", ".y", "b", "/b", "\u{e9}", "\u{20ac}", "\u{1F600}", "a.yaml",
+                ]),
+                text_body in "[ab\u{e9}\u{20ac}\u{1F600}/!.]{0,12}",
                 text_ends_with_the_suffix in any::<bool>(),
             ) {
                 let pattern = parts.concat() + suffix;
@@ -1891,8 +1998,8 @@ mod tests {
             /// No glob and path make matching panic.
             #[test]
             fn file_patterns_never_panic(
-                globs in prop::collection::vec("[ab\u{e9}*/!.]{0,9}", 0..4),
-                path in "[ab\u{e9}/.]{0,12}",
+                globs in prop::collection::vec("[ab\u{e9}\u{20ac}\u{1F600}*/!.]{0,9}", 0..4),
+                path in "[ab\u{e9}\u{20ac}\u{1F600}/.]{0,12}",
             ) {
                 if let Some(patterns) = FilePatterns::new(&globs) {
                     let _ = patterns.matches(&path);
@@ -1906,7 +2013,7 @@ mod tests {
             /// build the same patterns.
             #[test]
             fn new_and_without_limits_agree_within_the_limits(
-                globs in prop::collection::vec("[ab\u{e9}*/!.]{0,9}", 0..4),
+                globs in prop::collection::vec("[ab\u{e9}\u{20ac}\u{1F600}*/!.]{0,9}", 0..4),
             ) {
                 prop_assert_eq!(
                     FilePatterns::new(&globs),
