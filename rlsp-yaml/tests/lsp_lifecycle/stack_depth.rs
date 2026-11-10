@@ -306,17 +306,27 @@ fn reach(call: Call, json: &str) -> usize {
         Call::References => count(json, "\"range\""),
         // The edits are flat, so they read back; their text is a block
         // document of one line per level, or a flow document of one bracket
-        // per level.
+        // per level. A range edit holds only the lines formatting changes, so
+        // for `rangeFormatting` the line its range ends at counts too: it is
+        // the bottom of the document when the changed lines reach it.
         Call::Formatting | Call::RangeFormatting => {
             let edits: Value = serde_json::from_str(json).expect("the edits are not nested");
-            edits
-                .as_array()
-                .and_then(|edits| edits.first())
+            let edit = edits.as_array().and_then(|edits| edits.first());
+            let text_reach = edit
                 .and_then(|edit| edit.get("newText"))
                 .and_then(Value::as_str)
                 .map_or(0, |text| {
                     text.lines().count().max(text.matches(['{', '[']).count())
-                })
+                });
+            let end_line = edit
+                .and_then(|edit| edit.pointer("/range/end/line"))
+                .and_then(Value::as_u64)
+                .map_or(0, |line| usize::try_from(line).expect("line fits"));
+            if call == Call::RangeFormatting {
+                text_reach.max(end_line)
+            } else {
+                text_reach
+            }
         }
         Call::Hover
         | Call::Completion

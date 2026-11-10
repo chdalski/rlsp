@@ -454,7 +454,7 @@ corresponding plan file under `.ai/plans/`.
 
 **Description:** Implement `textDocument/rangeFormatting` to format a selected region of a YAML document.
 **Complexity:** Low
-**Comment:** Depends on full document formatting infrastructure. Full document formatted internally, requested range lines returned as edits.
+**Comment:** Depends on full document formatting infrastructure. Full document formatted internally; the edit replaces the whole region the formatter changes (the lines between the leading and trailing lines that formatting keeps, line breaks included) when the requested lines touch it, so it may reach beyond the selected lines and applying it gives the full-format text. A range outside the region gets no edit.
 **Tier:** 3
 
 ### Formatter Conformance — 100% Round-Trip [completed]

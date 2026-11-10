@@ -8,13 +8,14 @@
 
 The open server-and-position bugs of `.ai/backlog.md` give users of `rlsp-yaml` wrong ranges, lost
 text, and settings and quick fixes that never take effect. Each is fixed where it arises, together
-with three defects of the same causes that the backlog does not list.
+with the defects that the backlog does not list in the code these fixes rewrite.
 
 ## Context
 
 - Paths are under `rlsp-yaml/` unless they name `rlsp-yaml-parser/`; commands are those of the root
   `CLAUDE.md`. New code builds positions with `lsp_util::span_to_lsp` and
-  `lsp_util::offset_to_lsp` and adds no column arithmetic of its own.
+  `lsp_util::offset_to_lsp` and adds no column arithmetic of its own, apart from the position at the
+  end of a text in Task 9 (see Decisions).
 - **Source lines** are the lines of a text as the parser's public `LineBuffer` splits them: a line
   ends at `\n`, `\r\n`, or a lone `\r`, the line breaks of YAML 1.2 production [28] `b-break`
   (https://yaml.org/spec/1.2.2/#53-line-break-characters). `LineIndex` numbers lines the same way.
@@ -31,7 +32,7 @@ with three defects of the same causes that the backlog does not list.
 - [x] Task 6: One modeline reader serves the three modeline keys
 - [x] Task 7: Modelines and suppressions read source lines
 - [x] Task 8: Context actions and block-to-flow read source lines
-- [ ] Task 9: Range and full formatting keep the formatter's line breaks
+- [x] Task 9: Range and full formatting keep the formatter's line breaks
 - [ ] Task 10: File patterns match characters, not bytes
 - [ ] Task 11: `?` in SchemaStore catalog patterns matches one character
 - [ ] Push to `main` and confirm the full CI matrix is green
@@ -182,18 +183,39 @@ one line.
 
 `range_formatting` (`src/server.rs`) splits both texts with `str::lines()`, joins them with `\n`,
 and appends `\n`, so editorconfig `end_of_line` and `insert_final_newline` do not reach range
-edits, and a `\r` document is one line. `formatting` computes its end position with
+edits, and a `\r` document is one line. It replaces the requested lines with the lines of the same
+numbers in the formatted document, so when formatting changes the number of lines above or inside
+the range, the edit duplicates or loses text. `formatting` computes its end position with
 `str::lines()`, so for a `\r` document its edit covers only the first line.
 
-- [ ] A range edit's text is the slice of the formatted document for the requested lines, with the
-      formatted document's own line breaks: with `end_of_line = crlf`, `cr`, or `lf`, and with
-      `insert_final_newline = false`, applying it gives the same lines as full formatting
-- [ ] Without an editorconfig `end_of_line`, range formatting writes LF, as full formatting does
-- [ ] Requested lines that differ from the formatted document only in their line breaks get an
-      edit
-- [ ] In a document with lone `\r` breaks, a range that starts below the first line gets an edit,
-      and the full-format edit replaces the whole document
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] The lines that the document and its full-format output share, line breaks included, bound one
+      changed region: the leading run is counted from the first line, and the trailing run from the
+      last line among the lines the leading run left, so the two runs never overlap
+- [x] The requested lines run from `start.line` to `end.line`, both included, and the end
+      character is not read, as before this task; a range touches the region when one of its lines
+      is a document line of the region, or, for a region that holds no document line, a line next
+      to it
+- [x] A range that touches the region gets one edit that replaces the whole region with its
+      counterpart in the full-format output; a range that does not touch it, a range that starts
+      after the document's last line or ends before it starts, and a document equal to its
+      full-format output get no edit
+- [x] Applying a range edit gives the full-format output, with `end_of_line = crlf`, `cr`, or `lf`,
+      and with `insert_final_newline = false`
+- [x] `a: 1\n\n\n\nb: 2\n` with the requested lines 0 to 3, which touch the blank lines formatting
+      removes, gives the full-format output, with no key duplicated or lost
+- [x] Without an editorconfig `end_of_line`, range formatting writes LF, as full formatting does
+- [x] A document that differs from its full-format output only in line breaks gets an edit for a
+      range that touches the lines that differ
+- [x] In a document with lone `\r` breaks, a range that starts below the first line and touches the
+      changed region gets an edit, and the full-format edit replaces the whole document
+- [x] The full-format edit, and a range edit whose region ends at the end of a document without a
+      final line break, end at the end of the document, also when its last line holds a character
+      outside the BMP
+- [x] The Range formatting paragraph of `docs/configuration.md` tells a reader that the edit
+      replaces the whole region the formatter changes, which may reach beyond the selected lines,
+      and that a range outside that region gets no edit; `docs/feature-log.md` no longer says that
+      the requested lines are returned and records the changed-region rule
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 10: File patterns match characters, not bytes
 
@@ -255,10 +277,25 @@ literal like the `schemas` setting.
   plain, quoted, or folded scalar is no longer reported, though the decoded-value scan found it at
   a wrong range; matching across lines needed a lookahead that made the scan quadratic. Declined:
   ranges that span lines.
-- **Range formatting slices the full-format output:** range and full formatting then agree on every
-  line. Without an editorconfig `end_of_line`, range formatting writes LF; a client that inserts
-  text without matching the document's line breaks gets mixed breaks in that range. Declined: the
-  document's own line break.
+- **Range formatting writes the line breaks of the full-format output:** range and full formatting
+  then agree on every line. Without an editorconfig `end_of_line`, range formatting writes LF; a
+  client that inserts text without matching the document's line breaks gets mixed breaks in that
+  range. Declined: the document's own line break.
+- **Range formatting replaces the changed region:** the leading and trailing lines that the document
+  shares with its full-format output stay in place, so the region between them maps as one block
+  whatever formatting does to its line count. The edit may reach beyond the requested lines: on an
+  unformatted document the region often spans most of the file, and a document whose line breaks
+  differ from those the formatter writes shares no line, so any range then formats the whole text;
+  this holds for every CRLF document without an editorconfig `end_of_line`.
+  Declined: no edit when the line counts differ, since equal counts do not prove that the lines
+  between align; the full-format edit whenever the mapping is unsound, which replaces the whole
+  document even for a local change; a line diff, which needs a new dependency or an own diff whose
+  plain form grows with the product of both line counts.
+- **The end of a text is counted in UTF-16 units:** the server negotiates no `positionEncoding`, so
+  clients read columns as UTF-16, and a code-point column ends the edit before the tail of a last
+  line that holds a character outside the BMP. Until the UTF-16 plan this one position is UTF-16;
+  every other position Task 9 builds is column 0 of a line, including the end of a region after a
+  final line break. Declined: a column past the line end that relies on clients clamping it.
 - **Source lines through `LineBuffer`:** one definition of a line, the parser's. Declined: a split
   at each site.
 - **`?` in catalog patterns matches a leading dot:** picomatch's `?` does not match a leading dot,
@@ -271,8 +308,8 @@ literal like the `schemas` setting.
   documents by the old span, which ran to the next line; a multi-line plain scalar already ends at
   its last content byte (`multiline_plain_scalar_span_ends_at_last_content_byte` in
   `rlsp-yaml-parser/tests/smoke/scalars.rs`).
-- **A range differing only in line breaks gets an edit:** range formatting yields the lines of full
-  formatting, line breaks included.
+- **A range differing only in line breaks gets an edit:** line breaks count when the document and
+  its full-format output are compared for shared lines.
 - **Gate demands of Task 1:** the quick fix rechecks for an alias and is refused where the check stops
   at the validator's depth limit, for a bare document's empty root, and where a character outside
   the BMP precedes the anchor on its line (columns stay code points until the UTF-16 plan); the
@@ -301,6 +338,13 @@ literal like the `schemas` setting.
   as a byte index and panicked on non-ASCII text before the collection; it now cuts at a character
   boundary. The context actions read only the cursor's line instead of collecting all lines.
   Action edits keep writing `\n` in `\r` documents, as range formatting writes LF.
+
+- **Gate demands of Task 9:** the security-engineer's input gate found that the range edit's
+  line-by-number mapping duplicates or loses text and that a code-point end column leaves the tail
+  of an astral last line, which led to the approved revision of Task 9 (changed-region rule, UTF-16
+  end of text). The interim line-count guard and its helper were removed; the edit is tested
+  against an independent oracle; the stack-depth test reads the edit's end line only for range
+  formatting, so a truncated full-format edit still fails it. An empty document gets no edit.
 
 ## Task Notes
 

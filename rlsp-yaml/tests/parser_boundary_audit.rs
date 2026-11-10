@@ -118,6 +118,34 @@ const ALLOW_LIST: &[AllowEntry] = &[
         },
     },
     AllowEntry {
+        file: "lsp_util.rs",
+        func: "lines_with_breaks",
+        marker: AllowMarker::CarveOut {
+            reason: "byte-range arithmetic on source lines: cuts a text into its lines with their breaks so formatting edits replace whole lines, reads no structure",
+        },
+    },
+    AllowEntry {
+        file: "lsp_util.rs",
+        func: "range_format_edit",
+        marker: AllowMarker::CarveOut {
+            reason: "whitespace-preserving edit: swaps whole source lines of the text for the same lines of the formatter output, reads no structure",
+        },
+    },
+    AllowEntry {
+        file: "lsp_util.rs",
+        func: "full_format_edit",
+        marker: AllowMarker::CarveOut {
+            reason: "whitespace-preserving edit: replaces the whole text with the formatter output, reads no structure",
+        },
+    },
+    AllowEntry {
+        file: "lsp_util.rs",
+        func: "end_position",
+        marker: AllowMarker::CarveOut {
+            reason: "byte-range arithmetic on source lines: finds the end of the text as an LSP position, reads no structure",
+        },
+    },
+    AllowEntry {
         file: "editing/formatter/blank_lines.rs",
         func: "find_comment_on_line",
         marker: AllowMarker::CarveOut {

@@ -16,9 +16,9 @@ use tower_lsp::lsp_types::{
     DocumentOnTypeFormattingParams, DocumentRangeFormattingParams, DocumentSymbolParams,
     DocumentSymbolResponse, FileSystemWatcher, FoldingRange, FoldingRangeParams, GlobPattern,
     GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, InitializeParams,
-    InitializeResult, InitializedParams, Location, NumberOrString, OneOf, Position,
-    PrepareRenameResponse, Range, ReferenceParams, Registration, RenameOptions, RenameParams,
-    SelectionRange, SelectionRangeParams, SelectionRangeProviderCapability, SemanticTokens,
+    InitializeResult, InitializedParams, Location, NumberOrString, OneOf, PrepareRenameResponse,
+    ReferenceParams, Registration, RenameOptions, RenameParams, SelectionRange,
+    SelectionRangeParams, SelectionRangeProviderCapability, SemanticTokens,
     SemanticTokensFullOptions, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
     SemanticTokensServerCapabilities, ServerCapabilities, TextDocumentSyncCapability,
     TextDocumentSyncKind, TextEdit, Url, WatchKind, WorkDoneProgressOptions, WorkspaceEdit,
@@ -1457,38 +1457,8 @@ impl LanguageServer for Backend {
 
         let formatted = crate::editing::formatter::format_yaml(&text, &options);
 
-        // No changes — return None.
-        if formatted == text {
-            return Ok(None);
-        }
-
-        // Replace the entire document with a single TextEdit spanning from (0,0)
-        // to the end of the last line. For documents ending with a newline the
-        // end position is (line_count, 0); otherwise it is (last_line_idx, last_col).
-        let lines: Vec<&str> = text.lines().collect();
-        let end = if text.ends_with('\n') {
-            Position {
-                line: u32::try_from(lines.len()).unwrap_or(u32::MAX),
-                character: 0,
-            }
-        } else {
-            let last_col = lines.last().map_or(0, |l| l.len());
-            Position {
-                line: u32::try_from(lines.len().saturating_sub(1)).unwrap_or(u32::MAX),
-                character: u32::try_from(last_col).unwrap_or(u32::MAX),
-            }
-        };
-
-        Ok(Some(vec![TextEdit {
-            range: Range {
-                start: Position {
-                    line: 0,
-                    character: 0,
-                },
-                end,
-            },
-            new_text: formatted,
-        }]))
+        // One edit replaces the entire document; none when nothing changes.
+        Ok(crate::lsp_util::full_format_edit(&text, &formatted).map(|edit| vec![edit]))
     }
 
     async fn range_formatting(
@@ -1523,57 +1493,17 @@ impl LanguageServer for Backend {
 
         let formatted = crate::editing::formatter::format_yaml(&text, &options);
 
-        // Extract the lines within the requested range from both the original
-        // and the formatted output. The range end is exclusive at character 0
-        // of the next line when the editor selects whole lines.
-        let orig_lines: Vec<&str> = text.lines().collect();
-        let fmt_lines: Vec<&str> = formatted.lines().collect();
-
-        let start_line = requested.start.line as usize;
-        let end_line = requested.end.line as usize;
-
-        // Clamp to the actual number of lines in both versions.
-        let orig_end = end_line.min(orig_lines.len().saturating_sub(1));
-        let fmt_end = end_line.min(fmt_lines.len().saturating_sub(1));
-
-        // Collect the range slice from each version for comparison.
-        let orig_slice = orig_lines
-            .get(start_line..=orig_end)
-            .unwrap_or_default()
-            .join("\n");
-        let fmt_slice = fmt_lines
-            .get(start_line..=fmt_end)
-            .unwrap_or_default()
-            .join("\n");
-
-        // No change in the requested range — nothing to do.
-        if orig_slice == fmt_slice {
-            return Ok(None);
-        }
-
-        // Build the replacement text. Append a trailing newline so the edit
-        // replaces whole lines (including the terminator of the last line).
-        let new_text = format!("{fmt_slice}\n");
-
-        // The edit range spans from the start of start_line to the start of
-        // the line after end_line (i.e. character 0 of end_line + 1), which
-        // replaces the lines in their entirety.
-        let edit_start = Position {
-            line: u32::try_from(start_line).unwrap_or(u32::MAX),
-            character: 0,
-        };
-        let edit_end = Position {
-            line: u32::try_from(end_line + 1).unwrap_or(u32::MAX),
-            character: 0,
-        };
-
-        Ok(Some(vec![TextEdit {
-            range: Range {
-                start: edit_start,
-                end: edit_end,
-            },
-            new_text,
-        }]))
+        // The requested lines are the start line to the end line, both
+        // inclusive; the end character is not read, so a selection that ends
+        // at column 0 of the next line still covers that line. A range that
+        // touches the lines formatting changes gets one edit for all of them.
+        Ok(crate::lsp_util::range_format_edit(
+            &text,
+            &formatted,
+            requested.start.line,
+            requested.end.line,
+        )
+        .map(|edit| vec![edit]))
     }
 
     async fn on_type_formatting(
@@ -1775,7 +1705,7 @@ mod tests {
     use super::*;
     use rstest::rstest;
     use tower_lsp::lsp_types::{
-        FormattingOptions, HoverProviderCapability, OneOf, PartialResultParams,
+        FormattingOptions, HoverProviderCapability, OneOf, PartialResultParams, Position, Range,
         TextDocumentIdentifier, TextDocumentSyncCapability, TextDocumentSyncKind,
         WorkDoneProgressParams,
     };
