@@ -18,13 +18,11 @@ share a parent line with one sub-item each.
 - Path resolver's first pass is unpriced (`resolve_schema_path`, `src/schema/path.rs`); security Medium.
 - `httpProxy` and `schemas` VS Code settings have no `scope`/`restrictedConfigurations`, and `configuration.md` misstates the unset `httpProxy`; security Medium.
 - SSRF guard checks hostname strings only (`foo.localhost`, DNS rebinding); schema queue.
-- "(all required)" completion snippet does not escape names (`schema_key_completions`); security Low.
 - One long flow-collection line takes quadratic time, about 25 s for 2 MB (suspect `abs_pos` in `event_iter/flow.rs`), a denial-of-service risk for the language server; comment plan Task 4 security review.
 - Formatter output grows with depth times `tab_width` (a 250-level flow sequence prints about 250 times its input), and time grows with the square of the item count; `tab_size` and `print_width` come from the client unchecked; medium, nesting plan Task 2 security review.
 - `fetch_schemastore_catalog` in `rlsp-yaml/src/schema.rs` calls `fetch_json` without `check_json_depth` or the raw budget, so only the 5 MiB cap and serde's depth limit of 128 apply (fixed URL, non-recursive consumer); security Low, nesting plan Task 11 security review.
 - CVE-2026-118764 (minimatch) is allowlisted in the VS Code extension's `ignoreCves` until `vscode-languageclient` runs with minimatch 11.0.1 or later or rlsp-yaml lets a pattern reach the client's minimatch; reason and triggers in the `Audit dependencies` step comment of `.github/workflows/vscode-extension.yml`; glob override plan.
 - The actions in `.github/workflows/vscode-extension.yml` are pinned to mutable major tags, not commit SHAs, including the publish job that uses `VSCE_PAT`; pre-existing, security Medium; glob override plan Task 2 security review.
-- `validate_unused_anchors` in `rlsp-yaml/src/validation/validators/anchors.rs` truncates a long anchor name with `&entry.name[..100]`, which panics when byte 100 is not a char boundary (`k: &a` followed by 60 `é`); a panic in a handler ends the server; server bug-fix plan Task 1 security review.
 - `match_schemastore` in `rlsp-yaml/src/schema.rs` caps no path length, so a catalog pattern runs against a path of any length; pre-existing, security Low; server bug-fix plan Task 11 security review.
 
 ## Bugs
@@ -60,12 +58,7 @@ share a parent line with one sub-item each.
 - The first single-line plain scalar is bounded by input size only, not `MAX_SCALAR_LEN`, and blank lines between keys are lost when a value gets fewer lines (`a: x\n  y\n\nb: 1\n`); parser plan Task 6 review.
 - A core tag `!!map` on a block key is dropped on format, with the same data; parser plan Task 14 review.
 - `load("\u{FEFF}\nk: v\n")` panics on a `debug_assert` in `rlsp-yaml-parser/src/event_iter/directives.rs` ("expected content after consuming blank/comment/directive lines"); server bug-fix plan Task 1 review.
-- `validate_unused_anchors` stops at `MAX_DEPTH` (100) and reports an anchor as never used when its only alias is nested deeper; the quick fix refuses such anchors; server bug-fix plan Task 1 review.
-- The scalar branch of selection ranges (`rlsp-yaml/src/analysis/selection.rs` ~177-184) checks only `col >= start_col` on every line, never the end column, so a cursor after a multi-line scalar's last character or left of its start column on a continuation line selects it; server bug-fix plan Task 2 review.
-- `validators/duplicate_keys.rs` (~96-97) builds a duplicate key's range from the start line and the end column, wrong for multi-line keys; server bug-fix plan Task 2 security review.
-- The block-scalar action (`rlsp-yaml/src/editing/code_actions/block_scalar.rs`) prints the header and keeps the original trailing comment after the block text when a scalar has a `trailing_comment` but `trailing_comment_line_end` returns `None`, which would turn the comment into content; no input reaching this path is known; server bug-fix plan Task 4 security review.
 - `LineIndex::line_column` in `rlsp-yaml-parser/src/pos.rs` costs time in proportion to the column per call, so a long line with many color matches (or other per-match position lookups) grows with the square of its length; server bug-fix plan Task 5 security review.
-- A BOM before line 1 keeps a modeline on that line (`$schema`, custom tags, `$yamlVersion`) from matching, since `lsp_util::source_lines` does not strip it; server bug-fix plan Task 7 security review.
 
 ## Tests
 
@@ -153,6 +146,8 @@ share a parent line with one sub-item each.
 
 ## Open decisions
 
+- Completion inserts a schema property name that YAML reads as another key (`a: b`, `#x`, `- k`, `true`, an empty name) without quotes, in the single-property items and the "(all required)" snippet of `rlsp-yaml/src/completion/schema_completions.rs`; quoting it would reuse the formatter's `needs_quoting` and `escape_double_quoted` (`editing/formatter/scalar_render.rs`) and changes the inserted text; server-feature bug-fix plan design review, for the user's decision.
+- Selection ranges give no range for a position in the indentation of a multi-line scalar's continuation line (`k: aaa\n  bbb\n` at (1,1)) or on a comment line inside or between entries, though the scalar, entry, or mapping range contains it; selecting the innermost node whose range contains the position would change that (`rlsp-yaml/src/analysis/selection.rs`); server-feature bug-fix plan design review, for the user's decision.
 - Flat arena AST as a possible goal for a 1.0 of `rlsp-yaml-parser`: about 30 to 50% faster `load()` and far less memory in the spike, no depth limit from the stack; `rlsp-yaml` would need a port (479 `Node` patterns in 40 files, an edit API for the formatter); branch `spike/flat-ast` (a09dad39), report `.ai/reports/2026-11-02-loader-depth-spikes.md`; user request.
 - Relative and local schemas (`$schema=./schema.json`, `file://`); schema queue.
 - `autoWrapFlowStyle` opt-out for `block_to_flow`, only if a user asks; code-action format-config plan.
