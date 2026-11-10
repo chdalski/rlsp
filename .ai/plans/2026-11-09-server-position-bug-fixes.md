@@ -28,7 +28,7 @@ with three defects of the same causes that the backlog does not list.
 - [x] Task 3: Semantic tokens skip multi-line quoted scalars
 - [x] Task 4: The block-scalar action keeps trailing blanks out of the value
 - [x] Task 5: Color ranges come from the scalar's source text
-- [ ] Task 6: One modeline reader serves the three modeline keys
+- [x] Task 6: One modeline reader serves the three modeline keys
 - [ ] Task 7: Modelines and suppressions read source lines
 - [ ] Task 8: Context actions and block-to-flow read source lines
 - [ ] Task 9: Range and full formatting keep the formatter's line breaks
@@ -146,10 +146,12 @@ https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/spe
 (`src/schema/association.rs`) each repeat the loop over the first ten lines; one reader of modeline
 values serves all three, so the line-break fix lands in one place. Behavior is unchanged.
 
-- [ ] The three extractors read the first ten lines through one function that yields the values of
+- [x] The three extractors read the first ten lines through one function that yields the values of
       a modeline key
-- [ ] The tests of the three extractors in `association.rs` pass with their assertions unchanged
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] The tests of the three extractors in `association.rs` pass with their assertions unchanged
+- [x] New tests pin each extractor's first-match rule and passed against the extractors before
+      the refactor
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 7: Modelines and suppressions read source lines
 
@@ -288,6 +290,10 @@ literal like the `schemas` setting.
   masked so a name joined through an escape is not reported, and lines joined by an escaped line
   break are scanned together with matches kept within one source line; linearity tests cover large
   scalars.
+
+- **Gate demands of Task 6:** the existing tests did not pin the extractors' first-match rules, so
+  tests that pin them came first and passed against the unchanged extractors (WIP commit 39124edb)
+  before the refactor.
 
 ## Task Notes
 

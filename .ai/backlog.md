@@ -82,6 +82,7 @@ share a parent line with one sub-item each.
 - `has_mapping_with_odd_node_count` in `rlsp-yaml/tests/formatter_keeps_text.rs` repeats `check_well_formed` of `rlsp-yaml-parser/tests/support/mod.rs` across the crate boundary; parser plan Task 12 review.
 - `? !!str\n!zz : v\n? &x\n` has no case in `rlsp-yaml/tests/formatter_keeps_data.rs`; parser plan Task 12 review.
 - `has_dangling_alias` in `rlsp-yaml/tests/unused_anchor_fix.rs` matches `A([^;]*);` anywhere in the data signature, so a value with an uppercase `A` counts as a dangling alias; collect anchor and alias names from the `load()` AST instead; server bug-fix plan Task 1 review.
+- `TEXT_PARAM_REGEX` in `rlsp-yaml/tests/parser_boundary_audit.rs` matches only `&str` and `&[&str]`, so a function taking `text: &'a str` reads raw text without being flagged; server bug-fix plan Task 6 review.
 - The single- and double-quoted tail tests in `rlsp-yaml-parser/src/lexer/quoted.rs` could share a style parameter, and the span-test helpers of `tests/smoke/scalars.rs` and `tests/smoke/quoted_scalars.rs` are near-duplicates; server bug-fix plan Task 2 test review.
 - `multi_line_quoted_scalar_gets_no_string_token` in `rlsp-yaml/src/analysis/semantic_tokens.rs` repeats all six of its inputs in `tokens_around_quoted_scalar_have_exact_positions` with a weaker check; retire the older test; server bug-fix plan Task 3 review.
 - `converting_keeps_the_blanks_inside_the_quotes` in `rlsp-yaml/src/editing/code_actions/block_scalar.rs` accepts the value with or without a final `\n`, so it does not pin whether a block scalar or the double-quoted fallback results; server bug-fix plan Task 4 review.
@@ -106,6 +107,7 @@ share a parent line with one sub-item each.
   - fold `collection_keys_nested_as_deep_as_the_parser_accepts_keep_their_data` (400 levels) into the rstest `explicit_keys_nested_as_deep_as_the_parser_accepts_keep_their_data` in `rlsp-yaml/tests/formatter_keeps_data.rs`; nesting plan Task 6 review.
   - `rlsp-yaml`: `should_not_panic_on_deeply_nested_yaml` and the three default-nesting tests in `src/parser.rs` (partly repeated by the rstest case 256), and the four `get_max_items_computed_*` tests in `src/server.rs`; nesting plan Task 8 test review.
   - `rlsp-yaml/src/decorators/color.rs`: `hex_color_in_value_detected_despite_hash`, `range_positions_correct`, `css_named_color_in_value_position_is_detected`, `quoted_string_color_value_produces_correct_range`, and `hex_in_value_position_produces_correct_range` overlap the source-range table; server bug-fix plan Task 5 test review.
+  - `rlsp-yaml/src/schema/association.rs`: the six `*_on_tenth_line` / `*_beyond_tenth_line` modeline tests into one parameterized test; server bug-fix plan Task 6 test review.
   - `should_publish_no_schema_diagnostics_when_schema_exceeds_depth_limit` in `rlsp-yaml/tests/lsp_lifecycle/schema_fetch.rs` partly overlaps `schema_beyond_the_json_depth_limit_is_refused` in `stack_depth.rs`; nesting plan Task 11 test review.
 
 ## Cleanup

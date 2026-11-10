@@ -19,18 +19,21 @@ use rlsp_yaml_parser::node::{Document, Node};
 /// Returns `None` if no such line is found within the first 10 lines.
 #[must_use]
 pub fn extract_schema_url(text: &str) -> Option<String> {
-    const PREFIX: &str = "# yaml-language-server: $schema=";
+    modeline_values(text, "# yaml-language-server: $schema=")
+        .find(|url| !url.is_empty())
+        .map(str::to_string)
+}
 
-    for line in text.lines().take(10) {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix(PREFIX) {
-            let url = rest.trim();
-            if !url.is_empty() {
-                return Some(url.to_string());
-            }
-        }
-    }
-    None
+/// The values of the modelines that start with `prefix`, in source order.
+///
+/// Only the first 10 lines are read. A line matches when it starts with
+/// `prefix` after leading whitespace is dropped; the value is the rest of the
+/// line with surrounding whitespace trimmed, and may be empty. Each extractor
+/// decides which of the values it takes.
+fn modeline_values<'a>(text: &'a str, prefix: &'static str) -> impl Iterator<Item = &'a str> {
+    text.lines()
+        .take(10)
+        .filter_map(move |line| line.trim().strip_prefix(prefix).map(str::trim))
 }
 
 /// Extract custom tag names from a `yaml-language-server` modeline comment.
@@ -43,20 +46,16 @@ pub fn extract_schema_url(text: &str) -> Option<String> {
 /// Returns an empty `Vec` if no such line is found within the first 10 lines.
 #[must_use]
 pub fn extract_custom_tags(text: &str) -> Vec<String> {
-    const PREFIX: &str = "# yaml-language-server: $tags=";
-
-    for line in text.lines().take(10) {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix(PREFIX) {
-            return rest
-                .split(',')
+    modeline_values(text, "# yaml-language-server: $tags=")
+        .next()
+        .map(|tags| {
+            tags.split(',')
                 .map(str::trim)
-                .filter(|s| !s.is_empty())
+                .filter(|tag| !tag.is_empty())
                 .map(str::to_string)
-                .collect();
-        }
-    }
-    Vec::new()
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Extract a YAML version from a `yaml-language-server` modeline comment.
@@ -71,18 +70,9 @@ pub fn extract_custom_tags(text: &str) -> Vec<String> {
 /// 10 lines.
 #[must_use]
 pub fn extract_yaml_version(text: &str) -> Option<String> {
-    const PREFIX: &str = "# yaml-language-server: $yamlVersion=";
-
-    for line in text.lines().take(10) {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix(PREFIX) {
-            let value = rest.trim();
-            if value == "1.1" || value == "1.2" {
-                return Some(value.to_string());
-            }
-        }
-    }
-    None
+    modeline_values(text, "# yaml-language-server: $yamlVersion=")
+        .find(|version| matches!(*version, "1.1" | "1.2"))
+        .map(str::to_string)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -672,6 +662,26 @@ mod tests {
     #[case::none_sentinel_lowercase("# yaml-language-server: $schema=none\nkey: value\n", "none")]
     #[case::none_sentinel_mixed_case("# yaml-language-server: $schema=None\nkey: value\n", "None")]
     #[case::none_sentinel_uppercase("# yaml-language-server: $schema=NONE\nkey: value\n", "NONE")]
+    #[case::indented_modeline(
+        "  \t# yaml-language-server: $schema=https://example.com/schema.json\n",
+        "https://example.com/schema.json"
+    )]
+    #[case::crlf_line_ending(
+        "# yaml-language-server: $schema=https://example.com/schema.json\r\nkey: value\r\n",
+        "https://example.com/schema.json"
+    )]
+    #[case::equals_sign_inside_url(
+        "# yaml-language-server: $schema=https://example.com/s.json?a=b\n",
+        "https://example.com/s.json?a=b"
+    )]
+    #[case::empty_value_then_nonempty_value(
+        "# yaml-language-server: $schema=\n# yaml-language-server: $schema=https://example.com/b.json\n",
+        "https://example.com/b.json"
+    )]
+    #[case::first_nonempty_of_several(
+        "# yaml-language-server: $schema=https://example.com/a.json\n# yaml-language-server: $schema=https://example.com/b.json\n",
+        "https://example.com/a.json"
+    )]
     fn extract_schema_url_returns_some(#[case] text: &str, #[case] expected: &str) {
         assert_eq!(extract_schema_url(text), Some(expected.to_string()));
     }
@@ -690,6 +700,12 @@ mod tests {
     #[case::missing_equals("# yaml-language-server: $schema https://example.com/schema.json\n")]
     #[case::wrong_prefix("# yaml-ls: $schema=https://example.com/schema.json\n")]
     #[case::empty_input("")]
+    #[case::empty_value("# yaml-language-server: $schema=\n")]
+    #[case::whitespace_only_value("# yaml-language-server: $schema=   \n")]
+    #[case::spaces_around_equals("# yaml-language-server: $schema = https://example.com/s.json\n")]
+    #[case::no_space_after_hash("#yaml-language-server: $schema=https://example.com/s.json\n")]
+    #[case::no_space_after_colon("# yaml-language-server:$schema=https://example.com/s.json\n")]
+    #[case::key_case_differs("# yaml-language-server: $Schema=https://example.com/s.json\n")]
     fn extract_schema_url_returns_none(#[case] text: &str) {
         assert_eq!(extract_schema_url(text), None);
     }
@@ -722,6 +738,15 @@ mod tests {
         "key: value\n# yaml-language-server: $tags=!include,!ref\n",
         vec!["!include", "!ref"]
     )]
+    #[case::indented_modeline("  \t# yaml-language-server: $tags=!include\n", vec!["!include"])]
+    #[case::crlf_line_ending(
+        "# yaml-language-server: $tags=!include,!ref\r\nkey: value\r\n",
+        vec!["!include", "!ref"]
+    )]
+    #[case::first_modeline_wins(
+        "# yaml-language-server: $tags=!a\n# yaml-language-server: $tags=!b\n",
+        vec!["!a"]
+    )]
     fn extract_custom_tags_returns_tags(#[case] text: &str, #[case] expected: Vec<&str>) {
         assert_eq!(
             extract_custom_tags(text),
@@ -732,8 +757,21 @@ mod tests {
     #[rstest]
     #[case::no_tags_modeline("key: value\nother: stuff\n")]
     #[case::empty_input("")]
+    #[case::key_case_differs("# yaml-language-server: $Tags=!include\n")]
+    #[case::empty_first_modeline_ends_search(
+        "# yaml-language-server: $tags=\n# yaml-language-server: $tags=!include\n"
+    )]
+    #[case::separator_only_first_modeline_ends_search(
+        "# yaml-language-server: $tags= , ,\n# yaml-language-server: $tags=!include\n"
+    )]
     fn extract_custom_tags_returns_empty(#[case] text: &str) {
         assert_eq!(extract_custom_tags(text), Vec::<String>::new());
+    }
+
+    #[test]
+    fn extract_custom_tags_returns_tags_on_tenth_line() {
+        let text = n_lines(9) + "# yaml-language-server: $tags=!include\n";
+        assert_eq!(extract_custom_tags(&text), vec!["!include".to_string()]);
     }
 
     #[test]
@@ -754,6 +792,20 @@ mod tests {
         "1.2"
     )]
     #[case::second_line("key: value\n# yaml-language-server: $yamlVersion=1.2\n", "1.2")]
+    #[case::indented_modeline("  \t# yaml-language-server: $yamlVersion=1.2\n", "1.2")]
+    #[case::crlf_line_ending("# yaml-language-server: $yamlVersion=1.2\r\nkey: value\r\n", "1.2")]
+    #[case::invalid_then_valid(
+        "# yaml-language-server: $yamlVersion=2.0\n# yaml-language-server: $yamlVersion=1.2\n",
+        "1.2"
+    )]
+    #[case::empty_then_valid(
+        "# yaml-language-server: $yamlVersion=\n# yaml-language-server: $yamlVersion=1.1\n",
+        "1.1"
+    )]
+    #[case::first_valid_of_several(
+        "# yaml-language-server: $yamlVersion=1.1\n# yaml-language-server: $yamlVersion=1.2\n",
+        "1.1"
+    )]
     fn extract_yaml_version_returns_some(#[case] text: &str, #[case] expected: &str) {
         assert_eq!(extract_yaml_version(text), Some(expected.to_string()));
     }
@@ -771,6 +823,9 @@ mod tests {
     #[case::empty_input("")]
     #[case::empty_version_value("# yaml-language-server: $yamlVersion=\nkey: value\n")]
     #[case::wrong_prefix("# yaml-ls: $yamlVersion=1.1\nkey: value\n")]
+    #[case::key_case_differs("# yaml-language-server: $yamlversion=1.1\n")]
+    #[case::version_1_10("# yaml-language-server: $yamlVersion=1.10\n")]
+    #[case::version_with_trailing_comment("# yaml-language-server: $yamlVersion=1.1 # note\n")]
     fn extract_yaml_version_returns_none(#[case] text: &str) {
         assert_eq!(extract_yaml_version(text), None);
     }
@@ -779,6 +834,46 @@ mod tests {
     fn extract_yaml_version_returns_none_beyond_tenth_line() {
         let text = n_lines(10) + "# yaml-language-server: $yamlVersion=1.1\n";
         assert_eq!(extract_yaml_version(&text), None);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // modeline keys do not leak into each other
+    // ══════════════════════════════════════════════════════════════════════════
+
+    #[rstest]
+    #[case::schema_tags_version_order(
+        "# yaml-language-server: $schema=https://example.com/schema.json\n# yaml-language-server: $tags=!include\n# yaml-language-server: $yamlVersion=1.2\nkey: value\n"
+    )]
+    #[case::version_tags_schema_order(
+        "# yaml-language-server: $yamlVersion=1.2\n# yaml-language-server: $tags=!include\n# yaml-language-server: $schema=https://example.com/schema.json\nkey: value\n"
+    )]
+    fn each_extractor_reads_its_own_modeline_among_all_three(#[case] text: &str) {
+        assert_eq!(
+            extract_schema_url(text),
+            Some("https://example.com/schema.json".to_string())
+        );
+        assert_eq!(extract_custom_tags(text), vec!["!include".to_string()]);
+        assert_eq!(extract_yaml_version(text), Some("1.2".to_string()));
+    }
+
+    #[rstest]
+    #[case::only_schema(
+        "# yaml-language-server: $schema=https://example.com/schema.json\n",
+        true,
+        false,
+        false
+    )]
+    #[case::only_tags("# yaml-language-server: $tags=!include\n", false, true, false)]
+    #[case::only_version("# yaml-language-server: $yamlVersion=1.2\n", false, false, true)]
+    fn extractors_ignore_modelines_of_other_keys(
+        #[case] text: &str,
+        #[case] has_url: bool,
+        #[case] has_tags: bool,
+        #[case] has_version: bool,
+    ) {
+        assert_eq!(extract_schema_url(text).is_some(), has_url);
+        assert_eq!(!extract_custom_tags(text).is_empty(), has_tags);
+        assert_eq!(extract_yaml_version(text).is_some(), has_version);
     }
 
     // ══════════════════════════════════════════════════════════════════════════
