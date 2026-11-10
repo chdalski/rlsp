@@ -84,6 +84,7 @@ share a parent line with one sub-item each.
 - `? !!str\n!zz : v\n? &x\n` has no case in `rlsp-yaml/tests/formatter_keeps_data.rs`; parser plan Task 12 review.
 - `has_dangling_alias` in `rlsp-yaml/tests/unused_anchor_fix.rs` matches `A([^;]*);` anywhere in the data signature, so a value with an uppercase `A` counts as a dangling alias; collect anchor and alias names from the `load()` AST instead; server bug-fix plan Task 1 review.
 - `TEXT_PARAM_REGEX` in `rlsp-yaml/tests/parser_boundary_audit.rs` matches only `&str` and `&[&str]`, so a function taking `text: &'a str` reads raw text without being flagged; server bug-fix plan Task 6 review.
+- The test helpers `apply_block_to_flow_edit`, `apply_quoted_bool_edit`, `apply_first_action_edit`, and `apply_block_scalar_edit` in `rlsp-yaml/src/editing/code_actions.rs` repeat the line split and rebuild of `apply_text_edit`; server bug-fix plan Task 8 review.
 - The single- and double-quoted tail tests in `rlsp-yaml-parser/src/lexer/quoted.rs` could share a style parameter, and the span-test helpers of `tests/smoke/scalars.rs` and `tests/smoke/quoted_scalars.rs` are near-duplicates; server bug-fix plan Task 2 test review.
 - `multi_line_quoted_scalar_gets_no_string_token` in `rlsp-yaml/src/analysis/semantic_tokens.rs` repeats all six of its inputs in `tokens_around_quoted_scalar_have_exact_positions` with a weaker check; retire the older test; server bug-fix plan Task 3 review.
 - `converting_keeps_the_blanks_inside_the_quotes` in `rlsp-yaml/src/editing/code_actions/block_scalar.rs` accepts the value with or without a final `\n`, so it does not pin whether a block scalar or the double-quoted fallback results; server bug-fix plan Task 4 review.
@@ -118,6 +119,7 @@ share a parent line with one sub-item each.
 - `sequence_item_to_doc` in `sequence_render.rs` still copies the prefix matches of `collection_properties`; comment plan Task 3 review.
 - `prints_nothing` in `formatter.rs` repeats the rule of `node_to_doc.rs` for when a tag prints; comment plan Task 6 review.
 - `explicit_key_to_doc` is `pub(super)` but only used in its own file; comment plan Task 7 review.
+- `tab_to_spaces` in `rlsp-yaml/src/editing/code_actions/tab_to_spaces.rs` ends its edit at `line.len()` in bytes, not characters, so the range ends past a non-ASCII line's end; clients clamp it to the line end (LSP `Position`), so the edit is unchanged; server bug-fix plan Task 8 review.
 - `has_properties: bool` and `explicit_key: bool` in `mapping_render.rs` go against `lang-rust.md` (enums over boolean parameters); comment plan Task 8 review.
 - `flow.rs` builds the same empty scalar from the pending properties at three sites, and `clear_pending_properties` in `base.rs` has one caller left; comment plan Task 12 review.
 - `forced_explicit_key` in `mapping_render.rs`: the clause for a collection key with properties after a value without text is no longer needed for the data (`a: !u\n!t [x]: 1\n`, `a: \n!t [x]: 1\n`), so the output stays longer than needed; parser plan Task 10 review.

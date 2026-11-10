@@ -334,3 +334,44 @@ async fn should_not_offer_delete_unused_anchor_once_the_anchor_is_gone() {
             .is_empty()
     );
 }
+
+/// Open `text` and return the code actions the server offers for `line`.
+async fn actions_on_line(text: &str, uri: &str, line: u32) -> Vec<serde_json::Value> {
+    let mut service = open(text, uri).await;
+    let resp = send(&mut service, code_action_request(2, uri, line, line)).await;
+    let resp = resp.expect("codeAction should return a response");
+    let result = resp.result().expect("codeAction should have a result");
+    result.as_array().cloned().unwrap_or_default()
+}
+
+fn titles_of(actions: &[serde_json::Value]) -> Vec<&str> {
+    actions
+        .iter()
+        .map(|a| a["title"].as_str().expect("a title"))
+        .collect()
+}
+
+#[tokio::test]
+async fn should_offer_the_context_actions_of_a_lone_cr_document_through_the_server() {
+    let uri = "file:///test/context-actions-cr.yaml";
+    let lf = "x: 1\nb:\t2\nouter:\n  a: 1\n  b: 2\n";
+    let cr = lf.replace('\n', "\r");
+
+    let tab_lf = actions_on_line(lf, uri, 1).await;
+    let tab_cr = actions_on_line(&cr, uri, 1).await;
+    let flow_lf = actions_on_line(lf, uri, 2).await;
+    let flow_cr = actions_on_line(&cr, uri, 2).await;
+
+    assert_eq!(titles_of(&tab_lf), ["Convert tabs to spaces"]);
+    assert_eq!(tab_cr, tab_lf);
+    assert_eq!(titles_of(&flow_lf), ["Convert block to flow style"]);
+    assert_eq!(flow_cr, flow_lf);
+    assert_eq!(
+        apply_action(&cr, uri, &tab_cr[0]),
+        "x: 1\rb:  2\router:\r  a: 1\r  b: 2\r"
+    );
+    assert_eq!(
+        apply_action(&cr, uri, &flow_cr[0]).replace('\r', "\n"),
+        apply_action(lf, uri, &flow_lf[0])
+    );
+}

@@ -6,6 +6,7 @@ use rlsp_yaml_parser::node::Node;
 use rlsp_yaml_parser::{CollectionStyle, Document, LineIndex, Span};
 
 use crate::editing::formatter::{YamlFormatOptions, format_subtree};
+use crate::lsp_util::source_lines;
 
 use super::make_action;
 
@@ -92,29 +93,23 @@ pub(super) fn block_text_and_start_col(
 ) -> (String, usize) {
     let start_col = idx.line_column(loc.start).1 as usize;
     let line_idx = idx.line_column(loc.start).0.saturating_sub(1) as usize;
-    let lines: Vec<&str> = text.lines().collect();
-
-    let is_mapping_value = lines.get(line_idx).is_some_and(|line| {
-        let prefix = if start_col <= line.len() {
-            &line[..start_col]
-        } else {
-            line
-        };
+    // The column counts code points, so the prefix is cut at a char boundary.
+    let mapping_value_line = source_lines(text).nth(line_idx).filter(|line| {
+        let prefix = line
+            .char_indices()
+            .nth(start_col)
+            .map_or(*line, |(byte, _)| &line[..byte]);
         prefix.trim_end().ends_with(':')
     });
 
-    if is_mapping_value {
-        let key_indent = lines
-            .get(line_idx)
-            .map_or(0, |line| line.len() - line.trim_start().len());
-        let base_indent = key_indent + 2;
-        let indent_str = " ".repeat(base_indent);
-        let formatted = format_subtree(node, options, base_indent);
-        (format!("\n{indent_str}{formatted}"), start_col)
-    } else {
-        let formatted = format_subtree(node, options, start_col);
-        (formatted, start_col)
-    }
+    let Some(line) = mapping_value_line else {
+        return (format_subtree(node, options, start_col), start_col);
+    };
+    let key_indent = line.len() - line.trim_start().len();
+    let base_indent = key_indent + 2;
+    let indent_str = " ".repeat(base_indent);
+    let formatted = format_subtree(node, options, base_indent);
+    (format!("\n{indent_str}{formatted}"), start_col)
 }
 
 /// Walk the AST to find the block `Mapping` or `Sequence` to convert when the

@@ -30,7 +30,7 @@ with three defects of the same causes that the backlog does not list.
 - [x] Task 5: Color ranges come from the scalar's source text
 - [x] Task 6: One modeline reader serves the three modeline keys
 - [x] Task 7: Modelines and suppressions read source lines
-- [ ] Task 8: Context actions and block-to-flow read source lines
+- [x] Task 8: Context actions and block-to-flow read source lines
 - [ ] Task 9: Range and full formatting keep the formatter's line breaks
 - [ ] Task 10: File patterns match characters, not bytes
 - [ ] Task 11: `?` in SchemaStore catalog patterns matches one character
@@ -172,9 +172,11 @@ The context code actions (`src/editing/code_actions.rs`) and block-to-flow
 (`src/editing/code_actions/block_to_flow.rs`) split with `str::lines()` and see a `\r` document as
 one line.
 
-- [ ] In a document with lone `\r` breaks, both offer and apply the same actions as in the same
+- [x] In a document with lone `\r` breaks, both offer and apply the same actions as in the same
       document with `\n`
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Flow-to-block on a line with non-ASCII text before the collection, such as `日本語: [a, b]`,
+      gives its action instead of a panic, with `\n` and with `\r` breaks
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ### Task 9: Range and full formatting keep the formatter's line breaks
 
@@ -294,6 +296,11 @@ literal like the `schemas` setting.
 - **Gate demands of Task 6:** the existing tests did not pin the extractors' first-match rules, so
   tests that pin them came first and passed against the unchanged extractors (WIP commit 39124edb)
   before the refactor.
+
+- **Gate demands of Task 8:** `block_text_and_start_col` sliced its line with a code-point column
+  as a byte index and panicked on non-ASCII text before the collection; it now cuts at a character
+  boundary. The context actions read only the cursor's line instead of collecting all lines.
+  Action edits keep writing `\n` in `\r` documents, as range formatting writes LF.
 
 ## Task Notes
 

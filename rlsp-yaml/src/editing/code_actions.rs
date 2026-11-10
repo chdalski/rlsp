@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use rlsp_yaml_parser::{Document, LineIndex, Span};
 
 use crate::editing::formatter::YamlFormatOptions;
+use crate::lsp_util::source_lines;
 
 use block_scalar::string_to_block_scalar;
 use block_to_flow::block_to_flow;
@@ -47,8 +48,6 @@ pub fn code_actions(
     uri: &tower_lsp::lsp_types::Url,
     options: &YamlFormatOptions,
 ) -> Vec<CodeAction> {
-    let lines: Vec<&str> = text.lines().collect();
-
     // Diagnostic-driven actions
     let diag_actions = diagnostics
         .iter()
@@ -78,22 +77,19 @@ pub fn code_actions(
     // Context-driven actions (not tied to diagnostics)
     let line_idx = range.start.line as usize;
     let col = range.start.character as usize;
-    let context_actions: Vec<CodeAction> = lines.get(line_idx).map_or(vec![], |line| {
-        let mut actions: Vec<CodeAction> = [
-            if line.contains('\t') {
-                tab_to_spaces(&lines, line_idx, uri, options)
-            } else {
-                None
-            },
-            quoted_bool_to_unquoted(docs, line_idx, col, uri, options),
-            block_to_flow(docs, line_idx, uri, options),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
-        actions.extend(string_to_block_scalar(docs, text, line_idx, uri, options));
-        actions
-    });
+    let context_actions: Vec<CodeAction> =
+        source_lines(text).nth(line_idx).map_or(vec![], |line| {
+            let mut actions: Vec<CodeAction> = [
+                tab_to_spaces(line, line_idx, uri, options),
+                quoted_bool_to_unquoted(docs, line_idx, col, uri, options),
+                block_to_flow(docs, line_idx, uri, options),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            actions.extend(string_to_block_scalar(docs, text, line_idx, uri, options));
+            actions
+        });
 
     diag_actions.chain(context_actions).collect()
 }
@@ -470,5 +466,317 @@ mod test_helpers {
             result.push('\n');
         }
         (result, edit)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+    use tower_lsp::lsp_types::{CodeAction, Position, Range, TextEdit};
+
+    use crate::editing::formatter::YamlFormatOptions;
+    use crate::parser::parse_yaml;
+    use crate::test_utils::test_uri;
+
+    use super::code_actions;
+    use super::test_helpers::{apply_text_edit, cursor_range, docs_for, flow_diags_for};
+
+    /// What a document offers: the diagnostics are the flow-style ones of the
+    /// document itself, as the server computes them, when `with_flow_diags`.
+    fn actions_of(text: &str, range: Range, with_flow_diags: bool) -> Vec<CodeAction> {
+        let diagnostics = if with_flow_diags {
+            flow_diags_for(text)
+        } else {
+            vec![]
+        };
+        code_actions(
+            &docs_for(text),
+            text,
+            range,
+            &diagnostics,
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        )
+    }
+
+    /// From the start of `line` to far beyond the document: the diagnostics of
+    /// the lines from `line` on apply.
+    fn from_line(line: u32) -> Range {
+        Range::new(Position::new(line, 0), Position::new(999, 0))
+    }
+
+    fn edit_of(action: &CodeAction) -> TextEdit {
+        let changes = action
+            .edit
+            .as_ref()
+            .and_then(|edit| edit.changes.as_ref())
+            .expect("the action carries edits");
+        changes[&test_uri()][0].clone()
+    }
+
+    fn titles(actions: &[CodeAction]) -> Vec<&str> {
+        actions.iter().map(|a| a.title.as_str()).collect()
+    }
+
+    /// The edits write `\n` whatever the break of the document is, so compare
+    /// documents by their lines.
+    fn normalised(text: &str) -> String {
+        text.replace("\r\n", "\n").replace('\r', "\n")
+    }
+
+    /// Offer and apply the action titled `title` for `template` and for
+    /// `template` with every `\n` replaced by `line_break`, and assert that the
+    /// two agree. Returns the applied text of the broken document.
+    fn assert_parity(
+        template: &str,
+        line_break: &str,
+        range: Range,
+        with_flow_diags: bool,
+        expected_titles: &[&str],
+        applied_title: &str,
+    ) -> String {
+        let broken = template.replace('\n', line_break);
+        let lf_actions = actions_of(template, range, with_flow_diags);
+        let broken_actions = actions_of(&broken, range, with_flow_diags);
+
+        assert_eq!(titles(&lf_actions), expected_titles, "the \\n document");
+        assert_eq!(broken_actions, lf_actions, "offered with {line_break:?}");
+
+        let apply = |text: &str, actions: &[CodeAction]| {
+            let action = actions
+                .iter()
+                .find(|a| a.title == applied_title)
+                .expect("the action to apply is offered");
+            apply_text_edit(text, &edit_of(action))
+        };
+        let applied = apply(&broken, &broken_actions);
+        assert_eq!(
+            normalised(&applied),
+            apply(template, &lf_actions),
+            "applied with {line_break:?}"
+        );
+        applied
+    }
+
+    const TABS: &str = "Convert tabs to spaces";
+    const BLOCK_TO_FLOW: &str = "Convert block to flow style";
+    const FLOW_MAP: &str = "Convert flow mapping to block style";
+    const FLOW_SEQ: &str = "Convert flow sequence to block style";
+
+    #[rstest]
+    fn should_offer_tabs_to_spaces_on_a_later_line_when_lines_end_with_a_break(
+        #[values("\r\n", "\r")] line_break: &str,
+    ) {
+        let applied = assert_parity(
+            "a: 1\nb:\t2\nc: 3\n",
+            line_break,
+            cursor_range(1, 0),
+            false,
+            &[TABS],
+            TABS,
+        );
+
+        assert_eq!(
+            applied,
+            format!("a: 1{line_break}b:  2{line_break}c: 3{line_break}")
+        );
+    }
+
+    #[rstest]
+    fn should_change_only_the_cursor_line_when_tabs_are_on_two_lines(
+        #[values("\r\n", "\r")] line_break: &str,
+    ) {
+        let applied = assert_parity(
+            "a:\t1\nb:\t2\n",
+            line_break,
+            cursor_range(0, 0),
+            false,
+            &[TABS],
+            TABS,
+        );
+
+        assert_eq!(applied, format!("a:  1{line_break}b:\t2{line_break}"));
+    }
+
+    #[rstest]
+    fn should_offer_nothing_when_the_tab_is_on_another_line(
+        #[values("\r\n", "\r")] line_break: &str,
+    ) {
+        let broken = "a:\t1\nb: 2\nc: 3\n".replace('\n', line_break);
+
+        assert!(actions_of(&broken, cursor_range(2, 0), false).is_empty());
+    }
+
+    #[rstest]
+    fn should_count_an_empty_line_when_the_tab_follows_it(
+        #[values("\r\n", "\r")] line_break: &str,
+    ) {
+        let applied = assert_parity(
+            "a: 1\n\nb:\t2\n",
+            line_break,
+            cursor_range(2, 0),
+            false,
+            &[TABS],
+            TABS,
+        );
+
+        assert_eq!(
+            applied,
+            format!("a: 1{line_break}{line_break}b:  2{line_break}")
+        );
+    }
+
+    #[test]
+    fn should_count_each_break_once_when_breaks_are_mixed() {
+        let text = "a: 1\r\nb:\t2\rc: 3\n";
+
+        let actions = actions_of(text, cursor_range(1, 0), false);
+
+        assert_eq!(titles(&actions), [TABS]);
+        let edit = edit_of(&actions[0]);
+        assert_eq!(
+            edit.range,
+            Range::new(Position::new(1, 0), Position::new(1, 4))
+        );
+        assert_eq!(edit.new_text, "b:  2");
+    }
+
+    #[rstest]
+    fn should_offer_the_quoted_bool_on_a_later_line(#[values("\r\n", "\r")] line_break: &str) {
+        let applied = assert_parity(
+            "a: 1\nb: \"true\"\n",
+            line_break,
+            cursor_range(1, 3),
+            false,
+            &["Convert quoted string to true"],
+            "Convert quoted string to true",
+        );
+
+        assert_eq!(applied, format!("a: 1{line_break}b: true{line_break}"));
+    }
+
+    #[rstest]
+    fn should_convert_block_to_flow_on_a_later_line(#[values("\r\n", "\r")] line_break: &str) {
+        let applied = assert_parity(
+            "x: 1\nouter:\n  a: 1\n  b: 2\ny: 3\n",
+            line_break,
+            cursor_range(1, 0),
+            false,
+            &[BLOCK_TO_FLOW],
+            BLOCK_TO_FLOW,
+        );
+
+        assert!(
+            applied.starts_with(&format!("x: 1{line_break}")),
+            "{applied:?}"
+        );
+        assert!(
+            applied.ends_with(&format!("y: 3{line_break}")),
+            "{applied:?}"
+        );
+        let reparsed = parse_yaml(&applied);
+        assert!(reparsed.diagnostics.is_empty(), "{applied:?}");
+    }
+
+    #[rstest]
+    fn should_not_convert_block_to_flow_on_a_child_line(#[values("\r\n", "\r")] line_break: &str) {
+        let broken = "x: 1\nouter:\n  a: 1\n  b: 2\ny: 3\n".replace('\n', line_break);
+
+        let actions = actions_of(&broken, cursor_range(2, 0), false);
+
+        assert!(titles(&actions).iter().all(|t| *t != BLOCK_TO_FLOW));
+    }
+
+    #[rstest]
+    fn should_offer_block_scalar_conversion_on_a_later_line(
+        #[values("\r\n", "\r")] line_break: &str,
+    ) {
+        let template = format!("x: 1\nkey: \"{}\"\n", "a".repeat(50));
+
+        assert_parity(
+            &template,
+            line_break,
+            cursor_range(1, 0),
+            false,
+            &[
+                "Convert to block scalar (literal)",
+                "Convert to block scalar (folded)",
+            ],
+            "Convert to block scalar (literal)",
+        );
+    }
+
+    #[rstest]
+    #[case::after_the_last_break("a:\t1\n", 1, &[])]
+    #[case::without_a_final_break("a:\t1", 0, &[TABS])]
+    #[case::empty_text("", 0, &[])]
+    fn should_see_no_line_after_the_last_break(
+        #[case] template: &str,
+        #[case] line: u32,
+        #[case] expected: &[&str],
+        #[values("\r\n", "\r")] line_break: &str,
+    ) {
+        let broken = template.replace('\n', line_break);
+
+        let actions = actions_of(&broken, cursor_range(line, 0), false);
+
+        assert_eq!(titles(&actions), expected);
+    }
+
+    #[rstest]
+    fn should_offer_nothing_when_the_line_is_beyond_the_document(
+        #[values("\r\n", "\r")] line_break: &str,
+        #[values(3, u32::MAX)] line: u32,
+    ) {
+        let broken = "a:\t1\nb: 2\n".replace('\n', line_break);
+
+        assert!(actions_of(&broken, cursor_range(line, 0), false).is_empty());
+    }
+
+    #[rstest]
+    #[case::mapping_value_map("outer:\n  inner: {a: 1, b: 2}\n", 1, FLOW_MAP)]
+    #[case::mapping_value_seq("outer:\n  items: [x, y]\n", 1, FLOW_SEQ)]
+    #[case::deeper_indent("a:\n    deep: {x: 1}\n", 1, FLOW_MAP)]
+    #[case::spanning_two_lines("top:\n  k: {a: 1,\n    b: 2}\n", 1, FLOW_MAP)]
+    #[case::sequence_item("list:\n  - {a: 1}\n", 1, FLOW_MAP)]
+    #[case::first_line("k: {a: 1}\nz: 2\n", 0, FLOW_MAP)]
+    fn should_convert_a_flow_collection_when_lines_end_with_a_break(
+        #[case] template: &str,
+        #[case] line: u32,
+        #[case] title: &str,
+        #[values("\r\n", "\r")] line_break: &str,
+    ) {
+        let applied = assert_parity(template, line_break, from_line(line), true, &[title], title);
+
+        let reparsed = parse_yaml(&applied);
+        assert!(reparsed.diagnostics.is_empty(), "{applied:?}");
+    }
+
+    #[rstest]
+    fn should_open_the_block_form_on_a_new_line_when_the_flow_value_follows_a_key(
+        #[values("\r\n", "\r")] line_break: &str,
+    ) {
+        let broken = "outer:\n  inner: {a: 1, b: 2}\n".replace('\n', line_break);
+
+        let actions = actions_of(&broken, from_line(1), true);
+
+        assert_eq!(edit_of(&actions[0]).new_text, "\n    a: 1\n    b: 2");
+    }
+
+    #[rstest]
+    #[case::cjk_key("日本語: [a, b]\n", 0, FLOW_SEQ)]
+    #[case::accented_key("é: {a: 1}\n", 0, FLOW_MAP)]
+    #[case::emoji_key("😀: [a]\n", 0, FLOW_SEQ)]
+    #[case::on_a_later_line("x: 1\n日本語: {a: 1}\n", 1, FLOW_MAP)]
+    fn should_convert_a_flow_collection_after_multibyte_text(
+        #[case] template: &str,
+        #[case] line: u32,
+        #[case] title: &str,
+        #[values("\n", "\r")] line_break: &str,
+    ) {
+        let applied = assert_parity(template, line_break, from_line(line), true, &[title], title);
+
+        let reparsed = parse_yaml(&applied);
+        assert!(reparsed.diagnostics.is_empty(), "{applied:?}");
     }
 }

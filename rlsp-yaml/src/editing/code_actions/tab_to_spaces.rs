@@ -15,12 +15,11 @@ use crate::editing::formatter::YamlFormatOptions;
 use super::make_action;
 
 pub(super) fn tab_to_spaces(
-    lines: &[&str],
+    line: &str,
     line_idx: usize,
     uri: &tower_lsp::lsp_types::Url,
     _options: &YamlFormatOptions,
 ) -> Option<CodeAction> {
-    let line = lines.get(line_idx)?;
     if !line.contains('\t') {
         return None;
     }

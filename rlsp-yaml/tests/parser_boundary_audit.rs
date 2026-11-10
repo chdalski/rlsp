@@ -257,6 +257,20 @@ const ALLOW_LIST: &[AllowEntry] = &[
         },
     },
     AllowEntry {
+        file: "editing/code_actions.rs",
+        func: "actions_of",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture",
+        },
+    },
+    AllowEntry {
+        file: "editing/code_actions.rs",
+        func: "normalised",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture comparing documents by their lines",
+        },
+    },
+    AllowEntry {
         file: "lsp_util.rs",
         func: "idx",
         marker: AllowMarker::CarveOut {
