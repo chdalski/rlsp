@@ -34,7 +34,7 @@ with the defects that the backlog does not list in the code these fixes rewrite.
 - [x] Task 8: Context actions and block-to-flow read source lines
 - [x] Task 9: Range and full formatting keep the formatter's line breaks
 - [x] Task 10: File patterns match characters, not bytes
-- [ ] Task 11: `?` in SchemaStore catalog patterns matches one character
+- [x] Task 11: `?` in SchemaStore catalog patterns matches one character
 - [ ] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
@@ -237,15 +237,15 @@ separator (https://github.com/micromatch/picomatch, "Basic globbing"). `parse_sc
 (`src/schema.rs`) builds its patterns with `FilePatterns::without_limits`, which reads `?` as a
 literal like the `schemas` setting.
 
-- [ ] Catalog patterns are built with their own constructor, in which `?` matches exactly one
+- [x] Catalog patterns are built with their own constructor, in which `?` matches exactly one
       character other than `/`; the `schemas` setting reads `?` as before
-- [ ] `/home/u/winget-pkgs/manifests/m/Microsoft/PowerToys/0.80.0/Microsoft.PowerToys.installer.yaml`
+- [x] `/home/u/winget-pkgs/manifests/m/Microsoft/PowerToys/0.80.0/Microsoft.PowerToys.installer.yaml`
       matches the winget installer pattern, and `manifests/mm/` and `manifests//` do not
-- [ ] The tests that pin `without_limits` agreeing with `new` within the limits pass unchanged
-- [ ] `docs/configuration.md` tells a reader how catalog patterns read `?`, `docs/feature-log.md`
+- [x] The tests that pin `without_limits` agreeing with `new` within the limits pass unchanged
+- [x] `docs/configuration.md` tells a reader how catalog patterns read `?`, `docs/feature-log.md`
       tells them that winget manifests now get their SchemaStore schema, and no doc comment says
       that catalog patterns follow the rules of the `schemas` setting
-- [ ] Build, tests, `cargo clippy --all-targets`, and fmt pass
+- [x] Build, tests, `cargo clippy --all-targets`, and fmt pass
 
 ## Non-Goals
 
@@ -350,6 +350,11 @@ literal like the `schemas` setting.
   them, the length limits stay in bytes, no normalization or case folding is added, and the
   segment-start flag follows the last character read; the exhaustive and proptest comparisons with
   the byte-based reference matcher also run over multibyte alphabets.
+
+- **Gate demands of Task 11:** the catalog constructor is `FilePatterns::for_catalog`, and an enum,
+  not a bool, selects how `?` reads; `without_limits` became private and shares one builder with
+  it; a settings test pins `?` as a literal in `schemas`. The proptest pinning `without_limits`
+  against `new` keeps its assertion and adds `?` to its alphabet, a superset of its old inputs.
 
 ## Task Notes
 

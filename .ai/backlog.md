@@ -25,6 +25,7 @@ share a parent line with one sub-item each.
 - CVE-2026-118764 (minimatch) is allowlisted in the VS Code extension's `ignoreCves` until `vscode-languageclient` runs with minimatch 11.0.1 or later or rlsp-yaml lets a pattern reach the client's minimatch; reason and triggers in the `Audit dependencies` step comment of `.github/workflows/vscode-extension.yml`; glob override plan.
 - The actions in `.github/workflows/vscode-extension.yml` are pinned to mutable major tags, not commit SHAs, including the publish job that uses `VSCE_PAT`; pre-existing, security Medium; glob override plan Task 2 security review.
 - `validate_unused_anchors` in `rlsp-yaml/src/validation/validators/anchors.rs` truncates a long anchor name with `&entry.name[..100]`, which panics when byte 100 is not a char boundary (`k: &a` followed by 60 `é`); a panic in a handler ends the server; server bug-fix plan Task 1 security review.
+- `match_schemastore` in `rlsp-yaml/src/schema.rs` caps no path length, so a catalog pattern runs against a path of any length; pre-existing, security Low; server bug-fix plan Task 11 security review.
 
 ## Bugs
 
@@ -84,6 +85,7 @@ share a parent line with one sub-item each.
 - `? !!str\n!zz : v\n? &x\n` has no case in `rlsp-yaml/tests/formatter_keeps_data.rs`; parser plan Task 12 review.
 - `has_dangling_alias` in `rlsp-yaml/tests/unused_anchor_fix.rs` matches `A([^;]*);` anywhere in the data signature, so a value with an uppercase `A` counts as a dangling alias; collect anchor and alias names from the `load()` AST instead; server bug-fix plan Task 1 review.
 - `TEXT_PARAM_REGEX` in `rlsp-yaml/tests/parser_boundary_audit.rs` matches only `&str` and `&[&str]`, so a function taking `text: &'a str` reads raw text without being flagged; server bug-fix plan Task 6 review.
+- `without_limits_accepts_what_new_refuses`, `without_limits_matches_and_excludes_with_a_glob_over_the_byte_limit`, and `without_limits_matches_a_hundred_thousand_globs_and_a_huge_glob` in `rlsp-yaml/src/schema/association.rs` test `without_limits` beyond the limits, which only `new` calls, always within them; aimed at `for_catalog` they would pin the catalog's scale guarantee; server bug-fix plan Task 11 review.
 - The test helpers `apply_block_to_flow_edit`, `apply_quoted_bool_edit`, `apply_first_action_edit`, and `apply_block_scalar_edit` in `rlsp-yaml/src/editing/code_actions.rs` repeat the line split and rebuild of `apply_text_edit`; server bug-fix plan Task 8 review.
 - The single- and double-quoted tail tests in `rlsp-yaml-parser/src/lexer/quoted.rs` could share a style parameter, and the span-test helpers of `tests/smoke/scalars.rs` and `tests/smoke/quoted_scalars.rs` are near-duplicates; server bug-fix plan Task 2 test review.
 - `multi_line_quoted_scalar_gets_no_string_token` in `rlsp-yaml/src/analysis/semantic_tokens.rs` repeats all six of its inputs in `tokens_around_quoted_scalar_have_exact_positions` with a weaker check; retire the older test; server bug-fix plan Task 3 review.
@@ -110,6 +112,7 @@ share a parent line with one sub-item each.
   - `rlsp-yaml`: `should_not_panic_on_deeply_nested_yaml` and the three default-nesting tests in `src/parser.rs` (partly repeated by the rstest case 256), and the four `get_max_items_computed_*` tests in `src/server.rs`; nesting plan Task 8 test review.
   - `rlsp-yaml/src/decorators/color.rs`: `hex_color_in_value_detected_despite_hash`, `range_positions_correct`, `css_named_color_in_value_position_is_detected`, `quoted_string_color_value_produces_correct_range`, and `hex_in_value_position_produces_correct_range` overlap the source-range table; server bug-fix plan Task 5 test review.
   - `rlsp-yaml/src/schema/association.rs`: the six `*_on_tenth_line` / `*_beyond_tenth_line` modeline tests into one parameterized test; server bug-fix plan Task 6 test review.
+  - `rlsp-yaml/src/schema.rs`: `parsed_catalog_ends_for_a_file_match_that_made_backtracking_explode` and `match_schemastore_ends_for_a_file_match_that_made_backtracking_explode` are near-duplicates; server bug-fix plan Task 11 test review.
   - `should_publish_no_schema_diagnostics_when_schema_exceeds_depth_limit` in `rlsp-yaml/tests/lsp_lifecycle/schema_fetch.rs` partly overlaps `schema_beyond_the_json_depth_limit_is_refused` in `stack_depth.rs`; nesting plan Task 11 test review.
 
 ## Cleanup
@@ -119,6 +122,7 @@ share a parent line with one sub-item each.
 - `sequence_item_to_doc` in `sequence_render.rs` still copies the prefix matches of `collection_properties`; comment plan Task 3 review.
 - `prints_nothing` in `formatter.rs` repeats the rule of `node_to_doc.rs` for when a tag prints; comment plan Task 6 review.
 - `explicit_key_to_doc` is `pub(super)` but only used in its own file; comment plan Task 7 review.
+- `FilePatterns::without_limits` in `rlsp-yaml/src/schema/association.rs` is private with `new` as its only production caller and could fold into the shared builder; server bug-fix plan Task 11 test review.
 - `tab_to_spaces` in `rlsp-yaml/src/editing/code_actions/tab_to_spaces.rs` ends its edit at `line.len()` in bytes, not characters, so the range ends past a non-ASCII line's end; clients clamp it to the line end (LSP `Position`), so the edit is unchanged; server bug-fix plan Task 8 review.
 - `has_properties: bool` and `explicit_key: bool` in `mapping_render.rs` go against `lang-rust.md` (enums over boolean parameters); comment plan Task 8 review.
 - `flow.rs` builds the same empty scalar from the pending properties at three sites, and `clear_pending_properties` in `base.rs` has one caller left; comment plan Task 12 review.

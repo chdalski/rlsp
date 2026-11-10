@@ -367,9 +367,10 @@ pub const MAX_PATH_BYTES: usize = 4096;
 /// after that is ignored. No value lacks a glob that includes files.
 ///
 /// [`FilePatterns::new`] builds the entries of the `schemas` setting, which
-/// can come from a cloned repository, and enforces the limits for them.
-/// [`FilePatterns::without_limits`] builds the entries of the `SchemaStore`
-/// catalog with the same rules.
+/// can come from a cloned repository, and enforces the limits for them; a `?`
+/// in its globs is a literal character. [`FilePatterns::for_catalog`] builds
+/// the entries of the `SchemaStore` catalog with the same rules, except that
+/// it enforces no limits and that a `?` matches one character other than `/`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FilePatterns {
     include: Vec<Glob>,
@@ -409,19 +410,36 @@ impl FilePatterns {
     /// without its limits on the number and the length of the globs; `None`
     /// when none includes files.
     ///
-    /// For sources whose total size is bounded already, such as the
-    /// `SchemaStore` catalog. Never use it for the `schemas` setting: its
-    /// globs are untrusted, and only the limits of [`Self::new`] bound the
-    /// cost of a match.
+    /// A `?` stays a literal character, as in [`Self::new`].
+    fn without_limits<'a>(patterns: impl IntoIterator<Item = &'a str>) -> Option<Self> {
+        Self::build(patterns, QuestionMark::Literal)
+    }
+
+    /// Sort the `fileMatch` `patterns` of a `SchemaStore` catalog entry into
+    /// inclusions and exclusions like [`Self::new`], but without its limits on
+    /// the number and the length of the globs, and with a `?` that matches
+    /// exactly one character other than `/`, as in picomatch; `None` when none
+    /// includes files.
+    ///
+    /// The catalog is bounded as a whole already. Never use this for the
+    /// `schemas` setting: its globs are untrusted, and only the limits of
+    /// [`Self::new`] bound the cost of a match.
     #[must_use]
-    pub(crate) fn without_limits<'a>(patterns: impl IntoIterator<Item = &'a str>) -> Option<Self> {
+    pub(crate) fn for_catalog<'a>(patterns: impl IntoIterator<Item = &'a str>) -> Option<Self> {
+        Self::build(patterns, QuestionMark::AnyCharacter)
+    }
+
+    fn build<'a>(
+        patterns: impl IntoIterator<Item = &'a str>,
+        question_mark: QuestionMark,
+    ) -> Option<Self> {
         let (mut include, mut exclude) = (Vec::new(), Vec::new());
         for pattern in patterns {
             let (excluded, rest) = split(pattern);
             if rest.is_empty() {
                 continue;
             }
-            let glob = Glob::anywhere(rest);
+            let glob = Glob::anywhere(rest, question_mark);
             if excluded {
                 exclude.push(glob);
             } else {
@@ -471,11 +489,22 @@ enum Token {
     Literal(char),
     /// `*`: any run of characters other than `/`.
     Star,
+    /// `?` read as a wildcard: exactly one character other than `/`.
+    AnyCharacter,
     /// `**`, and the `/` after it if there is one: any run of characters.
     /// With `at_segment_start` the run has to end where a path segment begins.
     DoubleStar {
         at_segment_start: bool,
     },
+}
+
+/// How a glob reads a `?`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QuestionMark {
+    /// Like any other character: only a `?` matches it.
+    Literal,
+    /// Like in picomatch: one character other than `/`.
+    AnyCharacter,
 }
 
 /// A glob compiled to tokens and matched without backtracking, so a match
@@ -495,13 +524,17 @@ impl Glob {
     /// - `**` matches any sequence of characters including `/`
     /// - `**/` is `**` and the `/` after it; it ends only at the start of a
     ///   path segment: at the start of the text or after a `/`
+    /// - `?` matches one character other than `/` when `question_mark` says
+    ///   so, and itself otherwise
     /// - All other characters match literally
-    fn anywhere(pattern: &str) -> Self {
+    fn anywhere(pattern: &str, question_mark: QuestionMark) -> Self {
         let leading = Token::DoubleStar {
             at_segment_start: true,
         };
         Self {
-            tokens: std::iter::once(leading).chain(tokenize(pattern)).collect(),
+            tokens: std::iter::once(leading)
+                .chain(tokenize(pattern, question_mark))
+                .collect(),
         }
     }
 
@@ -541,7 +574,7 @@ impl Glob {
             .rev()
             .map_while(|token| match token {
                 Token::Literal(literal) => Some(*literal),
-                Token::Star | Token::DoubleStar { .. } => None,
+                Token::Star | Token::AnyCharacter | Token::DoubleStar { .. } => None,
             })
             .all(|literal| text_end.next() == Some(literal))
     }
@@ -568,8 +601,9 @@ impl Glob {
                 match *token {
                     Token::Literal(literal) if literal == character => mark(next, index + 1),
                     Token::Star if character != '/' => mark(next, index),
+                    Token::AnyCharacter if character != '/' => mark(next, index + 1),
                     Token::DoubleStar { .. } => mark(next, index),
-                    Token::Literal(_) | Token::Star => {}
+                    Token::Literal(_) | Token::Star | Token::AnyCharacter => {}
                 }
             }
             self.skip_empty_runs(next, character == '/');
@@ -587,7 +621,7 @@ impl Glob {
     fn skip_empty_runs(&self, reached: &mut [bool], at_segment_start: bool) {
         for (index, token) in self.tokens.iter().enumerate() {
             let can_end_here = match *token {
-                Token::Literal(_) => false,
+                Token::Literal(_) | Token::AnyCharacter => false,
                 Token::Star => true,
                 Token::DoubleStar {
                     at_segment_start: required,
@@ -608,7 +642,7 @@ fn mark(states: &mut [bool], index: usize) {
 
 /// Split `pattern` into tokens. A `**/` ends only at the start of a path
 /// segment.
-fn tokenize(pattern: &str) -> impl Iterator<Item = Token> + '_ {
+fn tokenize(pattern: &str, question_mark: QuestionMark) -> impl Iterator<Item = Token> + '_ {
     let mut characters = pattern.chars().peekable();
     std::iter::from_fn(move || {
         let character = characters.next()?;
@@ -617,6 +651,7 @@ fn tokenize(pattern: &str) -> impl Iterator<Item = Token> + '_ {
                 at_segment_start: characters.next_if_eq(&'/').is_some(),
             },
             '*' => Token::Star,
+            '?' if question_mark == QuestionMark::AnyCharacter => Token::AnyCharacter,
             literal => Token::Literal(literal),
         })
     })
@@ -1514,7 +1549,11 @@ mod tests {
     // ══════════════════════════════════════════════════════════════════════════
 
     fn anywhere_matches(pattern: &str, text: &str) -> bool {
-        Glob::anywhere(pattern).is_match(text)
+        Glob::anywhere(pattern, QuestionMark::Literal).is_match(text)
+    }
+
+    fn catalog_matches(pattern: &str, text: &str) -> bool {
+        Glob::anywhere(pattern, QuestionMark::AnyCharacter).is_match(text)
     }
 
     fn literal(character: char) -> Token {
@@ -1570,7 +1609,51 @@ mod tests {
         #[case] tokens: Vec<Token>,
     ) {
         let expected: Vec<Token> = std::iter::once(SEGMENT_START).chain(tokens).collect();
-        assert_eq!(Glob::anywhere(pattern).tokens, expected);
+        assert_eq!(
+            Glob::anywhere(pattern, QuestionMark::Literal).tokens,
+            expected
+        );
+    }
+
+    const ANY_CHARACTER: Token = Token::AnyCharacter;
+
+    #[rstest]
+    #[case::alone("?", vec![ANY_CHARACTER])]
+    #[case::twice("??", vec![ANY_CHARACTER, ANY_CHARACTER])]
+    #[case::before_a_star("?*", vec![ANY_CHARACTER, Token::Star])]
+    #[case::after_three_stars("***?", vec![ANY_RUN, Token::Star, ANY_CHARACTER])]
+    #[case::after_a_double_star("**?", vec![ANY_RUN, ANY_CHARACTER])]
+    #[case::after_a_double_star_slash("**/?", vec![SEGMENT_START, ANY_CHARACTER])]
+    #[case::before_a_double_star_slash("?**/", vec![ANY_CHARACTER, SEGMENT_START])]
+    #[case::between_literals("a?é", vec![literal('a'), ANY_CHARACTER, literal('é')])]
+    #[case::after_a_four_byte_literal(
+        "\u{1F600}?",
+        vec![literal('\u{1F600}'), ANY_CHARACTER]
+    )]
+    fn catalog_glob_tokenizes_question_marks_as_wildcards(
+        #[case] pattern: &str,
+        #[case] tokens: Vec<Token>,
+    ) {
+        let expected: Vec<Token> = std::iter::once(SEGMENT_START).chain(tokens).collect();
+        assert_eq!(
+            Glob::anywhere(pattern, QuestionMark::AnyCharacter).tokens,
+            expected
+        );
+    }
+
+    #[rstest]
+    #[case::alone("?", vec![literal('?')])]
+    #[case::between_literals("a?é", vec![literal('a'), literal('?'), literal('é')])]
+    #[case::before_a_star("?*", vec![literal('?'), Token::Star])]
+    fn schemas_glob_tokenizes_question_marks_as_literals(
+        #[case] pattern: &str,
+        #[case] tokens: Vec<Token>,
+    ) {
+        let expected: Vec<Token> = std::iter::once(SEGMENT_START).chain(tokens).collect();
+        assert_eq!(
+            Glob::anywhere(pattern, QuestionMark::Literal).tokens,
+            expected
+        );
     }
 
     // Each case derives from the rules: the glob matches the whole text or
@@ -1603,6 +1686,7 @@ mod tests {
     #[case::trailing_double_star_matches_nothing_after_a_slash("a/**", "a/", true)]
     #[case::trailing_double_star_needs_its_slash("a/**", "a", false)]
     #[case::question_mark_is_literal("?.yaml", "a.yaml", false)]
+    #[case::question_mark_matches_itself("?.yaml", "?.yaml", true)]
     #[case::brackets_are_literal("[a].yaml", "a.yaml", false)]
     #[case::multibyte_literal("é.yaml", "é.yaml", true)]
     #[case::star_matches_multibyte("*", "é", true)]
@@ -1756,8 +1840,16 @@ mod tests {
     /// stops at a `/`, a `**` does not, and the `/` after a `**` is part of
     /// it: it ends at the start of the text or after a `/`. `text` stays whole
     /// and `from` is a position in it, so that "after a `/`" looks at the byte
-    /// before `from` rather than at the start of a slice.
-    fn reference_matches(pattern: &[u8], text: &[u8], from: usize) -> bool {
+    /// before `from` rather than at the start of a slice. A wildcard run ends
+    /// only between two characters, and a `?` read as a wildcard takes the
+    /// whole UTF-8 sequence of one character other than `/`.
+    fn reference_matches(
+        pattern: &[u8],
+        text: &[u8],
+        from: usize,
+        question_mark: QuestionMark,
+    ) -> bool {
+        let between_characters = |end: usize| text.get(end).is_none_or(|byte| byte & 0xC0 != 0x80);
         match pattern.split_first() {
             None => from == text.len(),
             Some((&b'*', [b'*', after @ ..])) => {
@@ -1765,25 +1857,232 @@ mod tests {
                     .strip_prefix(b"/")
                     .map_or((after, false), |after| (after, true));
                 (from..=text.len()).any(|end| {
-                    (!ends_at_a_segment_start || end == 0 || text[end - 1] == b'/')
-                        && reference_matches(after, text, end)
+                    between_characters(end)
+                        && (!ends_at_a_segment_start || end == 0 || text[end - 1] == b'/')
+                        && reference_matches(after, text, end, question_mark)
                 })
             }
-            Some((&b'*', after)) => (from..=text.len())
-                .any(|end| !text[from..end].contains(&b'/') && reference_matches(after, text, end)),
+            Some((&b'*', after)) => (from..=text.len()).any(|end| {
+                between_characters(end)
+                    && !text[from..end].contains(&b'/')
+                    && reference_matches(after, text, end, question_mark)
+            }),
+            Some((&b'?', after)) if question_mark == QuestionMark::AnyCharacter => {
+                text.get(from).is_some_and(|&lead| {
+                    let width = match lead {
+                        b'/' => return false,
+                        0xF0.. => 4,
+                        0xE0.. => 3,
+                        0xC0.. => 2,
+                        _ => 1,
+                    };
+                    reference_matches(after, text, from + width, question_mark)
+                })
+            }
             Some((&byte, after)) => {
-                text.get(from) == Some(&byte) && reference_matches(after, text, from + 1)
+                text.get(from) == Some(&byte)
+                    && reference_matches(after, text, from + 1, question_mark)
             }
         }
     }
 
-    /// What a `schemas` pattern matches: the glob matches the whole path or
-    /// what follows one of its slashes.
-    fn anywhere_reference(glob: &str, text: &str) -> bool {
+    /// What a pattern matches: the glob matches the whole path or what
+    /// follows one of its slashes.
+    fn reference_anywhere(glob: &str, text: &str, question_mark: QuestionMark) -> bool {
         let starts = std::iter::once(0).chain(text.match_indices('/').map(|(i, _)| i + 1));
         starts
             .into_iter()
-            .any(|start| reference_matches(glob.as_bytes(), text.as_bytes(), start))
+            .any(|start| reference_matches(glob.as_bytes(), text.as_bytes(), start, question_mark))
+    }
+
+    /// What a `schemas` pattern matches.
+    fn anywhere_reference(glob: &str, text: &str) -> bool {
+        reference_anywhere(glob, text, QuestionMark::Literal)
+    }
+
+    /// What a catalog pattern matches.
+    fn catalog_reference(glob: &str, text: &str) -> bool {
+        reference_anywhere(glob, text, QuestionMark::AnyCharacter)
+    }
+
+    fn catalog_patterns(globs: &[&str]) -> FilePatterns {
+        FilePatterns::for_catalog(globs.iter().copied()).expect("globs include a file")
+    }
+
+    // A `?` matches exactly one character other than `/`, a leading dot
+    // included; the rest follows the rules of `anywhere_glob_follows_the_documented_syntax`.
+    #[rstest]
+    #[case::one_character("?", "a", true)]
+    #[case::needs_a_character("?", "", false)]
+    #[case::not_two_characters("?", "ab", false)]
+    #[case::two_marks_two_characters("??", "ab", true)]
+    #[case::two_marks_need_two("??", "a", false)]
+    #[case::two_marks_not_three("??", "abc", false)]
+    #[case::between_literals("a?c", "abc", true)]
+    #[case::between_literals_needs_a_character("a?c", "ac", false)]
+    #[case::between_literals_not_two_characters("a?c", "abbc", false)]
+    #[case::not_a_slash_between_literals("a?c", "a/c", false)]
+    #[case::not_a_slash("?", "/", false)]
+    #[case::a_segment_of_one_character("a/?/c", "a/b/c", true)]
+    #[case::not_an_empty_segment("a/?/c", "a//c", false)]
+    #[case::not_a_segment_of_two_characters("a/?/c", "a/bb/c", false)]
+    #[case::a_leading_dot("?.yaml", "..yaml", true)]
+    #[case::a_letter_before_the_extension("?.yaml", "a.yaml", true)]
+    #[case::needs_its_own_character_before_a_dot("?.yaml", ".yaml", false)]
+    #[case::starts_at_a_segment_start("?.yaml", "ab.yaml", false)]
+    #[case::starts_after_a_slash("?.yaml", "x/a.yaml", true)]
+    #[case::trailing_mark_starts_at_a_segment_start("a?", "xab", false)]
+    #[case::trailing_mark_after_a_slash("a?", "x/ab", true)]
+    #[case::matches_a_question_mark("?", "?", true)]
+    #[case::matches_a_question_mark_after_a_literal("a?", "a?", true)]
+    #[case::matches_a_backslash("?", "\\", true)]
+    #[case::matches_an_exclamation_mark("?", "!", true)]
+    #[case::matches_a_two_byte_character("a?b", "a\u{e9}b", true)]
+    #[case::matches_a_three_byte_character("a?b", "a\u{20ac}b", true)]
+    #[case::matches_a_four_byte_character("a?b", "a\u{1F600}b", true)]
+    #[case::not_two_four_byte_characters("a?b", "a\u{1F600}\u{1F600}b", false)]
+    #[case::not_a_letter_with_a_combining_accent("a?b", "ae\u{301}b", false)]
+    #[case::star_then_mark("*?", "a", true)]
+    #[case::star_then_mark_takes_two("*?", "ab", true)]
+    #[case::star_then_mark_needs_a_character("*?", "", false)]
+    #[case::star_then_mark_stops_at_a_slash("*?", "a/", false)]
+    #[case::mark_then_star("?*", "a", true)]
+    #[case::mark_then_star_needs_a_character("?*", "", false)]
+    #[case::double_star_slash_then_mark("**/?", "a/b/c", true)]
+    #[case::double_star_slash_then_mark_not_two_characters("**/?", "a/bc", false)]
+    #[case::double_star_then_mark("a**?", "a/b", true)]
+    #[case::double_star_then_mark_needs_a_character("a**?", "a", false)]
+    #[case::double_star_then_mark_not_a_slash("a**?", "a/", false)]
+    #[case::double_star_slash_then_mark_after_a_name("a**/?", "a/b", true)]
+    #[case::double_star_slash_then_mark_not_two_characters_after_a_name("a**/?", "a/bc", false)]
+    #[case::double_star_slash_then_mark_needs_the_slash("a**/?", "ab", false)]
+    #[case::trailing_mark_after_a_literal("a?", "ab", true)]
+    #[case::trailing_mark_needs_a_character("a?", "a", false)]
+    #[case::trailing_mark_after_a_star("*.yam?", "x.yaml", true)]
+    #[case::trailing_mark_after_a_star_needs_a_character("*.yam?", "x.yam", false)]
+    #[case::trailing_mark_after_a_star_not_a_slash("*.yam?", "x.yam/", false)]
+    #[case::mark_before_a_trailing_literal("?b", "xb", true)]
+    #[case::mark_before_a_trailing_literal_differs("?b", "xc", false)]
+    #[case::mark_before_a_trailing_literal_needs_a_character("?b", "b", false)]
+    fn catalog_glob_follows_the_documented_syntax(
+        #[case] pattern: &str,
+        #[case] text: &str,
+        #[case] expected: bool,
+    ) {
+        assert_eq!(
+            catalog_reference(pattern, text),
+            expected,
+            "the reference: {pattern} on {text}"
+        );
+        assert_eq!(
+            catalog_matches(pattern, text),
+            expected,
+            "{pattern} on {text}"
+        );
+        assert_eq!(
+            catalog_patterns(&[pattern]).matches(text),
+            expected,
+            "catalog patterns: {pattern} on {text}"
+        );
+    }
+
+    #[rstest]
+    #[case::one_character_for_the_catalog_only(&["a?.yaml"], "/p/ab.yaml", true, false)]
+    #[case::the_question_mark_itself_for_both(&["a?.yaml"], "/p/a?.yaml", true, true)]
+    #[case::no_character_for_neither(&["a?.yaml"], "/p/a.yaml", false, false)]
+    #[case::no_slash_for_neither(&["a?.yaml"], "/p/a/.yaml", false, false)]
+    fn catalog_and_schemas_patterns_read_a_question_mark_differently(
+        #[case] globs: &[&str],
+        #[case] path: &str,
+        #[case] catalog_expected: bool,
+        #[case] schemas_expected: bool,
+    ) {
+        assert_eq!(
+            catalog_patterns(globs).matches(path),
+            catalog_expected,
+            "catalog: {globs:?} on {path}"
+        );
+        assert_eq!(
+            file_patterns(globs).matches(path),
+            schemas_expected,
+            "schemas: {globs:?} on {path}"
+        );
+    }
+
+    #[rstest]
+    #[case::exclusion_with_a_mark_removes(&["**", "!?.yaml"], "/p/a.yaml", false)]
+    #[case::exclusion_with_a_mark_leaves_other_files(&["**", "!?.yaml"], "/p/ab.yaml", true)]
+    #[case::exclusion_with_a_slash_before_the_mark(&["**", "!/?.yaml"], "/p/a.yaml", false)]
+    #[case::inclusion_with_a_slash_before_the_mark(&["/?.yaml"], "/p/a.yaml", true)]
+    #[case::second_bang_is_literal_before_the_mark(&["**", "!!?"], "/p/!x", false)]
+    #[case::second_bang_is_literal_before_the_mark_and_misses(&["**", "!!?"], "/p/x", true)]
+    #[case::only_one_slash_is_removed_before_a_mark(&["//?"], "/a//x", true)]
+    #[case::second_slash_is_literal_before_a_mark(&["//?"], "/a/x", false)]
+    fn catalog_patterns_apply_exclusions_and_leading_characters_before_reading_a_mark(
+        #[case] globs: &[&str],
+        #[case] path: &str,
+        #[case] expected: bool,
+    ) {
+        assert_eq!(
+            catalog_patterns(globs).matches(path),
+            expected,
+            "{globs:?} on {path}"
+        );
+    }
+
+    #[rstest]
+    #[case::exclusion_only(&["!?"])]
+    #[case::slash_exclusion_only(&["!/?"])]
+    #[case::empty_and_exclusion(&["", "!?"])]
+    #[case::exclusions_only(&["!?", "!x"])]
+    fn catalog_patterns_refuse_globs_that_include_no_file(#[case] globs: &[&str]) {
+        assert_eq!(FilePatterns::for_catalog(globs.iter().copied()), None);
+    }
+
+    /// A glob of `tokens` tokens ends in a `?` and a letter, as in the
+    /// bounds test of the `schemas` globs: the heap takes the states of a glob
+    /// that is longer than the stack buffers.
+    #[rstest]
+    #[case::one_state_below_the_stack_bound(STACK_STATES - 3)]
+    #[case::at_the_stack_bound(STACK_STATES - 2)]
+    #[case::one_state_above_the_stack_bound(STACK_STATES - 1)]
+    fn catalog_glob_agrees_with_the_reference_around_the_stack_bound(#[case] tokens: usize) {
+        let letters = "a".repeat(tokens - 2);
+        let glob = letters.clone() + "?b";
+        let texts = [
+            (letters.clone() + "xb", true),
+            (letters.clone() + "b", false),
+            (letters.clone() + "xxb", false),
+            (letters.clone() + "/b", false),
+            (format!("/d/{letters}xb"), true),
+            (format!("/d/{letters}\u{1F600}b"), true),
+        ];
+        for (text, expected) in &texts {
+            assert_eq!(catalog_reference(&glob, text), *expected, "the reference");
+            assert_eq!(
+                catalog_matches(&glob, text),
+                *expected,
+                "{tokens} tokens on {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn catalog_patterns_match_a_question_mark_glob_beyond_the_byte_limit() {
+        let letters = "a".repeat(MAX_PATTERN_BYTES + 44);
+        let glob = letters.clone() + "?";
+        let patterns = catalog_patterns(&[&glob]);
+        let excluding = catalog_patterns(&["**", &format!("!{glob}")]);
+        for (path, expected) in [
+            (format!("/d/{letters}x"), true),
+            (format!("/d/{letters}"), false),
+            (format!("/d/{letters}xx"), false),
+            (format!("/d/{letters}/"), false),
+        ] {
+            assert_eq!(catalog_reference(&glob, &path), expected, "the reference");
+            assert_eq!(patterns.matches(&path), expected, "{path}");
+            assert_eq!(excluding.matches(&path), !expected, "excluding {path}");
+        }
     }
 
     /// Globs of `tokens` tokens: `tokens - 2` letters, a star and a letter.
@@ -1798,7 +2097,10 @@ mod tests {
         #[case] states: usize,
     ) {
         let glob = "a".repeat(tokens - 2) + "*b";
-        assert_eq!(Glob::anywhere(&glob).tokens.len() + 1, states);
+        assert_eq!(
+            Glob::anywhere(&glob, QuestionMark::Literal).tokens.len() + 1,
+            states
+        );
         let texts = [
             ("a".repeat(tokens - 2) + "b", true),
             ("a".repeat(tokens - 2) + "zzb", true),
@@ -1858,7 +2160,7 @@ mod tests {
     ) {
         let texts = strings_over(text_alphabet, text_len);
         for pattern in strings_over(glob_alphabet, glob_len) {
-            let glob = Glob::anywhere(&pattern);
+            let glob = Glob::anywhere(&pattern, QuestionMark::Literal);
             for text in &texts {
                 assert_eq!(
                     glob.is_match(text),
@@ -1869,10 +2171,54 @@ mod tests {
         }
     }
 
+    /// Like the test above, for the globs that read a `?` as a wildcard and,
+    /// as the last case, for the globs of the `schemas` setting that hold a
+    /// `?` as a literal.
+    #[rstest]
+    #[case::wildcard_ascii(QuestionMark::AnyCharacter, &['a', '/', '*', '?'], 6, &['a', '/'], 7)]
+    #[case::wildcard_mixed_widths(
+        QuestionMark::AnyCharacter,
+        &['a', '\u{e9}', '\u{1F600}', '/', '*', '?'],
+        4,
+        &['a', '\u{e9}', '\u{20ac}', '\u{1F600}', '/'],
+        5
+    )]
+    #[case::literal_ascii(QuestionMark::Literal, &['a', '?', '/', '*'], 6, &['a', '?', '/'], 5)]
+    fn anywhere_glob_with_question_marks_agrees_with_the_reference_model_on_every_short_glob_and_text(
+        #[case] question_mark: QuestionMark,
+        #[case] glob_alphabet: &[char],
+        #[case] glob_len: usize,
+        #[case] text_alphabet: &[char],
+        #[case] text_len: usize,
+    ) {
+        let texts = strings_over(text_alphabet, text_len);
+        for pattern in strings_over(glob_alphabet, glob_len) {
+            let glob = Glob::anywhere(&pattern, question_mark);
+            for text in &texts {
+                assert_eq!(
+                    glob.is_match(text),
+                    reference_anywhere(&pattern, text, question_mark),
+                    "{question_mark:?}: {pattern} on {text}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn catalog_matching_ends_for_a_glob_of_question_marks_and_stars() {
+        finishes_within_thirty_seconds(|| {
+            let glob = "?*".repeat(120) + "b";
+            let patterns = catalog_patterns(&[&glob]);
+            assert!(patterns.matches(&("a".repeat(MAX_PATH_BYTES - 1) + "b")));
+            assert!(!patterns.matches(&("a".repeat(100) + "b")));
+            assert!(!patterns.matches(&("a/".repeat(MAX_PATH_BYTES / 2 - 1) + "b")));
+        });
+    }
+
     #[test]
     fn one_glob_gives_the_same_results_on_every_call() {
-        let glob = Glob::anywhere("a*b");
-        let with_double_star = Glob::anywhere("a**/b");
+        let glob = Glob::anywhere("a*b", QuestionMark::Literal);
+        let with_double_star = Glob::anywhere("a**/b", QuestionMark::Literal);
         for _ in 0..3 {
             assert!(glob.is_match("axxb"));
             assert!(!glob.is_match("axxc"));
@@ -1938,6 +2284,50 @@ mod tests {
 
         use super::*;
 
+        /// `Glob::anywhere` and the patterns built from `pattern` agree with
+        /// the reference model on `text`.
+        fn agrees_with_the_reference(
+            pattern: &str,
+            text: &str,
+            question_mark: QuestionMark,
+        ) -> Result<(), TestCaseError> {
+            prop_assert_eq!(
+                Glob::anywhere(pattern, question_mark).is_match(text),
+                reference_anywhere(pattern, text, question_mark),
+                "{:?}: {} on {}",
+                question_mark,
+                pattern,
+                text
+            );
+            // `FilePatterns` adds the reading of a leading `!` as an
+            // exclusion and the removal of one leading `/`.
+            let (excluded, rest) = pattern
+                .strip_prefix('!')
+                .map_or((false, pattern), |rest| (true, rest));
+            let glob = rest.strip_prefix('/').unwrap_or(rest);
+            if !glob.is_empty() {
+                let globbed = reference_anywhere(glob, text, question_mark);
+                let globs: &[&str] = if excluded {
+                    &["**", pattern]
+                } else {
+                    &[pattern]
+                };
+                let patterns = match question_mark {
+                    QuestionMark::Literal => file_patterns(globs),
+                    QuestionMark::AnyCharacter => catalog_patterns(globs),
+                };
+                prop_assert_eq!(
+                    patterns.matches(text),
+                    globbed != excluded,
+                    "file patterns, {:?}: {} on {}",
+                    question_mark,
+                    pattern,
+                    text
+                );
+            }
+            Ok(())
+        }
+
         proptest! {
             #![proptest_config(ProptestConfig {
                 cases: 4096,
@@ -1969,37 +2359,40 @@ mod tests {
                 } else {
                     text_body
                 };
-                prop_assert_eq!(
-                    anywhere_matches(&pattern, &text),
-                    anywhere_reference(&pattern, &text),
-                    "{} on {}", pattern, text
-                );
-                // `FilePatterns` adds the reading of a leading `!` as an
-                // exclusion and the removal of one leading `/`.
-                let (excluded, rest) = pattern
-                    .strip_prefix('!')
-                    .map_or((false, pattern.as_str()), |rest| (true, rest));
-                let glob = rest.strip_prefix('/').unwrap_or(rest);
-                if !glob.is_empty() {
-                    let globbed = anywhere_reference(glob, &text);
-                    let (patterns, expected) = if excluded {
-                        (file_patterns(&["**", &pattern]), !globbed)
-                    } else {
-                        (file_patterns(&[&pattern]), globbed)
-                    };
-                    prop_assert_eq!(
-                        patterns.matches(&text),
-                        expected,
-                        "file patterns: {} on {}", pattern, text
-                    );
-                }
+                agrees_with_the_reference(&pattern, &text, QuestionMark::Literal)?;
+            }
+
+            /// Like the property above, for the patterns of a catalog, which
+            /// read a `?` as a wildcard.
+            #[test]
+            fn catalog_glob_agrees_with_the_reference_model(
+                parts in prop::collection::vec(
+                    prop::sample::select(vec![
+                        "a", "b", "\u{e9}", "\u{20ac}", "\u{1F600}", "/", "!", ".", "*", "**", "**/",
+                        "?",
+                    ]),
+                    0..6,
+                ),
+                suffix in prop::sample::select(vec![
+                    "", ".y", "b", "/b", "\u{e9}", "\u{20ac}", "\u{1F600}", "a.yaml", "?", "?b",
+                ]),
+                text_body in "[ab?\u{e9}\u{20ac}\u{1F600}/!.]{0,12}",
+                text_ends_with_the_suffix in any::<bool>(),
+            ) {
+                let pattern = parts.concat() + suffix;
+                let text = if text_ends_with_the_suffix {
+                    text_body + suffix
+                } else {
+                    text_body
+                };
+                agrees_with_the_reference(&pattern, &text, QuestionMark::AnyCharacter)?;
             }
 
             /// No glob and path make matching panic.
             #[test]
             fn file_patterns_never_panic(
-                globs in prop::collection::vec("[ab\u{e9}\u{20ac}\u{1F600}*/!.]{0,9}", 0..4),
-                path in "[ab\u{e9}\u{20ac}\u{1F600}/.]{0,12}",
+                globs in prop::collection::vec("[ab?\u{e9}\u{20ac}\u{1F600}*/!.]{0,9}", 0..4),
+                path in "[ab?\u{e9}\u{20ac}\u{1F600}/.]{0,12}",
             ) {
                 if let Some(patterns) = FilePatterns::new(&globs) {
                     let _ = patterns.matches(&path);
@@ -2007,16 +2400,32 @@ mod tests {
                 if let Some(patterns) = FilePatterns::without_limits(globs.iter().map(String::as_str)) {
                     let _ = patterns.matches(&path);
                 }
+                if let Some(patterns) = FilePatterns::for_catalog(globs.iter().map(String::as_str)) {
+                    let _ = patterns.matches(&path);
+                }
             }
 
             /// Within the limits, the limited and the unlimited constructor
-            /// build the same patterns.
+            /// build the same patterns, a `?` included.
             #[test]
             fn new_and_without_limits_agree_within_the_limits(
-                globs in prop::collection::vec("[ab\u{e9}\u{20ac}\u{1F600}*/!.]{0,9}", 0..4),
+                globs in prop::collection::vec("[ab?\u{e9}\u{20ac}\u{1F600}*/!.]{0,9}", 0..4),
             ) {
                 prop_assert_eq!(
                     FilePatterns::new(&globs),
+                    FilePatterns::without_limits(globs.iter().map(String::as_str))
+                );
+            }
+
+            /// Without a `?` in the globs, the constructor of the catalog
+            /// builds what the unlimited constructor builds: they differ only
+            /// in how they read a `?`.
+            #[test]
+            fn for_catalog_and_without_limits_differ_only_in_question_marks(
+                globs in prop::collection::vec("[ab\u{e9}\u{20ac}\u{1F600}*/!.]{0,9}", 0..4),
+            ) {
+                prop_assert_eq!(
+                    FilePatterns::for_catalog(globs.iter().map(String::as_str)),
                     FilePatterns::without_limits(globs.iter().map(String::as_str))
                 );
             }

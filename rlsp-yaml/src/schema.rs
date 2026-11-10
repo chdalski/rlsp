@@ -1330,8 +1330,11 @@ fn is_json_family_pattern(pattern: &str) -> bool {
 ///
 /// Follows yaml-language-server: an entry's `fileMatch` patterns are read like
 /// the patterns of a `schemas` entry (see [`association::FilePatterns`]), after
-/// those that name a JSON file are dropped. The catalog is bounded as a whole,
-/// so its patterns are not subject to the limits of the `schemas` setting.
+/// those that name a JSON file are dropped, except that a `?` matches one
+/// character other than `/`, as in picomatch (see
+/// [`association::FilePatterns::for_catalog`]). The catalog is bounded as a
+/// whole, so its patterns are not subject to the limits of the `schemas`
+/// setting.
 /// Keeps only the entries with a non-empty `url` and at least one pattern left
 /// that includes files; items of `fileMatch` that are not strings are skipped.
 /// Returns `None` if the value is not a JSON object with a `schemas` array.
@@ -1348,7 +1351,7 @@ pub fn parse_schemastore_catalog(value: &Value) -> Option<SchemaStoreCatalog> {
             if url.is_empty() {
                 return None;
             }
-            let file_match = association::FilePatterns::without_limits(
+            let file_match = association::FilePatterns::for_catalog(
                 entry_obj
                     .get("fileMatch")?
                     .as_array()?
@@ -5105,7 +5108,8 @@ mod tests {
         );
     }
 
-    // The patterns of a catalog entry follow the rules of the `schemas` setting.
+    // The patterns of a catalog entry follow the rules of the `schemas`
+    // setting, except for the `?` (see `parsed_catalog_reads_a_question_mark_as_one_character`).
     #[rstest]
     #[case::bare_name_matches_the_whole_path(&["config.yaml"], "config.yaml", true)]
     #[case::bare_name_matches_below_a_directory(&["config.yaml"], "/p/config.yaml", true)]
@@ -5141,6 +5145,62 @@ mod tests {
     #[case::uppercase_yaml_pattern_is_case_sensitive(&["*.YAML"], "/p/a.yaml", false)]
     #[case::multibyte_name(&["é.yaml"], "/p/é.yaml", true)]
     fn parsed_catalog_reads_file_match_patterns_like_the_schemas_setting(
+        #[case] patterns: &[&str],
+        #[case] filename: &str,
+        #[case] expected: bool,
+    ) {
+        let catalog = parse_catalog(&[("https://example.com/s.json", patterns)]);
+        assert_eq!(
+            match_schemastore(filename, &catalog).is_some(),
+            expected,
+            "{patterns:?} on {filename}"
+        );
+    }
+
+    const WINGET_INSTALLER: &str = "**/manifests/?/*/*/*/*.*.installer.yaml";
+
+    // Unlike in the `schemas` setting, a `?` matches one character other than
+    // `/`, as in picomatch.
+    #[rstest]
+    #[case::winget_installer(
+        &[WINGET_INSTALLER],
+        "/home/u/winget-pkgs/manifests/m/Microsoft/PowerToys/0.80.0/Microsoft.PowerToys.installer.yaml",
+        true
+    )]
+    #[case::winget_installer_with_a_capital_letter(
+        &[WINGET_INSTALLER],
+        "/home/u/winget-pkgs/manifests/M/Microsoft/PowerToys/0.80.0/Microsoft.PowerToys.installer.yaml",
+        true
+    )]
+    #[case::winget_installer_with_two_letters(
+        &[WINGET_INSTALLER],
+        "/home/u/winget-pkgs/manifests/mm/Microsoft/PowerToys/0.80.0/Microsoft.PowerToys.installer.yaml",
+        false
+    )]
+    #[case::winget_installer_with_an_empty_segment(
+        &[WINGET_INSTALLER],
+        "/home/u/winget-pkgs/manifests//Microsoft/PowerToys/0.80.0/Microsoft.PowerToys.installer.yaml",
+        false
+    )]
+    #[case::winget_installer_one_segment_short(
+        &[WINGET_INSTALLER],
+        "/home/u/winget-pkgs/manifests/m/Microsoft/0.80.0/Microsoft.PowerToys.installer.yaml",
+        false
+    )]
+    #[case::winget_installer_with_another_extension(
+        &[WINGET_INSTALLER],
+        "/home/u/winget-pkgs/manifests/m/Microsoft/PowerToys/0.80.0/Microsoft.PowerToys.installer.yml",
+        false
+    )]
+    #[case::one_character(&["?.yaml"], "/p/a.yaml", true)]
+    #[case::not_two_characters(&["?.yaml"], "/p/ab.yaml", false)]
+    #[case::a_leading_dot(&["?.yaml"], "/p/..yaml", true)]
+    #[case::a_multibyte_character(&["?.yaml"], "/p/é.yaml", true)]
+    #[case::not_a_slash(&["?.yaml"], "/p/a/.yaml", false)]
+    #[case::exclusion_with_a_mark_removes(&["*.yaml", "!?.yaml"], "/p/a.yaml", false)]
+    #[case::exclusion_with_a_mark_leaves_other_files(&["*.yaml", "!?.yaml"], "/p/ab.yaml", true)]
+    #[case::json_pattern_is_dropped_before_it_is_read(&["?.json", "a.yaml"], "/p/a.json", false)]
+    fn parsed_catalog_reads_a_question_mark_as_one_character(
         #[case] patterns: &[&str],
         #[case] filename: &str,
         #[case] expected: bool,

@@ -58,6 +58,15 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### SchemaStore Assigns Schemas to Winget Manifests [completed]
+
+**Date:** 2026-11-10
+**Description:** SchemaStore now assigns its schema to winget manifests such as `manifests/m/Microsoft/PowerToys/0.80.0/Microsoft.PowerToys.installer.yaml`. The catalog's patterns for them contain `?`, which matches exactly one character other than `/`, as in picomatch; the server read it as a literal `?` before, so these files got no schema. A `?` in a [`schemas`](configuration.md#schemas) glob stays a literal character. See [`schemaStore`](configuration.md#schemastore).
+**Complexity:** Low
+**Tier:** 1
+
+---
+
 ### The Formatter Keeps the Data of a File [completed]
 
 **Date:** 2026-10-31

@@ -1257,6 +1257,14 @@ mod tests {
     }
 
     #[test]
+    fn schemas_reads_a_question_mark_as_a_literal_character() {
+        let read = read(&json!({"schemas": {"https://a.test/s.json": ["?.yaml"]}}));
+        let patterns = &read.settings.schemas["https://a.test/s.json"];
+        assert!(patterns.matches("/p/?.yaml"));
+        assert!(!patterns.matches("/p/a.yaml"));
+    }
+
+    #[test]
     fn schemas_drops_entries_of_another_form_and_keeps_the_rest() {
         let read = read(&json!({"schemas": {
             "https://a.test/s.json": "*.yaml",
