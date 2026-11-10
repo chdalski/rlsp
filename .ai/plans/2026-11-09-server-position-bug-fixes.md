@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-11-10)
 **Created:** 2026-11-09
 
 # Server and Position Bug Fixes
@@ -35,7 +35,7 @@ with the defects that the backlog does not list in the code these fixes rewrite.
 - [x] Task 9: Range and full formatting keep the formatter's line breaks
 - [x] Task 10: File patterns match characters, not bytes
 - [x] Task 11: `?` in SchemaStore catalog patterns matches one character
-- [ ] Push to `main` and confirm the full CI matrix is green
+- [x] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
