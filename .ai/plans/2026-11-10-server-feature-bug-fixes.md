@@ -37,7 +37,7 @@ each fixed where they arise.
 - [x] Task 2: References and rename share one anchor and alias walk
 - [x] Task 3: The unused-anchor validator and its quick fix read the whole document
 - [x] Task 4: The other validators read the whole document
-- [ ] Task 5: No selection range misses its position
+- [x] Task 5: No selection range misses its position
 - [ ] Task 6: A selection-range response has one entry per position
 - [ ] Task 7: A duplicate-key diagnostic covers the whole key
 - [ ] Task 8: The block-scalar action never turns a comment into content
@@ -131,17 +131,17 @@ not contain its position: for `k: "aaa\n  bbb" # c\n` at (1,9) the chain is the 
 its entry (0,0)-(1,6), and the document root (0,0)-(2,0). LSP 3.17 requires `positions[i]` to lie in
 `result[i].range`.
 
-- [ ] For every position of documents with a multi-line plain, double-quoted, and explicit-key
+- [x] For every position of documents with a multi-line plain, double-quoted, and explicit-key
       scalar, a comment after a multi-line value, and comment lines inside and between entries, every
       range of the returned chain contains the position and every parent range contains its child
       range
-- [ ] Each chain is the chain the code returned before this task, without the ranges that do not
+- [x] Each chain is the chain the code returned before this task, without the ranges that do not
       contain the position: `k: "aaa\n  bbb" # c\n` at (1,9) gets the document root (0,0)-(2,0) as
       its only range, and the existing selection tests pass with their assertions unchanged, apart
       from those that pin a range that does not contain its position
-- [ ] A position that got no range before this task gets none: `k: aaa\n  bbb\n` at (1,1), and
+- [x] A position that got no range before this task gets none: `k: aaa\n  bbb\n` at (1,1), and
       `key: value\n# a comment\nother: data\n` at (1,5)
-- [ ] Through the server, the selection-range request for `k: "aaa\n  bbb" # c\n` at (1,9)
+- [x] Through the server, the selection-range request for `k: "aaa\n  bbb" # c\n` at (1,9)
       (`tests/lsp_lifecycle/selection_ranges.rs`) returns the document root (0,0)-(2,0) as its only
       range
 

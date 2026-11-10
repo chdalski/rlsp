@@ -2,7 +2,7 @@
 
 use rlsp_yaml_parser::node::{Document, Node};
 use rlsp_yaml_parser::{LineIndex, Span};
-use tower_lsp::lsp_types::{Position, SelectionRange};
+use tower_lsp::lsp_types::{Position, Range, SelectionRange};
 
 use crate::lsp_util::span_to_lsp;
 
@@ -52,32 +52,32 @@ fn selection_range_for_position(
     }
 
     // Derive doc root range from AST span directly
-    let doc_root_span = node_span(&doc.root);
-    let doc_root = span_to_lsp(doc_root_span, idx);
+    let doc_root = span_to_lsp(node_span(&doc.root), idx);
 
-    // Build the SelectionRange chain: innermost first in ancestor_spans,
-    // outermost (doc root) is the final parent.
-    let mut current: Option<Box<SelectionRange>> = Some(Box::new(SelectionRange {
-        range: doc_root,
-        parent: None,
-    }));
-
-    // ancestor_spans[0] is innermost, last is closest-to-root.
-    // We want to wrap them outermost-first, so iterate in reverse.
-    for span in ancestor_spans.iter().rev() {
-        let range = span_to_lsp(*span, idx);
+    // Chain ranges innermost-first, the document root last. The walk matches
+    // by line, so a range can miss the cursor's column; those are dropped, as
+    // the protocol requires every range of the chain to contain the position.
+    // Wrap outermost-first so that the innermost range ends up on top.
+    ancestor_spans
+        .iter()
+        .map(|span| span_to_lsp(*span, idx))
         // Avoid emitting the doc root twice
-        if range == doc_root {
-            continue;
-        }
-        let sr = SelectionRange {
-            range,
-            parent: current,
-        };
-        current = Some(Box::new(sr));
-    }
+        .filter(|range| *range != doc_root)
+        .chain(std::iter::once(doc_root))
+        .filter(|range| range_contains(range, position))
+        .rev()
+        .fold(None, |parent, range| {
+            Some(SelectionRange {
+                range,
+                parent: parent.map(Box::new),
+            })
+        })
+}
 
-    current.map(|b| *b)
+/// Whether `position` lies between the start and the end of `range`, both
+/// included. Compares lines first, then columns.
+fn range_contains(range: &Range, position: Position) -> bool {
+    range.start <= position && position <= range.end
 }
 
 /// Extract the `Span` (loc) from a `Node<Span>`.
@@ -382,25 +382,6 @@ mod tests {
             result.is_empty(),
             "cursor on '...' line should produce no selection range"
         );
-    }
-
-    // Group: selection_ranges_does_not_panic — no assertion, must not panic
-    #[rstest]
-    #[case::position_beyond_document("key: value\n", pos(99, 0))]
-    #[case::position_beyond_line_length("key: value\n", pos(0, 999))]
-    #[case::cursor_on_document_separator("a: 1\n---\nb: 2\n", pos(1, 0))]
-    #[case::cursor_on_comment_only_document("# just a comment\n", pos(0, 2))]
-    #[case::cursor_on_comment_line_in_middle(
-        "key: value\n# this is a comment\nother: data\n",
-        pos(1, 5)
-    )]
-    #[case::sequence_value_in_mapping("items:\n  - alpha\n  - beta\n  - gamma\n", pos(1, 4))]
-    #[case::deeply_nested_sequence_value("data:\n  - nested:\n      - deep_value\n", pos(2, 10))]
-    #[case::key_at_column_zero("empty:\nother: val\n", pos(0, 0))]
-    #[case::alias_in_sequence("base: &anchor value\ncopy:\n  - *anchor\n", pos(2, 4))]
-    fn selection_ranges_does_not_panic(#[case] text: &str, #[case] position: Position) {
-        let docs = parse_docs(text);
-        let _ = selection_ranges(docs.as_deref().unwrap_or(&[]), &[position]);
     }
 
     #[test]
@@ -804,35 +785,229 @@ mod tests {
         ranges
     }
 
-    // A multi-line quoted scalar's range ends at its closing quote, so a cursor
-    // on the next entry selects that entry and not the quoted value.
+    type Chain = Vec<((u32, u32), (u32, u32))>;
+
+    /// Shorthand for the expected `(start, end)` pair of a chain entry.
+    const fn r(start: (u32, u32), end: (u32, u32)) -> ((u32, u32), (u32, u32)) {
+        (start, end)
+    }
+
+    // Golden chains, innermost range first. A range that does not contain the
+    // position is left out; a range whose start or end equals the position is
+    // kept. Where a sequence item holds a scalar the item and the scalar have
+    // the same range, so the chain lists it twice.
     #[rstest]
-    #[case::on_the_closing_line("k: \"a\n    b\"\nz: 1\n", pos(1, 4), ((0, 3), (1, 6)))]
-    #[case::on_the_opening_line("k: 'a\n    b'\nz: 1\n", pos(0, 4), ((0, 3), (1, 6)))]
-    #[case::next_entry("k: \"a\n    b\"\nz: 1\n", pos(2, 3), ((2, 3), (2, 4)))]
-    fn multi_line_quoted_scalar_selection_innermost_range(
+    #[case::range_end_is_inclusive(
+        "k: v\n", pos(0, 4),
+        vec![r((0, 3), (0, 4)), r((0, 0), (0, 4)), r((0, 0), (1, 0))]
+    )]
+    #[case::range_start_is_inclusive(
+        "k: v\n", pos(0, 3),
+        vec![r((0, 3), (0, 4)), r((0, 0), (0, 4)), r((0, 0), (1, 0))]
+    )]
+    #[case::one_past_end_keeps_only_root("k: v\n", pos(0, 5), vec![r((0, 0), (1, 0))])]
+    #[case::comment_after_single_line_value(
+        "k: v # c\n", pos(0, 6), vec![r((0, 0), (1, 0))]
+    )]
+    #[case::comment_after_multiline_double_quoted(
+        "k: \"aaa\n  bbb\" # c\n", pos(1, 9), vec![r((0, 0), (2, 0))]
+    )]
+    #[case::multiline_double_quoted_inside_last_line(
+        "k: \"aaa\n  bbb\" # c\n", pos(1, 5),
+        vec![r((0, 3), (1, 6)), r((0, 0), (1, 6)), r((0, 0), (2, 0))]
+    )]
+    #[case::multiline_double_quoted_closing_quote_end_inclusive(
+        "k: \"aaa\n  bbb\" # c\n", pos(1, 6),
+        vec![r((0, 3), (1, 6)), r((0, 0), (1, 6)), r((0, 0), (2, 0))]
+    )]
+    #[case::multiline_double_quoted_first_line(
+        "k: \"aaa\n  bbb\" # c\n", pos(0, 4),
+        vec![r((0, 3), (1, 6)), r((0, 0), (1, 6)), r((0, 0), (2, 0))]
+    )]
+    #[case::multiline_double_quoted_space_before_comment(
+        "k: \"aaa\n  bbb\" # c\n", pos(1, 7), vec![r((0, 0), (2, 0))]
+    )]
+    #[case::double_quoted_escaped_newline_comment(
+        "k: \"aaa\\n  bbb\" # c\n", pos(0, 17), vec![r((0, 0), (1, 0))]
+    )]
+    #[case::quoted_value_closing_line(
+        "k: \"a\n    b\"\nz: 1\n", pos(1, 4),
+        vec![r((0, 3), (1, 6)), r((0, 0), (1, 6)), r((0, 0), (3, 0))]
+    )]
+    #[case::quoted_value_opening_line(
+        "k: \"a\n    b\"\nz: 1\n", pos(0, 4),
+        vec![r((0, 3), (1, 6)), r((0, 0), (1, 6)), r((0, 0), (3, 0))]
+    )]
+    #[case::single_quoted_value_opening_line(
+        "k: 'a\n    b'\nz: 1\n", pos(0, 4),
+        vec![r((0, 3), (1, 6)), r((0, 0), (1, 6)), r((0, 0), (3, 0))]
+    )]
+    #[case::next_entry_after_quoted_value(
+        "k: \"a\n    b\"\nz: 1\n", pos(2, 3),
+        vec![r((2, 3), (2, 4)), r((2, 0), (2, 4)), r((0, 0), (3, 0))]
+    )]
+    #[case::comment_after_multiline_plain(
+        "k: aaa\n  bbb # c\nz: 1\n", pos(1, 8), vec![r((0, 0), (3, 0))]
+    )]
+    #[case::multiline_plain_end_inclusive(
+        "k: aaa\n  bbb # c\nz: 1\n", pos(1, 5),
+        vec![r((0, 3), (1, 5)), r((0, 0), (1, 5)), r((0, 0), (3, 0))]
+    )]
+    #[case::next_entry_after_multiline_plain(
+        "k: aaa\n  bbb # c\nz: 1\n", pos(2, 3),
+        vec![r((2, 3), (2, 4)), r((2, 0), (2, 4)), r((0, 0), (3, 0))]
+    )]
+    #[case::next_entry_past_line_end(
+        "k: aaa\n  bbb # c\nz: 1\n", pos(2, 5), vec![r((0, 0), (3, 0))]
+    )]
+    #[case::indentation_of_nested_entry(
+        "a:\n  # inside\n  b: 1\n\n  # gap\n  c: \"x\n    y\"\n", pos(2, 0),
+        vec![r((0, 0), (7, 0))]
+    )]
+    #[case::explicit_key_indicator_not_in_entry(
+        "? a\n  b\n: v\n  w\nz: 1\n", pos(0, 0), vec![r((0, 0), (5, 0))]
+    )]
+    #[case::explicit_key_content_keeps_key_and_entry(
+        "? a\n  b\n: v\n  w\nz: 1\n", pos(0, 2),
+        vec![r((0, 2), (1, 3)), r((0, 2), (3, 3)), r((0, 0), (5, 0))]
+    )]
+    #[case::explicit_value_line(
+        "? a\n  b\n: v\n  w\nz: 1\n", pos(2, 2),
+        vec![r((2, 2), (3, 3)), r((0, 2), (3, 3)), r((0, 0), (5, 0))]
+    )]
+    #[case::explicit_value_past_end(
+        "? a\n  b\n: v\n  w\nz: 1\n", pos(3, 4), vec![r((0, 0), (5, 0))]
+    )]
+    #[case::explicit_block_scalar_key_indicator(
+        "? |\n  a\n  b\n: v\n", pos(0, 0), vec![r((0, 0), (4, 0))]
+    )]
+    #[case::sequence_comment_after_multiline_item(
+        "l:\n  - a\n    b\n  - \"c\n    d\" # e\n  # f\n  - g\n", pos(4, 8),
+        vec![r((0, 0), (7, 0))]
+    )]
+    #[case::sequence_item_end_inclusive(
+        "l:\n  - a\n    b\n  - \"c\n    d\" # e\n  # f\n  - g\n", pos(4, 6),
+        vec![r((3, 4), (4, 6)), r((3, 4), (4, 6)), r((0, 0), (7, 0))]
+    )]
+    #[case::sequence_last_item_past_end(
+        "l:\n  - a\n    b\n  - \"c\n    d\" # e\n  # f\n  - g\n", pos(6, 6),
+        vec![r((0, 0), (7, 0))]
+    )]
+    #[case::flow_sequence_between_items(
+        "f: [a, b,\n  c]\ng: {x: 1,\n  y: 2}\n", pos(0, 6),
+        vec![r((0, 0), (1, 3)), r((0, 0), (4, 0))]
+    )]
+    #[case::flow_mapping_left_of_inner_entry(
+        "f: [a, b,\n  c]\ng: {x: 1,\n  y: 2}\n", pos(2, 0),
+        vec![r((2, 0), (3, 6)), r((0, 0), (4, 0))]
+    )]
+    #[case::multibyte_key_past_end("日本語: val\n", pos(0, 9), vec![r((0, 0), (1, 0))])]
+    #[case::multibyte_value_end_inclusive(
+        "日本語: val\n", pos(0, 8),
+        vec![r((0, 5), (0, 8)), r((0, 0), (0, 8)), r((0, 0), (1, 0))]
+    )]
+    #[case::second_document_comment_after_multiline(
+        "a: 1\n---\nb: \"x\n  y\" # c\n", pos(3, 7), vec![r((2, 0), (4, 0))]
+    )]
+    fn selection_chain_exact(
         #[case] text: &str,
         #[case] position: Position,
-        #[case] expected: ((u32, u32), (u32, u32)),
+        #[case] expected: Chain,
     ) {
-        assert_eq!(chain(text, position).first(), Some(&expected));
+        assert_eq!(chain(text, position), expected);
     }
 
+    // Positions that get no range stay without one; selecting a node for them
+    // is decided separately.
+    #[rstest]
+    #[case::continuation_line_left_of_scalar_start("k: aaa\n  bbb\n", pos(1, 1))]
+    #[case::continuation_line_of_double_quoted("k: \"aaa\n  bbb\" # c\n", pos(1, 2))]
+    #[case::comment_between_entries("k: v # c\n# between\nz: 1\n", pos(1, 3))]
+    #[case::comment_after_last_entry("k: v # c\n# between\nz: 1\n# trailing\n", pos(3, 0))]
+    fn selection_chain_stays_empty(#[case] text: &str, #[case] position: Position) {
+        assert!(chain(text, position).is_empty());
+    }
+
+    // The document root is dropped too when it misses the position: without a
+    // final line break it ends on the last line.
     #[test]
-    fn multi_line_quoted_scalar_entry_range_ends_at_the_closing_quote() {
-        let ranges = chain("k: \"a\n    b\"\nz: 1\n", pos(1, 4));
-        assert!(
-            ranges.contains(&((0, 0), (1, 6))),
-            "expected the entry range (0,0)-(1,6) in {ranges:?}"
+    fn position_outside_every_range_gets_no_selection_range() {
+        let docs = parse_docs_inner("key: value");
+        assert!(selection_ranges(&docs, &[pos(0, 11)]).is_empty());
+        assert_eq!(
+            chain("key: value", pos(0, 10)),
+            vec![r((0, 5), (0, 10)), r((0, 0), (0, 10))]
         );
     }
 
-    #[test]
-    fn next_entry_chain_does_not_include_the_multi_line_quoted_value() {
-        let ranges = chain("k: \"a\n    b\"\nz: 1\n", pos(2, 3));
-        assert!(
-            !ranges.contains(&((0, 3), (1, 6))) && !ranges.contains(&((0, 0), (1, 6))),
-            "unexpected range of the first entry in {ranges:?}"
-        );
+    fn contains(range: ((u32, u32), (u32, u32)), position: (u32, u32)) -> bool {
+        range.0 <= position && position <= range.1
+    }
+
+    // Every range of every chain contains its position and every parent range
+    // contains its child, for each position of a grid that reaches past the
+    // ends of the lines and of the document.
+    #[rstest]
+    #[case::multiline_plain("k: aaa\n  bbb\n")]
+    #[case::multiline_double_quoted_with_comment("k: \"aaa\n  bbb\" # c\n")]
+    #[case::multiline_single_quoted("k: 'aaa\n  bbb' # c\n")]
+    #[case::double_quoted_escaped_newline_single_line("k: \"aaa\\n  bbb\" # c\n")]
+    #[case::explicit_key_multiline_plain("? a\n  b\n: v\n  w\nz: 1\n")]
+    #[case::explicit_key_block_scalar("? |\n  a\n  b\n: v\n")]
+    #[case::comment_after_multiline_value("k: aaa\n  bbb # c\nz: 1\n")]
+    #[case::comment_lines_between_entries("k: v # c\n# between\nz: 1\n# trailing\n")]
+    #[case::comments_and_blank_line_inside_nested_mapping(
+        "a:\n  # inside\n  b: 1\n\n  # gap\n  c: \"x\n    y\"\n"
+    )]
+    #[case::literal_block_scalar_value("k: |\n  a\n  b\nz: 1\n")]
+    #[case::sequence_of_multiline_items_with_comments(
+        "l:\n  - a\n    b\n  - \"c\n    d\" # e\n  # f\n  - g\n"
+    )]
+    #[case::sequence_of_mappings_with_multiline_value("- a: 1\n  b: \"p\n    q\"\n- c\n")]
+    #[case::flow_collections_multiline("f: [a, b,\n  c]\ng: {x: 1,\n  y: 2}\n")]
+    #[case::multibyte_key("日本語: val\n")]
+    #[case::multibyte_multiline_value("k: \"日本\n  語\" # c\n")]
+    #[case::multi_document_with_terminator("doc1: 1\n---\ndoc2: \"a\n  b\"\n...\n")]
+    #[case::crlf_multiline_quoted("k: \"aaa\r\n  bbb\" # c\r\n")]
+    #[case::no_trailing_newline("key: value")]
+    #[case::simple_mapping("key: value\n")]
+    #[case::document_separator("a: 1\n---\nb: 2\n")]
+    #[case::comment_only_document("# just a comment\n")]
+    #[case::sequence_values("items:\n  - alpha\n  - beta\n  - gamma\n")]
+    #[case::nested_sequence_values("data:\n  - nested:\n      - deep_value\n")]
+    #[case::empty_value("empty:\nother: val\n")]
+    #[case::alias_in_sequence("base: &anchor value\ncopy:\n  - *anchor\n")]
+    fn selection_chain_invariants(#[case] text: &str) {
+        let docs = parse_docs_inner(text);
+        let line_lengths: Vec<u32> = text
+            .split('\n')
+            .map(|line| line.chars().count() as u32)
+            .collect();
+        let mut positions = vec![pos(99, 0), pos(0, 999), pos(u32::MAX, 0), pos(0, u32::MAX)];
+        for line in 0..line_lengths.len() as u32 + 2 {
+            let length = line_lengths.get(line as usize).copied().unwrap_or(0);
+            positions.extend((0..length + 3).map(|character| pos(line, character)));
+        }
+
+        for position in positions {
+            let result = selection_ranges(&docs, &[position]);
+            assert!(result.len() <= 1, "{text:?} at {position:?}: {result:?}");
+            let ranges = chain(text, position);
+            let at = (position.line, position.character);
+            for range in &ranges {
+                assert!(
+                    contains(*range, at),
+                    "{text:?} at {position:?}: {range:?} misses the position in {ranges:?}"
+                );
+            }
+            for pair in ranges.windows(2) {
+                assert!(
+                    pair[1].0 <= pair[0].0 && pair[0].1 <= pair[1].1,
+                    "{text:?} at {position:?}: {:?} does not contain {:?} in {ranges:?}",
+                    pair[1],
+                    pair[0]
+                );
+            }
+        }
     }
 }
