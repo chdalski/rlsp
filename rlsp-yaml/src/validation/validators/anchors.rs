@@ -6,6 +6,7 @@ use rlsp_yaml_parser::node::{Document, Node};
 use rlsp_yaml_parser::{LineIndex, Span};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, Range};
 
+use super::truncate_name;
 use crate::lsp_util::span_to_lsp;
 
 /// An anchor definition collected from the AST.
@@ -58,11 +59,7 @@ pub fn validate_unused_anchors(docs: &[Document<Span>]) -> Vec<Diagnostic> {
 
         for entry in &anchors {
             if !used.contains(entry.name.as_str()) {
-                let truncated_name = if entry.name.len() > 100 {
-                    format!("{}...", &entry.name[..100])
-                } else {
-                    entry.name.clone()
-                };
+                let truncated_name = truncate_name(&entry.name);
                 diagnostics.push(Diagnostic {
                     range: entry.range,
                     severity: Some(DiagnosticSeverity::WARNING),
@@ -238,14 +235,20 @@ mod tests {
         }));
     }
 
-    #[test]
-    fn should_handle_long_anchor_name() {
-        let long_name = "a".repeat(200);
-        let text = format!("data: &{long_name}\n  k: v\n");
-        let result = parse_anchors(&text);
+    #[rstest]
+    #[case::ascii_100("a".repeat(100), "a".repeat(100))]
+    #[case::ascii_101("a".repeat(101), format!("{}...", "a".repeat(100)))]
+    #[case::ascii_200("a".repeat(200), format!("{}...", "a".repeat(100)))]
+    #[case::multibyte_within_100_chars(format!("a{}", "é".repeat(60)), format!("a{}", "é".repeat(60)))]
+    #[case::multibyte_beyond_100_chars_cut_inside_char(
+        format!("a{}", "é".repeat(150)),
+        format!("a{}...", "é".repeat(99))
+    )]
+    fn unused_anchor_message_truncation(#[case] name: String, #[case] shown: String) {
+        let result = parse_anchors(&format!("data: &{name}\n  k: v\n"));
 
         assert_eq!(result.len(), 1);
-        assert!(!result[0].message.is_empty());
+        assert_eq!(result[0].message, format!("Anchor '{shown}' is never used"));
     }
 
     // ---- Unused Anchors Validator: Multi-Document Scoping (standalone) ----

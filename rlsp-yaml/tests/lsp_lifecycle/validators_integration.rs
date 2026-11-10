@@ -1518,3 +1518,41 @@ async fn should_suppress_unused_anchor_on_the_line_of_the_anchor_token() {
         assert_eq!(has_code(&diags, "unusedAnchor"), !suppressed, "{name}");
     }
 }
+
+// A long multi-byte anchor name must not take the server down: the unused-anchor
+// message is cut at a character boundary and the server keeps answering.
+#[rstest]
+#[case::within_100_chars(60, "é".repeat(60))]
+#[case::beyond_100_chars(150, format!("{}...", "é".repeat(99)))]
+#[tokio::test]
+async fn should_publish_unused_anchor_for_long_multibyte_name_and_keep_serving(
+    #[case] count: usize,
+    #[case] shown_suffix: String,
+) {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/long-multibyte-anchor.yaml";
+    let text = format!("k: &a{}\n", "é".repeat(count));
+    send(&mut service, did_open_notification(uri, &text)).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+    let unused: Vec<_> = diags
+        .iter()
+        .filter(|d| matches!(&d.code, Some(NumberOrString::String(s)) if s == "unusedAnchor"))
+        .collect();
+    assert_eq!(unused.len(), 1);
+    assert_eq!(
+        unused[0].message,
+        format!("Anchor 'a{shown_suffix}' is never used")
+    );
+
+    let resp = send(&mut service, hover_request(2, uri, 0, 0)).await;
+    let resp = resp.expect("server should answer a request after the anchor was opened");
+    assert!(resp.is_ok(), "hover should not return an error: {resp:?}");
+}

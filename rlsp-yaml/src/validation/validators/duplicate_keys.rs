@@ -6,6 +6,7 @@ use rlsp_yaml_parser::node::{Document, Node};
 use rlsp_yaml_parser::{LineIndex, Span};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 
+use super::truncate_name;
 use crate::validation::ValidationSettings;
 
 /// Validate duplicate mapping keys in YAML documents.
@@ -87,12 +88,7 @@ fn push_duplicate_diagnostic(
     severity: DiagnosticSeverity,
     idx: &LineIndex,
 ) {
-    let display_key = if key.len() > 100 {
-        let end = key.char_indices().nth(100).map_or(key.len(), |(i, _)| i);
-        format!("{}...", &key[..end])
-    } else {
-        key.to_string()
-    };
+    let display_key = truncate_name(key);
     let (start_line_1based, start_col) = idx.line_column(loc.start);
     let (_, end_col) = idx.line_column(loc.end);
     let start_line = start_line_1based.saturating_sub(1);
@@ -349,16 +345,17 @@ spec:
         assert!(result.iter().all(|d| d.message.contains("'x'")));
     }
 
-    #[test]
-    fn should_truncate_long_key_name_in_message() {
-        let long_key = "k".repeat(110);
-        let text = format!("{long_key}: 1\n{long_key}: 2\n");
-        let result = parse_duplicate(&text);
+    #[rstest]
+    #[case::ascii_100("k".repeat(100), "k".repeat(100))]
+    #[case::ascii_101("k".repeat(101), format!("{}...", "k".repeat(100)))]
+    #[case::ascii_110("k".repeat(110), format!("{}...", "k".repeat(100)))]
+    #[case::multibyte_within_100_chars("é".repeat(60), "é".repeat(60))]
+    #[case::multibyte_beyond_100_chars("é".repeat(150), format!("{}...", "é".repeat(100)))]
+    fn duplicate_key_message_truncation(#[case] key: String, #[case] shown: String) {
+        let result = parse_duplicate(&format!("{key}: 1\n{key}: 2\n"));
 
         assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("..."));
-        let display = &result[0].message;
-        assert!(display.len() < long_key.len() + 20);
+        assert_eq!(result[0].message, format!("Duplicate key: '{shown}'"));
     }
 
     #[test]

@@ -13,6 +13,7 @@ share a parent line with one sub-item each.
 
 ## Security
 
+- The unresolved-alias message in `rlsp-yaml/src/validation/validators/anchors.rs` and the key copies in `duplicate_keys.rs` hold the name uncut, so a megabyte-long alias or key name gives a megabyte-long message; hardening, security Low; server-feature bug-fix plan Task 1 security review.
 - Alias expansion depth: `max_nesting_depth` does not bound the expanded tree in resolved mode; `expand_node`, `Clone`, `Drop` in `loader.rs`; stack-overflow investigation.
 - `REGEX_CACHE` unbounded and `validate_schema` on the async executor (`src/schema/pattern.rs`); schema queue.
 - Path resolver's first pass is unpriced (`resolve_schema_path`, `src/schema/path.rs`); security Medium.
@@ -110,6 +111,7 @@ share a parent line with one sub-item each.
 
 ## Cleanup
 
+- `truncate_name` in `rlsp-yaml/src/validation/validators.rs` is `pub(super)`, while its child modules could use a private `fn`; server-feature bug-fix plan Task 1 review.
 - `MAX_LOGGED_SETTING_CHARS` import cycle, `unknownTag` match instead of `has_code`, `loggable_url` cannot strip userinfo from cannot-be-a-base URLs; tolerant-settings plan.
 - Schema cache: no eviction across URLs, no negative cache for rejected schemas; `cargo doc` fails on private links; share-ref-targets plan.
 - `sequence_item_to_doc` in `sequence_render.rs` still copies the prefix matches of `collection_properties`; comment plan Task 3 review.

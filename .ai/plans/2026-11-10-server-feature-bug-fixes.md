@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-11-10
 
 # Server Feature Bug Fixes
@@ -32,7 +32,7 @@ and the pre-existing bugs found in the same code are each fixed where they arise
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: Long names in validator messages are cut at a character boundary
+- [x] Task 1: Long names in validator messages are cut at a character boundary
 - [ ] Task 2: References and rename share one anchor and alias walk
 - [ ] Task 3: The unused-anchor validator and its quick fix read the whole document
 - [ ] Task 4: The other validators read the whole document
@@ -54,13 +54,13 @@ and the pre-existing bugs found in the same code are each fixed where they arise
 but cuts by characters, so a key of more than 100 bytes and at most 100 characters gets `...` with
 nothing cut.
 
-- [ ] A name of at most 100 characters appears in full and without `...` in the unused-anchor and the
+- [x] A name of at most 100 characters appears in full and without `...` in the unused-anchor and the
       duplicate-key message, whatever its byte length: an anchor `a` followed by 60 `é`, and a
       duplicated key of 60 `é`
-- [ ] A name of more than 100 characters appears as its first 100 characters followed by `...` in
+- [x] A name of more than 100 characters appears as its first 100 characters followed by `...` in
       both messages, also when byte 100 lies inside a character: an anchor `a` followed by 150 `é`
-- [ ] One function holds the truncation rule for both messages
-- [ ] Opening `k: &a` followed by 60 `é` through the server publishes its `unusedAnchor` diagnostic,
+- [x] One function holds the truncation rule for both messages
+- [x] Opening `k: &a` followed by 60 `é` through the server publishes its `unusedAnchor` diagnostic,
       and the server answers a later request
 
 ### Task 2: References and rename share one anchor and alias walk
