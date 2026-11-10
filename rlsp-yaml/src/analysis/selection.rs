@@ -8,18 +8,23 @@ use crate::lsp_util::span_to_lsp;
 
 /// Compute selection ranges for the given YAML documents and cursor positions.
 ///
-/// For each position, returns a `SelectionRange` whose parent chain expands
-/// from innermost node to outermost document root.
-/// Returns an empty `Vec` if `docs` or `positions` is empty.
+/// Returns one `SelectionRange` per position, in the order of `positions`, as
+/// the protocol pairs `result[i]` with `positions[i]`. A position with a node
+/// gets a chain that expands from the innermost range to the document root.
+/// A position without one (a comment line, a document separator, a position
+/// past the document, or no document at all) gets the empty range at the
+/// position, without a parent.
+/// Returns an empty `Vec` if `positions` is empty.
 #[must_use]
 pub fn selection_ranges(docs: &[Document<Span>], positions: &[Position]) -> Vec<SelectionRange> {
-    if docs.is_empty() || positions.is_empty() {
-        return Vec::new();
-    }
-
     positions
         .iter()
-        .filter_map(|pos| selection_range_for_position(docs, *pos))
+        .map(|pos| {
+            selection_range_for_position(docs, *pos).unwrap_or_else(|| SelectionRange {
+                range: Range::new(*pos, *pos),
+                parent: None,
+            })
+        })
         .collect()
 }
 
@@ -354,11 +359,20 @@ mod tests {
     // ---- Safety / edge case tests ----
 
     #[test]
-    fn should_return_empty_for_empty_document() {
-        let result = selection_ranges(&[], &[pos(0, 0)]);
-        assert!(
-            result.is_empty(),
-            "should return empty Vec for empty document"
+    fn no_documents_gives_one_empty_range_per_position() {
+        let result = selection_ranges(&[], &[pos(0, 0), pos(3, 7)]);
+        assert_eq!(
+            result,
+            vec![
+                SelectionRange {
+                    range: Range::new(pos(0, 0), pos(0, 0)),
+                    parent: None
+                },
+                SelectionRange {
+                    range: Range::new(pos(3, 7), pos(3, 7)),
+                    parent: None
+                },
+            ]
         );
     }
 
@@ -371,17 +385,7 @@ mod tests {
             result.is_empty(),
             "should return empty Vec for empty positions slice"
         );
-    }
-
-    #[test]
-    fn should_return_empty_for_cursor_on_dot_dot_dot_line() {
-        let text = "key: value\n...\nother: val\n";
-        let docs = parse_docs(text);
-        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(1, 0)]);
-        assert!(
-            result.is_empty(),
-            "cursor on '...' line should produce no selection range"
-        );
+        assert!(selection_ranges(&[], &[]).is_empty());
     }
 
     #[test]
@@ -662,10 +666,6 @@ mod tests {
         "doc1key: value1\n---\ndoc2key: value2\n",
         pos(2, 0)
     )]
-    #[case::comment_line_returns_no_selection_range(
-        "key: value\n# a comment\nother: data\n",
-        pos(1, 5)
-    )]
     fn selection_ranges_regression(#[case] text: &str, #[case] position: Position) {
         let docs = parse_docs(text);
         let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[position]);
@@ -721,13 +721,6 @@ mod tests {
                     outermost.range.end.line
                 );
             }
-            // case (d): comment line returns no selection range
-            p if p == pos(1, 5) => {
-                assert!(
-                    result.is_empty(),
-                    "case (d): comment line should return empty"
-                );
-            }
             _ => {}
         }
     }
@@ -773,6 +766,7 @@ mod tests {
     fn chain(yaml: &str, position: Position) -> Vec<((u32, u32), (u32, u32))> {
         let docs = parse_docs(yaml);
         let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[position]);
+        assert_eq!(result.len(), 1, "one entry per position: {result:?}");
         let mut ranges = Vec::new();
         let mut current = result.first();
         while let Some(sr) = current {
@@ -917,27 +911,85 @@ mod tests {
         assert_eq!(chain(text, position), expected);
     }
 
-    // Positions that get no range stay without one; selecting a node for them
-    // is decided separately.
+    // A position without a node gets the empty range at the position, without
+    // a parent. Selecting a node for such positions is decided separately.
     #[rstest]
     #[case::continuation_line_left_of_scalar_start("k: aaa\n  bbb\n", pos(1, 1))]
     #[case::continuation_line_of_double_quoted("k: \"aaa\n  bbb\" # c\n", pos(1, 2))]
     #[case::comment_between_entries("k: v # c\n# between\nz: 1\n", pos(1, 3))]
     #[case::comment_after_last_entry("k: v # c\n# between\nz: 1\n# trailing\n", pos(3, 0))]
-    fn selection_chain_stays_empty(#[case] text: &str, #[case] position: Position) {
-        assert!(chain(text, position).is_empty());
+    #[case::comment_line_after_entry("k: v\n# c\n", pos(1, 1))]
+    #[case::comment_line_inside_mapping("key: value\n# a comment\nother: data\n", pos(1, 5))]
+    #[case::dot_dot_dot_line("key: value\n...\nother: val\n", pos(1, 0))]
+    #[case::past_end_of_last_line_without_final_newline("key: value", pos(0, 11))]
+    #[case::line_beyond_document("k: v\n", pos(99, 0))]
+    #[case::empty_text("", pos(0, 0))]
+    fn selection_chain_without_node_is_the_empty_range_at_the_position(
+        #[case] text: &str,
+        #[case] position: Position,
+    ) {
+        let at = (position.line, position.character);
+        assert_eq!(chain(text, position), vec![r(at, at)]);
     }
 
-    // The document root is dropped too when it misses the position: without a
-    // final line break it ends on the last line.
+    // The end of the last line is inside the document root without a final
+    // line break; one column further is the case above.
     #[test]
-    fn position_outside_every_range_gets_no_selection_range() {
-        let docs = parse_docs_inner("key: value");
-        assert!(selection_ranges(&docs, &[pos(0, 11)]).is_empty());
+    fn end_inclusive_without_final_newline() {
         assert_eq!(
             chain("key: value", pos(0, 10)),
             vec![r((0, 5), (0, 10)), r((0, 0), (0, 10))]
         );
+    }
+
+    // A result entry belongs to the position at the same index.
+    #[test]
+    fn position_without_range_in_the_middle_keeps_later_results_aligned() {
+        let docs = parse_docs_inner("k: v\n# c\n");
+        let result = selection_ranges(&docs, &[pos(1, 1), pos(0, 0)]);
+        assert_eq!(result.len(), 2);
+        assert_eq!(
+            result[0],
+            SelectionRange {
+                range: Range::new(pos(1, 1), pos(1, 1)),
+                parent: None
+            }
+        );
+        assert_eq!(result[1], selection_ranges(&docs, &[pos(0, 0)])[0]);
+        assert_eq!(result[1].range, Range::new(pos(0, 0), pos(0, 1)));
+        assert!(result[1].parent.is_some());
+    }
+
+    #[rstest]
+    #[case::chain_then_empty(vec![pos(0, 0), pos(1, 1)])]
+    #[case::empty_then_chain(vec![pos(1, 1), pos(0, 0)])]
+    #[case::chain_empty_chain(vec![pos(0, 0), pos(1, 1), pos(2, 0)])]
+    #[case::two_empty(vec![pos(1, 1), pos(1, 2)])]
+    #[case::duplicate_chains(vec![pos(0, 0), pos(0, 0)])]
+    #[case::duplicate_empty(vec![pos(1, 1), pos(1, 1)])]
+    fn results_follow_the_order_of_the_positions(#[case] positions: Vec<Position>) {
+        let docs = parse_docs_inner("k: v\n# c\nz: 1\n");
+        let result = selection_ranges(&docs, &positions);
+        assert_eq!(result.len(), positions.len());
+        for (entry, position) in result.iter().zip(&positions) {
+            assert_eq!(*entry, selection_ranges(&docs, &[*position])[0]);
+        }
+    }
+
+    #[test]
+    fn multi_document_positions_stay_aligned() {
+        let docs = parse_docs_inner("a: 1\n---\nb: 2\n");
+        let positions = [pos(2, 0), pos(1, 0), pos(0, 0)];
+        let result = selection_ranges(&docs, &positions);
+        assert_eq!(result.len(), 3);
+        for (entry, position) in result.iter().zip(&positions) {
+            assert_eq!(*entry, selection_ranges(&docs, &[*position])[0]);
+        }
+        let mut outermost = &result[0];
+        while let Some(parent) = outermost.parent.as_deref() {
+            outermost = parent;
+        }
+        assert!(outermost.range.start.line >= 2, "{outermost:?}");
     }
 
     fn contains(range: ((u32, u32), (u32, u32)), position: (u32, u32)) -> bool {
@@ -989,9 +1041,13 @@ mod tests {
             positions.extend((0..length + 3).map(|character| pos(line, character)));
         }
 
-        for position in positions {
+        let batch = selection_ranges(&docs, &positions);
+        assert_eq!(batch.len(), positions.len(), "{text:?}");
+
+        for (index, position) in positions.into_iter().enumerate() {
             let result = selection_ranges(&docs, &[position]);
-            assert!(result.len() <= 1, "{text:?} at {position:?}: {result:?}");
+            assert_eq!(result.len(), 1, "{text:?} at {position:?}: {result:?}");
+            assert_eq!(batch[index], result[0], "{text:?} at {position:?}");
             let ranges = chain(text, position);
             let at = (position.line, position.character);
             for range in &ranges {

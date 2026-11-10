@@ -38,7 +38,7 @@ each fixed where they arise.
 - [x] Task 3: The unused-anchor validator and its quick fix read the whole document
 - [x] Task 4: The other validators read the whole document
 - [x] Task 5: No selection range misses its position
-- [ ] Task 6: A selection-range response has one entry per position
+- [x] Task 6: A selection-range response has one entry per position
 - [ ] Task 7: A duplicate-key diagnostic covers the whole key
 - [ ] Task 8: The block-scalar action never turns a comment into content
 - [ ] Task 9: A BOM does not hide a modeline or a suppression comment on line 1
@@ -153,14 +153,14 @@ move onto earlier positions, while LSP 3.17 pairs `result[i]` with `positions[i]
 range at `positions[i]` for a position without one: `k: v\n# c\n` with the positions (1,1) and (0,0)
 returns one range today, which the client takes for (1,1).
 
-- [ ] The response holds one entry per requested position, in request order
-- [ ] A position without a range gets the empty range at the position, without a parent: (1,1) of
+- [x] The response holds one entry per requested position, in request order
+- [x] A position without a range gets the empty range at the position, without a parent: (1,1) of
       `k: v\n# c\n`, (1,5) of `key: value\n# a comment\nother: data\n`, (1,0) of
       `key: value\n...\nother: val\n`, and (0,0) when there is no document
-- [ ] `should_return_empty_for_empty_document`, `should_return_empty_for_cursor_on_dot_dot_dot_line`,
+- [x] `should_return_empty_for_empty_document`, `should_return_empty_for_cursor_on_dot_dot_dot_line`,
       and the `comment_line_returns_no_selection_range` case of `selection_ranges_regression` assert
       the empty range at their position; the doc comment of `selection_ranges` describes the response
-- [ ] Through the server, the request with (1,1) and (0,0) on `k: v\n# c\n` returns two entries, the
+- [x] Through the server, the request with (1,1) and (0,0) on `k: v\n# c\n` returns two entries, the
       empty range at (1,1) and then the chain for (0,0), and a request on an empty document returns
       the empty range at each position
 

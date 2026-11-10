@@ -8,11 +8,19 @@ use tower_lsp::jsonrpc::Request;
 use super::helpers::*;
 
 pub fn selection_range_request(id: i64, uri: &str, line: u32, character: u32) -> Request {
+    selection_range_request_for(id, uri, &[(line, character)])
+}
+
+pub fn selection_range_request_for(id: i64, uri: &str, positions: &[(u32, u32)]) -> Request {
+    let positions: Vec<_> = positions
+        .iter()
+        .map(|&(line, character)| json!({ "line": line, "character": character }))
+        .collect();
     Request::build("textDocument/selectionRange")
         .id(id)
         .params(json!({
             "textDocument": { "uri": uri },
-            "positions": [{ "line": line, "character": character }]
+            "positions": positions
         }))
         .finish()
 }
@@ -51,12 +59,16 @@ async fn should_return_null_selection_ranges_for_unknown_document() {
 
     // Do NOT send didOpen for this URI
     let uri = "file:///test/unknown.yaml";
-    let resp = send(&mut service, selection_range_request(2, uri, 0, 0)).await;
+    let resp = send(
+        &mut service,
+        selection_range_request_for(2, uri, &[(0, 0), (1, 1)]),
+    )
+    .await;
     let resp = resp.expect("selectionRange should return a response");
     let result = resp.result().expect("selectionRange should have result");
     assert!(
-        result.is_null() || result.as_array().is_some_and(Vec::is_empty),
-        "selectionRange result should be null or empty for unknown document"
+        result.is_null(),
+        "selectionRange result should be null for unknown document, got {result}"
     );
 }
 
@@ -131,8 +143,17 @@ async fn selection_range_inside_multiline_value_keeps_the_full_chain() {
     );
 }
 
+fn empty_range_entry(line: u32, character: u32) -> serde_json::Value {
+    json!({
+        "range": {
+            "start": { "line": line, "character": character },
+            "end": { "line": line, "character": character }
+        }
+    })
+}
+
 #[tokio::test]
-async fn selection_range_outside_every_range_returns_no_range() {
+async fn selection_range_outside_every_range_returns_the_empty_range() {
     let (mut service, socket) = LspService::new(Backend::new);
     tokio::spawn(socket.for_each(|_| async {}));
 
@@ -143,6 +164,91 @@ async fn selection_range_outside_every_range_returns_no_range() {
     send(&mut service, did_open_notification(uri, "key: value")).await;
 
     let resp = send(&mut service, selection_range_request(2, uri, 0, 11)).await;
+    let resp = resp.expect("selectionRange should return a response");
+    let result = resp.result().expect("selectionRange should have a result");
+    assert_eq!(result, &json!([empty_range_entry(0, 11)]));
+}
+
+#[tokio::test]
+async fn selection_range_returns_one_entry_per_position_in_order() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/selection_order.yaml";
+    send(&mut service, did_open_notification(uri, "k: v\n# c\n")).await;
+
+    let resp = send(
+        &mut service,
+        selection_range_request_for(2, uri, &[(1, 1), (0, 0)]),
+    )
+    .await;
+    let resp = resp.expect("selectionRange should return a response");
+    let result = resp.result().expect("selectionRange should have a result");
+    assert_eq!(
+        result,
+        &json!([
+            empty_range_entry(1, 1),
+            {
+                "range": {
+                    "start": { "line": 0, "character": 0 },
+                    "end": { "line": 0, "character": 1 }
+                },
+                "parent": {
+                    "range": {
+                        "start": { "line": 0, "character": 0 },
+                        "end": { "line": 0, "character": 4 }
+                    },
+                    "parent": {
+                        "range": {
+                            "start": { "line": 0, "character": 0 },
+                            "end": { "line": 2, "character": 0 }
+                        }
+                    }
+                }
+            }
+        ])
+    );
+}
+
+#[tokio::test]
+async fn selection_range_for_document_without_ast_returns_an_empty_range_per_position() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/selection_empty.yaml";
+    send(&mut service, did_open_notification(uri, "")).await;
+
+    let resp = send(
+        &mut service,
+        selection_range_request_for(2, uri, &[(0, 0), (2, 5)]),
+    )
+    .await;
+    let resp = resp.expect("selectionRange should return a response");
+    let result = resp.result().expect("selectionRange should have a result");
+    assert_eq!(
+        result,
+        &json!([empty_range_entry(0, 0), empty_range_entry(2, 5)])
+    );
+}
+
+#[tokio::test]
+async fn selection_range_with_no_positions_returns_null() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/selection_no_positions.yaml";
+    send(&mut service, did_open_notification(uri, "k: v\n")).await;
+
+    let resp = send(&mut service, selection_range_request_for(2, uri, &[])).await;
     let resp = resp.expect("selectionRange should return a response");
     let result = resp.result().expect("selectionRange should have a result");
     assert!(result.is_null(), "got {result}");
