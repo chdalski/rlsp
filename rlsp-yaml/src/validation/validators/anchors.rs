@@ -1,19 +1,14 @@
 // SPDX-License-Identifier: MIT
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
-use rlsp_yaml_parser::node::{Document, Node};
-use rlsp_yaml_parser::{LineIndex, Span};
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, Range};
+use rlsp_yaml_parser::Span;
+use rlsp_yaml_parser::node::Document;
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString};
 
 use super::truncate_name;
 use crate::lsp_util::span_to_lsp;
-
-/// An anchor definition collected from the AST.
-struct AnchorEntry {
-    name: String,
-    range: Range,
-}
+use crate::navigation::collect_anchor_alias_entries;
 
 /// Validate unused anchors and unresolved aliases in YAML documents.
 ///
@@ -25,29 +20,27 @@ struct AnchorEntry {
 /// unused-anchor diagnostic is the `&name` token (`Node::anchor_loc`), not the
 /// node it anchors; the range of an unresolved-alias diagnostic is the alias
 /// node's span (`*name`).
+///
+/// The whole of each document is read: how deep the documents nest is bounded
+/// where they are loaded.
 #[must_use]
 pub fn validate_unused_anchors(docs: &[Document<Span>]) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
     for doc in docs {
         let idx = doc.line_index();
-        let mut anchors: Vec<AnchorEntry> = Vec::new();
-        let mut alias_names: Vec<(String, Range)> = Vec::new();
+        let (anchors, aliases) = collect_anchor_alias_entries(doc);
 
-        collect_anchors_and_aliases(&doc.root, &mut anchors, &mut alias_names, 0, idx);
-
-        // Build anchor name → range map for lookup (last definition wins on duplicates)
-        let anchor_map: HashMap<&str, &AnchorEntry> =
-            anchors.iter().map(|e| (e.name.as_str(), e)).collect();
+        let anchor_names: HashSet<&str> = anchors.iter().map(|(name, _)| *name).collect();
 
         let mut used: HashSet<&str> = HashSet::new();
 
-        for (alias_name, alias_range) in &alias_names {
-            if anchor_map.contains_key(alias_name.as_str()) {
-                used.insert(alias_name.as_str());
+        for (alias_name, alias_loc) in &aliases {
+            if anchor_names.contains(alias_name) {
+                used.insert(alias_name);
             } else {
                 diagnostics.push(Diagnostic {
-                    range: *alias_range,
+                    range: span_to_lsp(*alias_loc, idx),
                     severity: Some(DiagnosticSeverity::ERROR),
                     code: Some(NumberOrString::String("unresolvedAlias".to_string())),
                     message: format!("Alias '{alias_name}' has no matching anchor"),
@@ -57,11 +50,11 @@ pub fn validate_unused_anchors(docs: &[Document<Span>]) -> Vec<Diagnostic> {
             }
         }
 
-        for entry in &anchors {
-            if !used.contains(entry.name.as_str()) {
-                let truncated_name = truncate_name(&entry.name);
+        for (anchor_name, anchor_loc) in &anchors {
+            if !used.contains(anchor_name) {
+                let truncated_name = truncate_name(anchor_name);
                 diagnostics.push(Diagnostic {
-                    range: entry.range,
+                    range: span_to_lsp(*anchor_loc, idx),
                     severity: Some(DiagnosticSeverity::WARNING),
                     code: Some(NumberOrString::String("unusedAnchor".to_string())),
                     message: format!("Anchor '{truncated_name}' is never used"),
@@ -76,60 +69,15 @@ pub fn validate_unused_anchors(docs: &[Document<Span>]) -> Vec<Diagnostic> {
     diagnostics
 }
 
-/// The deepest node level the unused-anchor validator and its quick fix look at.
-pub(crate) const MAX_DEPTH: usize = 100;
-
-/// Recursively walk the AST collecting anchor definitions and alias references.
-fn collect_anchors_and_aliases(
-    node: &Node<Span>,
-    anchors: &mut Vec<AnchorEntry>,
-    aliases: &mut Vec<(String, Range)>,
-    depth: usize,
-    idx: &LineIndex,
-) {
-    if depth > MAX_DEPTH {
-        return;
-    }
-
-    match node {
-        Node::Alias { name, loc, .. } => {
-            let range = span_to_lsp(*loc, idx);
-            aliases.push((name.clone(), range));
-        }
-        Node::Scalar { .. } | Node::Mapping { .. } | Node::Sequence { .. } => {
-            if let (Some(name), Some(loc)) = (node.anchor(), node.anchor_loc()) {
-                anchors.push(AnchorEntry {
-                    name: name.to_owned(),
-                    range: span_to_lsp(loc, idx),
-                });
-            }
-            match node {
-                Node::Mapping { entries, .. } => {
-                    for (key, value) in entries {
-                        collect_anchors_and_aliases(key, anchors, aliases, depth + 1, idx);
-                        collect_anchors_and_aliases(value, anchors, aliases, depth + 1, idx);
-                    }
-                }
-                Node::Sequence { items, .. } => {
-                    for item in items {
-                        collect_anchors_and_aliases(item, anchors, aliases, depth + 1, idx);
-                    }
-                }
-                Node::Scalar { .. } | Node::Alias { .. } => {}
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::fmt::Write as _;
 
     use rstest::rstest;
-    use tower_lsp::lsp_types::Position;
+    use tower_lsp::lsp_types::{Position, Range};
 
     use super::*;
-    use crate::test_utils::parse_docs;
+    use crate::test_utils::{nested_flow, parse_docs};
 
     fn parse_anchors(yaml: &str) -> Vec<Diagnostic> {
         validate_unused_anchors(&parse_docs(yaml))
@@ -271,6 +219,149 @@ mod tests {
             .find(|d| d.severity == Some(DiagnosticSeverity::ERROR));
         assert!(unused.is_some());
         assert!(unresolved.is_some());
+    }
+
+    // ---- Unused Anchors Validator: Nesting Depth ----
+    //
+    // The validator reads whole documents: where an anchor or an alias sits
+    // makes no difference.  `d` is the number of flow sequences around the
+    // node, inside the root mapping.
+
+    fn assert_loads(yaml: &str) {
+        assert!(rlsp_yaml_parser::load(yaml).is_ok(), "the text loads");
+    }
+
+    fn codes_of(diagnostics: &[Diagnostic]) -> Vec<&str> {
+        diagnostics
+            .iter()
+            .filter_map(|d| match &d.code {
+                Some(NumberOrString::String(code)) => Some(code.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[rstest]
+    fn an_alias_at_any_depth_uses_the_anchor(#[values(0, 99, 100, 101, 255)] d: usize) {
+        let text = format!("a: &x 1\nb: {}\n", nested_flow(d, "*x"));
+        assert_loads(&text);
+        assert_eq!(parse_anchors(&text), []);
+    }
+
+    fn flow_mapping_values(d: usize) -> String {
+        format!("a: &x 1\nb: {}*x{}\n", "{k: ".repeat(d), "}".repeat(d))
+    }
+
+    fn flow_mapping_key(d: usize) -> String {
+        format!("a: &x 1\nb: {}\n", nested_flow(d, "{*x : 1}"))
+    }
+
+    /// `d` lines of `entry`, each indented one level deeper than the last.
+    fn staircase(d: usize, entry: &str) -> String {
+        let mut lines = String::new();
+        for level in 0..d {
+            writeln!(lines, "{}{entry}", "  ".repeat(level)).unwrap();
+        }
+        lines
+    }
+
+    fn block_mappings(d: usize) -> String {
+        let chain = staircase(d, "k:");
+        format!("a: &x 1\n{chain}{}leaf: *x\n", "  ".repeat(d))
+    }
+
+    fn block_sequences(d: usize) -> String {
+        let chain = staircase(d, "-");
+        format!("- &x 1\n{chain}{}- *x\n", "  ".repeat(d))
+    }
+
+    #[rstest]
+    #[case::flow_mapping_value(flow_mapping_values)]
+    #[case::flow_mapping_key(flow_mapping_key)]
+    #[case::block_mappings(block_mappings)]
+    #[case::block_sequences(block_sequences)]
+    fn an_alias_in_each_nesting_form_uses_the_anchor(
+        #[case] build: fn(usize) -> String,
+        #[values(101, 200)] d: usize,
+    ) {
+        let text = build(d);
+        assert_loads(&text);
+        assert!(text.contains("*x"));
+        assert_eq!(parse_anchors(&text), []);
+    }
+
+    #[rstest]
+    fn an_anchor_at_any_depth_resolves_the_alias(#[values(0, 99, 100, 101, 255)] d: usize) {
+        let text = format!("a: {}\nb: *x\n", nested_flow(d, "&x 1"));
+        assert_loads(&text);
+        assert_eq!(parse_anchors(&text), []);
+    }
+
+    #[rstest]
+    fn a_mismatching_alias_at_depth_is_reported(#[values(101, 255)] d: usize) {
+        let text = format!("a: &x 1\nb: {}\n", nested_flow(d, "*y"));
+        assert_loads(&text);
+        let result = parse_anchors(&text);
+
+        assert_eq!(codes_of(&result), ["unresolvedAlias", "unusedAnchor"]);
+        assert_eq!(text_of(&text, result[0].range), "*y");
+        assert_eq!(text_of(&text, result[1].range), "&x");
+    }
+
+    #[rstest]
+    fn an_unused_anchor_at_any_depth_is_reported(#[values(0, 99, 100, 101, 255)] d: usize) {
+        let text = format!("a: {}\n", nested_flow(d, "&x 1"));
+        assert_loads(&text);
+        let result = parse_anchors(&text);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(result[0].tags, Some(vec![DiagnosticTag::UNNECESSARY]));
+        assert_eq!(result[0].message, "Anchor 'x' is never used");
+        let column = u32::try_from(3 + d).unwrap();
+        assert_eq!(
+            result[0].range,
+            Range::new(Position::new(0, column), Position::new(0, column + 2))
+        );
+        assert_eq!(text_of(&text, result[0].range), "&x");
+    }
+
+    #[test]
+    fn a_deep_anchor_is_not_used_by_a_deep_alias_of_another_document() {
+        let text = format!(
+            "a: {}\n---\nb: {}\n",
+            nested_flow(101, "&x 1"),
+            nested_flow(101, "*x")
+        );
+        assert_loads(&text);
+
+        assert_eq!(
+            codes_of(&parse_anchors(&text)),
+            ["unusedAnchor", "unresolvedAlias"]
+        );
+    }
+
+    #[test]
+    fn one_alias_uses_every_anchor_of_its_name_at_any_depth() {
+        let text = format!("a: &x 1\nb: {}\nc: *x\n", nested_flow(101, "&x 2"));
+        assert_loads(&text);
+        assert_eq!(parse_anchors(&text), []);
+    }
+
+    #[test]
+    fn deep_unused_anchors_are_reported_in_document_order() {
+        let text = format!(
+            "a: {}\nb: {}\n",
+            nested_flow(101, "&p 1"),
+            nested_flow(120, "&q 2")
+        );
+        assert_loads(&text);
+
+        let tokens: Vec<String> = parse_anchors(&text)
+            .iter()
+            .map(|d| text_of(&text, d.range))
+            .collect();
+        assert_eq!(tokens, ["&p", "&q"]);
     }
 
     // ---- Unused Anchors Validator: Security (standalone) ----

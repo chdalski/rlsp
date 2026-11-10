@@ -6,7 +6,7 @@ use rlsp_yaml_parser::node::Node;
 use rlsp_yaml_parser::{CollectionStyle, Document, LineIndex, ScalarStyle, Span};
 
 use crate::lsp_util::{offset_to_lsp, span_to_lsp};
-use crate::validation::validators::anchors::MAX_DEPTH;
+use crate::navigation::collect_anchor_alias_entries;
 
 use super::make_action;
 
@@ -16,6 +16,9 @@ use super::make_action;
 /// anchor's span in the AST and the text around it, and nothing is offered when
 /// the diagnostic matches no anchor of `docs` (it is stale), when the anchor has
 /// an alias in the meantime, or when deleting it would break the document.
+///
+/// The whole of each document is read: how deep the documents nest is bounded
+/// where they are loaded.
 pub(super) fn delete_unused_anchor(
     docs: &[Document<Span>],
     text: &str,
@@ -23,14 +26,14 @@ pub(super) fn delete_unused_anchor(
     uri: &tower_lsp::lsp_types::Url,
 ) -> Option<CodeAction> {
     let (doc, anchor) = docs.iter().find_map(|doc| {
-        find_anchor(&doc.root, diag.range, doc.line_index(), false, 0).map(|found| (doc, found))
+        find_anchor(&doc.root, diag.range, doc.line_index(), false).map(|found| (doc, found))
     })?;
     // A document without `---` whose only content is the anchored empty node
     // would vanish from the stream with its token.
     let bare_empty_root = !doc.explicit_start
         && is_empty_node(&doc.root)
         && doc.root.anchor_loc() == Some(anchor.loc);
-    if !anchor.removable || bare_empty_root || may_have_alias(&doc.root, anchor.name, 0) {
+    if !anchor.removable || bare_empty_root || has_alias(doc, anchor.name) {
         return None;
     }
 
@@ -77,11 +80,7 @@ fn find_anchor<'a>(
     range: Range,
     idx: &LineIndex,
     needs_node: bool,
-    depth: usize,
 ) -> Option<FoundAnchor<'a>> {
-    if depth > MAX_DEPTH {
-        return None;
-    }
     if let (Some(name), Some(loc)) = (node.anchor(), node.anchor_loc())
         && span_to_lsp(loc, idx) == range
     {
@@ -97,15 +96,15 @@ fn find_anchor<'a>(
             entries.iter().find_map(|(key, value)| {
                 // `{&a : v}` keeps its entry without the anchor, `{&a, b}` does not.
                 let key_needs_node = in_flow && is_empty_node(value);
-                find_anchor(key, range, idx, key_needs_node, depth + 1)
-                    .or_else(|| find_anchor(value, range, idx, false, depth + 1))
+                find_anchor(key, range, idx, key_needs_node)
+                    .or_else(|| find_anchor(value, range, idx, false))
             })
         }
         Node::Sequence { items, style, .. } => {
             let in_flow = *style == CollectionStyle::Flow;
             items
                 .iter()
-                .find_map(|item| find_anchor(item, range, idx, in_flow, depth + 1))
+                .find_map(|item| find_anchor(item, range, idx, in_flow))
         }
         Node::Scalar { .. } | Node::Alias { .. } => None,
     }
@@ -122,23 +121,14 @@ fn is_empty_node(node: &Node<Span>) -> bool {
         )
 }
 
-/// Whether the document holds an alias to `name`, or is nested deeper than the
-/// unused-anchor validator reads, where an alias to `name` cannot be ruled out:
-/// the validator reports an anchor unused whose only alias sits below its limit.
-fn may_have_alias(node: &Node<Span>, name: &str, depth: usize) -> bool {
-    if depth > MAX_DEPTH {
-        return true;
-    }
-    match node {
-        Node::Alias { name: alias, .. } => alias == name,
-        Node::Mapping { entries, .. } => entries.iter().any(|(key, value)| {
-            may_have_alias(key, name, depth + 1) || may_have_alias(value, name, depth + 1)
-        }),
-        Node::Sequence { items, .. } => items
-            .iter()
-            .any(|item| may_have_alias(item, name, depth + 1)),
-        Node::Scalar { .. } => false,
-    }
+/// Whether `doc` holds an alias to `name`: the validator reports an anchor
+/// unused only when it has none, and deleting an anchor with an alias would
+/// leave the alias without one.
+fn has_alias(doc: &Document<Span>, name: &str) -> bool {
+    collect_anchor_alias_entries(doc)
+        .1
+        .iter()
+        .any(|(alias, _)| *alias == name)
 }
 
 /// The byte range to delete for the anchor token at `start..end` of `buffer`.
@@ -202,7 +192,7 @@ mod tests {
     use super::super::code_actions;
     use super::super::test_helpers::{apply_text_edit, docs_for, make_diagnostic};
     use crate::editing::formatter::YamlFormatOptions;
-    use crate::test_utils::test_uri;
+    use crate::test_utils::{nested_flow, test_uri};
     use crate::validation::validators::validate_unused_anchors;
 
     const TITLE: &str = "Delete unused anchor";
@@ -457,34 +447,74 @@ mod tests {
         assert!(unused_anchor_actions(text, &[], whole_document(), &diag).is_empty());
     }
 
-    // The anchor has an alias by now: deleting it would leave the alias without
-    // an anchor.
-    #[test]
-    fn a_stale_diagnostic_of_an_anchor_that_is_used_now_offers_nothing() {
-        let diag = make_diagnostic(0, 3, 5, "unusedAnchor");
-        let text = "k: &a v\nj: *a\n";
-        assert!(unused_anchor_actions(text, &docs_for(text), whole_document(), &diag).is_empty());
-    }
-
-    // The validator reads the document down to a depth limit, so it reports an
-    // anchor unused whose only alias sits below it.  Deleting that anchor would
-    // leave the alias without one: no fix once an alias cannot be ruled out.
+    // The anchor has an alias by now, at any depth: deleting it would leave the
+    // alias without an anchor.
     #[rstest]
-    #[case::alias_at_the_limit(100)]
-    #[case::alias_below_the_limit(101)]
-    #[case::alias_far_below_the_limit(120)]
-    fn no_fix_when_an_alias_may_sit_below_the_depth_the_validator_reads(#[case] depth: usize) {
-        let text = format!("a: &x 1\nb: {}*x{}\n", "[".repeat(depth), "]".repeat(depth));
+    fn a_stale_diagnostic_of_an_anchor_with_an_alias_offers_nothing(
+        #[values(0, 1, 99, 100, 101, 255)] depth: usize,
+    ) {
+        let text = format!("a: &x 1\nb: {}\n", nested_flow(depth, "*x"));
         assert!(rlsp_yaml_parser::load(&text).is_ok());
-        assert_eq!(validate_unused_anchors(&docs_for(&text)).len(), 1);
-        assert_eq!(applied_fixes(&text), [None]);
+        let diag = make_diagnostic(0, 3, 5, "unusedAnchor");
+        assert!(validate_unused_anchors(&docs_for(&text)).is_empty());
+        assert!(unused_anchor_actions(&text, &docs_for(&text), whole_document(), &diag).is_empty());
     }
 
-    // Just inside the limit the validator sees the alias: the anchor is used.
+    // An alias of another name leaves the anchor unused, at any depth.
+    #[rstest]
+    fn an_alias_of_another_name_does_not_block_the_fix(#[values(101, 255)] depth: usize) {
+        let text = format!("a: &x 1\nb: {}\n", nested_flow(depth, "*y"));
+        assert!(rlsp_yaml_parser::load(&text).is_ok());
+        let diag = make_diagnostic(0, 3, 5, "unusedAnchor");
+        let actions = unused_anchor_actions(&text, &docs_for(&text), whole_document(), &diag);
+        assert_eq!(actions.len(), 1);
+    }
+
+    // An alias of the same name in another document is no alias of the anchor.
     #[test]
-    fn an_alias_within_the_depth_the_validator_reads_uses_the_anchor() {
-        let text = format!("a: &x 1\nb: {}*x{}\n", "[".repeat(99), "]".repeat(99));
-        assert!(validate_unused_anchors(&docs_for(&text)).is_empty());
+    fn an_alias_in_another_document_does_not_block_the_fix() {
+        let text = format!("a: &x 1\n---\nb: {}\n", nested_flow(101, "*x"));
+        assert!(rlsp_yaml_parser::load(&text).is_ok());
+        let diag = make_diagnostic(0, 3, 5, "unusedAnchor");
+        let actions = unused_anchor_actions(&text, &docs_for(&text), whole_document(), &diag);
+        assert_eq!(actions.len(), 1);
+    }
+
+    // An anchor is found and deleted at any depth.
+    #[rstest]
+    fn the_fix_deletes_an_anchor_at_any_depth(#[values(99, 100, 101, 255)] depth: usize) {
+        let text = format!("a: {}\n", nested_flow(depth, "&x 1"));
+        assert!(rlsp_yaml_parser::load(&text).is_ok());
+        assert_eq!(
+            applied_fix(&text),
+            format!("a: {}\n", nested_flow(depth, "1"))
+        );
+    }
+
+    // Whether a flow entry needs its anchor is told at any depth.
+    #[test]
+    fn the_flow_entry_guard_holds_at_depth() {
+        let kept = format!("a: {}\n", nested_flow(101, "[&a, b]"));
+        assert_eq!(applied_fixes(&kept), [None]);
+
+        let deleted = format!("a: {}\n", nested_flow(101, "{&a : v}"));
+        assert_eq!(
+            applied_fix(&deleted),
+            format!("a: {}\n", nested_flow(101, "{: v}"))
+        );
+    }
+
+    // Two anchors of one name, one of them deep: each fix deletes its own token.
+    #[test]
+    fn a_deep_anchor_of_a_shared_name_gets_its_own_fix() {
+        let text = format!("a: &x 1\nb: {}\n", nested_flow(101, "&x 2"));
+        assert_eq!(
+            applied_fixes(&text),
+            [
+                Some(format!("a: 1\nb: {}\n", nested_flow(101, "&x 2"))),
+                Some(format!("a: &x 1\nb: {}\n", nested_flow(101, "2"))),
+            ]
+        );
     }
 
     // With two anchors of one name the diagnostic selects the one at its range.

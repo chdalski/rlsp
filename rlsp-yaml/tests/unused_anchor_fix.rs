@@ -22,9 +22,14 @@ use rlsp_yaml::validation::validators::validate_unused_anchors;
 use rlsp_yaml_parser::load;
 use rstest::rstest;
 use suite_cases::load_cases_from_file;
-use tower_lsp::lsp_types::{Diagnostic, Position, Range, TextEdit, Url};
+use tower_lsp::lsp_types::{Diagnostic, NumberOrString, Position, Range, TextEdit, Url};
 
 // ---- helpers ----------------------------------------------------------------
+
+/// `leaf` inside `depth` nested flow sequences.
+fn nested_flow(depth: usize, leaf: &str) -> String {
+    format!("{}{leaf}{}", "[".repeat(depth), "]".repeat(depth))
+}
 
 #[expect(clippy::expect_used, reason = "test helper; the URL is a literal")]
 fn uri() -> Url {
@@ -234,14 +239,47 @@ fn the_fix_keeps_the_data(#[case] text: &str) {
     }
 }
 
-/// The validator reads a document down to a depth limit and reports an anchor
-/// unused whose only alias sits below it: the fix must not delete that anchor.
-/// The refusal branch of `check_fixes` shows that deleting it changes the data.
+/// An anchor with an alias at any depth is not unused: no diagnostic, so no fix,
+/// and the diagnostic of a stale client is refused. The refusal is right:
+/// deleting the token the naive way leaves the alias without an anchor.
 #[rstest]
-fn the_fix_keeps_the_data_of_an_anchor_with_a_deeply_nested_alias(
-    #[values(99, 100, 101, 120)] depth: usize,
+fn an_anchor_with_a_deeply_nested_alias_is_not_reported_and_not_fixed(
+    #[values(99, 100, 101, 255)] depth: usize,
 ) {
-    let text = format!("a: &x 1\nb: {}*x{}\n", "[".repeat(depth), "]".repeat(depth));
+    let text = format!("a: &x 1\nb: {}\n", nested_flow(depth, "*x"));
+    assert!(load(&text).is_ok());
+    assert!(unused_anchors(&text).is_empty());
+
+    let stale = Diagnostic {
+        range: Range::new(Position::new(0, 3), Position::new(0, 5)),
+        code: Some(NumberOrString::String("unusedAnchor".into())),
+        ..Diagnostic::default()
+    };
+    assert_eq!(applied_fix(&text, &stale), None);
+    assert!(has_dangling_alias(&naive_deletion(&text, &stale)));
+}
+
+/// The fix of an anchor deep in the document keeps the data.
+#[rstest]
+fn the_fix_keeps_the_data_of_a_deeply_nested_anchor(#[values(99, 100, 101, 255)] depth: usize) {
+    let text = format!("a: {}\n", nested_flow(depth, "&x 1"));
+    assert!(load(&text).is_ok());
+    assert_eq!(unused_anchors(&text).len(), 1);
+    if let Err(message) = check_fixes(&text) {
+        panic!("{message}");
+    }
+}
+
+/// A deep unused anchor is fixed, a flat anchor with a deep alias is kept.
+#[test]
+fn the_fix_tells_a_deep_unused_anchor_from_a_deep_alias() {
+    let text = format!(
+        "a: {}\nb: &y 2\nc: {}\n",
+        nested_flow(101, "&x 1"),
+        nested_flow(101, "*y")
+    );
+    assert!(load(&text).is_ok());
+    assert_eq!(unused_anchors(&text).len(), 1);
     if let Err(message) = check_fixes(&text) {
         panic!("{message}");
     }

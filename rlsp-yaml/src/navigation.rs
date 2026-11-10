@@ -10,29 +10,35 @@ pub mod references;
 pub mod rename;
 
 /// `(name, span)` pairs for anchor or alias tokens.
-pub(crate) type NamedSpans = Vec<(String, Span)>;
+pub(crate) type NamedSpans<'a> = Vec<(&'a str, Span)>;
 
 /// Walk a single document and collect `(name, span)` pairs for every anchor
 /// token and every alias token.
 ///
 /// Anchor spans come from `Node::*.anchor_loc` (the `&name` token span).
 /// Alias spans come from `Node::Alias.loc` (the `*name` token span).
-pub(crate) fn collect_anchor_alias_entries(doc: &Document<Span>) -> (NamedSpans, NamedSpans) {
+pub(crate) fn collect_anchor_alias_entries(
+    doc: &Document<Span>,
+) -> (NamedSpans<'_>, NamedSpans<'_>) {
     let mut anchors = Vec::new();
     let mut aliases = Vec::new();
     collect_node(&doc.root, &mut anchors, &mut aliases);
     (anchors, aliases)
 }
 
-fn collect_node(node: &Node<Span>, anchors: &mut NamedSpans, aliases: &mut NamedSpans) {
+fn collect_node<'a>(
+    node: &'a Node<Span>,
+    anchors: &mut NamedSpans<'a>,
+    aliases: &mut NamedSpans<'a>,
+) {
     match node {
         Node::Scalar { .. } | Node::Mapping { .. } | Node::Sequence { .. } => {
             if let (Some(name), Some(loc)) = (node.anchor(), node.anchor_loc()) {
-                anchors.push((name.to_owned(), loc));
+                anchors.push((name, loc));
             }
         }
         Node::Alias { name, loc, .. } => {
-            aliases.push((name.clone(), *loc));
+            aliases.push((name.as_str(), *loc));
         }
     }
     match node {

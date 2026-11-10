@@ -303,6 +303,48 @@ async fn should_delete_an_unused_anchor_through_the_server() {
     }
 }
 
+/// `leaf` inside `depth` nested flow sequences.
+fn nested_flow(depth: usize, leaf: &str) -> String {
+    format!("{}{leaf}{}", "[".repeat(depth), "]".repeat(depth))
+}
+
+#[tokio::test]
+async fn should_delete_an_unused_anchor_nested_deeper_than_a_hundred_levels() {
+    let uri = "file:///test/delete-anchor-deep.yaml";
+    for depth in [101, 255] {
+        let text = format!("a: {}\n", nested_flow(depth, "&x 1"));
+        let mut service = open(&text, uri).await;
+        let actions = unused_anchor_actions_of(&mut service, uri, 0, 0).await;
+
+        assert_eq!(actions.len(), 1, "depth {depth}: {actions:?}");
+        assert_eq!(actions[0]["kind"], "quickfix", "depth {depth}");
+        assert_eq!(
+            apply_action(&text, uri, &actions[0]),
+            format!("a: {}\n", nested_flow(depth, "1")),
+            "depth {depth}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn should_not_report_an_anchor_whose_alias_is_nested_deeper_than_a_hundred_levels() {
+    let uri = "file:///test/delete-anchor-deep-alias.yaml";
+    for depth in [101, 255] {
+        let text = format!("a: &x 1\nb: {}\n", nested_flow(depth, "*x"));
+        let mut service = open(&text, uri).await;
+
+        assert!(
+            unused_anchor_actions_of(&mut service, uri, 0, 99)
+                .await
+                .is_empty(),
+            "depth {depth}"
+        );
+        let diagnostics = format!("{:?}", service.inner().get_diagnostics(uri));
+        assert!(!diagnostics.contains("yamlSyntax"), "depth {depth}");
+        assert!(!diagnostics.contains("unusedAnchor"), "depth {depth}");
+    }
+}
+
 #[tokio::test]
 async fn should_offer_delete_unused_anchor_on_the_anchor_line_only() {
     let uri = "file:///test/delete-anchor-line.yaml";

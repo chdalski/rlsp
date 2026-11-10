@@ -34,7 +34,7 @@ and the pre-existing bugs found in the same code are each fixed where they arise
 - [x] Design review of the approach
 - [x] Task 1: Long names in validator messages are cut at a character boundary
 - [x] Task 2: References and rename share one anchor and alias walk
-- [ ] Task 3: The unused-anchor validator and its quick fix read the whole document
+- [x] Task 3: The unused-anchor validator and its quick fix read the whole document
 - [ ] Task 4: The other validators read the whole document
 - [ ] Task 5: No selection range misses its position
 - [ ] Task 6: A selection-range response has one entry per position
@@ -86,19 +86,22 @@ an alias whose anchor lies deeper "has no matching anchor". The quick fix in
 finds no anchor below depth 100. The validator takes its anchors and aliases from the walk that
 Task 2 shares.
 
-- [ ] An anchor at depth 0 whose only alias is at depth 99, at 100, at 101, and at 255 gets no
+- [x] An anchor at depth 0 whose only alias is at depth 99, at 100, at 101, and at 255 gets no
       `unusedAnchor` diagnostic
-- [ ] An alias at depth 1 whose anchor is at depth 101 and at 255 gets no `unresolvedAlias`
+- [x] An alias at depth 1 whose anchor is at depth 101 and at 255 gets no `unresolvedAlias`
       diagnostic
-- [ ] An anchor without an alias at depth 101 and at depth 255 gets the `unusedAnchor` diagnostic and
+- [x] An anchor without an alias at depth 101 and at depth 255 gets the `unusedAnchor` diagnostic and
       the "Delete unused anchor" action
-- [ ] Through the server, the anchor-and-alias document of `tests/lsp_lifecycle/stack_depth.rs`
+- [x] Through the server, the anchor-and-alias document of `tests/lsp_lifecycle/stack_depth.rs`
       publishes no `unusedAnchor` diagnostic at 256 and at 512 levels
-- [ ] `no_fix_when_an_alias_may_sit_below_the_depth_the_validator_reads` and
+- [x] `no_fix_when_an_alias_may_sit_below_the_depth_the_validator_reads` and
       `an_alias_within_the_depth_the_validator_reads_uses_the_anchor` (`delete_anchor.rs`) and
       `the_fix_keeps_the_data_of_an_anchor_with_a_deeply_nested_alias` (`tests/unused_anchor_fix.rs`)
       assert the behavior above; no comment or doc says the validator or the quick fix stops at a
       depth
+- [x] The shared anchor and alias walk borrows the names from the document instead of copying them
+- [x] The quick fix runs to the bottom of a document 256 levels deep on a 2 MiB stack and, in an
+      ignored release case, 512 levels deep on the release stack (`tests/lsp_lifecycle/stack_depth.rs`)
 
 ### Task 4: The other validators read the whole document
 
@@ -218,6 +221,9 @@ ends at its first `}`.
   document instead of stopping at a depth of their own — the loader already bounds depth, and
   `stack_depth.rs` measures every validator at that bound; a walk that stops reports absences it has
   not checked.
+- **Gate demands on Task 3:** the shared walk borrows names instead of copying them — copying made
+  the quick fix about three times slower with 5 000 unused anchors; and the quick fix has its own
+  stack-depth cases — the anchor-and-alias document never reaches the fix, since its anchor is used.
 - **Truncation:** the shared rule keeps the `...` suffix of both messages; the `…` helpers in
   `server.rs` and `completion/formatting.rs` cap a total length with another suffix and stay apart.
 - **Selection:** Task 5 only leaves out ranges that do not contain the position and adds none.

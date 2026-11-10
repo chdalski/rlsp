@@ -46,3 +46,9 @@ pub fn vscode_manifest_properties() -> serde_json::Map<String, serde_json::Value
         .expect("the manifest declares configuration properties")
         .clone()
 }
+
+/// `leaf` inside `depth` nested flow sequences: `[[leaf]]` for a depth of 2.
+#[must_use]
+pub fn nested_flow(depth: usize, leaf: &str) -> String {
+    format!("{}{leaf}{}", "[".repeat(depth), "]".repeat(depth))
+}

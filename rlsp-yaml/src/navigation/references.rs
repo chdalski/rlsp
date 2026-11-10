@@ -21,9 +21,9 @@ pub fn goto_definition(docs: &[Document<Span>], uri: &Url, position: Position) -
     let alias_entry = aliases
         .iter()
         .find(|(_, loc)| span_contains(*loc, cursor, idx))?;
-    let alias_name = &alias_entry.0;
+    let alias_name = alias_entry.0;
 
-    let anchor_entry = anchors.iter().find(|(name, _)| name == alias_name)?;
+    let anchor_entry = anchors.iter().find(|(name, _)| *name == alias_name)?;
 
     Some(Location {
         uri: uri.clone(),
@@ -52,12 +52,12 @@ pub fn find_references(
     let name = anchors
         .iter()
         .find(|(_, loc)| span_contains(*loc, cursor, idx))
-        .map(|(n, _)| n.as_str())
+        .map(|(n, _)| *n)
         .or_else(|| {
             aliases
                 .iter()
                 .find(|(_, loc)| span_contains(*loc, cursor, idx))
-                .map(|(n, _)| n.as_str())
+                .map(|(n, _)| *n)
         });
 
     let Some(name) = name else {
@@ -67,7 +67,7 @@ pub fn find_references(
     let declaration = if include_declaration {
         anchors
             .iter()
-            .find(|(n, _)| n == name)
+            .find(|(n, _)| *n == name)
             .map(|(_, loc)| Location {
                 uri: uri.clone(),
                 range: span_to_lsp(*loc, idx),
@@ -78,7 +78,7 @@ pub fn find_references(
 
     let alias_locations = aliases
         .iter()
-        .filter(|(n, _)| n == name)
+        .filter(|(n, _)| *n == name)
         .map(|(_, loc)| Location {
             uri: uri.clone(),
             range: span_to_lsp(*loc, idx),

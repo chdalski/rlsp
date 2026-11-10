@@ -13,6 +13,7 @@ share a parent line with one sub-item each.
 
 ## Security
 
+- The "Delete unused anchor" quick fix walks the whole document twice per `unusedAnchor` diagnostic (`find_anchor`, `has_alias` in `rlsp-yaml/src/editing/code_actions/delete_anchor.rs`), so a code-action request costs time with the square of the number of unused anchors (about 1 s for 5 000); pre-existing, security Low; server-feature bug-fix plan Task 3 review.
 - The unresolved-alias message in `rlsp-yaml/src/validation/validators/anchors.rs` and the key copies in `duplicate_keys.rs` hold the name uncut, so a megabyte-long alias or key name gives a megabyte-long message; hardening, security Low; server-feature bug-fix plan Task 1 security review.
 - Alias expansion depth: `max_nesting_depth` does not bound the expanded tree in resolved mode; `expand_node`, `Clone`, `Drop` in `loader.rs`; stack-overflow investigation.
 - `REGEX_CACHE` unbounded and `validate_schema` on the async executor (`src/schema/pattern.rs`); schema queue.
@@ -63,6 +64,7 @@ share a parent line with one sub-item each.
 
 ## Tests
 
+- The depth tests of the unused-anchor validator and quick fix count `d` as the flow sequences inside the root mapping, so the cases named 99 and 255 sit at depths 100 and 256; server-feature bug-fix plan Task 3 review.
 - `document_symbol_request` in `rlsp-yaml/tests/lsp_lifecycle/nesting_depth.rs` duplicates the helper in `navigation.rs`, and its `server()` overlaps `helpers::start_server` (it drops the log instead of collecting it); nesting plan Task 9 and Task 11 test reviews.
 - The stdio framing (`read_one_message`, `read_content_length`, `send`, `recv_matching`, `is_response_to`) exists in both `rlsp-yaml/tests/claude_code_stdio_smoke.rs` and `tests/lsp_lifecycle/stack_depth.rs`; extract it to a shared `tests/common` module; nesting plan Task 11 review.
 - The release runs in `rlsp-yaml/tests/lsp_lifecycle/stack_depth.rs` fetch no 49-level schema and do not assert that the validator reaches its depth limit at 512 levels; only the debug and stdio runs do; nesting plan Task 11 review.

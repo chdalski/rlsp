@@ -390,6 +390,15 @@ fn check(shape: Shape, call: Call, levels: usize, json: &str, formatter: Formatt
     }
 }
 
+/// The validators read the whole document: the anchor of the anchor-and-alias
+/// shape has its alias at the bottom, so it is used, whatever the depth.
+fn assert_anchors_resolved(published: &str, shape: Shape) {
+    assert!(
+        !published.contains("unusedAnchor") && !published.contains("unresolvedAlias"),
+        "{shape:?}: the anchor and its alias are not paired: {published}"
+    );
+}
+
 fn codes(diagnostics: &[Diagnostic]) -> Vec<&str> {
     diagnostics
         .iter()
@@ -529,6 +538,7 @@ async fn survive_every_request(shape: Shape, levels: usize) {
         !codes(&diagnostics).contains(&"yamlSyntax"),
         "{shape:?}: the document did not load: {diagnostics:?}"
     );
+    assert_anchors_resolved(&codes(&diagnostics).join(","), shape);
 
     send_every_request(&mut service, shape, levels, Some(Formatter::Default)).await;
     let enforcing = settings(&proxy, levels, Formatter::EnforceBlockStyle);
@@ -867,6 +877,62 @@ fn schema_beyond_the_json_depth_limit_is_refused(#[case] body: String) {
     });
 }
 
+// ---- the quick fix of the unused anchor, at the bottom of a document ----
+
+/// The anchor-and-alias document with one more entry at the bottom, whose
+/// anchor `&u` has no alias: the quick fix finds it at the bottom, and reads
+/// the whole tree for an alias of its name.
+async fn survive_anchor_fix(levels: usize) {
+    let (mut service, _log) = start_server(json!({ "maxNestingDepth": levels })).await;
+    let shape = Shape::AnchorAndAlias;
+    let text = format!(
+        "{}{}spare: &u 1\n",
+        shape.text(levels),
+        "  ".repeat(levels - 1)
+    );
+    send(&mut service, did_open_notification(URI, &text)).await;
+
+    let diagnostics = diagnostics_of(&service, URI);
+    assert_eq!(codes(&diagnostics), ["unusedAnchor"], "{diagnostics:?}");
+    let unused = unused_anchor_actions(&mut service, lsp(levels + 3)).await;
+    assert_eq!(unused.len(), 1, "{unused:?}");
+}
+
+/// The "Delete unused anchor" actions the server offers for the diagnostics it
+/// published, on the lines from `line`.
+async fn unused_anchor_actions(service: &mut LspService<Backend>, line: u32) -> Vec<Value> {
+    let request = code_action_request_with_diagnostics(30, URI, line, line + 1, &json!([]));
+    let response = send(service, request)
+        .await
+        .expect("every request returns a response");
+    let result = response.result().expect("codeAction has a result");
+    result.as_array().map_or_else(Vec::new, |actions| {
+        actions
+            .iter()
+            .filter(|action| action["title"] == "Delete unused anchor")
+            .cloned()
+            .collect()
+    })
+}
+
+#[test]
+fn the_anchor_fix_survives_256_levels_on_2_mib() {
+    run_on_stack("anchor-fix".to_string(), TWO_MIB, || {
+        survive_anchor_fix(DEFAULT_LEVELS)
+    });
+}
+
+#[test]
+#[ignore = "needs a release build and a process of its own: \
+            cargo test --release -p rlsp-yaml --test lsp_lifecycle -- --ignored --exact \
+            --test-threads=1 stack_depth::the_anchor_fix_survives_512_levels"]
+fn the_anchor_fix_survives_512_levels() {
+    assert_release_build();
+    run_on_stack("anchor-fix-512".to_string(), RELEASE_STACK, || {
+        survive_anchor_fix(MAX_LEVELS)
+    });
+}
+
 // ---- the upper end of the setting, in a release build ----
 
 /// A release build has to run these: the stack of a debug build is far above
@@ -1124,6 +1190,7 @@ fn shipped_server_survives_512_levels_over_stdio(#[case] shape: Shape) {
         !diagnostics.to_string().contains("yamlSyntax"),
         "{shape:?}: the document did not load: {diagnostics}"
     );
+    assert_anchors_resolved(&diagnostics.to_string(), shape);
     for (call, request) in requests(shape, MAX_LEVELS, &diagnostics) {
         let result = server.request(&request);
         check(shape, call, MAX_LEVELS, &result, Formatter::Default);

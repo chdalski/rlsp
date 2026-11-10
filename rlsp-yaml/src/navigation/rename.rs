@@ -51,17 +51,17 @@ pub fn rename(
     let name = anchors
         .iter()
         .find(|(_, loc)| span_contains(*loc, cursor, idx))
-        .map(|(n, _)| n.as_str())
+        .map(|(n, _)| *n)
         .or_else(|| {
             aliases
                 .iter()
                 .find(|(_, loc)| span_contains(*loc, cursor, idx))
-                .map(|(n, _)| n.as_str())
+                .map(|(n, _)| *n)
         })?;
 
     let anchor_edits = anchors
         .iter()
-        .filter(|(n, _)| n == name)
+        .filter(|(n, _)| *n == name)
         .map(|(_, loc)| TextEdit {
             range: span_to_lsp(*loc, idx),
             new_text: format!("&{new_name}"),
@@ -69,7 +69,7 @@ pub fn rename(
 
     let alias_edits = aliases
         .iter()
-        .filter(|(n, _)| n == name)
+        .filter(|(n, _)| *n == name)
         .map(|(_, loc)| TextEdit {
             range: span_to_lsp(*loc, idx),
             new_text: format!("*{new_name}"),
