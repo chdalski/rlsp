@@ -6,6 +6,7 @@ use serde_json::json;
 use tower_lsp::LspService;
 use tower_lsp::jsonrpc::Request;
 
+use super::fake_proxy::{FakeProxy, Reply};
 use super::helpers::*;
 
 pub fn completion_request(id: i64, uri: &str, line: u32, character: u32) -> Request {
@@ -669,4 +670,51 @@ async fn should_complete_the_sibling_item_keys_of_a_sequence_under_a_key_inside_
     .await;
 
     assert_eq!(sorted_labels(&result), ["protocol"]);
+}
+
+// ── The "(all required)" snippet over a schema fetched from a server ─────────
+
+#[tokio::test]
+async fn should_escape_names_and_defaults_in_the_all_required_snippet_of_a_fetched_schema() {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "$CLIPBOARD": { "type": "string" },
+            "config": { "type": "object" },
+            "a}b": { "type": "string" },
+            "a\\b": { "type": "string" }
+        },
+        "required": ["$CLIPBOARD", "config", "a}b", "a\\b"]
+    });
+    let proxy = FakeProxy::start(Reply::ok(Some("application/json"), schema.to_string()));
+    let (mut service, _log) = start_server(json!({ "httpProxy": proxy.url() })).await;
+    let uri = "file:///test/completion-all-required.yaml";
+    let text =
+        "# yaml-language-server: $schema=http://schema.invalid/schema.json\nplaceholder: null\n";
+    send(&mut service, did_open_notification(uri, text)).await;
+
+    let resp = send(&mut service, completion_request(2, uri, 1, 0))
+        .await
+        .expect("completion should return a response");
+    let result = resp.result().expect("completion should have a result");
+    let items = result
+        .as_array()
+        .or_else(|| result["items"].as_array())
+        .expect("completion result should be a list of items");
+
+    let snippet = items
+        .iter()
+        .find(|item| item["label"] == "(all required)")
+        .expect("an '(all required)' item");
+    // LSP `InsertTextFormat::Snippet` is 2.
+    assert_eq!(snippet["insertTextFormat"], 2);
+    assert_eq!(
+        snippet["insertText"].as_str(),
+        Some("\\$CLIPBOARD: ${1:\"\"}\nconfig: ${2:{\\}}\na\\}b: ${3:\"\"}\na\\\\b: ${4:\"\"}")
+    );
+    let plain = items
+        .iter()
+        .find(|item| item["label"] == "$CLIPBOARD")
+        .expect("a plain item for the name");
+    assert!(plain.get("insertText").is_none(), "{plain}");
 }

@@ -94,11 +94,8 @@ pub(super) fn schema_key_completions(
                         .as_ref()
                         .and_then(|props| props.get(*key))
                         .map_or("", |prop| snippet_default(parsed.resolve(prop)));
-                    if default.is_empty() {
-                        format!("{key}: ${{{n}:}}")
-                    } else {
-                        format!("{key}: ${{{n}:{default}}}")
-                    }
+                    let key = escape_snippet_text(key);
+                    format!("{key}: ${{{n}:{default}}}")
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
@@ -117,14 +114,29 @@ pub(super) fn schema_key_completions(
     items
 }
 
-/// Return the snippet placeholder default for a schema based on its type.
+/// Escape `\`, `$`, and `}` so a client inserts `literal` as written instead of
+/// reading it as a variable, a tabstop, or the end of a placeholder (LSP 3.17,
+/// snippet syntax).
+fn escape_snippet_text(literal: &str) -> String {
+    let mut escaped = String::with_capacity(literal.len());
+    for c in literal.chars() {
+        if matches!(c, '\\' | '$' | '}') {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+    escaped
+}
+
+/// Return the snippet placeholder default for a schema based on its type,
+/// already escaped for the placeholder it is written into.
 fn snippet_default(schema: &JsonSchema) -> &'static str {
     match schema.schema_type.as_ref() {
         Some(SchemaType::Single(t)) => match t.as_str() {
             "string" => "\"\"",
             "integer" | "number" => "0",
             "boolean" => "false",
-            "object" => "{}",
+            "object" => "{\\}",
             "array" => "[]",
             _ => "",
         },
@@ -1304,29 +1316,9 @@ mod tests {
             .as_deref()
             .expect("snippet item must have insert_text");
 
-        assert!(
-            insert_text.contains("${1:"),
-            "snippet must contain tab-stop ${{1:...}}, got: {insert_text}"
-        );
-        assert!(
-            insert_text.contains("${2:"),
-            "snippet must contain tab-stop ${{2:...}}, got: {insert_text}"
-        );
-        assert!(
-            insert_text.contains("${3:"),
-            "snippet must contain tab-stop ${{3:...}}, got: {insert_text}"
-        );
-        assert!(
-            insert_text.contains("name:"),
-            "snippet must mention 'name', got: {insert_text}"
-        );
-        assert!(
-            insert_text.contains("age:"),
-            "snippet must mention 'age', got: {insert_text}"
-        );
-        assert!(
-            insert_text.contains("enabled:"),
-            "snippet must mention 'enabled', got: {insert_text}"
+        assert_eq!(
+            insert_text,
+            "name: ${1:\"\"}\nage: ${2:0}\nenabled: ${3:false}"
         );
     }
 
@@ -1353,52 +1345,6 @@ mod tests {
         let result = complete_at(&docs, cursor, Some(&ParsedSchema::new(schema)));
         let has_snippet = result.iter().any(|i| i.label == "(all required)");
         assert!(!has_snippet, "should not offer '(all required)' snippet");
-    }
-
-    #[test]
-    #[expect(
-        clippy::literal_string_with_formatting_args,
-        reason = "snippet placeholders look like format args"
-    )]
-    fn should_use_type_aware_defaults_in_snippet() {
-        let schema = schema_with_required(
-            vec![
-                ("title", string_schema()),
-                ("count", integer_schema()),
-                ("active", boolean_schema()),
-            ],
-            vec!["title", "count", "active"],
-        );
-        let text = "placeholder: null\n";
-        let docs = parse_docs(text);
-        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
-
-        let snippet = result
-            .iter()
-            .find(|i| i.label == "(all required)")
-            .expect("should offer snippet");
-
-        let insert_text = snippet
-            .insert_text
-            .as_deref()
-            .expect("must have insert_text");
-
-        assert!(
-            insert_text.contains("\"\""),
-            "string type should default to \"\", got: {insert_text}"
-        );
-        assert!(
-            insert_text.contains(":0")
-                || insert_text.contains(": 0")
-                || insert_text.contains("{1:0}")
-                || insert_text.contains("{2:0}")
-                || insert_text.contains("{3:0}"),
-            "integer type should default to 0, got: {insert_text}"
-        );
-        assert!(
-            insert_text.contains("false"),
-            "boolean type should default to false, got: {insert_text}"
-        );
     }
 
     #[test]
@@ -1445,80 +1391,148 @@ mod tests {
         );
     }
 
-    #[test]
-    fn should_use_object_default_in_snippet_for_object_type_required_field() {
-        let schema = schema_with_required(
-            vec![
-                (
-                    "config",
-                    JsonSchema {
-                        schema_type: Some(SchemaType::Single("object".to_string())),
-                        ..JsonSchema::default()
-                    },
-                ),
-                ("name", string_schema()),
-            ],
-            vec!["config", "name"],
-        );
-        let schema2 = schema_with_required(
-            vec![
-                (
-                    "tags",
-                    JsonSchema {
-                        schema_type: Some(SchemaType::Single("array".to_string())),
-                        ..JsonSchema::default()
-                    },
-                ),
-                ("name", string_schema()),
-            ],
-            vec!["tags", "name"],
-        );
+    // ── Snippet escaping (LSP 3.17, snippet syntax) ──────────────────────────
 
-        let text = "placeholder: null\n";
-        let docs = parse_docs(text);
+    /// Decode snippet text that holds no placeholder: `\` escapes `\`, `$`
+    /// and `}`; any other `\`, `$` or `}` is syntax, so decoding fails.
+    fn decode_plain_snippet_text(snippet: &str) -> Option<String> {
+        let mut decoded = String::new();
+        let mut chars = snippet.chars();
+        while let Some(c) = chars.next() {
+            match c {
+                '\\' => decoded.push(chars.next().filter(|n| matches!(n, '\\' | '$' | '}'))?),
+                '$' | '}' => return None,
+                _ => decoded.push(c),
+            }
+        }
+        Some(decoded)
+    }
 
-        let result1 = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
-        let snippet1 = result1.iter().find(|i| i.label == "(all required)");
-        assert!(
-            snippet1.is_some(),
-            "should offer snippet for object-typed field"
-        );
-        let insert1 = snippet1.unwrap().insert_text.as_deref().unwrap_or("");
-        assert!(
-            insert1.contains("{}"),
-            "object type default should be '{{}}', got: {insert1}"
-        );
+    #[rstest]
+    #[case::empty("", "")]
+    #[case::plain("name", "name")]
+    #[case::characters_that_need_no_escape("a{b|c,d:e/f", "a{b|c,d:e/f")]
+    #[case::non_ascii("größe🙂", "größe🙂")]
+    #[case::dollar("$schema", "\\$schema")]
+    #[case::clipboard_variable("$CLIPBOARD", "\\$CLIPBOARD")]
+    #[case::tabstop("$1", "\\$1")]
+    #[case::closing_brace("a}b", "a\\}b")]
+    #[case::backslash("a\\b", "a\\\\b")]
+    #[case::trailing_backslash("a\\", "a\\\\")]
+    #[case::choice_syntax("${1|a,b|}", "\\${1|a,b|\\}")]
+    #[case::backslash_then_dollar("\\$", "\\\\\\$")]
+    #[case::backslash_then_brace("\\}", "\\\\\\}")]
+    #[case::dollar_then_brace("$}", "\\$\\}")]
+    fn escape_snippet_text_escapes_backslash_dollar_and_closing_brace(
+        #[case] text: &str,
+        #[case] expected: &str,
+    ) {
+        assert_eq!(escape_snippet_text(text), expected);
+    }
 
-        let result2 = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema2)));
-        let snippet2 = result2.iter().find(|i| i.label == "(all required)");
-        assert!(
-            snippet2.is_some(),
-            "should offer snippet for array-typed field"
-        );
-        let insert2 = snippet2.unwrap().insert_text.as_deref().unwrap_or("");
-        assert!(
-            insert2.contains("[]"),
-            "array type default should be '[]', got: {insert2}"
-        );
+    proptest::proptest! {
+        #[test]
+        fn escaped_snippet_text_decodes_to_the_original(text in ".*") {
+            proptest::prop_assert_eq!(
+                decode_plain_snippet_text(&escape_snippet_text(&text)),
+                Some(text)
+            );
+        }
+    }
+
+    /// The "(all required)" snippet of an object that requires all of `props`,
+    /// in order.
+    fn required_snippet_text(props: Vec<(&str, JsonSchema)>) -> String {
+        let required = props.iter().map(|(name, _)| *name).collect();
+        let schema = schema_with_required(props, required);
+        let docs = parse_docs("placeholder: null\n");
+        let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
+        result
+            .iter()
+            .find(|i| i.label == "(all required)")
+            .and_then(|i| i.insert_text.clone())
+            .expect("an '(all required)' snippet with insert text")
+    }
+
+    #[rstest]
+    #[case::schema_keyword("$schema", "\\$schema: ${1:\"\"}\nb: ${2:\"\"}")]
+    #[case::clipboard_variable("$CLIPBOARD", "\\$CLIPBOARD: ${1:\"\"}\nb: ${2:\"\"}")]
+    #[case::tabstop_lookalike("$1", "\\$1: ${1:\"\"}\nb: ${2:\"\"}")]
+    #[case::closing_brace("a}b", "a\\}b: ${1:\"\"}\nb: ${2:\"\"}")]
+    #[case::backslash("a\\b", "a\\\\b: ${1:\"\"}\nb: ${2:\"\"}")]
+    fn the_required_snippet_inserts_a_name_as_the_schema_writes_it(
+        #[case] name: &str,
+        #[case] expected: &str,
+    ) {
+        let snippet = required_snippet_text(vec![(name, string_schema()), ("b", string_schema())]);
+
+        assert_eq!(snippet, expected);
     }
 
     #[test]
-    fn should_use_bare_tab_stop_in_snippet_for_field_with_no_type() {
+    fn the_required_snippet_numbers_the_tabstops_past_an_escaped_name() {
+        let snippet = required_snippet_text(vec![("a", string_schema()), ("$b", string_schema())]);
+
+        assert_eq!(snippet, "a: ${1:\"\"}\n\\$b: ${2:\"\"}");
+    }
+
+    #[rstest]
+    #[case::plain("config", "config: ${1:{\\}}\nname: ${2:\"\"}")]
+    #[case::escaped_name("$defs", "\\$defs: ${1:{\\}}\nname: ${2:\"\"}")]
+    fn the_placeholder_of_an_object_property_covers_the_whole_default(
+        #[case] name: &str,
+        #[case] expected: &str,
+    ) {
+        let object = JsonSchema {
+            schema_type: Some(SchemaType::Single("object".to_string())),
+            ..JsonSchema::default()
+        };
+
+        let snippet = required_snippet_text(vec![(name, object), ("name", string_schema())]);
+
+        assert_eq!(snippet, expected);
+    }
+
+    #[rstest]
+    #[case::string(Some(SchemaType::Single("string".to_string())), "\"\"")]
+    #[case::integer(Some(SchemaType::Single("integer".to_string())), "0")]
+    #[case::number(Some(SchemaType::Single("number".to_string())), "0")]
+    #[case::boolean(Some(SchemaType::Single("boolean".to_string())), "false")]
+    #[case::object(Some(SchemaType::Single("object".to_string())), "{\\}")]
+    #[case::array(Some(SchemaType::Single("array".to_string())), "[]")]
+    #[case::unknown_type(Some(SchemaType::Single("null".to_string())), "")]
+    #[case::type_list(Some(SchemaType::Multiple(vec!["string".to_string(), "null".to_string()])), "")]
+    #[case::no_type(None, "")]
+    fn the_required_snippet_defaults_a_property_by_its_type(
+        #[case] schema_type: Option<SchemaType>,
+        #[case] default: &str,
+    ) {
+        let property = JsonSchema {
+            schema_type,
+            ..JsonSchema::default()
+        };
+
+        let snippet = required_snippet_text(vec![("x", property), ("y", string_schema())]);
+
+        assert_eq!(snippet, format!("x: ${{1:{default}}}\ny: ${{2:\"\"}}"));
+    }
+
+    #[test]
+    fn the_key_item_of_a_name_with_a_dollar_stays_plain_text() {
         let schema = schema_with_required(
-            vec![("data", JsonSchema::default()), ("name", string_schema())],
-            vec!["data", "name"],
+            vec![("$CLIPBOARD", string_schema()), ("b", string_schema())],
+            vec!["$CLIPBOARD", "b"],
         );
-        let text = "placeholder: null\n";
-        let docs = parse_docs(text);
+        let docs = parse_docs("placeholder: null\n");
         let result = complete_at(&docs, pos(0, 0), Some(&ParsedSchema::new(schema)));
 
-        let snippet = result.iter().find(|i| i.label == "(all required)");
-        assert!(snippet.is_some(), "should offer snippet");
-        let insert = snippet.unwrap().insert_text.as_deref().unwrap_or("");
-        assert!(
-            insert.contains("data: ${"),
-            "no-type field should have a tab-stop, got: {insert}"
-        );
+        let item = result
+            .iter()
+            .find(|i| i.label == "$CLIPBOARD")
+            .expect("a key item named by the schema");
+
+        assert_eq!(item.insert_text, None);
+        assert_eq!(item.insert_text_format, None);
     }
 
     #[test]

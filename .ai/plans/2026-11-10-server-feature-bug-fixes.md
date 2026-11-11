@@ -51,7 +51,7 @@ bugs found in the same code are each fixed where they arise.
 - [x] Task 7: A duplicate-key diagnostic covers the whole key
 - [x] Task 8: The block-scalar action never turns a comment into content
 - [x] Task 9: A BOM does not hide a modeline or a suppression comment on line 1
-- [ ] Task 10: The "(all required)" snippet inserts names and defaults as written
+- [x] Task 10: The "(all required)" snippet inserts names and defaults as written
 - [ ] Task 11: The "Delete unused anchor" quick fix answers a request with one pass over the document
 - [ ] Task 12: A position on a node's text selects that node, not an earlier sibling
 - [ ] Task 13: Colors and document links read a scalar's source text through one reader
@@ -220,10 +220,10 @@ Only a document and a text that disagree reach this, so no server test can.
 `$CLIPBOARD` makes the client insert the clipboard, and the placeholder of an object default `{}`
 ends at its first `}`.
 
-- [ ] The snippet inserts each required name exactly as the schema writes it, for names holding `$`,
+- [x] The snippet inserts each required name exactly as the schema writes it, for names holding `$`,
       `}`, and `\`, and for `$CLIPBOARD`
-- [ ] The placeholder of an object property covers the whole default `{}`
-- [ ] Through the server, a completion request against a schema with such names
+- [x] The placeholder of an object property covers the whole default `{}`
+- [x] Through the server, a completion request against a schema with such names
       (`tests/lsp_lifecycle/completion.rs`, schema served by the fake proxy) returns the escaped
       snippet
 
