@@ -1340,7 +1340,7 @@ impl LanguageServer for Backend {
             return Ok(None);
         }
 
-        Ok(Some(ranges))
+        Ok(Some(ranges.to_client(&open.converter)))
     }
 
     async fn document_link(&self, params: DocumentLinkParams) -> Result<Option<Vec<DocumentLink>>> {
@@ -1358,7 +1358,7 @@ impl LanguageServer for Backend {
             return Ok(None);
         }
 
-        Ok(Some(links))
+        Ok(Some(links.to_client(&open.converter)))
     }
 
     async fn selection_range(
@@ -1579,7 +1579,10 @@ impl LanguageServer for Backend {
         let Some(open) = self.read_document(&uri, LoadedDocuments::Copy) else {
             return Ok(None);
         };
-        let tokens = crate::analysis::semantic_tokens::semantic_tokens(
+        // The tokens are converted by their absolute positions: the client
+        // counts both the start and the length in its own units, and the
+        // deltas must be taken between the converted starts.
+        let tokens = crate::analysis::semantic_tokens::absolute_tokens(
             open.documents.as_deref().unwrap_or(&[]),
             &open.text,
         );
@@ -1588,7 +1591,9 @@ impl LanguageServer for Backend {
         }
         Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
             result_id: None,
-            data: tokens,
+            data: crate::analysis::semantic_tokens::encode_deltas(
+                tokens.to_client(&open.converter),
+            ),
         })))
     }
 
@@ -1611,7 +1616,9 @@ impl LanguageServer for Backend {
             return Ok(None);
         }
 
-        Ok(Some(DocumentSymbolResponse::Nested(symbols)))
+        Ok(Some(DocumentSymbolResponse::Nested(
+            symbols.to_client(&open.converter),
+        )))
     }
 
     async fn prepare_rename(
@@ -1677,7 +1684,8 @@ impl LanguageServer for Backend {
             range: m.range,
             color: m.color,
         })
-        .collect();
+        .collect::<Vec<_>>()
+        .to_client(&open.converter);
 
         Ok(colors)
     }

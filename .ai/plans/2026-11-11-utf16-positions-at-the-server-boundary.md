@@ -51,7 +51,7 @@ converted back, at the boundary in `server.rs`, while the features keep counting
 - [x] Task 2: Every document handler reads its document through one function
 - [x] Task 3: Published diagnostics and code actions use client positions
 - [x] Task 4: Requests that take a position read and answer client positions
-- [ ] Task 5: Whole-document responses use client positions
+- [x] Task 5: Whole-document responses use client positions
 - [ ] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
@@ -154,22 +154,22 @@ Document symbols, folding ranges, document links, document colors, and semantic 
 positions. Semantic tokens are converted with absolute positions, before the delta encoding, so start
 and length both count UTF-16 units. LSP 3.17 sections "Position" and "Semantic Tokens" apply.
 
-- [ ] Through the server, for a document with an astral character before them on their lines, the
+- [x] Through the server, for a document with an astral character before them on their lines, the
       ranges of document symbols, document links, and document colors are in client positions
-- [ ] Through the server, the semantic token after an astral character starts at its client column
+- [x] Through the server, the semantic token after an astral character starts at its client column
       and its length counts UTF-16 units, as does the delta start of the token after it
-- [ ] Document links compute their columns in code points; the server tests of Task 1 for document
+- [x] Document links compute their columns in code points; the server tests of Task 1 for document
       links pass unchanged
-- [ ] On its 2 MiB stack, `tests/lsp_lifecycle/stack_depth.rs` answers the document-symbol request on
+- [x] On its 2 MiB stack, `tests/lsp_lifecycle/stack_depth.rs` answers the document-symbol request on
       a deep document whose lines hold an astral character, with every range in client positions,
       since the boundary trait walks the nested child symbols
-- [ ] Every document handler converts the positions it reads and answers through the boundary trait,
+- [x] Every document handler converts the positions it reads and answers through the boundary trait,
       and `tests/lsp_lifecycle/utf16_positions.rs` holds a case for each document handler that reads
       or answers a position
-- [ ] `len_utf16` and `encode_utf16` appear in `src/` only in `src/position_encoding.rs`
-- [ ] The comment on the color test cases in `src/decorators/color.rs` states that features count
+- [x] `len_utf16` and `encode_utf16` appear in `src/` only in `src/position_encoding.rs`
+- [x] The comment on the color test cases in `src/decorators/color.rs` states that features count
       columns in code points and the handler converts them, and announces no later change
-- [ ] The Conventions section of the root `CLAUDE.md` tells an agent that features count columns in
+- [x] The Conventions section of the root `CLAUDE.md` tells an agent that features count columns in
       code points and that handlers convert through `src/position_encoding.rs`
 
 ## Decisions
@@ -226,6 +226,12 @@ and length both count UTF-16 units. LSP 3.17 sections "Position" and "Semantic T
 - **Round trip at `u32::MAX`:** a client column cannot exceed `u32::MAX`, so on a line with astral
   characters the internal columns that close to `u32::MAX` saturate on the way out and do not come
   back exactly; the round trip holds for every position whose client column does not saturate.
+- **Gate demands on Task 5:** `tests/position_unit_audit.rs` fails when `len_utf16` or
+  `encode_utf16` appears in `src/` outside `src/position_encoding.rs`, so the source check keeps
+  holding for later handlers; document links count characters incrementally, token conversion and
+  delta encoding saturate, and document symbols convert iteratively in place; the server sweep
+  requires the narrow documents to answer symbols and tokens, so it never compares two empty
+  answers.
 
 ## Non-Goals
 

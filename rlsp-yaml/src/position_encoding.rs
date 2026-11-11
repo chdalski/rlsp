@@ -13,11 +13,14 @@
 //! boundary with a [`PositionConverter`] and the [`ClientPositions`] trait.
 
 use tower_lsp::lsp_types::{
-    AnnotatedTextEdit, CodeAction, CodeActionContext, CodeActionParams, CompletionItem,
-    CompletionTextEdit, Diagnostic, DiagnosticRelatedInformation, DocumentChangeOperation,
-    DocumentChanges, Hover, InsertReplaceEdit, Location, OneOf, Position, Range, SelectionRange,
-    TextDocumentEdit, TextEdit, WorkspaceEdit,
+    AnnotatedTextEdit, CodeAction, CodeActionContext, CodeActionParams, ColorInformation,
+    CompletionItem, CompletionTextEdit, Diagnostic, DiagnosticRelatedInformation,
+    DocumentChangeOperation, DocumentChanges, DocumentLink, DocumentSymbol, FoldingRange, Hover,
+    InsertReplaceEdit, Location, OneOf, Position, Range, SelectionRange, TextDocumentEdit,
+    TextEdit, WorkspaceEdit,
 };
+
+use crate::analysis::semantic_tokens::AbsoluteToken;
 
 /// An astral character of the text, with what a column after it needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -488,6 +491,113 @@ impl ClientPositions for SelectionRange {
     }
 }
 
+impl ClientPositions for DocumentLink {
+    fn map_positions(self, convert: &dyn Fn(Position) -> Position) -> Self {
+        let Self {
+            range,
+            target,
+            tooltip,
+            data,
+        } = self;
+        Self {
+            range: range.map_positions(convert),
+            target,
+            tooltip,
+            data,
+        }
+    }
+}
+
+impl ClientPositions for ColorInformation {
+    fn map_positions(self, convert: &dyn Fn(Position) -> Position) -> Self {
+        let Self { range, color } = self;
+        Self {
+            range: range.map_positions(convert),
+            color,
+        }
+    }
+}
+
+/// The columns are plain numbers next to their lines: each one converts as the
+/// position on the line of its own end. An absent column stays absent.
+impl ClientPositions for FoldingRange {
+    fn map_positions(self, convert: &dyn Fn(Position) -> Position) -> Self {
+        let Self {
+            start_line,
+            start_character,
+            end_line,
+            end_character,
+            kind,
+            collapsed_text,
+        } = self;
+        Self {
+            start_line,
+            start_character: start_character
+                .map(|column| convert(Position::new(start_line, column)).character),
+            end_line,
+            end_character: end_character
+                .map(|column| convert(Position::new(end_line, column)).character),
+            kind,
+            collapsed_text,
+        }
+    }
+}
+
+/// A token has one line, a start, and a length: the start converts as a
+/// position, and the length is the distance between the converted start and
+/// the converted end, which is how many units the client counts in the token.
+impl ClientPositions for AbsoluteToken {
+    fn map_positions(self, convert: &dyn Fn(Position) -> Position) -> Self {
+        let Self {
+            line,
+            start,
+            length,
+            token_type,
+            token_modifiers_bitset,
+        } = self;
+        let client_start = convert(Position::new(line, start)).character;
+        let client_end = convert(Position::new(line, start.saturating_add(length))).character;
+        Self {
+            line,
+            start: client_start,
+            length: client_end.saturating_sub(client_start),
+            token_type,
+            token_modifiers_bitset,
+        }
+    }
+}
+
+/// The tree of `children` is walked with a loop and changed in place, not
+/// recursed into: it is as deep as the document nests, and a recursive walk
+/// would add a stack frame per level to the nesting the handlers already carry.
+#[expect(
+    deprecated,
+    reason = "DocumentSymbol.deprecated field is required by LSP spec"
+)]
+impl ClientPositions for DocumentSymbol {
+    fn map_positions(mut self, convert: &dyn Fn(Position) -> Position) -> Self {
+        let mut pending = vec![&mut self];
+        while let Some(symbol) = pending.pop() {
+            let Self {
+                name: _name,
+                detail: _detail,
+                kind: _kind,
+                tags: _tags,
+                deprecated: _deprecated,
+                range,
+                selection_range,
+                children,
+            } = symbol;
+            *range = range.map_positions(convert);
+            *selection_range = selection_range.map_positions(convert);
+            if let Some(children) = children {
+                pending.extend(children.iter_mut());
+            }
+        }
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
@@ -497,10 +607,10 @@ mod tests {
     use rstest::rstest;
     use serde_json::{Value, json};
     use tower_lsp::lsp_types::{
-        CodeActionContext, Command, CompletionItemKind, CreateFile, DeleteFile, DiagnosticSeverity,
-        HoverContents, MarkupContent, MarkupKind, NumberOrString,
-        OptionalVersionedTextDocumentIdentifier, PartialResultParams, ResourceOp,
-        TextDocumentIdentifier, Url, WorkDoneProgressParams,
+        CodeActionContext, Color, Command, CompletionItemKind, CreateFile, DeleteFile,
+        DiagnosticSeverity, FoldingRangeKind, HoverContents, MarkupContent, MarkupKind,
+        NumberOrString, OptionalVersionedTextDocumentIdentifier, PartialResultParams, ResourceOp,
+        SymbolKind, SymbolTag, TextDocumentIdentifier, Url, WorkDoneProgressParams,
     };
 
     use super::*;
@@ -795,6 +905,39 @@ mod tests {
         }
 
         #[test]
+        fn converted_tokens_keep_their_order_and_end_where_the_converted_end_does(
+            characters in characters(true),
+            tokens in prop::collection::vec((0_u32..4, 0_u32..12, 0_u32..8), 0..20),
+        ) {
+            let converter = PositionConverter::new(&text_of(&characters));
+            let mut tokens: Vec<AbsoluteToken> = tokens
+                .into_iter()
+                .map(|(line, start, length)| AbsoluteToken {
+                    line,
+                    start,
+                    length,
+                    token_type: 0,
+                    token_modifiers_bitset: 0,
+                })
+                .collect();
+            tokens.sort_by_key(|token| (token.line, token.start));
+
+            let client = tokens.clone().to_client(&converter);
+
+            for (token, converted) in tokens.iter().zip(&client) {
+                let start = converter.to_client(at(token.line, token.start));
+                let end = converter.to_client(at(token.line, token.start + token.length));
+                prop_assert_eq!(converted.line, token.line);
+                prop_assert_eq!(converted.start, start.character);
+                prop_assert_eq!(converted.start + converted.length, end.character);
+            }
+            let starts: Vec<(u32, u32)> = client.iter().map(|t| (t.line, t.start)).collect();
+            let mut sorted = starts.clone();
+            sorted.sort_unstable();
+            prop_assert_eq!(starts, sorted);
+        }
+
+        #[test]
         fn a_text_without_an_astral_character_converts_every_position_to_itself(
             characters in characters(false),
             line in prop::num::u32::ANY,
@@ -1021,6 +1164,56 @@ mod tests {
                 range: self.range(),
                 parent: (parents > 0).then(|| Box::new(self.selection_range(parents - 1))),
             }
+        }
+
+        fn document_link(&self) -> DocumentLink {
+            DocumentLink {
+                range: self.range(),
+                target: Some(uri()),
+                tooltip: Some("t".to_string()),
+                data: Some(json!({ "line": 1, "character": 5 })),
+            }
+        }
+
+        fn color_information(&self) -> ColorInformation {
+            ColorInformation {
+                range: self.range(),
+                color: Color {
+                    red: 0.25,
+                    green: 0.5,
+                    blue: 0.75,
+                    alpha: 1.0,
+                },
+            }
+        }
+
+        #[expect(
+            deprecated,
+            reason = "DocumentSymbol.deprecated field is required by LSP spec"
+        )]
+        fn document_symbol(
+            &self,
+            name: &str,
+            children: Option<Vec<DocumentSymbol>>,
+        ) -> DocumentSymbol {
+            DocumentSymbol {
+                name: name.to_string(),
+                detail: Some("d".to_string()),
+                kind: SymbolKind::FIELD,
+                tags: Some(vec![SymbolTag::DEPRECATED]),
+                deprecated: Some(true),
+                range: self.range(),
+                selection_range: self.range(),
+                children,
+            }
+        }
+
+        /// `A` with the children `B` (which has the child `C`) and `D`.
+        fn symbol_tree(&self) -> DocumentSymbol {
+            let c = self.document_symbol("C", None);
+            let b = self.document_symbol("B", Some(vec![c]));
+            let d = self.document_symbol("D", None);
+            self.document_symbol("A", Some(vec![b, d]))
         }
 
         fn code_action_params(&self) -> CodeActionParams {
@@ -1262,6 +1455,371 @@ mod tests {
     }
 
     #[test]
+    fn every_position_of_document_links_and_colors_is_converted() {
+        let positions = Positions(Cell::new(0));
+
+        assert_every_position_converted(
+            &vec![positions.document_link(), positions.document_link()],
+            4,
+            ClientPositions::to_client,
+            ClientPositions::to_internal,
+            PositionConverter::to_client,
+        );
+        assert_every_position_converted(
+            &vec![positions.color_information(), positions.color_information()],
+            4,
+            ClientPositions::to_client,
+            ClientPositions::to_internal,
+            PositionConverter::to_client,
+        );
+    }
+
+    #[test]
+    fn the_other_fields_of_a_link_and_a_color_stay() {
+        let positions = Positions(Cell::new(0));
+        let link = positions.document_link();
+        let color = positions.color_information();
+
+        let client_link = link.clone().to_client(&converter());
+        let client_color = color.clone().to_client(&converter());
+
+        assert_eq!(client_link.target, link.target);
+        assert_eq!(client_link.tooltip, link.tooltip);
+        assert_eq!(client_link.data, link.data);
+        assert_eq!(client_color.color, color.color);
+    }
+
+    #[test]
+    fn a_range_across_two_lines_converts_each_end_with_its_own_line() {
+        let range = Range::new(at(0, 2), at(1, 2));
+
+        let first_line = PositionConverter::new(&format!("a\n{ASTRAL}{ASTRAL}"));
+        let second_line = PositionConverter::new(&format!("{ASTRAL}{ASTRAL}\na"));
+
+        assert_eq!(range.to_client(&first_line), Range::new(at(0, 2), at(1, 4)));
+        assert_eq!(
+            range.to_client(&second_line),
+            Range::new(at(0, 4), at(1, 2))
+        );
+    }
+
+    #[test]
+    fn every_position_of_a_symbol_tree_is_converted() {
+        let positions = Positions(Cell::new(0));
+
+        assert_every_position_converted(
+            &vec![positions.symbol_tree(), positions.symbol_tree()],
+            32,
+            ClientPositions::to_client,
+            ClientPositions::to_internal,
+            PositionConverter::to_client,
+        );
+    }
+
+    #[test]
+    #[expect(
+        deprecated,
+        reason = "DocumentSymbol.deprecated field is required by LSP spec"
+    )]
+    fn the_other_fields_of_a_symbol_stay() {
+        let tree = Positions(Cell::new(0)).symbol_tree();
+
+        let client = tree.clone().to_client(&converter());
+
+        assert_eq!(client.name, tree.name);
+        assert_eq!(client.detail, tree.detail);
+        assert_eq!(client.kind, tree.kind);
+        assert_eq!(client.tags, Some(vec![SymbolTag::DEPRECATED]));
+        assert_eq!(client.deprecated, Some(true));
+    }
+
+    #[test]
+    fn children_none_stays_none_and_an_empty_list_stays_an_empty_list() {
+        let positions = Positions(Cell::new(0));
+        let none = positions.document_symbol("a", None);
+        let empty = positions.document_symbol("b", Some(Vec::new()));
+
+        assert_eq!(none.to_client(&converter()).children, None);
+        assert_eq!(empty.to_client(&converter()).children, Some(Vec::new()));
+    }
+
+    /// The names of a tree in depth-first order.
+    fn names_of(symbols: &[DocumentSymbol]) -> Vec<String> {
+        let mut names = Vec::new();
+        let mut pending: Vec<&DocumentSymbol> = symbols.iter().rev().collect();
+        while let Some(symbol) = pending.pop() {
+            names.push(symbol.name.clone());
+            pending.extend(symbol.children.iter().flatten().rev());
+        }
+        names
+    }
+
+    #[test]
+    fn siblings_keep_their_order_at_every_level() {
+        let tree = vec![Positions(Cell::new(0)).symbol_tree()];
+
+        let client = tree.clone().to_client(&converter());
+
+        assert_eq!(names_of(&client), ["A", "B", "C", "D"]);
+        assert_eq!(names_of(&client), names_of(&tree));
+    }
+
+    /// A tree of `depth` levels with three children each, whose ranges lie on
+    /// lines 0 to 2, converted by a recursive walk of the test's own as the
+    /// oracle for the walk of the implementation.
+    #[expect(
+        deprecated,
+        reason = "DocumentSymbol.deprecated field is required by LSP spec"
+    )]
+    fn varied_tree(depth: u32, seed: u32) -> DocumentSymbol {
+        let range = Range::new(at(seed % 3, seed % 5), at((seed + 1) % 3, (seed * 7) % 11));
+        DocumentSymbol {
+            name: format!("s{seed}"),
+            detail: None,
+            kind: SymbolKind::FIELD,
+            tags: None,
+            deprecated: None,
+            range,
+            selection_range: Range::new(range.start, range.start),
+            children: (depth > 0).then(|| {
+                (0..3)
+                    .map(|i| varied_tree(depth - 1, seed * 3 + i + 1))
+                    .collect()
+            }),
+        }
+    }
+
+    fn converted_recursively(
+        symbol: DocumentSymbol,
+        converter: &PositionConverter,
+    ) -> DocumentSymbol {
+        DocumentSymbol {
+            range: symbol.range.to_client(converter),
+            selection_range: symbol.selection_range.to_client(converter),
+            children: symbol.children.map(|children| {
+                children
+                    .into_iter()
+                    .map(|child| converted_recursively(child, converter))
+                    .collect()
+            }),
+            ..symbol
+        }
+    }
+
+    #[test]
+    fn a_symbol_tree_converts_like_a_plain_recursive_walk() {
+        let converter = PositionConverter::new(&format!(
+            "{ASTRAL}a{ASTRAL}\nb{ASTRAL}{ASTRAL}c\n{ASTRAL}{ASTRAL}{ASTRAL}{ASTRAL}{ASTRAL}{ASTRAL}{ASTRAL}{ASTRAL}{ASTRAL}{ASTRAL}{ASTRAL}{ASTRAL}"
+        ));
+        let tree = varied_tree(4, 1);
+
+        let client = tree.clone().to_client(&converter);
+
+        assert_eq!(client, converted_recursively(tree.clone(), &converter));
+        assert_ne!(client, tree);
+        assert_eq!(client.to_internal(&converter), tree);
+    }
+
+    /// A chain of `levels` symbols, each the only child of the one above,
+    /// built from the inside out so that the test itself does not recurse.
+    #[expect(
+        deprecated,
+        reason = "DocumentSymbol.deprecated field is required by LSP spec"
+    )]
+    fn symbol_chain(levels: usize) -> DocumentSymbol {
+        (0..levels)
+            .fold(None, |inner: Option<DocumentSymbol>, _| {
+                Some(DocumentSymbol {
+                    name: "s".to_string(),
+                    detail: None,
+                    kind: SymbolKind::FIELD,
+                    tags: None,
+                    deprecated: None,
+                    range: Range::new(at(0, 2), at(0, 4)),
+                    selection_range: Range::new(at(0, 2), at(0, 2)),
+                    children: inner.map(|inner| vec![inner]),
+                })
+            })
+            .expect("at least one level")
+    }
+
+    /// The ranges of a chain from the outermost symbol in, taking the chain
+    /// apart on the way: dropping a deep tree would recurse.
+    fn take_ranges_of(mut symbol: DocumentSymbol) -> Vec<(Range, Range)> {
+        let mut ranges = vec![(symbol.range, symbol.selection_range)];
+        while let Some(child) = symbol.children.take().and_then(|mut c| c.pop()) {
+            ranges.push((child.range, child.selection_range));
+            symbol = child;
+        }
+        ranges
+    }
+
+    fn on_a_stack_of(kib: usize, work: impl FnOnce() + Send + 'static) {
+        std::thread::Builder::new()
+            .stack_size(kib * 1024)
+            .spawn(work)
+            .expect("a thread")
+            .join()
+            .expect("the work finished without a stack overflow or a panic");
+    }
+
+    #[test]
+    fn a_symbol_chain_as_deep_as_the_nesting_limit_converts_in_both_directions() {
+        let converter = converter();
+        let chain = symbol_chain(513);
+
+        let client = chain.clone().to_client(&converter);
+
+        let ranges = take_ranges_of(client.clone());
+        assert_eq!(ranges.len(), 513);
+        assert!(ranges.iter().all(|&(range, selection)| {
+            range == Range::new(at(0, 4), at(0, 8)) && selection == Range::new(at(0, 4), at(0, 4))
+        }));
+        assert_eq!(
+            take_ranges_of(client.to_internal(&converter)),
+            take_ranges_of(chain)
+        );
+    }
+
+    #[test]
+    fn a_symbol_chain_of_thousands_of_levels_converts_on_a_small_stack() {
+        on_a_stack_of(128, || {
+            let converter = converter();
+            let client = symbol_chain(5_000).to_client(&converter);
+
+            let ranges = take_ranges_of(client);
+
+            assert_eq!(ranges.len(), 5_000);
+            assert!(
+                ranges
+                    .iter()
+                    .all(|&(range, _)| range == Range::new(at(0, 4), at(0, 8)))
+            );
+        });
+    }
+
+    fn folding(start: (u32, Option<u32>), end: (u32, Option<u32>)) -> FoldingRange {
+        FoldingRange {
+            start_line: start.0,
+            start_character: start.1,
+            end_line: end.0,
+            end_character: end.1,
+            kind: Some(FoldingRangeKind::Region),
+            collapsed_text: Some("c".to_string()),
+        }
+    }
+
+    #[test]
+    fn a_folding_range_converts_each_column_with_the_line_of_its_own_end() {
+        let first_line = PositionConverter::new(&format!("{ASTRAL}{ASTRAL}\nabc"));
+        let second_line = PositionConverter::new(&format!("abc\n{ASTRAL}{ASTRAL}"));
+        let range = folding((0, Some(2)), (1, Some(2)));
+
+        assert_eq!(
+            range.clone().to_client(&first_line),
+            folding((0, Some(4)), (1, Some(2)))
+        );
+        assert_eq!(
+            range.to_client(&second_line),
+            folding((0, Some(2)), (1, Some(4)))
+        );
+    }
+
+    #[rstest]
+    #[case::none_and_none((0, None), (1, None))]
+    #[case::start_only((0, Some(2)), (1, None))]
+    #[case::end_only((0, None), (1, Some(2)))]
+    fn an_absent_column_of_a_folding_range_stays_absent(
+        #[case] start: (u32, Option<u32>),
+        #[case] end: (u32, Option<u32>),
+    ) {
+        let client = folding(start, end).to_client(&converter());
+
+        assert_eq!(client.start_character.is_some(), start.1.is_some());
+        assert_eq!(client.end_character.is_some(), end.1.is_some());
+        assert_eq!((client.start_line, client.end_line), (start.0, end.0));
+        assert_eq!(client.kind, Some(FoldingRangeKind::Region));
+        assert_eq!(client.collapsed_text.as_deref(), Some("c"));
+    }
+
+    #[test]
+    fn the_columns_of_a_folding_range_round_trip_and_keep_the_maximum() {
+        let converter = converter();
+        let range = folding((0, Some(4)), (0, Some(u32::MAX)));
+
+        let client = range.to_client(&converter);
+
+        assert_eq!(client, folding((0, Some(8)), (0, Some(u32::MAX))));
+        assert_eq!(client.to_internal(&converter).start_character, Some(4));
+    }
+
+    #[test]
+    fn a_token_converts_its_start_and_its_length() {
+        // Characters 0 to 199 of line 0 are astral: column c is at 2c.
+        let token = |start, length| AbsoluteToken {
+            line: 0,
+            start,
+            length,
+            token_type: 3,
+            token_modifiers_bitset: 1,
+        };
+
+        assert_eq!(
+            token(2, 3).to_client(&converter()),
+            AbsoluteToken {
+                start: 4,
+                length: 6,
+                ..token(2, 3)
+            }
+        );
+        assert_eq!(token(2, 0).to_client(&converter()).length, 0);
+    }
+
+    #[rstest]
+    #[case::before_the_character("k: \u{1f600}", (0, 0, 1), (0, 1))]
+    #[case::at_the_character("k: \u{1f600}", (0, 3, 1), (3, 2))]
+    #[case::after_the_character("\u{1f600}k", (0, 1, 1), (2, 1))]
+    #[case::ending_right_after_the_character("a\u{1f600}b", (0, 0, 2), (0, 3))]
+    #[case::around_the_character("a\u{1f600}b", (0, 0, 3), (0, 4))]
+    #[case::on_a_line_without_the_character("\u{1f600}\nabc", (1, 0, 3), (0, 3))]
+    fn a_token_counts_the_units_of_the_client(
+        #[case] document: &str,
+        #[case] (line, start, length): (u32, u32, u32),
+        #[case] (client_start, client_length): (u32, u32),
+    ) {
+        let token = AbsoluteToken {
+            line,
+            start,
+            length,
+            token_type: 0,
+            token_modifiers_bitset: 0,
+        };
+
+        let client = token.to_client(&PositionConverter::new(document));
+
+        assert_eq!(
+            (client.line, client.start, client.length),
+            (line, client_start, client_length)
+        );
+    }
+
+    #[test]
+    fn a_token_near_the_maximum_column_does_not_overflow() {
+        let token = AbsoluteToken {
+            line: 0,
+            start: u32::MAX - 1,
+            length: 5,
+            token_type: 0,
+            token_modifiers_bitset: 0,
+        };
+
+        let client = token.to_client(&converter());
+
+        assert_eq!(client.start, u32::MAX);
+        assert_eq!(client.length, 0);
+    }
+
+    #[test]
     fn opaque_data_and_commands_are_left_alone() {
         let action = Positions(Cell::new(0)).code_action(false);
 
@@ -1292,5 +1850,12 @@ mod tests {
         assert_eq!(none.to_client(&converter()), None);
         assert_eq!(None::<SelectionRange>.to_client(&converter()), None);
         assert_eq!(Vec::<TextEdit>::new().to_client(&converter()), vec![]);
+        assert_eq!(Vec::<DocumentSymbol>::new().to_client(&converter()), vec![]);
+        assert_eq!(Vec::<DocumentLink>::new().to_client(&converter()), vec![]);
+        assert_eq!(
+            Vec::<ColorInformation>::new().to_client(&converter()),
+            vec![]
+        );
+        assert_eq!(Vec::<FoldingRange>::new().to_client(&converter()), vec![]);
     }
 }

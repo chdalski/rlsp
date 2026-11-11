@@ -651,6 +651,47 @@ fn selection_ranges_of_256_levels_with_astral_characters_are_in_client_positions
     });
 }
 
+/// The raw text of the document symbols, which has to stay text for the same
+/// reason as the selection ranges.
+async fn document_symbol_text(text: &str) -> String {
+    let service = &mut open(text, URI).await;
+    let response = send(service, document_symbol_request(2, URI))
+        .await
+        .expect("documentSymbol should return a response");
+    assert!(response.is_ok(), "{response:?}");
+    response.result().expect("a result").to_string()
+}
+
+/// The boundary trait walks the `children` of an answer as deep as the
+/// document, in client positions: the document with an astral character before
+/// each key is answered like the document with two one-unit characters there.
+#[test]
+fn document_symbols_of_256_levels_with_astral_characters_are_in_client_positions_on_2_mib() {
+    run_on_stack("symbols-client".to_string(), TWO_MIB, || async {
+        let levels = DEFAULT_LEVELS;
+        let astral = document_symbol_text(&marked_keys(levels, "\u{1f600}")).await;
+        let narrow = document_symbol_text(&marked_keys(levels, "xx")).await;
+
+        assert_eq!(astral.replace('\u{1f600}', "xx"), narrow);
+        assert!(
+            count(&astral, "\"children\":") >= levels - 1,
+            "{astral:.300}"
+        );
+        // The key of the deepest mapping, `{A}leaf: 1`, stands at the client
+        // columns 510 to 516, and its entry ends at 519; counted in code points
+        // they end at 515 and 518.
+        let line = levels - 1;
+        let selection = format!(
+            "\"selectionRange\":{{\"end\":{{\"character\":516,\"line\":{line}}},\"start\":{{\"character\":510,\"line\":{line}}}}}"
+        );
+        let range = format!(
+            "\"range\":{{\"end\":{{\"character\":519,\"line\":{line}}},\"start\":{{\"character\":510,\"line\":{line}}}}}"
+        );
+        assert!(astral.contains(&selection), "{astral:.300}");
+        assert!(astral.contains(&range), "{astral:.300}");
+    });
+}
+
 /// `levels` nested block mappings with `top: oops` in the mapping of
 /// `marker_level` (0-based), the one value the recursive schema rejects.
 fn marked(levels: usize, marker_level: usize) -> String {

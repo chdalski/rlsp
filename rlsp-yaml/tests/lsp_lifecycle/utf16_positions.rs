@@ -5,6 +5,15 @@
 //! "Position" and `PositionEncodingKind`; the default when the server names no
 //! encoding). Each case here holds a position the server sends or reads in
 //! UTF-16 code units.
+//!
+//! Every document handler that reads or answers a position has a case here:
+//! hover, completion, definition, references, folding ranges, document links,
+//! selection ranges, code actions, formatting, range formatting, on-type
+//! formatting, semantic tokens, document symbols, prepare rename, rename, and
+//! document colors. Code lens and color presentation read no document: the
+//! code lens answers the range (0,0), which is the same in both units, and
+//! color presentation reads and answers no position. `didChange` takes the
+//! whole text (full sync), so no change range comes in.
 use rlsp_yaml::server::Backend;
 use rstest::rstest;
 use serde_json::{Value, json};
@@ -13,8 +22,13 @@ use tower_lsp::LspService;
 use tower_lsp::lsp_types::PublishDiagnosticsParams;
 
 use super::code_actions::{code_action_request, code_action_request_at};
+use super::document_color::document_color_request;
 use super::document_links::document_link_request;
+use super::folding_ranges::folding_range_request;
+use super::formatting_integration::formatting_request_with_tab_size;
 use super::helpers::*;
+use super::navigation::document_symbol_request;
+use super::semantic_tokens::semantic_tokens_request;
 
 /// U+1F600: one code point, two UTF-16 code units.
 const ASTRAL: &str = "\u{1f600}";
@@ -898,4 +912,329 @@ async fn a_selection_request_with_many_positions_is_answered_one_entry_each_in_o
             assert_eq!(entry, &json!({ "range": range(position, position) }));
         }
     }
+}
+
+// ---- answers about the whole document ----
+
+const WHOLE_URI: &str = "file:///test/utf16-whole.yaml";
+
+/// The result of `request` from a server with `template` open, `{A}` replaced
+/// by an astral character; `null` when the server answers nothing.
+async fn whole_document_result(
+    template: &str,
+    request: impl FnOnce(&str) -> tower_lsp::jsonrpc::Request,
+) -> Value {
+    let mut service = open(&template.replace("{A}", ASTRAL), WHOLE_URI).await;
+    result_of(&mut service, request(WHOLE_URI)).await
+}
+
+fn tokens_of(result: &Value) -> Vec<u64> {
+    result["data"]
+        .as_array()
+        .expect("token data")
+        .iter()
+        .map(|number| number.as_u64().expect("a number"))
+        .collect()
+}
+
+// The semantic tokens are `[delta_line, delta_start, length, type, modifiers]`
+// per token, with the types PROPERTY 0, STRING 1, NUMBER 2, VARIABLE 4,
+// COMMENT 6, OPERATOR 7. In each document the columns after an astral
+// character, and the length of a token that holds one, count UTF-16 units.
+#[rstest]
+#[case::key_and_value("{A}: v\n", &[0, 0, 2, 0, 0, 0, 4, 1, 1, 0])]
+#[case::astral_character_inside_the_key("a{A}b: v\n", &[0, 0, 4, 0, 0, 0, 6, 1, 1, 0])]
+#[case::mixed_widths("\u{e9}{A}\u{65e5}: v\n", &[0, 0, 4, 0, 0, 0, 6, 1, 1, 0])]
+#[case::token_right_after_the_character("[{A},v]\n", &[0, 1, 2, 1, 0, 0, 3, 1, 1, 0])]
+#[case::comment_after_the_value(
+    "k: {A} # c\n",
+    &[0, 0, 1, 0, 0, 0, 3, 2, 1, 0, 0, 3, 3, 6, 0]
+)]
+#[case::character_in_the_comment("# {A}\n", &[0, 0, 4, 6, 0])]
+#[case::second_line_without_the_character(
+    "{A}: 1\nb: 2\n",
+    &[0, 0, 2, 0, 0, 0, 4, 1, 2, 0, 1, 0, 1, 0, 0, 0, 3, 1, 2, 0]
+)]
+#[case::two_characters("{A}: {A}\n", &[0, 0, 2, 0, 0, 0, 4, 2, 1, 0])]
+#[case::anchor_and_alias(
+    "[{A}, &a v, *a]\n",
+    &[0, 1, 2, 1, 0, 0, 4, 2, 4, 1, 0, 3, 1, 1, 0, 0, 3, 2, 4, 0]
+)]
+#[case::block_scalar_sigil("{A}: |", &[0, 0, 2, 0, 0, 0, 4, 1, 7, 0])]
+#[case::no_astral_character("name: Alice\nage: 30\n", &[0, 0, 4, 0, 0, 0, 6, 5, 1, 0, 1, 0, 3, 0, 0, 0, 5, 2, 2, 0])]
+#[tokio::test]
+async fn a_semantic_token_is_at_its_utf16_columns_with_its_utf16_length(
+    #[case] template: &str,
+    #[case] expected: &[u64],
+) {
+    let result = whole_document_result(template, |uri| semantic_tokens_request(2, uri)).await;
+
+    assert_eq!(tokens_of(&result), expected);
+}
+
+// Each document answers like the same document with two one-unit characters
+// where the astral characters stand: the client sees the same columns.
+const WHOLE_DOCUMENTS: &[&str] = &[
+    "{A}: 1\nb: 2\n",
+    "a: {A}\nb: &x {A}\nc: *x # {A}\n",
+    "a: b\n---\n{A}: c # {A}\n---\nd: red\n",
+    "{A}: 1\r\nk: https://example.com {A}\r\nc: red\r\n",
+    "{A}: 1\rk: https://example.com {A}\rc: red\r",
+    "\u{feff}{A}: red\nk: v\n",
+    "[b{A}, &a v, *a]\n",
+    "k: |\n  {A} see https://example.com {A}\n  red\n",
+    "k: \"{A}\n  red {A}\"\nz: 1\n",
+    "{A}: red\n---\n{A}: blue\n",
+    "k:\n  {A}: 1\n  b: 2\n",
+    "# {A}\n# {A}\nk: v\n",
+];
+
+#[rstest]
+#[tokio::test]
+async fn the_whole_document_answers_of_a_document_with_astral_characters_are_those_of_a_narrow_one(
+    #[values(
+        |uri: &str| semantic_tokens_request(2, uri),
+        |uri: &str| document_symbol_request(2, uri),
+        |uri: &str| folding_range_request(2, uri),
+        |uri: &str| document_link_request(2, uri),
+        |uri: &str| document_color_request(2, uri)
+    )]
+    request: fn(&str) -> tower_lsp::jsonrpc::Request,
+    #[values(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)] document: usize,
+) {
+    let template = WHOLE_DOCUMENTS[document];
+
+    let astral = whole_document_result(template, request).await;
+    let narrow = whole_document_result(&template.replace("{A}", "xx"), request).await;
+
+    // The names of the symbols hold the character.
+    assert_eq!(astral.to_string().replace(ASTRAL, "xx"), narrow.to_string());
+}
+
+// The sweep compares nothing when both answers are null: every document of it
+// has keys, so symbols and tokens must come back for the narrow one.
+#[rstest]
+#[tokio::test]
+async fn the_narrow_documents_of_the_sweep_have_symbols_and_tokens(
+    #[values(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)] document: usize,
+) {
+    let template = WHOLE_DOCUMENTS[document].replace("{A}", "xx");
+
+    let symbols = whole_document_result(&template, |uri| document_symbol_request(2, uri)).await;
+    let tokens = whole_document_result(&template, |uri| semantic_tokens_request(2, uri)).await;
+
+    assert!(
+        symbols
+            .as_array()
+            .is_some_and(|symbols| !symbols.is_empty()),
+        "{template:?}: {symbols}"
+    );
+    assert!(!tokens_of(&tokens).is_empty(), "{template:?}: {tokens}");
+}
+
+/// The ranges `(start, end)` of `selection` per symbol of a flat answer.
+fn symbol_ranges(result: &Value) -> Vec<(Value, Value)> {
+    result
+        .as_array()
+        .expect("symbols")
+        .iter()
+        .map(|symbol| (symbol["range"].clone(), symbol["selectionRange"].clone()))
+        .collect()
+}
+
+#[tokio::test]
+async fn document_symbols_are_at_their_utf16_columns() {
+    let result =
+        whole_document_result("{A}: 1\nb: 2\n", |uri| document_symbol_request(2, uri)).await;
+
+    assert_eq!(
+        symbol_ranges(&result),
+        vec![
+            (range((0, 0), (0, 5)), range((0, 0), (0, 2))),
+            (range((1, 0), (1, 4)), range((1, 0), (1, 1))),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn the_ranges_of_nested_symbols_are_converted_with_their_own_lines() {
+    let result = whole_document_result("k:\n  {A}: 1\n  b: 2\n", |uri| {
+        document_symbol_request(2, uri)
+    })
+    .await;
+
+    let parent = &result[0];
+    assert_eq!(parent["range"], range((0, 0), (3, 0)));
+    let children = symbol_ranges(&parent["children"]);
+    assert_eq!(
+        children,
+        vec![
+            (range((1, 2), (1, 7)), range((1, 2), (1, 4))),
+            (range((2, 2), (2, 6)), range((2, 2), (2, 3))),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn the_range_of_a_parent_ends_at_the_utf16_column_of_its_last_line() {
+    let result =
+        whole_document_result("k: [1, {A}]\n", |uri| document_symbol_request(2, uri)).await;
+
+    assert_eq!(result[0]["range"], range((0, 0), (0, 9)));
+    assert_eq!(
+        symbol_ranges(&result[0]["children"]),
+        vec![
+            (range((0, 4), (0, 5)), range((0, 4), (0, 5))),
+            (range((0, 7), (0, 9)), range((0, 7), (0, 9))),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_second_document_wraps_its_symbols_at_utf16_columns() {
+    let result =
+        whole_document_result("a: b\n---\n{A}: c\n", |uri| document_symbol_request(2, uri)).await;
+
+    let wrapper = &result[1];
+    assert_eq!(wrapper["name"], "Document 2");
+    assert_eq!(
+        wrapper["selectionRange"]["start"],
+        json!({"line": 2, "character": 0})
+    );
+    assert_eq!(
+        symbol_ranges(&wrapper["children"]),
+        vec![(range((2, 0), (2, 5)), range((2, 0), (2, 2)))]
+    );
+}
+
+#[tokio::test]
+async fn folding_ranges_carry_lines_and_no_columns() {
+    let result = whole_document_result("# {A}\n# {A}\nk:\n  {A}: 1\n  b: {A}\n", |uri| {
+        folding_range_request(2, uri)
+    })
+    .await;
+
+    let ranges = result.as_array().expect("folding ranges");
+    assert_eq!(ranges.len(), 3);
+    for range in ranges {
+        let keys: Vec<&String> = range.as_object().expect("an object").keys().collect();
+        assert!(
+            !keys.iter().any(|key| key.ends_with("Character")),
+            "{range}"
+        );
+    }
+}
+
+/// The start and the end of a range, as line and character pairs.
+type ColorRange = ((u32, u32), (u32, u32));
+
+#[rstest]
+#[case::plain("a: {A} red\n", &[((0, 6), (0, 9))])]
+#[case::double_quoted("a: \"{A} red\"\n", &[((0, 7), (0, 10))])]
+#[case::before_and_after("a: red {A} blue\n", &[((0, 3), (0, 6)), ((0, 10), (0, 14))])]
+#[case::quoted_value_after_the_key("{A}: '#ff0000'\n", &[((0, 5), (0, 12))])]
+#[case::continuation_line("a: x\n  {A} red\n", &[((1, 5), (1, 8))])]
+#[case::character_on_the_previous_line("a: {A}\n  red\n", &[((1, 2), (1, 5))])]
+#[case::block_scalar("a: |\n  {A} red\n", &[((1, 5), (1, 8))])]
+#[case::escape_and_character("a: \"{A}\\x20red\"\n", &[((0, 10), (0, 13))])]
+#[case::second_document("a: red\n---\n{A}: blue\n", &[((0, 3), (0, 6)), ((2, 4), (2, 8))])]
+#[case::crlf("a: {A}\r\nb: red\r\n", &[((1, 3), (1, 6))])]
+#[case::lone_cr("a: {A}\rb: red\r", &[((1, 3), (1, 6))])]
+#[tokio::test]
+async fn a_color_range_is_at_its_utf16_columns(
+    #[case] template: &str,
+    #[case] expected: &[ColorRange],
+) {
+    let result = whole_document_result(template, |uri| document_color_request(2, uri)).await;
+
+    let found: Vec<Value> = result
+        .as_array()
+        .expect("colors")
+        .iter()
+        .map(|color| color["range"].clone())
+        .collect();
+    let expected: Vec<Value> = expected
+        .iter()
+        .map(|&(start, end)| range(start, end))
+        .collect();
+    assert_eq!(found, expected);
+}
+
+#[tokio::test]
+async fn a_link_to_a_url_with_an_astral_character_ends_at_its_utf16_column() {
+    let found = link_ranges(&format!("k: https://example.com/{ASTRAL}\n")).await;
+
+    assert_eq!(found, vec![range((0, 3), (0, 25))]);
+}
+
+#[tokio::test]
+async fn an_include_link_after_an_astral_character_is_at_its_utf16_columns() {
+    let result = whole_document_result("{A}: !include foo.yaml\n", |uri| {
+        document_link_request(2, uri)
+    })
+    .await;
+
+    assert_eq!(
+        result,
+        json!([{
+            "range": range((0, 13), (0, 21)),
+            "target": "file:///test/foo.yaml",
+            "tooltip": "Open included file"
+        }])
+    );
+}
+
+#[tokio::test]
+async fn formatting_after_an_astral_character_ends_the_edit_in_utf16_units() {
+    let text = format!("k:  {ASTRAL}\nb:  2\n");
+    let mut service = open(&text, WHOLE_URI).await;
+
+    let result = result_of(
+        &mut service,
+        formatting_request_with_tab_size(2, WHOLE_URI, 2),
+    )
+    .await;
+
+    assert_eq!(
+        result[0]["range"]["end"],
+        json!({"line": 2, "character": 0})
+    );
+    assert_eq!(apply_edits(&text, &result), format!("k: {ASTRAL}\nb: 2\n"));
+}
+
+#[tokio::test]
+async fn the_tokens_and_colors_of_one_long_line_with_many_astral_characters_are_answered() {
+    tokio::time::timeout(std::time::Duration::from_secs(20), long_line_answers())
+        .await
+        .expect("the answers of one long line take linear time");
+}
+
+async fn long_line_answers() {
+    let entries = 20_000_usize;
+    let tokens_template = format!("[{}]\n", vec!["{A}a"; entries].join(","));
+    let colors_template = format!("[{}]\n", vec!["{A} red"; entries / 2].join(","));
+
+    let tokens =
+        whole_document_result(&tokens_template, |uri| semantic_tokens_request(2, uri)).await;
+    let colors =
+        whole_document_result(&colors_template, |uri| document_color_request(2, uri)).await;
+
+    let data = tokens_of(&tokens);
+    assert_eq!(data.len(), entries * 5);
+    // Every entry is `{A}a`, three units wide, after a comma: the last one
+    // starts three units after the one before it plus the comma.
+    assert_eq!(
+        data.get((entries - 1) * 5..).expect("the last token"),
+        [0, 4, 3, 1, 0]
+    );
+    let colors = colors.as_array().expect("colors");
+    assert_eq!(colors.len(), entries / 2);
+    // An entry `{A} red` is six units wide, with a comma seven, and the color
+    // is the last three units of it.
+    let last = colors.last().expect("a color");
+    let entry_start = u32::try_from(1 + 7 * (entries / 2 - 1)).expect("fits");
+    assert_eq!(
+        last["range"],
+        range((0, entry_start + 3), (0, entry_start + 6))
+    );
 }

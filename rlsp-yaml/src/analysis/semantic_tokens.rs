@@ -38,22 +38,33 @@ pub fn legend() -> SemanticTokensLegend {
     }
 }
 
-/// A token with absolute position, before delta encoding.
-struct RawToken {
-    line: u32,
-    start: u32,
-    length: u32,
-    token_type: u32,
-    token_modifiers_bitset: u32,
+/// A token with its absolute position, before delta encoding.
+///
+/// `start` and `length` count code points, as the positions of all features
+/// do; the handler converts them to the client's columns, then calls
+/// [`encode_deltas`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AbsoluteToken {
+    /// The 0-based line of the token; a token never spans lines.
+    pub line: u32,
+    /// The 0-based column where the token starts.
+    pub start: u32,
+    /// The number of columns the token spans.
+    pub length: u32,
+    /// The index into the token types of [`legend`].
+    pub token_type: u32,
+    /// The bit set over the token modifiers of [`legend`].
+    pub token_modifiers_bitset: u32,
 }
 
-/// Produces semantic tokens for syntax highlighting from the YAML AST.
+/// Produces the semantic tokens for syntax highlighting from the YAML AST,
+/// sorted by line and start.
 ///
 /// `text` is retained solely for `Event::Comment` extraction via
 /// `rlsp_yaml_parser::parse_events` — all structural tokens come from `docs`.
 #[must_use]
-pub fn semantic_tokens(docs: &[Document<Span>], text: &str) -> Vec<SemanticToken> {
-    let mut raw: Vec<RawToken> = Vec::new();
+pub fn absolute_tokens(docs: &[Document<Span>], text: &str) -> Vec<AbsoluteToken> {
+    let mut raw: Vec<AbsoluteToken> = Vec::new();
 
     for doc in docs {
         let idx = doc.line_index();
@@ -65,19 +76,25 @@ pub fn semantic_tokens(docs: &[Document<Span>], text: &str) -> Vec<SemanticToken
     // Sort by (line, start) so delta encoding is correct regardless of the
     // order in which tokens were collected.
     raw.sort_by_key(|t| (t.line, t.start));
+    raw
+}
 
-    // Delta-encode.
-    let mut tokens = Vec::with_capacity(raw.len());
+/// Delta-encodes tokens that are sorted by line and start, in the columns they
+/// carry: `delta_start` is relative to the start of the previous token on the
+/// same line, and to column 0 on a new line.
+#[must_use]
+pub fn encode_deltas(tokens: Vec<AbsoluteToken>) -> Vec<SemanticToken> {
+    let mut encoded = Vec::with_capacity(tokens.len());
     let mut prev_line = 0u32;
     let mut prev_start = 0u32;
-    for rt in raw {
-        let delta_line = rt.line - prev_line;
+    for rt in tokens {
+        let delta_line = rt.line.saturating_sub(prev_line);
         let delta_start = if delta_line == 0 {
-            rt.start - prev_start
+            rt.start.saturating_sub(prev_start)
         } else {
             rt.start
         };
-        tokens.push(SemanticToken {
+        encoded.push(SemanticToken {
             delta_line,
             delta_start,
             length: rt.length,
@@ -87,7 +104,7 @@ pub fn semantic_tokens(docs: &[Document<Span>], text: &str) -> Vec<SemanticToken
         prev_line = rt.line;
         prev_start = rt.start;
     }
-    tokens
+    encoded
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -95,7 +112,7 @@ pub fn semantic_tokens(docs: &[Document<Span>], text: &str) -> Vec<SemanticToken
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Recursively walk a node and collect tokens for all token kinds except comments.
-fn collect_node_tokens(node: &Node<Span>, out: &mut Vec<RawToken>, idx: &LineIndex) {
+fn collect_node_tokens(node: &Node<Span>, out: &mut Vec<AbsoluteToken>, idx: &LineIndex) {
     // Emit anchor token if present (all node kinds except Alias carry anchor_loc).
     if let Some(span) = node.anchor_loc() {
         out.push(span_to_raw(span, TOKEN_VARIABLE, MOD_DECLARATION, idx));
@@ -149,7 +166,7 @@ fn collect_node_tokens(node: &Node<Span>, out: &mut Vec<RawToken>, idx: &LineInd
 }
 
 /// Collect comment tokens from `Event::Comment` events in the event stream.
-fn collect_comment_tokens(yaml: &str, out: &mut Vec<RawToken>) {
+fn collect_comment_tokens(yaml: &str, out: &mut Vec<AbsoluteToken>) {
     let idx = LineIndex::new(yaml);
     for result in rlsp_yaml_parser::parse_events(yaml) {
         if let Ok((Event::Comment { .. }, span)) = result {
@@ -158,20 +175,20 @@ fn collect_comment_tokens(yaml: &str, out: &mut Vec<RawToken>) {
     }
 }
 
-/// Convert an AST `Span` to a `RawToken`.
+/// Convert an AST `Span` to an `AbsoluteToken`.
 ///
-/// AST positions: line is 1-based, column is 0-based codepoints.
-/// LSP positions: line is 0-based, column is 0-based codepoints.
+/// AST positions: line is 1-based, column is 0-based code points.
+/// Token positions: line is 0-based, column is 0-based code points.
 fn span_to_raw(
     span: Span,
     token_type: u32,
     token_modifiers_bitset: u32,
     idx: &LineIndex,
-) -> RawToken {
+) -> AbsoluteToken {
     let (start_line, start_col) = idx.line_column(span.start);
     let (_, end_col) = idx.line_column(span.end);
     let length = end_col.saturating_sub(start_col);
-    RawToken {
+    AbsoluteToken {
         line: start_line.saturating_sub(1),
         start: start_col,
         length,
@@ -180,14 +197,14 @@ fn span_to_raw(
     }
 }
 
-/// Classifies a scalar node's value and returns a `RawToken`, or `None` if
+/// Classifies a scalar node's value and returns an `AbsoluteToken`, or `None` if
 /// the scalar should produce no token (empty value).
 fn classify_scalar_node(
     value: &str,
     style: rlsp_yaml_parser::ScalarStyle,
     loc: Span,
     idx: &LineIndex,
-) -> Option<RawToken> {
+) -> Option<AbsoluteToken> {
     let (start_line, start_col) = idx.line_column(loc.start);
     let (end_line, end_col) = idx.line_column(loc.end);
     let length = end_col.saturating_sub(start_col);
@@ -200,7 +217,7 @@ fn classify_scalar_node(
     // Block scalar indicators.
     match style {
         ScalarStyle::Literal(_) | ScalarStyle::Folded(_) => {
-            return Some(RawToken {
+            return Some(AbsoluteToken {
                 line,
                 start: start_col,
                 length: 1, // only the `|` or `>` sigil
@@ -220,7 +237,7 @@ fn classify_scalar_node(
     // Quoted strings.
     match style {
         ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted => {
-            return Some(RawToken {
+            return Some(AbsoluteToken {
                 line,
                 start: start_col,
                 length,
@@ -243,7 +260,7 @@ fn classify_scalar_node(
         lower.as_str(),
         "true" | "false" | "yes" | "no" | "on" | "off" | "null" | "~"
     ) {
-        return Some(RawToken {
+        return Some(AbsoluteToken {
             line,
             start: start_col,
             length,
@@ -254,7 +271,7 @@ fn classify_scalar_node(
 
     // Numbers.
     if is_number(trimmed) {
-        return Some(RawToken {
+        return Some(AbsoluteToken {
             line,
             start: start_col,
             length,
@@ -264,7 +281,7 @@ fn classify_scalar_node(
     }
 
     // Fallback: unquoted scalar → STRING.
-    Some(RawToken {
+    Some(AbsoluteToken {
         line,
         start: start_col,
         length,
@@ -322,22 +339,14 @@ mod tests {
     use super::*;
     use crate::test_utils::parse_docs;
 
-    /// Decode delta-encoded tokens into `(abs_line, abs_start, length, token_type, modifiers)`.
-    fn absolute(tokens: &[SemanticToken]) -> Vec<(u32, u32, u32, u32, u32)> {
-        let mut line = 0u32;
-        let mut start = 0u32;
+    /// The tokens as `(abs_line, abs_start, length, token_type, modifiers)`.
+    fn absolute(tokens: Vec<AbsoluteToken>) -> Vec<(u32, u32, u32, u32, u32)> {
         tokens
-            .iter()
+            .into_iter()
             .map(|t| {
-                line += t.delta_line;
-                start = if t.delta_line == 0 {
-                    start + t.delta_start
-                } else {
-                    t.delta_start
-                };
                 (
-                    line,
-                    start,
+                    t.line,
+                    t.start,
                     t.length,
                     t.token_type,
                     t.token_modifiers_bitset,
@@ -358,13 +367,13 @@ mod tests {
 
     #[test]
     fn empty_document_produces_no_tokens() {
-        assert!(semantic_tokens(&parse_docs(""), "").is_empty());
+        assert!(absolute_tokens(&parse_docs(""), "").is_empty());
     }
 
     #[test]
     fn comment_line_produces_comment_token() {
         let text = "# comment";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         let comments: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_COMMENT).collect();
         assert_eq!(comments.len(), 1);
         assert_eq!(comments[0].0, 0); // line 0
@@ -374,7 +383,7 @@ mod tests {
     #[test]
     fn comment_line_with_indent_starts_at_hash() {
         let text = "  # indented comment";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         let comments: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_COMMENT).collect();
         assert_eq!(comments.len(), 1);
         assert_eq!(comments[0].1, 2); // col 2
@@ -383,7 +392,7 @@ mod tests {
     #[test]
     fn mapping_key_produces_property_token() {
         let text = "name: value";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         let keys: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_PROPERTY).collect();
         assert_eq!(keys.len(), 1);
         assert_eq!(keys[0].0, 0); // line 0
@@ -394,7 +403,7 @@ mod tests {
     #[test]
     fn string_value_produces_string_token() {
         let text = "key: hello";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         let strings: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_STRING).collect();
         assert!(!strings.is_empty());
         assert_eq!(strings[0].2, 5); // len("hello")
@@ -403,14 +412,14 @@ mod tests {
     #[test]
     fn quoted_string_value_produces_string_token() {
         let text = r#"key: "quoted""#;
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         assert!(abs.iter().any(|t| t.3 == TOKEN_STRING));
     }
 
     #[test]
     fn integer_value_produces_number_token() {
         let text = "count: 42";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         let nums: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_NUMBER).collect();
         assert_eq!(nums.len(), 1);
         assert_eq!(nums[0].2, 2); // len("42")
@@ -419,7 +428,7 @@ mod tests {
     #[test]
     fn float_value_produces_number_token() {
         let text = "pi: 3.14";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         let nums: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_NUMBER).collect();
         assert_eq!(nums.len(), 1);
         assert_eq!(nums[0].2, 4); // len("3.14")
@@ -435,14 +444,14 @@ mod tests {
     #[case::on_keyword("flag: on")]
     #[case::off_keyword("flag: off")]
     fn produces_keyword_token(#[case] input: &str) {
-        let abs = absolute(&semantic_tokens(&parse_docs(input), input));
+        let abs = absolute(absolute_tokens(&parse_docs(input), input));
         assert!(abs.iter().any(|t| t.3 == TOKEN_KEYWORD));
     }
 
     #[test]
     fn anchor_produces_variable_with_declaration_modifier() {
         let text = "base: &anchor value";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         assert!(
             abs.iter()
                 .any(|t| t.3 == TOKEN_VARIABLE && t.4 == MOD_DECLARATION)
@@ -452,14 +461,14 @@ mod tests {
     #[test]
     fn alias_produces_variable_without_modifier() {
         let text = "a: &x val\nb: *x\n";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         assert!(abs.iter().any(|t| t.3 == TOKEN_VARIABLE && t.4 == 0));
     }
 
     #[test]
     fn tag_produces_type_token() {
         let text = "value: !include file.yaml";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         assert!(abs.iter().any(|t| t.3 == TOKEN_TYPE));
     }
 
@@ -471,14 +480,14 @@ mod tests {
     #[case::pipe_plus("text: |+")]
     #[case::gt_plus("text: >+")]
     fn block_scalar_produces_operator_token(#[case] input: &str) {
-        let abs = absolute(&semantic_tokens(&parse_docs(input), input));
+        let abs = absolute(absolute_tokens(&parse_docs(input), input));
         assert!(abs.iter().any(|t| t.3 == TOKEN_OPERATOR));
     }
 
     #[test]
-    fn delta_encoding_correct_for_multi_line_document() {
+    fn keys_of_a_multi_line_document_are_at_their_lines() {
         let text = "a: 1\nb: 2\n";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         let keys: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_PROPERTY).collect();
         assert!(keys.iter().any(|k| k.0 == 0 && k.1 == 0)); // "a" line 0 col 0
         assert!(keys.iter().any(|k| k.0 == 1 && k.1 == 0)); // "b" line 1 col 0
@@ -487,17 +496,17 @@ mod tests {
     #[test]
     fn delta_line_is_zero_for_tokens_on_same_line() {
         let text = "key: value";
-        let tokens = semantic_tokens(&parse_docs(text), text);
+        let tokens = encode_deltas(absolute_tokens(&parse_docs(text), text));
         for t in tokens.iter().skip(1) {
             assert_eq!(t.delta_line, 0);
         }
     }
 
     #[test]
-    fn delta_start_is_relative_to_previous_token_on_same_line() {
+    fn tokens_of_one_line_are_at_their_start_columns() {
         // "key: value" — property at col 0 (len 3), string at col 5 (len 5).
         let text = "key: value";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         let prop = abs.iter().find(|t| t.3 == TOKEN_PROPERTY).unwrap();
         let str_tok = abs.iter().find(|t| t.3 == TOKEN_STRING).unwrap();
         assert_eq!(prop.1, 0);
@@ -512,7 +521,7 @@ mod tests {
         // A bare "-" with no value should produce no scalar token.
         // The parser emits an empty scalar for the bare "-" item.
         let text = "items:\n  -\n";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         // Only "items" key token expected; no STRING/NUMBER/KEYWORD for bare "-"
         let non_property: Vec<_> = abs.iter().filter(|t| t.3 != TOKEN_PROPERTY).collect();
         assert!(
@@ -525,7 +534,7 @@ mod tests {
     #[test]
     fn negative_integer_produces_number_token() {
         let text = "temp: -42";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         let nums: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_NUMBER).collect();
         assert_eq!(nums.len(), 1);
         assert_eq!(nums[0].2, 3); // len("-42")
@@ -535,7 +544,7 @@ mod tests {
     #[test]
     fn scientific_notation_produces_number_token() {
         let text = "val: 1.5e10";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         assert_eq!(abs.iter().filter(|t| t.3 == TOKEN_NUMBER).count(), 1);
     }
 
@@ -543,7 +552,7 @@ mod tests {
     #[test]
     fn negative_float_produces_number_token() {
         let text = "val: -3.14";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         let nums: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_NUMBER).collect();
         assert_eq!(nums.len(), 1);
         assert_eq!(nums[0].2, 5); // len("-3.14")
@@ -553,7 +562,7 @@ mod tests {
     #[test]
     fn sequence_item_string_value_produces_string_token() {
         let text = "- hello";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         let strings: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_STRING).collect();
         assert_eq!(strings.len(), 1);
         assert_eq!(strings[0].2, 5); // len("hello")
@@ -563,7 +572,7 @@ mod tests {
     #[test]
     fn sequence_item_number_value_produces_number_token() {
         let text = "- 42";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         assert_eq!(abs.iter().filter(|t| t.3 == TOKEN_NUMBER).count(), 1);
     }
 
@@ -571,7 +580,7 @@ mod tests {
     #[test]
     fn sequence_item_keyword_value_produces_keyword_token() {
         let text = "- true";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         assert!(abs.iter().any(|t| t.3 == TOKEN_KEYWORD));
     }
 
@@ -579,7 +588,7 @@ mod tests {
     #[test]
     fn tag_on_value_side_of_mapping_produces_type_token() {
         let text = "key: !str hello";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         assert!(
             abs.iter().any(|t| t.3 == TOKEN_TYPE),
             "tag on value side should produce type token"
@@ -590,7 +599,7 @@ mod tests {
     #[test]
     fn anchor_on_sequence_item_produces_variable_with_declaration() {
         let text = "- &myanchor value";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         assert!(
             abs.iter()
                 .any(|t| t.3 == TOKEN_VARIABLE && t.4 == MOD_DECLARATION),
@@ -603,18 +612,18 @@ mod tests {
     fn inline_comment_stops_marker_scan() {
         // "&anchor" after "#" should NOT be treated as an anchor token
         let text = "key: value # &notananchor";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         assert!(
             abs.iter().all(|t| t.3 != TOKEN_VARIABLE),
             "marker inside comment should not produce variable token"
         );
     }
 
-    // delta_line is correct when crossing multiple lines
+    // a blank line between two tokens keeps their line numbers
     #[test]
-    fn delta_line_correct_across_multiple_lines() {
+    fn tokens_after_a_blank_line_are_at_their_lines() {
         let text = "a: 1\n\nb: 2\n";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         let keys: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_PROPERTY).collect();
         assert!(keys.iter().any(|k| k.0 == 0)); // "a" on line 0
         assert!(keys.iter().any(|k| k.0 == 2)); // "b" on line 2 (blank line skipped)
@@ -634,7 +643,7 @@ mod tests {
         #[case] expected_len: u32,
     ) {
         let docs = parse_docs(text);
-        let abs = absolute(&semantic_tokens(&docs, text));
+        let abs = absolute(absolute_tokens(&docs, text));
         let keys: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_PROPERTY).collect();
         assert!(!keys.is_empty(), "expected at least one property token");
         let key = keys[0];
@@ -648,7 +657,7 @@ mod tests {
     #[case::anchor_before_value("base: &anchor value\n")]
     fn anchor_token_position_matches_anchor_loc_not_scalar_loc(#[case] text: &str) {
         let docs = parse_docs(text);
-        let abs = absolute(&semantic_tokens(&docs, text));
+        let abs = absolute(absolute_tokens(&docs, text));
         let idx = docs[0].line_index();
 
         let anchor_tokens: Vec<_> = abs
@@ -696,7 +705,7 @@ mod tests {
     #[case::alias_reference("a: &x val\nb: *x\n")]
     fn alias_token_position_matches_alias_loc(#[case] text: &str) {
         let docs = parse_docs(text);
-        let abs = absolute(&semantic_tokens(&docs, text));
+        let abs = absolute(absolute_tokens(&docs, text));
         let idx = docs[0].line_index();
 
         let alias_tokens: Vec<_> = abs
@@ -746,7 +755,7 @@ mod tests {
         #[case] expected_len: u32,
     ) {
         let docs = parse_docs(text);
-        let abs = absolute(&semantic_tokens(&docs, text));
+        let abs = absolute(absolute_tokens(&docs, text));
         let idx = LineIndex::new(text);
 
         let comment_tok = abs
@@ -809,7 +818,7 @@ mod tests {
         #[case] expected_len: u32,
     ) {
         let docs = parse_docs(text);
-        let abs = absolute(&semantic_tokens(&docs, text));
+        let abs = absolute(absolute_tokens(&docs, text));
         let comments: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_COMMENT).collect();
         assert_eq!(
             comments.iter().map(|t| (t.0, t.1, t.2)).collect::<Vec<_>>(),
@@ -833,7 +842,7 @@ mod tests {
         #[case] expected_string_tokens: usize,
     ) {
         let docs = parse_docs(text);
-        let abs = absolute(&semantic_tokens(&docs, text));
+        let abs = absolute(absolute_tokens(&docs, text));
         let strings = abs.iter().filter(|t| t.3 == TOKEN_STRING).count();
         assert_eq!(strings, expected_string_tokens, "tokens: {abs:?}");
     }
@@ -934,7 +943,7 @@ mod tests {
         #[case] expected: &[(u32, u32, u32, u32, u32)],
     ) {
         let docs = parse_docs(text);
-        let abs = absolute(&semantic_tokens(&docs, text));
+        let abs = absolute(absolute_tokens(&docs, text));
         assert_eq!(abs, expected, "input: {text:?}");
     }
 
@@ -951,7 +960,7 @@ mod tests {
     #[case::multi_line_double_quoted("a: \"x\n  y\" # c\n")]
     fn no_token_overlaps_a_comment_token(#[case] text: &str) {
         let docs = parse_docs(text);
-        let abs = absolute(&semantic_tokens(&docs, text));
+        let abs = absolute(absolute_tokens(&docs, text));
         let comment = abs
             .iter()
             .find(|t| t.3 == TOKEN_COMMENT)
@@ -969,7 +978,7 @@ mod tests {
     #[case::int_tag("n: !!int 42\n")]
     fn tagged_scalar_tag_token_at_tag_loc_not_scalar_loc(#[case] text: &str) {
         let docs = parse_docs(text);
-        let abs = absolute(&semantic_tokens(&docs, text));
+        let abs = absolute(absolute_tokens(&docs, text));
         let idx = docs[0].line_index();
 
         let Node::Mapping { entries, .. } = &docs[0].root else {
@@ -1023,7 +1032,7 @@ mod tests {
     #[test]
     fn anchor_on_mapping_node_produces_anchor_token() {
         let text = "&m\na: 1\n";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         let anchor_tokens: Vec<_> = abs
             .iter()
             .filter(|t| t.3 == TOKEN_VARIABLE && t.4 == MOD_DECLARATION)
@@ -1044,7 +1053,7 @@ mod tests {
     #[test]
     fn anchor_on_sequence_node_produces_anchor_token() {
         let text = "items: &seq\n  - one\n";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         assert!(
             abs.iter()
                 .any(|t| t.3 == TOKEN_VARIABLE && t.4 == MOD_DECLARATION),
@@ -1055,7 +1064,7 @@ mod tests {
     #[test]
     fn tag_on_mapping_node_produces_tag_token() {
         let text = "!!map\na: 1\n";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         let type_tokens: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_TYPE).collect();
         assert!(
             !type_tokens.is_empty(),
@@ -1071,7 +1080,7 @@ mod tests {
     #[test]
     fn nested_mapping_keys_all_produce_property_tokens() {
         let text = "outer:\n  inner: value\n";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         let keys: Vec<_> = abs.iter().filter(|t| t.3 == TOKEN_PROPERTY).collect();
         assert_eq!(keys.len(), 2, "expected 2 property tokens, got: {keys:?}");
         assert!(
@@ -1087,7 +1096,7 @@ mod tests {
     #[test]
     fn indented_comment_position_from_event_span() {
         let text = "  # indented\n";
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         let comment_tok = abs
             .iter()
             .find(|t| t.3 == TOKEN_COMMENT)
@@ -1101,7 +1110,7 @@ mod tests {
     fn multiple_tokens_on_same_document_sorted_by_position() {
         let text = "key: &anchor value\n";
         let docs = parse_docs(text);
-        let abs = absolute(&semantic_tokens(&docs, text));
+        let abs = absolute(absolute_tokens(&docs, text));
         assert!(!abs.is_empty(), "expected tokens");
         for window in abs.windows(2) {
             let a = window[0];
@@ -1117,10 +1126,10 @@ mod tests {
 
     // LSP-4: multibyte key — token length is codepoint count, not byte count
     #[test]
-    fn semantic_tokens_multibyte_key_delta_correct() {
+    fn semantic_tokens_multibyte_key_length_is_code_points() {
         let text = "日本語: val\n";
         let docs = parse_docs(text);
-        let abs = absolute(&semantic_tokens(&docs, text));
+        let abs = absolute(absolute_tokens(&docs, text));
         // The key "日本語" must produce a property token on line 0, col 0.
         let key_tok = abs
             .iter()
@@ -1140,7 +1149,7 @@ mod tests {
     #[case::continuation_of_inline_start("a: v\n    wxyz\n")]
     #[case::flow_sequence_item("[a\n  b\n]\n")]
     fn multiline_plain_value_produces_no_value_token(#[case] text: &str) {
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         assert!(
             !abs.iter()
                 .any(|t| matches!(t.3, TOKEN_STRING | TOKEN_NUMBER | TOKEN_KEYWORD)),
@@ -1155,7 +1164,7 @@ mod tests {
         #[case] text: &str,
         #[case] expected_value_token: u32,
     ) {
-        let abs = absolute(&semantic_tokens(&parse_docs(text), text));
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
         assert!(
             !abs.iter().any(|t| t.3 == TOKEN_PROPERTY),
             "unexpected key token: {abs:?}"
@@ -1165,5 +1174,72 @@ mod tests {
             abs.iter().any(|t| t.3 == expected_value_token && t.0 == 1),
             "missing value token: {abs:?}"
         );
+    }
+
+    // ---- code-point columns ----
+
+    #[test]
+    fn a_token_after_an_astral_character_counts_code_points() {
+        let text = "\u{1f600}: v\n";
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
+        assert_eq!(
+            abs,
+            vec![(0, 0, 1, TOKEN_PROPERTY, 0), (0, 3, 1, TOKEN_STRING, 0)]
+        );
+    }
+
+    #[test]
+    fn a_comment_with_an_astral_character_counts_it_once() {
+        let text = "# \u{1f600}\n";
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
+        assert_eq!(abs, vec![(0, 0, 3, TOKEN_COMMENT, 0)]);
+    }
+
+    // ---- delta encoding ----
+
+    fn token(line: u32, start: u32, length: u32) -> AbsoluteToken {
+        AbsoluteToken {
+            line,
+            start,
+            length,
+            token_type: TOKEN_STRING,
+            token_modifiers_bitset: MOD_DECLARATION,
+        }
+    }
+
+    #[rstest]
+    #[case::none(vec![], vec![])]
+    #[case::first_token_on_the_first_line(vec![token(0, 5, 2)], vec![(0, 5, 2)])]
+    #[case::first_token_on_a_later_line(vec![token(3, 4, 2)], vec![(3, 4, 2)])]
+    #[case::same_line_is_relative_to_the_previous_start(
+        vec![token(0, 1, 2), token(0, 4, 1)],
+        vec![(0, 1, 2), (0, 3, 1)]
+    )]
+    #[case::a_new_line_restarts_at_column_zero(
+        vec![token(0, 6, 1), token(1, 2, 1)],
+        vec![(0, 6, 1), (1, 2, 1)]
+    )]
+    #[case::skipped_lines(vec![token(0, 1, 1), token(3, 1, 1)], vec![(0, 1, 1), (3, 1, 1)])]
+    #[case::same_start(vec![token(0, 2, 1), token(0, 2, 3)], vec![(0, 2, 1), (0, 0, 3)])]
+    fn deltas_are_relative_to_the_previous_start(
+        #[case] tokens: Vec<AbsoluteToken>,
+        #[case] expected: Vec<(u32, u32, u32)>,
+    ) {
+        let encoded: Vec<_> = encode_deltas(tokens)
+            .into_iter()
+            .map(|t| {
+                assert_eq!(t.token_type, TOKEN_STRING);
+                assert_eq!(t.token_modifiers_bitset, MOD_DECLARATION);
+                (t.delta_line, t.delta_start, t.length)
+            })
+            .collect();
+        assert_eq!(encoded, expected);
+    }
+
+    #[test]
+    fn tokens_out_of_order_do_not_panic_when_encoded() {
+        let encoded = encode_deltas(vec![token(2, 5, 1), token(1, 3, 1), token(1, 1, 1)]);
+
+        assert_eq!(encoded.len(), 3);
     }
 }

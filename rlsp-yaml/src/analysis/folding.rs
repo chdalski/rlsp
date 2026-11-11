@@ -381,6 +381,26 @@ mod tests {
         );
     }
 
+    // The handler converts the columns of a range to the client's, and a range
+    // without columns stays one: folds are whole lines.
+    #[rstest]
+    #[case::astral_in_a_comment_run("# \u{1f600}\n# \u{1f600}\nk: v\n")]
+    #[case::astral_in_a_nested_mapping("k:\n  \u{1f600}: 1\n  b: 2\n")]
+    #[case::several_documents("a:\n  b: 1\n---\nc:\n  d: \u{1f600}\n")]
+    fn folding_ranges_carry_no_columns(#[case] text: &str) {
+        let docs = load_docs(text);
+
+        let result = folding_ranges(&docs, text);
+
+        assert!(!result.is_empty());
+        assert!(
+            result
+                .iter()
+                .all(|r| r.start_character.is_none() && r.end_character.is_none()),
+            "{result:?}"
+        );
+    }
+
     #[rstest]
     #[case::top_level_mapping_matches_ast_loc(
         "server:\n  host: localhost\n  port: 8080\n",

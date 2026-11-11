@@ -928,9 +928,11 @@ mod tests {
     #[case::double_quoted_blank_line("a: \"x\n\n  red\"\n", &[(2, 2, 5, "red")])]
     #[case::single_quoted_over_lines("a: 'x\n  red\n  blue'\n", &[(1, 2, 5, "red"), (2, 2, 6, "blue")])]
     // Multibyte characters count as one column each: the features count columns
-    // in code points (`LineIndex`).
+    // in code points (`LineIndex`), and the handler converts them for the client.
     #[case::cyrillic_key("ключ: red\n", &[(0, 6, 9, "red")])]
     #[case::astral_character_before("a: \"😀 red\"\n", &[(0, 6, 9, "red")])]
+    #[case::astral_character_before_in_a_block("a: |\n  😀 red\n", &[(1, 4, 7, "red")])]
+    #[case::astral_character_and_an_escape_before("a: \"😀\\x20red\"\n", &[(0, 9, 12, "red")])]
     // Line breaks
     #[case::crlf_block("a: |\r\n  red\r\n  blue\r\n", &[(1, 2, 5, "red"), (2, 2, 6, "blue")])]
     #[case::crlf_plain("a: x\r\n  red\r\n  blue\r\n", &[(1, 2, 5, "red"), (2, 2, 6, "blue")])]

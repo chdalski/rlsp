@@ -80,12 +80,15 @@ fn collect_node_links(
 
             // URL detection in scalar value.
             let is_multiline = matches!(style, ScalarStyle::Literal(_) | ScalarStyle::Folded(_));
-            // quote_char_len: opening quote character count in the source before `value` bytes.
-            // For single/double-quoted scalars the first source byte is the quote character.
-            let quote_utf16 = match style {
+            // The opening quote of a quoted scalar is one column of the source
+            // line before `value`.
+            let quote_columns = match style {
                 ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted => 1u32,
                 ScalarStyle::Plain | ScalarStyle::Literal(_) | ScalarStyle::Folded(_) => 0u32,
             };
+            // The matches come in ascending order: count the characters
+            // between them once, not from the start of `value` for each.
+            let mut counted = CountedPrefix::default();
 
             for mat in URL_REGEX.find_iter(value) {
                 let matched = trim_trailing_punctuation(mat.as_str());
@@ -99,29 +102,16 @@ fn collect_node_links(
                     // Multi-line scalar: fall back to the full node span.
                     span_to_range(*loc, idx)
                 } else {
-                    // Single-line scalar: compute the precise character range within the
-                    // source line. loc.start column is the codepoint column of the scalar's
+                    // Single-line scalar: compute the precise column range within the
+                    // source line. loc.start column is the column of the scalar's
                     // opening character (including the quote for quoted styles).
-                    let loc_start_col = idx.line_column(loc.start).1;
-                    let start_utf16 = u32::try_from(loc_start_col as usize).unwrap_or(u32::MAX)
-                        + quote_utf16
-                        + byte_to_utf16_offset(value, mat.start());
-                    let end_utf16 = u32::try_from(loc_start_col as usize).unwrap_or(u32::MAX)
-                        + quote_utf16
-                        + byte_to_utf16_offset(value, mat.start() + matched.len());
-                    let lsp_line =
-                        u32::try_from(idx.line_column(loc.start).0.saturating_sub(1) as usize)
-                            .unwrap_or(u32::MAX);
-                    Range {
-                        start: Position {
-                            line: lsp_line,
-                            character: start_utf16,
-                        },
-                        end: Position {
-                            line: lsp_line,
-                            character: end_utf16,
-                        },
-                    }
+                    let (start_line, loc_start_col) = idx.line_column(loc.start);
+                    let start = loc_start_col
+                        .saturating_add(quote_columns)
+                        .saturating_add(counted.chars_before(value, mat.start()));
+                    let end = start.saturating_add(count_chars(matched));
+                    let line = start_line.saturating_sub(1);
+                    Range::new(Position::new(line, start), Position::new(line, end))
                 };
                 out.push(DocumentLink {
                     range,
@@ -149,8 +139,7 @@ fn collect_node_links(
 /// Convert a `Span` to an LSP `Range`.
 ///
 /// `Pos::line` is 1-based; LSP lines are 0-based — hence `saturating_sub(1)`.
-/// `Pos::column` is 0-based codepoints; used directly as LSP character offset
-/// (same limitation as `schema_validation.rs:span_to_range`).
+/// `Pos::column` is 0-based code points, as the columns of all features are.
 fn span_to_range(loc: Span, idx: &LineIndex) -> Range {
     Range {
         start: Position {
@@ -193,11 +182,30 @@ fn trim_trailing_punctuation(s: &str) -> &str {
     s.trim_end_matches(['.', ',', ';', ':', '!', '?'])
 }
 
-/// Convert a byte offset to a UTF-16 code unit offset within `s[..byte_offset]`.
-///
-/// LSP uses UTF-16 code units for character positions.
-fn byte_to_utf16_offset(s: &str, byte_offset: usize) -> u32 {
-    u32::try_from(s[..byte_offset].chars().map(char::len_utf16).sum::<usize>()).unwrap_or(u32::MAX)
+/// The number of characters of `s`, saturating at `u32::MAX`.
+fn count_chars(s: &str) -> u32 {
+    u32::try_from(s.chars().count()).unwrap_or(u32::MAX)
+}
+
+/// The characters of a string before ascending byte offsets, counted
+/// incrementally: each call counts only the text since the previous one.
+#[derive(Default)]
+struct CountedPrefix {
+    byte: usize,
+    chars: u32,
+}
+
+impl CountedPrefix {
+    /// The number of characters in `s` before `byte_offset`, which must not be
+    /// smaller than that of the previous call and must lie on a character
+    /// boundary; otherwise it is the count up to the previous offset.
+    fn chars_before(&mut self, s: &str, byte_offset: usize) -> u32 {
+        if let Some(between) = s.get(self.byte..byte_offset) {
+            self.chars = self.chars.saturating_add(count_chars(between));
+            self.byte = byte_offset;
+        }
+        self.chars
+    }
 }
 
 #[cfg(test)]
@@ -590,36 +598,62 @@ mod tests {
         assert_eq!(tuples[0].3, "https://example.com/path%20with%20spaces");
     }
 
-    #[test]
-    fn should_handle_multibyte_utf8_before_url() {
-        let text = "説明: https://example.com\n";
+    // The features count columns in code points, whatever the width of the
+    // characters before the link; the handler converts them for the client.
+    #[rstest]
+    #[case::cjk_key("説明: https://example.com\n", &[(4, 23, "https://example.com/")])]
+    #[case::emoji_before("🔗 https://example.com\n", &[(2, 21, "https://example.com/")])]
+    #[case::mixed_multibyte(
+        "日本語: https://example.jp 説明\n",
+        &[(5, 23, "https://example.jp/")]
+    )]
+    #[case::astral_in_the_quoted_scalar(
+        "k: \"😀 https://example.com\"\n",
+        &[(6, 25, "https://example.com/")]
+    )]
+    #[case::astral_in_the_url(
+        "k: https://example.com/😀\n",
+        &[(3, 24, "https://example.com/%F0%9F%98%80")]
+    )]
+    #[case::two_links_after_an_astral_character(
+        "k: 😀 https://a.b/x https://c.d/y\n",
+        &[(5, 18, "https://a.b/x"), (19, 32, "https://c.d/y")]
+    )]
+    fn link_columns_count_code_points(#[case] text: &str, #[case] expected: &[(u32, u32, &str)]) {
         let result = find_document_links(&load_docs(text), None);
 
-        assert_eq!(result.len(), 1);
-        // UTF-16 offset calculation should handle multi-byte chars correctly
-        let tuples = links_as_tuples(&result);
-        assert_eq!(tuples[0].3, "https://example.com/");
+        let found = links_as_tuples(&result);
+        let expected: Vec<_> = expected
+            .iter()
+            .map(|&(start, end, target)| (0, start, end, target.to_string()))
+            .collect();
+        assert_eq!(found, expected);
     }
 
     #[test]
-    fn should_handle_emoji_before_url() {
-        let text = "🔗 https://example.com\n";
-        let result = find_document_links(&load_docs(text), None);
+    fn an_include_after_an_astral_character_ranges_over_its_code_points() {
+        let base = Url::parse("file:///dir/doc.yaml").unwrap();
+
+        let result = find_document_links(&load_docs("😀: !include foo.yaml\n"), Some(&base));
 
         assert_eq!(result.len(), 1);
-        let tuples = links_as_tuples(&result);
-        // Emoji takes 2 UTF-16 code units
-        assert_eq!(tuples[0].1, 3, "start position after emoji and space");
+        assert_eq!(
+            result[0].range,
+            Range::new(Position::new(0, 12), Position::new(0, 20))
+        );
     }
 
-    #[test]
-    fn should_handle_mixed_multibyte_chars_and_urls() {
-        let text = "日本語: https://example.jp 説明\n";
-        let result = find_document_links(&load_docs(text), None);
+    #[rstest]
+    #[timeout(std::time::Duration::from_secs(5))]
+    fn the_links_of_a_long_scalar_are_found_in_linear_time() {
+        let text = format!("k: \"{}\"\n", "\u{1f600} http://a.b ".repeat(20_000));
 
-        assert_eq!(result.len(), 1);
-        let tuples = links_as_tuples(&result);
-        assert_eq!(tuples[0].3, "https://example.jp/");
+        let result = find_document_links(&load_docs(&text), None);
+
+        assert_eq!(result.len(), 20_000);
+        // 4 columns for `k: "`, then 13 characters per round (an emoji, a
+        // space, the 10-character URL, a space) and 2 into the last round.
+        assert_eq!(result[19_999].range.start.character, 4 + 19_999 * 13 + 2);
     }
 
     #[test]

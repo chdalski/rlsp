@@ -9,7 +9,7 @@
 mod fixtures;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use rlsp_yaml::analysis::semantic_tokens::semantic_tokens;
+use rlsp_yaml::analysis::semantic_tokens::{absolute_tokens, encode_deltas};
 use rlsp_yaml::completion::complete_at;
 use rlsp_yaml::document_store::DocumentStore;
 use rlsp_yaml_parser::node::Document;
@@ -64,7 +64,7 @@ fn bench_semantic_tokens(c: &mut Criterion) {
     for (name, text) in &sizes {
         group.bench_with_input(BenchmarkId::from_parameter(name), text, |b, text| {
             let docs = rlsp_yaml_parser::load(text).expect("bench fixture must parse");
-            b.iter(|| semantic_tokens(&docs, text));
+            b.iter(|| encode_deltas(absolute_tokens(&docs, text)));
         });
     }
     group.finish();

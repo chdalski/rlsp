@@ -99,6 +99,7 @@ keywords.
 - Use `#[expect(lint, reason = "...")]` instead of `#[allow(lint)]` — enforced by `allow_attributes = "deny"` and `allow_attributes_without_reason = "deny"` in workspace lints
 - `clippy.toml` at the workspace root configures test-specific lint allowances (`allow-unwrap-in-tests`, `allow-expect-in-tests`, `allow-panic-in-tests`, `allow-indexing-slicing-in-tests = true`) — `unwrap_used`, `expect_used`, `panic`, and `indexing_slicing` do not need `#[expect]` suppression in test code
 - Every commit that changes a file under `rlsp-yaml/integrations/claude-code/` must also bump `plugin.json`'s `version` in the same commit — see Claude Code Plugin Versioning below
+- Features in `rlsp-yaml/` count columns in code points; the handlers in `src/server.rs` convert every position they read or answer to and from the client's UTF-16 columns through `src/position_encoding.rs`, and no other file in `src/` counts UTF-16 units
 
 ### Claude Code Plugin Versioning
 

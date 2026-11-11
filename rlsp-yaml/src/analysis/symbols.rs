@@ -654,20 +654,20 @@ mod tests {
     // New rstest regression cases (UT-NEW-A through UT-NEW-D)
     // -----------------------------------------------------------------------
 
-    // UT-NEW-A: UTF-8 key selection_range covers the full key (codepoint-accurate)
-    #[test]
-    fn utf8_key_selection_range_covers_full_key() {
-        let text = "名前: Alice\n";
+    // The selection range covers the key span only, in code points: not in
+    // bytes, and not in the UTF-16 units the handler converts them to.
+    #[rstest]
+    #[case::two_cjk_characters("名前: Alice\n", 2)]
+    #[case::three_cjk_characters("日本語: val\n", 3)]
+    #[case::astral_character("\u{1f600}k: v\n", 2)]
+    fn selection_range_of_a_multibyte_key_counts_code_points(#[case] text: &str, #[case] end: u32) {
         let docs = parse_docs(text);
         let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
 
         assert_eq!(symbols.len(), 1, "should have exactly 1 symbol");
         let sym = &symbols[0];
         assert_eq!(sym.selection_range.start.character, 0);
-        assert_eq!(
-            sym.selection_range.end.character, 2,
-            "selection_range.end.character should be 2 codepoints (名前 = 2 chars)"
-        );
+        assert_eq!(sym.selection_range.end.character, end);
     }
 
     // UT-NEW-B: Deeply nested mapping satisfies range-enclosure invariant at every level
@@ -825,28 +825,6 @@ mod tests {
             sym.kind,
             SymbolKind::NULL,
             "!!null tag must produce NULL symbol kind regardless of value content"
-        );
-    }
-
-    // LSP-2: multibyte key — character offsets are codepoint-based, not byte-based
-    //
-    // selection_range covers the key span only ("日本語"), so end.character
-    // must be 3 (codepoints) rather than 9 (bytes) or any byte-based count.
-    #[test]
-    fn symbols_multibyte_key_lsp_character_correct() {
-        let text = "日本語: val\n";
-        let docs = parse_docs(text);
-        let symbols = document_symbols(docs.as_deref().unwrap_or(&[]));
-        let sym = find_symbol(&symbols, "日本語").expect("should have '日本語' symbol");
-        assert_eq!(
-            sym.selection_range.start.character, 0,
-            "selection_range start.character should be 0, got {}",
-            sym.selection_range.start.character
-        );
-        assert_eq!(
-            sym.selection_range.end.character, 3,
-            "selection_range end.character should be 3 (codepoints), not 9 (bytes), got {}",
-            sym.selection_range.end.character
         );
     }
 
