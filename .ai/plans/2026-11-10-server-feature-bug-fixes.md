@@ -59,7 +59,7 @@ bugs found in the same code are each fixed where they arise.
 - [x] Task 13: Colors and document links read a scalar's source text through one reader
 - [x] Task 14: A document link covers the source text of its URL
 - [x] Task 15: Every block scalar value gets the token of its indicator
-- [ ] Task 16: A block scalar key gets the token of its indicator
+- [x] Task 16: A block scalar key gets the token of its indicator
 - [ ] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
@@ -366,18 +366,18 @@ indicator. A block scalar key spans lines, so it gets no token, and `? |` at the
 a property token for its indicator. The key branch emits the operator token of Task 15 for a block
 scalar key; other keys keep today's rule.
 
-- [ ] A block scalar key gains the operator token of its indicator, and every other token stays as it
+- [x] A block scalar key gains the operator token of its indicator, and every other token stays as it
       is today: (0,2,1,operator) for `? |\n  k\n: v\n`, `? >-\n  k\n: v\n`, `? |\n  k\n`,
       `? |\n: v\n`, and `? | # c\n  k\n: v\n`; (0,5,1,operator) for `? !t |\n  k\n: v\n` and
       `? &a |\n  k\n: v\n`; (0,8,1,operator) for `? &a !t >\n  k\n: v\n`; (1,4,1,operator) for
       `a:\n  ? |\n    k\n  : v\n`; (0,4,1,operator) for `- ? |\n    k\n  : v\n`
-- [ ] `? |\n  k\n: |\n  v\n` gets (0,2,1,operator) and (2,2,1,operator) and no other token
-- [ ] `? |` at the end of the text gets (0,2,1,operator) instead of its property token
-- [ ] Other keys keep their tokens: `? "a\n  b"\n: v\n`, `? a\n  b\n: v\n`, and `{"a\n b": v}\n` get
+- [x] `? |\n  k\n: |\n  v\n` gets (0,2,1,operator) and (2,2,1,operator) and no other token
+- [x] `? |` at the end of the text gets (0,2,1,operator) instead of its property token
+- [x] Other keys keep their tokens: `? "a\n  b"\n: v\n`, `? a\n  b\n: v\n`, and `{"a\n b": v}\n` get
       no key token; `? "ab"\n: v\n` gets (0,2,4,property) and `? ab\n: v\n` (0,2,2,property); every
       existing semantic-token test passes with its assertions unchanged, or, when new table rows
       cover it (see Decisions), is removed
-- [ ] Through the server, the semantic tokens of `? |\n  k\n: v\n` hold (0,2,1,operator)
+- [x] Through the server, the semantic tokens of `? |\n  k\n: v\n` hold (0,2,1,operator)
 
 ## Decisions
 

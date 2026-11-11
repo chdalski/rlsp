@@ -133,15 +133,12 @@ fn collect_node_tokens(node: &Node<Span>, out: &mut Vec<AbsoluteToken>, idx: &Li
         }
         Node::Mapping { entries, .. } => {
             for (key, value) in entries {
-                // For scalar keys: emit TOKEN_PROPERTY at key.loc (the key text span),
-                // plus any anchor/tag on the key. Do NOT emit a scalar content token
+                // For scalar keys: emit the key's own token (see `key_token`), plus
+                // any anchor/tag on the key. Do NOT emit a scalar content token
                 // (that would be double-classifying the key text as STRING).
                 // For non-scalar keys (complex keys): recurse normally.
-                if let Node::Scalar { loc, .. } = key {
-                    // A token cannot span lines: a multi-line flow key gets none.
-                    if idx.line_column(loc.start).0 == idx.line_column(loc.end).0 {
-                        out.push(span_to_raw(*loc, TOKEN_PROPERTY, 0, idx));
-                    }
+                if let Node::Scalar { loc, style, .. } = key {
+                    out.extend(key_token(*loc, *style, idx));
                     if let Some(span) = key.anchor_loc() {
                         out.push(span_to_raw(span, TOKEN_VARIABLE, MOD_DECLARATION, idx));
                     }
@@ -206,6 +203,20 @@ const fn block_indicator_token(line: u32, column: u32) -> AbsoluteToken {
         token_type: TOKEN_OPERATOR,
         token_modifiers_bitset: 0,
     }
+}
+
+/// The token of a scalar key's own text: the operator token of a block
+/// scalar's indicator, the property token of a key on one line, and none for a
+/// multi-line key, since a token cannot span lines.
+fn key_token(loc: Span, style: ScalarStyle, idx: &LineIndex) -> Option<AbsoluteToken> {
+    let (start_line, start_col) = idx.line_column(loc.start);
+    if matches!(style, ScalarStyle::Literal(_) | ScalarStyle::Folded(_)) {
+        return Some(block_indicator_token(
+            start_line.saturating_sub(1),
+            start_col,
+        ));
+    }
+    (start_line == idx.line_column(loc.end).0).then(|| span_to_raw(loc, TOKEN_PROPERTY, 0, idx))
 }
 
 /// Classifies a scalar node's value and returns an `AbsoluteToken`, or `None` if
@@ -632,6 +643,215 @@ mod tests {
     #[case::astral_key_before_the_sigil(
         "\u{1F600}: |\n x\n",
         &[(0, 0, 1, TOKEN_PROPERTY, 0), (0, 3, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::explicit_key_literal(
+        "? |\n  k\n: v\n",
+        &[
+            (0, 2, 1, TOKEN_OPERATOR, 0),
+            (2, 2, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::explicit_key_folded_strip(
+        "? >-\n  k\n: v\n",
+        &[
+            (0, 2, 1, TOKEN_OPERATOR, 0),
+            (2, 2, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::explicit_key_without_value(
+        "? |\n  k\n",
+        &[(0, 2, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::explicit_key_at_the_end_of_the_text(
+        "? |",
+        &[(0, 2, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::explicit_key_header_only_with_newline(
+        "? |\n",
+        &[(0, 2, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::explicit_key_empty_content(
+        "? |\n: v\n",
+        &[
+            (0, 2, 1, TOKEN_OPERATOR, 0),
+            (1, 2, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::explicit_key_comment_after_the_header(
+        "? | # c\n  k\n: v\n",
+        &[
+            (0, 2, 1, TOKEN_OPERATOR, 0),
+            (0, 4, 3, TOKEN_COMMENT, 0),
+            (2, 2, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::explicit_key_tag_before_the_sigil(
+        "? !t |\n  k\n: v\n",
+        &[
+            (0, 2, 2, TOKEN_TYPE, 0),
+            (0, 5, 1, TOKEN_OPERATOR, 0),
+            (2, 2, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::explicit_key_anchor_before_the_sigil(
+        "? &a |\n  k\n: v\n",
+        &[
+            (0, 2, 2, TOKEN_VARIABLE, MOD_DECLARATION),
+            (0, 5, 1, TOKEN_OPERATOR, 0),
+            (2, 2, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::explicit_key_anchor_and_tag_before_the_sigil(
+        "? &a !t >\n  k\n: v\n",
+        &[
+            (0, 2, 2, TOKEN_VARIABLE, MOD_DECLARATION),
+            (0, 5, 2, TOKEN_TYPE, 0),
+            (0, 8, 1, TOKEN_OPERATOR, 0),
+            (2, 2, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::explicit_key_long_tag_before_the_sigil(
+        "? !!str |\n  k\n: v\n",
+        &[
+            (0, 2, 5, TOKEN_TYPE, 0),
+            (0, 8, 1, TOKEN_OPERATOR, 0),
+            (2, 2, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::explicit_key_nested_in_a_mapping(
+        "a:\n  ? |\n    k\n  : v\n",
+        &[
+            (0, 0, 1, TOKEN_PROPERTY, 0),
+            (1, 4, 1, TOKEN_OPERATOR, 0),
+            (3, 4, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::explicit_key_in_a_sequence_item(
+        "- ? |\n    k\n  : v\n",
+        &[
+            (0, 4, 1, TOKEN_OPERATOR, 0),
+            (2, 4, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::explicit_key_and_block_value(
+        "? |\n  k\n: |\n  v\n",
+        &[
+            (0, 2, 1, TOKEN_OPERATOR, 0),
+            (2, 2, 1, TOKEN_OPERATOR, 0),
+        ],
+    )]
+    #[case::explicit_key_and_empty_block_value(
+        "? |\n  k\n: |\n",
+        &[
+            (0, 2, 1, TOKEN_OPERATOR, 0),
+            (2, 2, 1, TOKEN_OPERATOR, 0),
+        ],
+    )]
+    #[case::explicit_key_keep_indicator(
+        "? |+\n  k\n\n: v\n",
+        &[
+            (0, 2, 1, TOKEN_OPERATOR, 0),
+            (3, 2, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::explicit_key_indentation_indicator(
+        "? |2\n   k\n: v\n",
+        &[
+            (0, 2, 1, TOKEN_OPERATOR, 0),
+            (2, 2, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::explicit_key_folded_with_both_indicators(
+        "? >1-\n  k\n: v\n",
+        &[
+            (0, 2, 1, TOKEN_OPERATOR, 0),
+            (2, 2, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::explicit_key_crlf_line_endings(
+        "? |\r\n  k\r\n: v\r\n",
+        &[
+            (0, 2, 1, TOKEN_OPERATOR, 0),
+            (2, 2, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::explicit_key_lone_cr_line_endings(
+        "? | # c\r  k\r: v\r",
+        &[
+            (0, 2, 1, TOKEN_OPERATOR, 0),
+            (0, 4, 3, TOKEN_COMMENT, 0),
+            (2, 2, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::explicit_key_two_byte_anchor_before_the_sigil(
+        "? &é |\n  k\n: v\n",
+        &[
+            (0, 2, 2, TOKEN_VARIABLE, MOD_DECLARATION),
+            (0, 5, 1, TOKEN_OPERATOR, 0),
+            (2, 2, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::explicit_key_astral_anchor_before_the_sigil(
+        "? &😀 |\n  k\n: v\n",
+        &[
+            (0, 2, 2, TOKEN_VARIABLE, MOD_DECLARATION),
+            (0, 5, 1, TOKEN_OPERATOR, 0),
+            (2, 2, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::two_explicit_keys(
+        "? |\n  k\n? |\n  j\n: v\n",
+        &[
+            (0, 2, 1, TOKEN_OPERATOR, 0),
+            (2, 2, 1, TOKEN_OPERATOR, 0),
+            (4, 2, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::explicit_block_key_before_an_ordinary_key(
+        "? |\n  k\n: >\n  v\n? x\n: y\n",
+        &[
+            (0, 2, 1, TOKEN_OPERATOR, 0),
+            (2, 2, 1, TOKEN_OPERATOR, 0),
+            (4, 2, 1, TOKEN_PROPERTY, 0),
+            (5, 2, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::explicit_key_content_that_looks_like_a_comment(
+        "? |\n  # not a comment\n: v\n",
+        &[
+            (0, 2, 1, TOKEN_OPERATOR, 0),
+            (2, 2, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::explicit_key_with_multi_line_content(
+        "? |\n  a\n  b\n: v\n",
+        &[
+            (0, 2, 1, TOKEN_OPERATOR, 0),
+            (3, 2, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::explicit_key_after_a_document_start(
+        "---\n? |\n  k\n: v\n",
+        &[
+            (1, 2, 1, TOKEN_OPERATOR, 0),
+            (3, 2, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::explicit_key_in_a_tagged_mapping(
+        "!t\n? |\n  k\n: v\n",
+        &[
+            (0, 0, 2, TOKEN_TYPE, 0),
+            (1, 2, 1, TOKEN_OPERATOR, 0),
+            (3, 2, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::explicit_key_with_an_anchored_value(
+        "? |\n  k\n: &x v\n",
+        &[
+            (0, 2, 1, TOKEN_OPERATOR, 0),
+            (2, 2, 2, TOKEN_VARIABLE, MOD_DECLARATION),
+            (2, 5, 1, TOKEN_STRING, 0),
+        ],
     )]
     fn block_scalar_header_gets_exactly_one_operator_token_at_its_sigil(
         #[case] text: &str,
@@ -1315,22 +1535,50 @@ mod tests {
     }
 
     #[rstest]
-    #[case::plain_key("{a b\n  c: d}\n", TOKEN_STRING)]
-    #[case::double_quoted_key("{\"a\n  b\": 1}\n", TOKEN_NUMBER)]
-    fn multiline_flow_key_produces_no_key_token(
+    #[case::multi_line_double_quoted_explicit_key(
+        "? \"a\n  b\"\n: v\n",
+        &[(2, 2, 1, TOKEN_STRING, 0)],
+    )]
+    #[case::multi_line_plain_explicit_key(
+        "? a\n  b\n: v\n",
+        &[(2, 2, 1, TOKEN_STRING, 0)],
+    )]
+    #[case::multi_line_double_quoted_flow_key(
+        "{\"a\n b\": v}\n",
+        &[(1, 5, 1, TOKEN_STRING, 0)],
+    )]
+    #[case::multi_line_plain_flow_key(
+        "{a b\n  c: d}\n",
+        &[(1, 5, 1, TOKEN_STRING, 0)],
+    )]
+    #[case::multi_line_double_quoted_flow_key_with_number_value(
+        "{\"a\n  b\": 1}\n",
+        &[(1, 6, 1, TOKEN_NUMBER, 0)],
+    )]
+    #[case::double_quoted_explicit_key(
+        "? \"ab\"\n: v\n",
+        &[
+            (0, 2, 4, TOKEN_PROPERTY, 0),
+            (1, 2, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::plain_explicit_key(
+        "? ab\n: v\n",
+        &[
+            (0, 2, 2, TOKEN_PROPERTY, 0),
+            (1, 2, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::plain_explicit_key_ending_in_a_pipe(
+        "? 😀 |\n",
+        &[(0, 2, 3, TOKEN_PROPERTY, 0)],
+    )]
+    fn keys_that_are_not_block_scalars_keep_their_tokens(
         #[case] text: &str,
-        #[case] expected_value_token: u32,
+        #[case] expected: &[(u32, u32, u32, u32, u32)],
     ) {
         let abs = absolute(absolute_tokens(&parse_docs(text), text));
-        assert!(
-            !abs.iter().any(|t| t.3 == TOKEN_PROPERTY),
-            "unexpected key token: {abs:?}"
-        );
-        // The single-line value keeps its token.
-        assert!(
-            abs.iter().any(|t| t.3 == expected_value_token && t.0 == 1),
-            "missing value token: {abs:?}"
-        );
+        assert_eq!(abs, expected, "input: {text:?}");
     }
 
     // ---- code-point columns ----
