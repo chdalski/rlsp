@@ -697,13 +697,25 @@ pub fn range_formatting_request_with_tab_size(
     end_line: u32,
     tab_size: u32,
 ) -> Request {
+    range_formatting_request_at(id, uri, (start_line, 0), (end_line, 0), tab_size)
+}
+
+/// A range-formatting request for the range from `start` to `end`, each
+/// `(line, character)`.
+pub fn range_formatting_request_at(
+    id: i64,
+    uri: &str,
+    start: (u32, u32),
+    end: (u32, u32),
+    tab_size: u32,
+) -> Request {
     Request::build("textDocument/rangeFormatting")
         .id(id)
         .params(json!({
             "textDocument": { "uri": uri },
             "range": {
-                "start": { "line": start_line, "character": 0 },
-                "end": { "line": end_line, "character": 0 }
+                "start": { "line": start.0, "character": start.1 },
+                "end": { "line": end.0, "character": end.1 }
             },
             "options": { "tabSize": tab_size, "insertSpaces": true }
         }))

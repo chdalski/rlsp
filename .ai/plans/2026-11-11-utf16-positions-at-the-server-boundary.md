@@ -50,7 +50,7 @@ converted back, at the boundary in `server.rs`, while the features keep counting
 - [x] Task 1: Tests pin the answers the conversion keeps
 - [x] Task 2: Every document handler reads its document through one function
 - [x] Task 3: Published diagnostics and code actions use client positions
-- [ ] Task 4: Requests that take a position read and answer client positions
+- [x] Task 4: Requests that take a position read and answer client positions
 - [ ] Task 5: Whole-document responses use client positions
 - [ ] Push to `main` and confirm the full CI matrix is green
 
@@ -134,17 +134,17 @@ formatting, formatting, and range formatting convert the position or range they 
 positions they answer. Each handler converts both directions in this task, because selection ranges
 and on-type formatting answer with the client's own column. LSP 3.17 section "Position" applies.
 
-- [ ] Through the server, hover, completion, definition, references, prepare rename, rename,
+- [x] Through the server, hover, completion, definition, references, prepare rename, rename,
       selection ranges, and on-type formatting at a position after an astral character on its line
       answer for the node at that client position, and every range they answer is in client
       positions
-- [ ] Through the server, a selection-range request at a position without a range answers the empty
+- [x] Through the server, a selection-range request at a position without a range answers the empty
       range at the exact client position it was sent
-- [ ] Through the server, a range-formatting request whose range lies on lines with an astral
+- [x] Through the server, a range-formatting request whose range lies on lines with an astral
       character formats the same lines as before this task
-- [ ] The end of the full-format edit is computed in code points inside the server, and the server
+- [x] The end of the full-format edit is computed in code points inside the server, and the server
       tests of Task 1 for formatting pass unchanged
-- [ ] On its 2 MiB stack, `tests/lsp_lifecycle/stack_depth.rs` answers the selection-range request on
+- [x] On its 2 MiB stack, `tests/lsp_lifecycle/stack_depth.rs` answers the selection-range request on
       a deep document whose lines hold an astral character, with every range in client positions,
       since the boundary trait walks the nested parent ranges
 

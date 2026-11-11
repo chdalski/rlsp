@@ -36,14 +36,11 @@ fn lines_with_breaks(text: &str) -> Option<Vec<&str>> {
         .collect()
 }
 
-/// The LSP position of the end of `text`.
+/// The position of the end of `text`, an internal position: the column counts
+/// code points.
 ///
 /// After a line break, or in an empty text, that is column 0 of the line
-/// below the last. Otherwise it is the end of the last line, with the column
-/// in UTF-16 units, as the server negotiates no other `positionEncoding` and
-/// clients read columns that way. A column counted in code points would end
-/// the edit before the tail of a last line that holds a character outside
-/// the BMP.
+/// below the last. Otherwise it is the end of the last line.
 fn end_position(text: &str) -> Option<Position> {
     let (count, last_line) =
         source_lines(text).fold((0_usize, ""), |(count, _), line| (count + 1, line));
@@ -52,7 +49,7 @@ fn end_position(text: &str) -> Option<Position> {
     } else {
         Some(Position::new(
             u32::try_from(count - 1).ok()?,
-            u32::try_from(last_line.encode_utf16().count()).ok()?,
+            u32::try_from(last_line.chars().count()).ok()?,
         ))
     }
 }
@@ -358,8 +355,8 @@ mod tests {
         lines
     }
 
-    /// `document` with `edit` applied; a column past the end of a line stands
-    /// for that end.
+    /// `document` with `edit` applied, its columns counting code points; a
+    /// column past the end of a line stands for that end.
     fn apply(document: &str, edit: &TextEdit) -> String {
         let lines = split_after_breaks(document);
         let offset_of = |position: Position| -> usize {
@@ -368,15 +365,12 @@ mod tests {
                 return document.len();
             };
             let before: usize = lines[..line].iter().map(String::len).sum();
-            let mut units = 0;
-            let mut within = 0;
-            for ch in content.chars() {
-                if matches!(ch, '\r' | '\n') || units >= position.character as usize {
-                    break;
-                }
-                units += ch.len_utf16();
-                within += ch.len_utf8();
-            }
+            let within: usize = content
+                .chars()
+                .take(position.character as usize)
+                .take_while(|ch| !matches!(ch, '\r' | '\n'))
+                .map(char::len_utf8)
+                .sum();
             before + within
         };
         let start = offset_of(edit.range.start);
@@ -462,7 +456,7 @@ mod tests {
         "a: 1\nk: \u{1f600}\n",
         1,
         1,
-        Range::new(Position::new(1, 0), Position::new(1, 6)),
+        Range::new(Position::new(1, 0), Position::new(1, 5)),
         "k: \u{1f600}\n"
     )]
     #[case::open_last_line_after_a_lone_cr(
@@ -597,30 +591,17 @@ mod tests {
     #[case::crlf_terminated("a:  1\r\nb: 2\r\n", Position::new(2, 0))]
     #[case::lone_cr_terminated("a:  1\rb: 2\r", Position::new(2, 0))]
     #[case::empty_text("", Position::new(0, 0))]
+    #[case::unterminated("a:  1\nb: 2", Position::new(1, 4))]
+    #[case::unterminated_lone_cr("a:  1\rb: 2", Position::new(1, 4))]
+    #[case::unterminated_single_line("a:  1", Position::new(0, 5))]
+    #[case::multibyte_last_line("k:  é", Position::new(0, 5))]
+    #[case::astral_last_line_counts_one_code_point("k:  \u{1f600}", Position::new(0, 5))]
     fn full_format_edit_covers_the_whole_text(#[case] text: &str, #[case] end: Position) {
         let formatted = "x: 1\n";
 
         let edit = full_format_edit(text, formatted).expect("an edit");
 
         assert_eq!(edit.range, Range::new(Position::new(0, 0), end));
-        assert_eq!(apply(text, &edit), formatted);
-    }
-
-    #[rstest]
-    #[case::unterminated("a:  1\nb: 2", Position::new(1, 4))]
-    #[case::unterminated_lone_cr("a:  1\rb: 2", Position::new(1, 4))]
-    #[case::unterminated_single_line("a:  1", Position::new(0, 5))]
-    #[case::multibyte_last_line("k:  é", Position::new(0, 5))]
-    #[case::astral_last_line_counts_two_units("k:  \u{1f600}", Position::new(0, 6))]
-    fn full_format_edit_of_an_open_last_line_ends_at_its_utf16_length(
-        #[case] text: &str,
-        #[case] end: Position,
-    ) {
-        let formatted = "x: 1\n";
-
-        let edit = full_format_edit(text, formatted).expect("an edit");
-
-        assert_eq!(edit.range.end, end);
         assert_eq!(apply(text, &edit), formatted);
     }
 
@@ -743,6 +724,23 @@ mod tests {
                 last in prop_oneof![0_u32..8, Just(u32::MAX)],
             ) {
                 check(&text, &formatted, first, last)?;
+            }
+
+            /// The edit of the whole text ends where `LineIndex` puts the end
+            /// of the text, the way the features count code points.
+            #[test]
+            fn the_full_format_edit_ends_at_the_end_of_the_text_in_code_points(
+                text in "[ab\n\r\u{e9}\u{1f600}]{0,12}",
+            ) {
+                let edit = full_format_edit(&text, "x: 1\n");
+                prop_assume!(text != "x: 1\n");
+
+                let end = offset_to_lsp(
+                    u32::try_from(text.len()).expect("fits"),
+                    &LineIndex::new(&text),
+                );
+
+                prop_assert_eq!(edit.expect("an edit").range.end, end);
             }
 
             /// Widening a range that gets an edit keeps the edit.

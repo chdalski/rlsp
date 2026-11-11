@@ -13,7 +13,7 @@ pub fn check_i8_selection_no_panic(_path: &Path, text: &str) -> Result<(), Strin
     let result = catch_unwind(AssertUnwindSafe(|| selection_ranges(&docs, &[pos])))
         .map_err(|e| format!("panic in selection_ranges: {}", panic_message(&e)))?;
 
-    if let Some(sr) = result.first() {
+    if let Some(Some(sr)) = result.first() {
         let mut outermost = sr;
         while let Some(ref p) = outermost.parent {
             outermost = p;

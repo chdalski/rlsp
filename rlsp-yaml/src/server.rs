@@ -16,9 +16,9 @@ use tower_lsp::lsp_types::{
     DocumentOnTypeFormattingParams, DocumentRangeFormattingParams, DocumentSymbolParams,
     DocumentSymbolResponse, FileSystemWatcher, FoldingRange, FoldingRangeParams, GlobPattern,
     GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, InitializeParams,
-    InitializeResult, InitializedParams, Location, NumberOrString, OneOf, PrepareRenameResponse,
-    ReferenceParams, Registration, RenameOptions, RenameParams, SelectionRange,
-    SelectionRangeParams, SelectionRangeProviderCapability, SemanticTokens,
+    InitializeResult, InitializedParams, Location, NumberOrString, OneOf, Position,
+    PrepareRenameResponse, Range, ReferenceParams, Registration, RenameOptions, RenameParams,
+    SelectionRange, SelectionRangeParams, SelectionRangeProviderCapability, SemanticTokens,
     SemanticTokensFullOptions, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
     SemanticTokensServerCapabilities, ServerCapabilities, TextDocumentSyncCapability,
     TextDocumentSyncKind, TextEdit, Url, WatchKind, WorkDoneProgressOptions, WorkspaceEdit,
@@ -1203,11 +1203,13 @@ impl LanguageServer for Backend {
 
         let Some(OpenDocument {
             documents: Some(docs),
+            converter,
             ..
         }) = self.read_document(&uri, LoadedDocuments::Copy)
         else {
             return Ok(None);
         };
+        let position = position.to_internal(&converter);
 
         // Lock ordering: document_store → schema_associations → schema_cache
         let schema_url = self
@@ -1223,7 +1225,8 @@ impl LanguageServer for Backend {
                 .and_then(|cache| cache.get(&url).cloned())
         });
 
-        Ok(crate::hover::hover_at(&docs, position, schema.as_deref()))
+        Ok(crate::hover::hover_at(&docs, position, schema.as_deref())
+            .map(|hover| hover.to_client(&converter)))
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
@@ -1256,14 +1259,16 @@ impl LanguageServer for Backend {
 
         let items = crate::completion::complete_at(
             open.documents.as_deref().unwrap_or(&[]),
-            position,
+            position.to_internal(&open.converter),
             schema.as_deref(),
         );
         if items.is_empty() {
             return Ok(None);
         }
 
-        Ok(Some(CompletionResponse::Array(items)))
+        Ok(Some(CompletionResponse::Array(
+            items.to_client(&open.converter),
+        )))
     }
 
     async fn goto_definition(
@@ -1275,14 +1280,19 @@ impl LanguageServer for Backend {
 
         let Some(OpenDocument {
             documents: Some(docs),
+            converter,
             ..
         }) = self.read_document(&uri, LoadedDocuments::Copy)
         else {
             return Ok(None);
         };
 
-        let location = crate::navigation::references::goto_definition(&docs, &uri, position);
-        Ok(location.map(GotoDefinitionResponse::Scalar))
+        let location = crate::navigation::references::goto_definition(
+            &docs,
+            &uri,
+            position.to_internal(&converter),
+        );
+        Ok(location.map(|location| GotoDefinitionResponse::Scalar(location.to_client(&converter))))
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
@@ -1292,6 +1302,7 @@ impl LanguageServer for Backend {
 
         let Some(OpenDocument {
             documents: Some(docs),
+            converter,
             ..
         }) = self.read_document(&uri, LoadedDocuments::Copy)
         else {
@@ -1301,14 +1312,14 @@ impl LanguageServer for Backend {
         let locations = crate::navigation::references::find_references(
             &docs,
             &uri,
-            position,
+            position.to_internal(&converter),
             include_declaration,
         );
         if locations.is_empty() {
             return Ok(None);
         }
 
-        Ok(Some(locations))
+        Ok(Some(locations.to_client(&converter)))
     }
 
     async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
@@ -1360,14 +1371,34 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let result = crate::analysis::selection::selection_ranges(
+        let internal: Vec<Position> = params
+            .positions
+            .iter()
+            .map(|position| position.to_internal(&open.converter))
+            .collect();
+        let chains = crate::analysis::selection::selection_ranges(
             open.documents.as_deref().unwrap_or(&[]),
-            &params.positions,
+            &internal,
         );
-        if result.is_empty() {
+        if chains.is_empty() {
             return Ok(None);
         }
 
+        // A position without a node answers the empty range at the position
+        // the client sent, which may lie inside an astral character.
+        let result = chains
+            .into_iter()
+            .zip(&params.positions)
+            .map(|(chain, &sent)| {
+                chain.map_or_else(
+                    || SelectionRange {
+                        range: Range::new(sent, sent),
+                        parent: None,
+                    },
+                    |chain| chain.to_client(&open.converter),
+                )
+            })
+            .collect();
         Ok(Some(result))
     }
 
@@ -1445,7 +1476,9 @@ impl LanguageServer for Backend {
             return Ok(None);
         }
 
-        let Some(OpenDocument { text, .. }) = self.read_document(&uri, LoadedDocuments::Skip)
+        let Some(OpenDocument {
+            text, converter, ..
+        }) = self.read_document(&uri, LoadedDocuments::Skip)
         else {
             return Ok(None);
         };
@@ -1457,7 +1490,8 @@ impl LanguageServer for Backend {
         let formatted = crate::editing::formatter::format_yaml(&text, &options);
 
         // One edit replaces the entire document; none when nothing changes.
-        Ok(crate::lsp_util::full_format_edit(&text, &formatted).map(|edit| vec![edit]))
+        Ok(crate::lsp_util::full_format_edit(&text, &formatted)
+            .map(|edit| vec![edit.to_client(&converter)]))
     }
 
     async fn range_formatting(
@@ -1475,12 +1509,13 @@ impl LanguageServer for Backend {
             return Ok(None);
         }
 
-        let requested = params.range;
-
-        let Some(OpenDocument { text, .. }) = self.read_document(&uri, LoadedDocuments::Skip)
+        let Some(OpenDocument {
+            text, converter, ..
+        }) = self.read_document(&uri, LoadedDocuments::Skip)
         else {
             return Ok(None);
         };
+        let requested = params.range.to_internal(&converter);
 
         let tab_size = params.options.tab_size as usize;
         let options = self.format_options(&uri, &text, tab_size);
@@ -1497,7 +1532,7 @@ impl LanguageServer for Backend {
             requested.start.line,
             requested.end.line,
         )
-        .map(|edit| vec![edit]))
+        .map(|edit| vec![edit.to_client(&converter)]))
     }
 
     async fn on_type_formatting(
@@ -1525,7 +1560,7 @@ impl LanguageServer for Backend {
 
         let edits = crate::editing::on_type_formatting::format_on_type(
             open.documents.as_deref().unwrap_or(&[]),
-            position,
+            position.to_internal(&open.converter),
             ch,
             tab_size,
         );
@@ -1533,7 +1568,7 @@ impl LanguageServer for Backend {
             return Ok(None);
         }
 
-        Ok(Some(edits))
+        Ok(Some(edits.to_client(&open.converter)))
     }
 
     async fn semantic_tokens_full(
@@ -1588,14 +1623,16 @@ impl LanguageServer for Backend {
 
         let Some(OpenDocument {
             documents: Some(docs),
+            converter,
             ..
         }) = self.read_document(&uri, LoadedDocuments::Copy)
         else {
             return Ok(None);
         };
 
-        let range = crate::navigation::rename::prepare_rename(&docs, position);
-        Ok(range.map(PrepareRenameResponse::Range))
+        let range =
+            crate::navigation::rename::prepare_rename(&docs, position.to_internal(&converter));
+        Ok(range.map(|range| PrepareRenameResponse::Range(range.to_client(&converter))))
     }
 
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
@@ -1605,6 +1642,7 @@ impl LanguageServer for Backend {
 
         let Some(OpenDocument {
             documents: Some(docs),
+            converter,
             ..
         }) = self.read_document(&uri, LoadedDocuments::Copy)
         else {
@@ -1612,8 +1650,12 @@ impl LanguageServer for Backend {
         };
 
         Ok(crate::navigation::rename::rename(
-            &docs, &uri, position, &new_name,
-        ))
+            &docs,
+            &uri,
+            position.to_internal(&converter),
+            &new_name,
+        )
+        .map(|edit| edit.to_client(&converter)))
     }
 
     async fn document_color(&self, params: DocumentColorParams) -> Result<Vec<ColorInformation>> {

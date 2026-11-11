@@ -13,9 +13,10 @@
 //! boundary with a [`PositionConverter`] and the [`ClientPositions`] trait.
 
 use tower_lsp::lsp_types::{
-    AnnotatedTextEdit, CodeAction, CodeActionContext, CodeActionParams, Diagnostic,
-    DiagnosticRelatedInformation, DocumentChangeOperation, DocumentChanges, Location, OneOf,
-    Position, Range, TextDocumentEdit, TextEdit, WorkspaceEdit,
+    AnnotatedTextEdit, CodeAction, CodeActionContext, CodeActionParams, CompletionItem,
+    CompletionTextEdit, Diagnostic, DiagnosticRelatedInformation, DocumentChangeOperation,
+    DocumentChanges, Hover, InsertReplaceEdit, Location, OneOf, Position, Range, SelectionRange,
+    TextDocumentEdit, TextEdit, WorkspaceEdit,
 };
 
 /// An astral character of the text, with what a column after it needs.
@@ -381,6 +382,112 @@ impl ClientPositions for CodeActionParams {
     }
 }
 
+impl ClientPositions for Hover {
+    fn map_positions(self, convert: &dyn Fn(Position) -> Position) -> Self {
+        let Self { contents, range } = self;
+        Self {
+            contents,
+            range: range.map_positions(convert),
+        }
+    }
+}
+
+impl ClientPositions for InsertReplaceEdit {
+    fn map_positions(self, convert: &dyn Fn(Position) -> Position) -> Self {
+        let Self {
+            new_text,
+            insert,
+            replace,
+        } = self;
+        Self {
+            new_text,
+            insert: insert.map_positions(convert),
+            replace: replace.map_positions(convert),
+        }
+    }
+}
+
+impl ClientPositions for CompletionTextEdit {
+    fn map_positions(self, convert: &dyn Fn(Position) -> Position) -> Self {
+        match self {
+            Self::Edit(edit) => Self::Edit(edit.map_positions(convert)),
+            Self::InsertAndReplace(edit) => Self::InsertAndReplace(edit.map_positions(convert)),
+        }
+    }
+}
+
+impl ClientPositions for CompletionItem {
+    fn map_positions(self, convert: &dyn Fn(Position) -> Position) -> Self {
+        let Self {
+            label,
+            label_details,
+            kind,
+            detail,
+            documentation,
+            deprecated,
+            preselect,
+            sort_text,
+            filter_text,
+            insert_text,
+            insert_text_format,
+            insert_text_mode,
+            text_edit,
+            additional_text_edits,
+            command,
+            commit_characters,
+            data,
+            tags,
+        } = self;
+        Self {
+            label,
+            label_details,
+            kind,
+            detail,
+            documentation,
+            deprecated,
+            preselect,
+            sort_text,
+            filter_text,
+            insert_text,
+            insert_text_format,
+            insert_text_mode,
+            text_edit: text_edit.map_positions(convert),
+            additional_text_edits: additional_text_edits.map_positions(convert),
+            command,
+            commit_characters,
+            data,
+            tags,
+        }
+    }
+}
+
+/// The chain of `parent` ranges is walked with loops, not recursion: it is as
+/// deep as the document nests, and a recursive walk would add a stack frame
+/// per level to the nesting the handlers already carry.
+impl ClientPositions for SelectionRange {
+    fn map_positions(self, convert: &dyn Fn(Position) -> Position) -> Self {
+        let Self { range, parent } = self;
+        let mut parent_ranges = Vec::new();
+        let mut next = parent;
+        while let Some(link) = next {
+            let Self { range, parent } = *link;
+            parent_ranges.push(range);
+            next = parent;
+        }
+        // Rebuild from the outermost range inwards.
+        let parent = parent_ranges.into_iter().rev().fold(None, |parent, range| {
+            Some(Box::new(Self {
+                range: range.map_positions(convert),
+                parent,
+            }))
+        });
+        Self {
+            range: range.map_positions(convert),
+            parent,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
@@ -390,7 +497,8 @@ mod tests {
     use rstest::rstest;
     use serde_json::{Value, json};
     use tower_lsp::lsp_types::{
-        CodeActionContext, Command, CreateFile, DeleteFile, DiagnosticSeverity, NumberOrString,
+        CodeActionContext, Command, CompletionItemKind, CreateFile, DeleteFile, DiagnosticSeverity,
+        HoverContents, MarkupContent, MarkupKind, NumberOrString,
         OptionalVersionedTextDocumentIdentifier, PartialResultParams, ResourceOp,
         TextDocumentIdentifier, Url, WorkDoneProgressParams,
     };
@@ -859,6 +967,62 @@ mod tests {
             }
         }
 
+        fn hover(&self) -> Hover {
+            Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: "v".to_string(),
+                }),
+                range: Some(self.range()),
+            }
+        }
+
+        /// Two items: one with a plain edit and two additional edits, one with
+        /// an insert-and-replace edit.
+        fn completion_items(&self) -> Vec<CompletionItem> {
+            let item = |text_edit, additional_text_edits| CompletionItem {
+                label: "l".to_string(),
+                kind: Some(CompletionItemKind::PROPERTY),
+                detail: Some("d".to_string()),
+                insert_text: Some("i".to_string()),
+                sort_text: Some("s".to_string()),
+                filter_text: Some("f".to_string()),
+                preselect: Some(true),
+                text_edit,
+                additional_text_edits,
+                command: Some(Command {
+                    title: "c".to_string(),
+                    command: "c".to_string(),
+                    arguments: Some(vec![json!({ "line": 2, "character": 7 })]),
+                }),
+                commit_characters: Some(vec![":".to_string()]),
+                data: Some(json!({ "line": 3, "character": 9 })),
+                ..CompletionItem::default()
+            };
+            vec![
+                item(
+                    Some(CompletionTextEdit::Edit(self.edit())),
+                    Some(vec![self.edit(), self.edit()]),
+                ),
+                item(
+                    Some(CompletionTextEdit::InsertAndReplace(InsertReplaceEdit {
+                        new_text: "t".to_string(),
+                        insert: self.range(),
+                        replace: self.range(),
+                    })),
+                    None,
+                ),
+            ]
+        }
+
+        /// A chain of `parents` ranges above the innermost one.
+        fn selection_range(&self, parents: usize) -> SelectionRange {
+            SelectionRange {
+                range: self.range(),
+                parent: (parents > 0).then(|| Box::new(self.selection_range(parents - 1))),
+            }
+        }
+
         fn code_action_params(&self) -> CodeActionParams {
             CodeActionParams {
                 text_document: TextDocumentIdentifier { uri: uri() },
@@ -901,6 +1065,7 @@ mod tests {
     /// conversion of it, none is missed, and `back` returns the value.
     fn assert_every_position_converted<T>(
         value: &T,
+        expected_positions: usize,
         to: impl Fn(T, &PositionConverter) -> T,
         back: impl Fn(T, &PositionConverter) -> T,
         convert: impl Fn(&PositionConverter, Position) -> Position,
@@ -915,7 +1080,11 @@ mod tests {
         positions_in(&before, &mut old);
         positions_in(&after, &mut new);
 
-        assert!(old.len() >= 8, "the fixture holds positions: {before}");
+        assert_eq!(
+            old.len(),
+            expected_positions,
+            "the fixture holds these positions: {before}"
+        );
         assert_eq!(old.len(), new.len(), "{after}");
         for (&(line, character), &found) in old.iter().zip(&new) {
             let expected = convert(
@@ -939,6 +1108,7 @@ mod tests {
         for operations in [false, true] {
             assert_every_position_converted(
                 &Positions(Cell::new(0)).code_action(operations),
+                if operations { 20 } else { 24 },
                 ClientPositions::to_client,
                 ClientPositions::to_internal,
                 PositionConverter::to_client,
@@ -950,6 +1120,7 @@ mod tests {
     fn every_position_of_code_action_params_is_converted_in_both_directions() {
         assert_every_position_converted(
             &Positions(Cell::new(0)).code_action_params(),
+            14,
             ClientPositions::to_internal,
             ClientPositions::to_client,
             PositionConverter::to_internal,
@@ -962,12 +1133,14 @@ mod tests {
 
         assert_every_position_converted(
             &vec![positions.diagnostic(), positions.diagnostic()],
+            12,
             ClientPositions::to_client,
             ClientPositions::to_internal,
             PositionConverter::to_client,
         );
         assert_every_position_converted(
             &Some(positions.workspace_edit(false)),
+            12,
             ClientPositions::to_client,
             ClientPositions::to_internal,
             PositionConverter::to_client,
@@ -979,6 +1152,7 @@ mod tests {
                 positions.range(),
                 positions.range(),
             ],
+            8,
             ClientPositions::to_client,
             ClientPositions::to_internal,
             PositionConverter::to_client,
@@ -987,6 +1161,104 @@ mod tests {
             Position::new(0, 1).to_client(&converter()),
             Position::new(0, 2)
         );
+    }
+
+    #[test]
+    fn every_position_of_a_hover_is_converted() {
+        let positions = Positions(Cell::new(0));
+
+        assert_every_position_converted(
+            &vec![positions.hover(), positions.hover()],
+            4,
+            ClientPositions::to_client,
+            ClientPositions::to_internal,
+            PositionConverter::to_client,
+        );
+    }
+
+    #[test]
+    fn a_hover_without_a_range_stays_as_it_is() {
+        let mut hover = Positions(Cell::new(0)).hover();
+        hover.range = None;
+
+        assert_eq!(hover.clone().to_client(&converter()), hover);
+    }
+
+    #[test]
+    fn every_position_of_completion_items_is_converted() {
+        assert_every_position_converted(
+            &Positions(Cell::new(0)).completion_items(),
+            10,
+            ClientPositions::to_client,
+            ClientPositions::to_internal,
+            PositionConverter::to_client,
+        );
+    }
+
+    #[test]
+    fn the_opaque_fields_of_a_completion_item_are_left_alone() {
+        let items = Positions(Cell::new(0)).completion_items();
+
+        let client = items.clone().to_client(&converter());
+
+        for (before, after) in items.iter().zip(&client) {
+            assert_eq!(after.command, before.command);
+            assert_eq!(after.data, before.data);
+            assert_eq!(after.insert_text, before.insert_text);
+            assert_eq!(after.label, before.label);
+        }
+    }
+
+    #[test]
+    fn every_position_of_selection_ranges_is_converted() {
+        let positions = Positions(Cell::new(0));
+
+        assert_every_position_converted(
+            &vec![positions.selection_range(3), positions.selection_range(3)],
+            16,
+            ClientPositions::to_client,
+            ClientPositions::to_internal,
+            PositionConverter::to_client,
+        );
+        assert_every_position_converted(
+            &vec![positions.selection_range(0)],
+            2,
+            ClientPositions::to_client,
+            ClientPositions::to_internal,
+            PositionConverter::to_client,
+        );
+    }
+
+    /// The ranges of a chain, innermost first.
+    fn ranges_of(chain: &SelectionRange) -> Vec<Range> {
+        let mut ranges = vec![chain.range];
+        let mut link = chain.parent.as_deref();
+        while let Some(parent) = link {
+            ranges.push(parent.range);
+            link = parent.parent.as_deref();
+        }
+        ranges
+    }
+
+    #[test]
+    fn a_selection_range_chain_as_deep_as_the_nesting_limit_converts_in_both_directions() {
+        let chain = Positions(Cell::new(0)).selection_range(512);
+        let converter = converter();
+
+        let client = chain.clone().to_client(&converter);
+
+        let expected: Vec<Range> = ranges_of(&chain)
+            .into_iter()
+            .map(|range| {
+                Range::new(
+                    converter.to_client(range.start),
+                    converter.to_client(range.end),
+                )
+            })
+            .collect();
+        assert_eq!(expected.len(), 513);
+        assert_eq!(ranges_of(&client), expected);
+        assert_eq!(client.to_internal(&converter), chain);
     }
 
     #[test]
@@ -1018,6 +1290,7 @@ mod tests {
         let none: Option<Diagnostic> = None;
 
         assert_eq!(none.to_client(&converter()), None);
+        assert_eq!(None::<SelectionRange>.to_client(&converter()), None);
         assert_eq!(Vec::<TextEdit>::new().to_client(&converter()), vec![]);
     }
 }

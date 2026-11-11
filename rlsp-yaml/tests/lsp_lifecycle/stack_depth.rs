@@ -597,6 +597,60 @@ fn every_ast_request_survives_256_levels_on_2_mib(#[case] shape: Shape) {
     });
 }
 
+// ---- selection ranges in client positions ----
+
+/// `levels` nested block mappings with `mark` in front of every key.
+fn marked_keys(levels: usize, mark: &str) -> String {
+    (0..levels)
+        .map(|level| {
+            let entry = if level + 1 == levels { "leaf: 1" } else { "k:" };
+            ["  ".repeat(level).as_str(), mark, entry, "\n"].concat()
+        })
+        .collect()
+}
+
+/// The raw text of the selection ranges at the key of the deepest mapping,
+/// which has to stay text: the limit of `serde_json` on nested values is below
+/// the depth of this answer.
+async fn selection_range_text(text: &str, levels: usize) -> String {
+    let service = &mut open(text, URI).await;
+    let response = send(
+        service,
+        selection_range_request(2, URI, lsp(levels - 1), lsp(2 * (levels - 1) + 3)),
+    )
+    .await
+    .expect("selectionRange should return a response");
+    assert!(response.is_ok(), "{response:?}");
+    response.result().expect("a result").to_string()
+}
+
+/// The boundary trait walks the `parent` ranges of an answer as deep as the
+/// document, in client positions: the document with an astral character before
+/// each key is answered like the document with two one-unit characters there.
+#[test]
+fn selection_ranges_of_256_levels_with_astral_characters_are_in_client_positions_on_2_mib() {
+    run_on_stack("selection-client".to_string(), TWO_MIB, || async {
+        let levels = DEFAULT_LEVELS;
+        let astral = selection_range_text(&marked_keys(levels, "\u{1f600}"), levels).await;
+        let narrow = selection_range_text(&marked_keys(levels, "xx"), levels).await;
+
+        assert_eq!(astral, narrow);
+        assert!(count(&astral, "\"parent\":") >= levels, "{astral:.300}");
+        // The key of the deepest mapping, `{A}leaf`, stands at the client
+        // columns 510 to 516; counted in code points it ends at 515.
+        let bottom = format!(
+            "\"range\":{{\"end\":{{\"character\":516,\"line\":{}}},\"start\":{{\"character\":510,\"line\":{}}}}}}}]",
+            levels - 1,
+            levels - 1
+        );
+        assert!(
+            astral.ends_with(&bottom),
+            "{}",
+            &astral[astral.len() - 200..]
+        );
+    });
+}
+
 /// `levels` nested block mappings with `top: oops` in the mapping of
 /// `marker_level` (0-based), the one value the recursive schema rejects.
 fn marked(levels: usize, marker_level: usize) -> String {

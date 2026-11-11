@@ -512,3 +512,390 @@ async fn a_request_with_a_range_far_outside_the_document_is_answered(
 
     assert!(resp.expect("a response").is_ok());
 }
+
+// ---- requests that take a position ----
+
+const REQUEST_URI: &str = "file:///test/utf16-requests.yaml";
+
+/// The requests that read a position of the document.
+#[derive(Debug, Clone, Copy)]
+enum Handler {
+    Hover,
+    Completion,
+    Definition,
+    References { include_declaration: bool },
+    PrepareRename,
+    Rename,
+    OnType,
+}
+
+impl Handler {
+    fn request(self, position: (u32, u32)) -> tower_lsp::jsonrpc::Request {
+        let (line, character) = position;
+        match self {
+            Self::Hover => super::hover::hover_request(2, REQUEST_URI, line, character),
+            Self::Completion => {
+                super::completion::completion_request(2, REQUEST_URI, line, character)
+            }
+            Self::Definition => {
+                super::navigation::definition_request(2, REQUEST_URI, line, character)
+            }
+            Self::References {
+                include_declaration,
+            } => super::navigation::references_request(
+                2,
+                REQUEST_URI,
+                line,
+                character,
+                include_declaration,
+            ),
+            Self::PrepareRename => {
+                super::rename::prepare_rename_request(2, REQUEST_URI, line, character)
+            }
+            Self::Rename => super::rename::rename_request(2, REQUEST_URI, line, character, "zz"),
+            Self::OnType => super::on_type_formatting::on_type_formatting_request(
+                2,
+                REQUEST_URI,
+                line,
+                character,
+                "\n",
+            ),
+        }
+    }
+}
+
+/// The result that `request` gets from a server with `text` open.
+async fn result_of(
+    service: &mut LspService<Backend>,
+    request: tower_lsp::jsonrpc::Request,
+) -> Value {
+    let resp = send(service, request).await.expect("a response");
+    assert!(resp.is_ok(), "{resp:?}");
+    resp.result().expect("a result").clone()
+}
+
+fn location(start: (u32, u32), end: (u32, u32)) -> Value {
+    json!({ "uri": REQUEST_URI, "range": range(start, end) })
+}
+
+fn hover_of(path: &str, value: &str) -> Value {
+    json!({ "contents": {
+        "kind": "markdown",
+        "value": format!("**Path:** `{path}`\n\n**Type:** scalar\n\n**Value:** `{value}`\n")
+    } })
+}
+
+const FIELDS_MODELINE: &str = "# yaml-language-server: $schema=https://schemas.test/fields.json\n";
+
+// Each document has an astral character before the position on its line, and
+// the answer is in client positions: counted in code points the positions
+// would stand one column left for each such character.
+#[rstest]
+#[case::hover("[{A}, &a v, *a]\n", None, Handler::Hover, (0, 8), hover_of("[1]", "v"))]
+#[case::hover_with_the_character_on_the_previous_line_lf(
+    "{A}: 1\nk: v\n", None, Handler::Hover, (1, 3), hover_of("k", "v")
+)]
+#[case::hover_with_the_character_on_the_previous_line_crlf(
+    "{A}: 1\r\nk: v\r\n", None, Handler::Hover, (1, 3), hover_of("k", "v")
+)]
+#[case::hover_with_the_character_on_the_previous_line_cr(
+    "{A}: 1\rk: v\r", None, Handler::Hover, (1, 3), hover_of("k", "v")
+)]
+#[case::hover_in_the_second_document(
+    "a: b\n---\n{A}: 1\nk: v\n", None, Handler::Hover, (3, 3), hover_of("k", "v")
+)]
+#[case::completion_after_the_character(
+    &format!("{FIELDS_MODELINE}k: {{A}}x\n"),
+    Some("boolean"),
+    Handler::Completion,
+    (1, 5),
+    json!([{ "kind": 12, "label": "true" }, { "kind": 12, "label": "false" }])
+)]
+// This case puts the cursor on the second unit of the character (client column
+// 4 of `k: {A}`), which finds the character like its start; a request that is
+// not converted finds nothing there.
+#[case::completion_inside_the_character(
+    &format!("{FIELDS_MODELINE}k: {{A}}\n"),
+    Some("boolean"),
+    Handler::Completion,
+    (1, 4),
+    json!([{ "kind": 12, "label": "true" }, { "kind": 12, "label": "false" }])
+)]
+#[case::definition(
+    "[{A}, &a v, *a]\n", None, Handler::Definition, (0, 12), location((0, 5), (0, 7))
+)]
+#[case::definition_at_the_start_of_the_alias(
+    "[{A}, &a v, *a]\n", None, Handler::Definition, (0, 11), location((0, 5), (0, 7))
+)]
+#[case::references_with_the_declaration(
+    "[{A}, &a v, *a]\n",
+    None,
+    Handler::References { include_declaration: true },
+    (0, 12),
+    json!([location((0, 5), (0, 7)), location((0, 11), (0, 13))])
+)]
+#[case::references_without_the_declaration(
+    "[{A}, &a v, *a]\n",
+    None,
+    Handler::References { include_declaration: false },
+    (0, 6),
+    json!([location((0, 11), (0, 13))])
+)]
+#[case::prepare_rename(
+    "[{A}, &a v, *a]\n", None, Handler::PrepareRename, (0, 12), range((0, 11), (0, 13))
+)]
+#[case::prepare_rename_of_the_anchor(
+    "[{A}, &a v, *a]\n", None, Handler::PrepareRename, (0, 6), range((0, 5), (0, 7))
+)]
+#[case::rename(
+    "[{A}, &a v, *a]\n",
+    None,
+    Handler::Rename,
+    (0, 12),
+    json!({ "changes": { REQUEST_URI: [
+        { "range": range((0, 5), (0, 7)), "newText": "&zz" },
+        { "range": range((0, 11), (0, 13)), "newText": "*zz" }
+    ] } })
+)]
+#[case::on_type_formatting_with_the_character_on_the_cursor_line(
+    "a:\n{A}:\n",
+    None,
+    Handler::OnType,
+    (1, 3),
+    json!([{ "range": range((1, 0), (1, 3)), "newText": "  " }])
+)]
+#[case::on_type_formatting_with_the_character_on_the_previous_line(
+    "a:\n{A}:\n",
+    None,
+    Handler::OnType,
+    (2, 0),
+    json!([{ "range": range((2, 0), (2, 0)), "newText": "  " }])
+)]
+#[tokio::test]
+async fn a_request_at_a_client_position_finds_the_node_and_answers_client_positions(
+    #[case] template: &str,
+    #[case] field_type: Option<&str>,
+    #[case] handler: Handler,
+    #[case] position: (u32, u32),
+    #[case] expected: Value,
+) {
+    let text = template.replace("{A}", ASTRAL);
+    let (mut service, _published) = open_collecting(&text, REQUEST_URI, field_type).await;
+
+    let result = result_of(&mut service, handler.request(position)).await;
+
+    assert_eq!(result, expected);
+}
+
+/// `text` with the `changes` of a rename or the `edits` of a formatting
+/// applied, last edit first so the earlier ranges stay valid.
+fn apply_edits(text: &str, edits: &Value) -> String {
+    let mut edits: Vec<&Value> = edits.as_array().expect("edits").iter().collect();
+    edits.sort_by_key(|edit| offset_of(text, edit.pointer("/range/start").expect("a start")));
+    let mut edited = text.to_string();
+    for edit in edits.into_iter().rev() {
+        let start = offset_of(text, edit.pointer("/range/start").expect("a start"));
+        let end = offset_of(text, edit.pointer("/range/end").expect("an end"));
+        edited.replace_range(start..end, edit["newText"].as_str().expect("new text"));
+    }
+    edited
+}
+
+#[tokio::test]
+async fn a_rename_after_an_astral_character_edits_the_document_of_the_request_only() {
+    let text = format!("[{ASTRAL}, &a v, *a]\n");
+    let mut service = open(&text, REQUEST_URI).await;
+
+    let result = result_of(&mut service, Handler::Rename.request((0, 12))).await;
+
+    let changes = result["changes"].as_object().expect("changes");
+    assert_eq!(changes.keys().collect::<Vec<_>>(), [REQUEST_URI]);
+    assert!(result.get("documentChanges").is_none(), "{result}");
+    assert_eq!(
+        apply_edits(&text, &changes[REQUEST_URI]),
+        format!("[{ASTRAL}, &zz v, *zz]\n")
+    );
+}
+
+#[rstest]
+#[case::handler_hover(Handler::Hover)]
+#[case::handler_completion(Handler::Completion)]
+#[case::handler_definition(Handler::Definition)]
+#[case::handler_references(Handler::References { include_declaration: true })]
+#[case::handler_prepare_rename(Handler::PrepareRename)]
+#[case::handler_rename(Handler::Rename)]
+#[case::handler_on_type(Handler::OnType)]
+#[tokio::test]
+async fn a_request_at_an_extreme_position_is_answered(#[case] handler: Handler) {
+    let text = format!("{ASTRAL}: &a [{ASTRAL}, *a]\n{ASTRAL}{ASTRAL}: v\n");
+    let mut service = open(&text, REQUEST_URI).await;
+
+    for position in [
+        (0, u32::MAX),
+        (u32::MAX, 0),
+        (u32::MAX, u32::MAX),
+        (1, u32::MAX),
+        (0, 1),
+        (0, 2),
+        (0, 3),
+    ] {
+        let resp = send(&mut service, handler.request(position))
+            .await
+            .expect("a response");
+        assert!(resp.is_ok(), "{handler:?} at {position:?}: {resp:?}");
+    }
+}
+
+fn selection_chain(ranges: &[Span]) -> Value {
+    let mut chain = Value::Null;
+    for &(start, end) in ranges.iter().rev() {
+        chain = if chain.is_null() {
+            json!({ "range": range(start, end) })
+        } else {
+            json!({ "range": range(start, end), "parent": chain })
+        };
+    }
+    chain
+}
+
+async fn selection_result(text: &str, positions: &[(u32, u32)]) -> Value {
+    let mut service = open(text, REQUEST_URI).await;
+    result_of(
+        &mut service,
+        super::selection_ranges::selection_range_request_for(2, REQUEST_URI, positions),
+    )
+    .await
+}
+
+#[rstest]
+#[case::the_value_in_a_block_mapping(
+    "{A}: &a val\nk: *a\n",
+    (0, 9),
+    selection_chain(&[((0, 7), (0, 10)), ((0, 0), (0, 10)), ((0, 0), (2, 0))])
+)]
+#[case::the_value_after_two_characters(
+    "{A}{A}: val\n",
+    (0, 8),
+    selection_chain(&[((0, 6), (0, 9)), ((0, 0), (0, 9)), ((0, 0), (1, 0))])
+)]
+#[case::a_column_inside_the_character_selects_what_the_character_does(
+    "k: a{A}b\n",
+    (0, 5),
+    selection_chain(&[((0, 3), (0, 7)), ((0, 0), (0, 7)), ((0, 0), (1, 0))])
+)]
+#[tokio::test]
+async fn a_selection_range_after_an_astral_character_is_in_client_positions(
+    #[case] template: &str,
+    #[case] position: (u32, u32),
+    #[case] chain: Value,
+) {
+    let result = selection_result(&template.replace("{A}", ASTRAL), &[position]).await;
+
+    assert_eq!(result, json!([chain]));
+}
+
+#[rstest]
+#[case::inside_the_character((0, 3))]
+#[case::after_the_character((0, 4))]
+#[case::past_the_end_of_the_line((0, 50))]
+#[case::the_maximum_column((0, u32::MAX))]
+#[case::past_the_last_line((99, 0))]
+#[case::the_maximum_position((u32::MAX, u32::MAX))]
+#[tokio::test]
+async fn a_selection_range_without_a_node_is_the_empty_range_at_the_position_sent(
+    #[case] position: (u32, u32),
+) {
+    for text in [
+        format!("# {ASTRAL}x\n"),
+        // A syntax error leaves no document.
+        format!("{ASTRAL}: a: b\n"),
+        String::new(),
+    ] {
+        let result = selection_result(&text, &[position]).await;
+
+        assert_eq!(
+            result,
+            json!([{ "range": range(position, position) }]),
+            "{text:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn selection_ranges_for_several_positions_keep_their_order() {
+    let text = format!("# {ASTRAL}\nk: {ASTRAL}v\n");
+    let positions = [(1, 4), (0, 3), (1, 6), (0, 3)];
+
+    let result = selection_result(&text, &positions).await;
+
+    let result = result.as_array().expect("an array");
+    assert_eq!(result.len(), 4);
+    let empty = |position: (u32, u32)| json!({ "range": range(position, position) });
+    assert_eq!(result[1], empty((0, 3)));
+    assert_eq!(result[3], empty((0, 3)));
+    for index in [0, 2] {
+        assert_eq!(result[index]["range"], range((1, 3), (1, 6)), "{index}");
+        assert!(result[index].get("parent").is_some(), "{index}");
+    }
+}
+
+/// The edits that range formatting answers for `start..end`.
+async fn formatted_lines(
+    service: &mut LspService<Backend>,
+    start: (u32, u32),
+    end: (u32, u32),
+) -> Value {
+    let request =
+        super::formatting_integration::range_formatting_request_at(2, REQUEST_URI, start, end, 2);
+    result_of(service, request).await
+}
+
+#[tokio::test]
+async fn range_formatting_after_an_astral_character_formats_the_lines_of_the_range() {
+    let text = format!("a:\n    {ASTRAL}: 1\n    b: {ASTRAL}\nc:   2\n");
+    let mut service = open(&text, REQUEST_URI).await;
+    let whole_lines = formatted_lines(&mut service, (1, 0), (2, 0)).await;
+
+    assert_eq!(
+        apply_edits(&text, &whole_lines),
+        format!("a:\n  {ASTRAL}: 1\n  b: {ASTRAL}\nc: 2\n")
+    );
+    for (start, end) in [
+        // After the character, inside it, and past the end of the line.
+        ((1, 7), (2, 9)),
+        ((1, 6), (2, 8)),
+        ((1, 99), (2, 99)),
+        ((1, 3), (2, u32::MAX)),
+        ((1, u32::MAX), (2, 0)),
+    ] {
+        assert_eq!(
+            formatted_lines(&mut service, start, end).await,
+            whole_lines,
+            "{start:?}..{end:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_selection_request_with_many_positions_is_answered_one_entry_each_in_order() {
+    let text = format!("# {ASTRAL}\n{ASTRAL}: val\n");
+    let positions: Vec<(u32, u32)> = (0..10_000_u32)
+        .map(|i| match i % 3 {
+            0 => (1, 6),
+            1 => (0, u32::MAX),
+            _ => (u32::MAX, u32::MAX),
+        })
+        .collect();
+
+    let result = selection_result(&text, &positions).await;
+
+    let result = result.as_array().expect("an array");
+    assert_eq!(result.len(), positions.len());
+    for (entry, &position) in result.iter().zip(&positions) {
+        if position == (1, 6) {
+            assert_eq!(entry.get("range"), Some(&range((1, 4), (1, 7))));
+        } else {
+            assert_eq!(entry, &json!({ "range": range(position, position) }));
+        }
+    }
+}

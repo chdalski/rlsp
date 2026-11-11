@@ -8,23 +8,22 @@ use crate::lsp_util::span_to_lsp;
 
 /// Compute selection ranges for the given YAML documents and cursor positions.
 ///
-/// Returns one `SelectionRange` per position, in the order of `positions`, as
-/// the protocol pairs `result[i]` with `positions[i]`. A position with a node
-/// gets a chain that expands from the innermost range to the document root.
-/// A position without one (a comment line, a document separator, a position
-/// past the document, or no document at all) gets the empty range at the
-/// position, without a parent.
+/// Returns one entry per position, in the order of `positions`, as the
+/// protocol pairs `result[i]` with `positions[i]`. A position with a node gets
+/// a chain that expands from the innermost range to the document root. A
+/// position without one (a comment line, a document separator, a position past
+/// the document, or no document at all) gets `None`: the caller answers the
+/// empty range at the position the client sent, which this function cannot
+/// know when it was converted on the way in.
 /// Returns an empty `Vec` if `positions` is empty.
 #[must_use]
-pub fn selection_ranges(docs: &[Document<Span>], positions: &[Position]) -> Vec<SelectionRange> {
+pub fn selection_ranges(
+    docs: &[Document<Span>],
+    positions: &[Position],
+) -> Vec<Option<SelectionRange>> {
     positions
         .iter()
-        .map(|pos| {
-            selection_range_for_position(docs, *pos).unwrap_or_else(|| SelectionRange {
-                range: Range::new(*pos, *pos),
-                parent: None,
-            })
-        })
+        .map(|pos| selection_range_for_position(docs, *pos))
         .collect()
 }
 
@@ -209,13 +208,21 @@ mod tests {
         Position::new(line, character)
     }
 
+    /// The chains of positions that all lie on a node.
+    fn chains(docs: &[Document<Span>], positions: &[Position]) -> Vec<SelectionRange> {
+        selection_ranges(docs, positions)
+            .into_iter()
+            .map(|chain| chain.expect("a node at the position"))
+            .collect()
+    }
+
     // ---- Basic expansion tests ----
 
     #[test]
     fn should_return_value_range_expanding_to_key_value_then_document() {
         let text = "key: value\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(0, 6)]);
+        let result = chains(docs.as_deref().unwrap_or(&[]), &[pos(0, 6)]);
 
         assert_eq!(
             result.len(),
@@ -240,7 +247,7 @@ mod tests {
     fn should_return_key_range_expanding_to_key_value_then_document() {
         let text = "key: value\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(0, 1)]);
+        let result = chains(docs.as_deref().unwrap_or(&[]), &[pos(0, 1)]);
 
         assert_eq!(result.len(), 1);
         let sr = &result[0];
@@ -258,7 +265,7 @@ mod tests {
     fn should_return_sequence_item_expanding_to_sequence_then_document() {
         let text = "items:\n  - one\n  - two\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(1, 5)]);
+        let result = chains(docs.as_deref().unwrap_or(&[]), &[pos(1, 5)]);
 
         assert_eq!(result.len(), 1);
         let sr = &result[0];
@@ -274,7 +281,7 @@ mod tests {
     fn should_handle_nested_mapping() {
         let text = "server:\n  host: localhost\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(1, 8)]);
+        let result = chains(docs.as_deref().unwrap_or(&[]), &[pos(1, 8)]);
 
         assert_eq!(result.len(), 1);
         let sr = &result[0];
@@ -293,7 +300,7 @@ mod tests {
         let text = "name: Alice\nage: 30\n";
         let docs = parse_docs(text);
         let positions = [pos(0, 6), pos(1, 5)];
-        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &positions);
+        let result = chains(docs.as_deref().unwrap_or(&[]), &positions);
 
         assert_eq!(
             result.len(),
@@ -308,7 +315,7 @@ mod tests {
     fn should_handle_sequence_of_mappings() {
         let text = "users:\n  - name: Alice\n    age: 30\n  - name: Bob\n    age: 25\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(1, 10)]);
+        let result = chains(docs.as_deref().unwrap_or(&[]), &[pos(1, 10)]);
 
         assert_eq!(result.len(), 1);
         let sr = &result[0];
@@ -320,7 +327,7 @@ mod tests {
     fn should_scope_selection_to_current_document_in_multi_doc_yaml() {
         let text = "doc1key: value1\n---\ndoc2key: value2\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(2, 0)]);
+        let result = chains(docs.as_deref().unwrap_or(&[]), &[pos(2, 0)]);
 
         assert_eq!(result.len(), 1);
         let sr = &result[0];
@@ -340,7 +347,7 @@ mod tests {
     fn should_handle_first_document_in_multi_doc_yaml() {
         let text = "doc1key: value1\n---\ndoc2key: value2\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(0, 0)]);
+        let result = chains(docs.as_deref().unwrap_or(&[]), &[pos(0, 0)]);
 
         assert_eq!(result.len(), 1);
         let sr = &result[0];
@@ -359,28 +366,10 @@ mod tests {
     // ---- Safety / edge case tests ----
 
     #[test]
-    fn no_documents_gives_one_empty_range_per_position() {
-        let result = selection_ranges(&[], &[pos(0, 0), pos(3, 7)]);
-        assert_eq!(
-            result,
-            vec![
-                SelectionRange {
-                    range: Range::new(pos(0, 0), pos(0, 0)),
-                    parent: None
-                },
-                SelectionRange {
-                    range: Range::new(pos(3, 7), pos(3, 7)),
-                    parent: None
-                },
-            ]
-        );
-    }
-
-    #[test]
     fn should_handle_empty_positions_slice() {
         let text = "key: value\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[]);
+        let result = chains(docs.as_deref().unwrap_or(&[]), &[]);
         assert!(
             result.is_empty(),
             "should return empty Vec for empty positions slice"
@@ -400,7 +389,7 @@ mod tests {
         writeln!(text, "{leaf_indent}leaf: deep").unwrap();
 
         let docs = parse_docs(&text);
-        let result = selection_ranges(
+        let result = chains(
             docs.as_deref().unwrap_or(&[]),
             &[pos(64, leaf_indent.len() as u32)],
         );
@@ -425,7 +414,7 @@ mod tests {
     fn should_scope_document_end_at_dot_dot_dot_terminator() {
         let text = "key: value\n...\nafter: end\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(0, 5)]);
+        let result = chains(docs.as_deref().unwrap_or(&[]), &[pos(0, 5)]);
 
         if let Some(sr) = result.first() {
             let mut outermost = sr;
@@ -444,7 +433,7 @@ mod tests {
     fn should_handle_single_line_document() {
         let text = "key: value";
         let docs = parse_docs(text);
-        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(0, 5)]);
+        let result = chains(docs.as_deref().unwrap_or(&[]), &[pos(0, 5)]);
         if let Some(sr) = result.first() {
             let mut outermost = sr;
             while let Some(ref p) = outermost.parent {
@@ -458,7 +447,7 @@ mod tests {
     fn should_correctly_find_document_for_line_after_separator() {
         let text = "a: 1\n---\nb: 2\n---\nc: 3\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(4, 3)]);
+        let result = chains(docs.as_deref().unwrap_or(&[]), &[pos(4, 3)]);
         if let Some(sr) = result.first() {
             let mut outermost = sr;
             while let Some(ref p) = outermost.parent {
@@ -482,7 +471,7 @@ mod tests {
     fn nested_mapping_value_selection_has_correct_line_bounds() {
         let text = "server:\n  host: localhost\n  port: 8080\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(2, 8)]);
+        let result = chains(docs.as_deref().unwrap_or(&[]), &[pos(2, 8)]);
 
         assert_eq!(result.len(), 1);
         let sr = &result[0];
@@ -519,7 +508,7 @@ mod tests {
     fn sequence_item_selection_has_correct_line_bounds() {
         let text = "items:\n  - alpha\n  - beta\n  - gamma\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(3, 5)]);
+        let result = chains(docs.as_deref().unwrap_or(&[]), &[pos(3, 5)]);
 
         assert_eq!(result.len(), 1);
         let sr = &result[0];
@@ -546,7 +535,7 @@ mod tests {
     fn cursor_on_key_of_nested_mapping_expands_correctly() {
         let text = "outer:\n  inner: leaf\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(1, 2)]);
+        let result = chains(docs.as_deref().unwrap_or(&[]), &[pos(1, 2)]);
 
         assert_eq!(result.len(), 1);
         let sr = &result[0];
@@ -575,7 +564,7 @@ mod tests {
     fn deeply_nested_sequence_selection_chain_depth() {
         let text = "list:\n  - nested:\n      - leaf\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(2, 8)]);
+        let result = chains(docs.as_deref().unwrap_or(&[]), &[pos(2, 8)]);
 
         assert_eq!(result.len(), 1);
         let sr = &result[0];
@@ -597,7 +586,7 @@ mod tests {
     fn regression_value_range_start_line_is_zero_for_top_level_key() {
         let text = "key: value\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(0, 6)]);
+        let result = chains(docs.as_deref().unwrap_or(&[]), &[pos(0, 6)]);
 
         assert_eq!(result.len(), 1);
         let sr = &result[0];
@@ -623,7 +612,7 @@ mod tests {
     fn regression_nested_mapping_host_line_is_one() {
         let text = "server:\n  host: localhost\n";
         let docs = parse_docs(text);
-        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[pos(1, 8)]);
+        let result = chains(docs.as_deref().unwrap_or(&[]), &[pos(1, 8)]);
 
         assert_eq!(result.len(), 1);
         let sr = &result[0];
@@ -668,7 +657,7 @@ mod tests {
     )]
     fn selection_ranges_regression(#[case] text: &str, #[case] position: Position) {
         let docs = parse_docs(text);
-        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[position]);
+        let result = chains(docs.as_deref().unwrap_or(&[]), &[position]);
 
         match position {
             // case (a): key expands to entry → mapping → doc root; at least 4 levels
@@ -734,7 +723,7 @@ mod tests {
             line: 0,
             character: 0,
         }];
-        let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &positions);
+        let result = chains(docs.as_deref().unwrap_or(&[]), &positions);
         assert!(!result.is_empty(), "expected at least one selection range");
         // Walk the range chain and look for a range that covers [0:0..0:3]
         // (3 codepoints for "日本語", not 9 bytes).
@@ -763,12 +752,13 @@ mod tests {
 
     /// The selection chain of `yaml` at `position` as `(start, end)` pairs of
     /// `(line, character)`, innermost first.
+    /// Empty for a position without a node.
     fn chain(yaml: &str, position: Position) -> Vec<((u32, u32), (u32, u32))> {
         let docs = parse_docs(yaml);
         let result = selection_ranges(docs.as_deref().unwrap_or(&[]), &[position]);
         assert_eq!(result.len(), 1, "one entry per position: {result:?}");
         let mut ranges = Vec::new();
-        let mut current = result.first();
+        let mut current = result.first().and_then(Option::as_ref);
         while let Some(sr) = current {
             ranges.push((
                 (sr.range.start.line, sr.range.start.character),
@@ -911,8 +901,9 @@ mod tests {
         assert_eq!(chain(text, position), expected);
     }
 
-    // A position without a node gets the empty range at the position, without
-    // a parent. Selecting a node for such positions is decided separately.
+    // A position without a node gets no chain: the handler answers the empty
+    // range at the position the client sent. Selecting a node for such
+    // positions is decided separately.
     #[rstest]
     #[case::continuation_line_left_of_scalar_start("k: aaa\n  bbb\n", pos(1, 1))]
     #[case::continuation_line_of_double_quoted("k: \"aaa\n  bbb\" # c\n", pos(1, 2))]
@@ -924,12 +915,17 @@ mod tests {
     #[case::past_end_of_last_line_without_final_newline("key: value", pos(0, 11))]
     #[case::line_beyond_document("k: v\n", pos(99, 0))]
     #[case::empty_text("", pos(0, 0))]
-    fn selection_chain_without_node_is_the_empty_range_at_the_position(
-        #[case] text: &str,
-        #[case] position: Position,
-    ) {
-        let at = (position.line, position.character);
-        assert_eq!(chain(text, position), vec![r(at, at)]);
+    fn selection_chain_without_node_is_none(#[case] text: &str, #[case] position: Position) {
+        let docs = parse_docs_inner(text);
+        assert_eq!(selection_ranges(&docs, &[position]), vec![None]);
+    }
+
+    #[test]
+    fn no_documents_give_no_chain_per_position() {
+        assert_eq!(
+            selection_ranges(&[], &[pos(0, 0), pos(3, 7)]),
+            vec![None, None]
+        );
     }
 
     // The end of the last line is inside the document root without a final
@@ -943,23 +939,6 @@ mod tests {
     }
 
     // A result entry belongs to the position at the same index.
-    #[test]
-    fn position_without_range_in_the_middle_keeps_later_results_aligned() {
-        let docs = parse_docs_inner("k: v\n# c\n");
-        let result = selection_ranges(&docs, &[pos(1, 1), pos(0, 0)]);
-        assert_eq!(result.len(), 2);
-        assert_eq!(
-            result[0],
-            SelectionRange {
-                range: Range::new(pos(1, 1), pos(1, 1)),
-                parent: None
-            }
-        );
-        assert_eq!(result[1], selection_ranges(&docs, &[pos(0, 0)])[0]);
-        assert_eq!(result[1].range, Range::new(pos(0, 0), pos(0, 1)));
-        assert!(result[1].parent.is_some());
-    }
-
     #[rstest]
     #[case::chain_then_empty(vec![pos(0, 0), pos(1, 1)])]
     #[case::empty_then_chain(vec![pos(1, 1), pos(0, 0)])]
@@ -974,6 +953,16 @@ mod tests {
         for (entry, position) in result.iter().zip(&positions) {
             assert_eq!(*entry, selection_ranges(&docs, &[*position])[0]);
         }
+        // The first line is a node, the comment line is not.
+        let node = &selection_ranges(&docs, &[pos(0, 0)])[0];
+        assert_eq!(
+            node.as_ref().map(|chain| chain.range),
+            Some(Range::new(pos(0, 0), pos(0, 1)))
+        );
+        assert!(node.as_ref().is_some_and(|chain| chain.parent.is_some()));
+        for (entry, position) in result.iter().zip(&positions) {
+            assert_eq!(entry.is_none(), position.line == 1);
+        }
     }
 
     #[test]
@@ -985,7 +974,7 @@ mod tests {
         for (entry, position) in result.iter().zip(&positions) {
             assert_eq!(*entry, selection_ranges(&docs, &[*position])[0]);
         }
-        let mut outermost = &result[0];
+        let mut outermost = result[0].as_ref().expect("a chain");
         while let Some(parent) = outermost.parent.as_deref() {
             outermost = parent;
         }
