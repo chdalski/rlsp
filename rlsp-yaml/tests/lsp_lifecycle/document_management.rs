@@ -191,3 +191,52 @@ async fn a_document_that_was_never_opened_has_no_item_for_any_handler(
     let result = resp.result().expect("the request should have a result");
     assert_eq!(result, &expected, "{method}");
 }
+
+/// A document that does not load: the unclosed flow sequence leaves the store
+/// with its text and no parsed documents.
+const DOES_NOT_LOAD: &str = "# first\n# second\nname: value\nitems: [1, 2\n";
+const NOT_LOADED: &str = "file:///test/not-loaded.yaml";
+
+/// Every handler that reads an open document keeps its answer for one that
+/// does not load: most answer nothing; selection ranges and on-type formatting
+/// answer from the request alone, and semantic tokens from the comments in
+/// the text.
+#[rstest]
+#[case::hover(hover_request(2, NOT_LOADED, 2, 0), json!(null))]
+#[case::completion(completion_request(2, NOT_LOADED, 2, 0), json!(null))]
+#[case::definition(definition_request(2, NOT_LOADED, 2, 0), json!(null))]
+#[case::references(references_request(2, NOT_LOADED, 2, 0, true), json!(null))]
+#[case::folding_range(folding_range_request(2, NOT_LOADED), json!(null))]
+#[case::document_link(document_link_request(2, NOT_LOADED), json!(null))]
+#[case::selection_range(selection_range_request_for(2, NOT_LOADED, &[(2, 0)]), json!([{"range": {"start": {"line": 2, "character": 0}, "end": {"line": 2, "character": 0}}}]))]
+#[case::code_action(code_action_request(2, NOT_LOADED, 0, 1), json!(null))]
+#[case::formatting(formatting_request_with_tab_size(2, NOT_LOADED, 2), json!(null))]
+#[case::range_formatting(range_formatting_request_with_tab_size(2, NOT_LOADED, 0, 3, 2), json!(null))]
+#[case::on_type_formatting(on_type_formatting_request(2, NOT_LOADED, 1, 0, "\n"), json!([{"range": {"start": {"line": 1, "character": 0}, "end": {"line": 1, "character": 0}}, "newText": ""}]))]
+#[case::semantic_tokens(semantic_tokens_request(2, NOT_LOADED), json!({"data": [0, 0, 7, 6, 0, 1, 0, 8, 6, 0]}))]
+#[case::document_symbol(document_symbol_request(2, NOT_LOADED), json!(null))]
+#[case::prepare_rename(prepare_rename_request(2, NOT_LOADED, 2, 0), json!(null))]
+#[case::rename(rename_request(2, NOT_LOADED, 2, 0, "new"), json!(null))]
+#[case::document_color(document_color_request(2, NOT_LOADED), json!([]))]
+#[tokio::test]
+async fn a_document_that_does_not_load_keeps_each_handlers_answer(
+    #[case] request: Request,
+    #[case] expected: serde_json::Value,
+) {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+    send(
+        &mut service,
+        did_open_notification(NOT_LOADED, DOES_NOT_LOAD),
+    )
+    .await;
+
+    let method = request.method().to_string();
+    let resp = send(&mut service, request).await;
+    let resp = resp.expect("the request should return a response");
+    let result = resp.result().expect("the request should have a result");
+    assert_eq!(result, &expected, "{method}");
+}

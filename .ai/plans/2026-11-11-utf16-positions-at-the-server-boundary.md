@@ -48,7 +48,7 @@ converted back, at the boundary in `server.rs`, while the features keep counting
 - [x] Clarify scope with the user
 - [x] Design review of the approach
 - [x] Task 1: Tests pin the answers the conversion keeps
-- [ ] Task 2: Every document handler reads its document through one function
+- [x] Task 2: Every document handler reads its document through one function
 - [ ] Task 3: Published diagnostics and code actions use client positions
 - [ ] Task 4: Requests that take a position read and answer client positions
 - [ ] Task 5: Whole-document responses use client positions
@@ -77,13 +77,13 @@ Test-only.
 Each document handler copies a lock block to read text and AST; Tasks 3 to 5 build the converter
 from the text, which then happens in one place. Behavior is unchanged.
 
-- [ ] Every document handler gets the text and the parsed documents it reads from one function in
+- [x] Every document handler gets the text and the parsed documents it reads from one function in
       `server.rs`, which takes them under one lock of the document store; no document handler locks
       the document store itself
-- [ ] A document handler gets a copy of the parsed documents only if it reads them: formatting and
+- [x] A document handler gets a copy of the parsed documents only if it reads them: formatting and
       range formatting get none
-- [ ] Each document handler answers an open document without parsed documents as it does today
-- [ ] The tests in `tests/lsp_lifecycle/` and the unit tests in `src/server.rs` pass with their
+- [x] Each document handler answers an open document without parsed documents as it does today
+- [x] The tests in `tests/lsp_lifecycle/` and the unit tests in `src/server.rs` pass with their
       assertions unchanged
 
 ### Task 3: Published diagnostics and code actions use client positions
@@ -224,3 +224,9 @@ and length both count UTF-16 units. LSP 3.17 sections "Position" and "Semantic T
   this one)
 - The document-link range of an escaped quoted scalar (Decisions, "Escaped document links";
   `.ai/backlog.md`)
+
+## Task Notes
+
+- **Task 3:** `Backend::read_document` chooses whether to copy the parsed documents through a `bool`
+  parameter; when the task extends the function, an enum names that choice (`lang-rust.md`, Enums
+  Over Boolean Parameters)

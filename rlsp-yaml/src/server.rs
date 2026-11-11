@@ -218,6 +218,14 @@ fn truncate_chars(s: &str, max: usize) -> String {
     }
 }
 
+/// What a document handler reads of an open document.
+struct OpenDocument {
+    text: String,
+    /// The documents loaded from `text`, `None` when the load failed or was
+    /// not asked for.
+    documents: Option<Vec<rlsp_yaml_parser::node::Document<rlsp_yaml_parser::Span>>>,
+}
+
 // Lock acquisition order — always acquire in this sequence to prevent deadlock.
 // Every handler that needs multiple locks must follow this order and must fully
 // release each guard (let it drop) before acquiring the next:
@@ -401,6 +409,22 @@ impl Backend {
         let parsed = Url::parse(uri).ok()?;
         let store = self.document_store.lock().ok()?;
         store.get(&parsed).map(str::to_string)
+    }
+
+    /// Read the open document at `uri` for a document handler, or `None` when
+    /// it is not open. The text and the documents are read under one lock, so
+    /// the spans of the documents fit the text. `with_documents` is `false`
+    /// for a handler that reads the text only: it gets no copy of the
+    /// documents.
+    fn read_document(&self, uri: &Url, with_documents: bool) -> Option<OpenDocument> {
+        let store = self.document_store.lock().ok()?;
+        let text = store.get(uri)?.to_string();
+        let documents = if with_documents {
+            store.get_documents(uri).cloned()
+        } else {
+            None
+        };
+        Some(OpenDocument { text, documents })
     }
 
     /// Return the most recently published diagnostics for `uri`, or `None`.
@@ -1150,19 +1174,11 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        let (docs, text_present) = if let Ok(store) = self.document_store.lock() {
-            let text_present = store.get(&uri).is_some();
-            let docs = store.get_documents(&uri).cloned();
-            (docs, text_present)
-        } else {
-            return Ok(None);
-        };
-
-        if !text_present {
-            return Ok(None);
-        }
-
-        let Some(docs) = docs else {
+        let Some(OpenDocument {
+            documents: Some(docs),
+            ..
+        }) = self.read_document(&uri, true)
+        else {
             return Ok(None);
         };
 
@@ -1192,13 +1208,7 @@ impl LanguageServer for Backend {
         let position = params.text_document_position.position;
 
         // Lock ordering: document_store → schema_associations → schema_cache
-        let docs = if let Ok(store) = self.document_store.lock() {
-            let text = store.get(&uri);
-            if text.is_none() {
-                return Ok(None);
-            }
-            store.get_documents(&uri).cloned()
-        } else {
+        let Some(open) = self.read_document(&uri, true) else {
             return Ok(None);
         };
 
@@ -1218,7 +1228,7 @@ impl LanguageServer for Backend {
         });
 
         let items = crate::completion::complete_at(
-            docs.as_deref().unwrap_or(&[]),
+            open.documents.as_deref().unwrap_or(&[]),
             position,
             schema.as_deref(),
         );
@@ -1236,19 +1246,11 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        let (docs, text_present) = if let Ok(store) = self.document_store.lock() {
-            let text_present = store.get(&uri).is_some();
-            let docs = store.get_documents(&uri).cloned();
-            (docs, text_present)
-        } else {
-            return Ok(None);
-        };
-
-        if !text_present {
-            return Ok(None);
-        }
-
-        let Some(docs) = docs else {
+        let Some(OpenDocument {
+            documents: Some(docs),
+            ..
+        }) = self.read_document(&uri, true)
+        else {
             return Ok(None);
         };
 
@@ -1261,19 +1263,11 @@ impl LanguageServer for Backend {
         let position = params.text_document_position.position;
         let include_declaration = params.context.include_declaration;
 
-        let (docs, text_present) = if let Ok(store) = self.document_store.lock() {
-            let text_present = store.get(&uri).is_some();
-            let docs = store.get_documents(&uri).cloned();
-            (docs, text_present)
-        } else {
-            return Ok(None);
-        };
-
-        if !text_present {
-            return Ok(None);
-        }
-
-        let Some(docs) = docs else {
+        let Some(OpenDocument {
+            documents: Some(docs),
+            ..
+        }) = self.read_document(&uri, true)
+        else {
             return Ok(None);
         };
 
@@ -1293,20 +1287,14 @@ impl LanguageServer for Backend {
     async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
         let uri = params.text_document.uri;
 
-        let (text, docs) = if let Ok(store) = self.document_store.lock() {
-            let text = store.get(&uri).map(str::to_string);
-            let docs = store.get_documents(&uri).cloned();
-            (text, docs)
-        } else {
+        let Some(open) = self.read_document(&uri, true) else {
             return Ok(None);
         };
 
-        let Some(text) = text else {
-            return Ok(None);
-        };
-
-        let mut ranges =
-            crate::analysis::folding::folding_ranges(docs.as_deref().unwrap_or(&[]), &text);
+        let mut ranges = crate::analysis::folding::folding_ranges(
+            open.documents.as_deref().unwrap_or(&[]),
+            &open.text,
+        );
         let limit = self.get_max_items_computed();
         ranges.truncate(limit);
 
@@ -1320,17 +1308,12 @@ impl LanguageServer for Backend {
     async fn document_link(&self, params: DocumentLinkParams) -> Result<Option<Vec<DocumentLink>>> {
         let uri = params.text_document.uri;
 
-        let docs = if let Ok(store) = self.document_store.lock() {
-            if store.get(&uri).is_none() {
-                return Ok(None);
-            }
-            store.get_documents(&uri).cloned()
-        } else {
+        let Some(open) = self.read_document(&uri, true) else {
             return Ok(None);
         };
 
         let links = crate::decorators::document_links::find_document_links(
-            docs.as_deref().unwrap_or(&[]),
+            open.documents.as_deref().unwrap_or(&[]),
             Some(&uri),
         );
         if links.is_empty() {
@@ -1346,17 +1329,12 @@ impl LanguageServer for Backend {
     ) -> Result<Option<Vec<SelectionRange>>> {
         let uri = params.text_document.uri;
 
-        let docs = if let Ok(store) = self.document_store.lock() {
-            if store.get(&uri).is_none() {
-                return Ok(None);
-            }
-            store.get_documents(&uri).cloned()
-        } else {
+        let Some(open) = self.read_document(&uri, true) else {
             return Ok(None);
         };
 
         let result = crate::analysis::selection::selection_ranges(
-            docs.as_deref().unwrap_or(&[]),
+            open.documents.as_deref().unwrap_or(&[]),
             &params.positions,
         );
         if result.is_empty() {
@@ -1370,25 +1348,17 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri;
         let range = params.range;
 
-        let (text, docs) = if let Ok(store) = self.document_store.lock() {
-            let text = store.get(&uri).map(str::to_string);
-            let docs = store.get_documents(&uri).cloned();
-            (text, docs)
-        } else {
-            return Ok(None);
-        };
-
-        let Some(text) = text else {
+        let Some(open) = self.read_document(&uri, true) else {
             return Ok(None);
         };
 
         let diagnostics = self.get_diagnostics(uri.as_str()).unwrap_or_default();
 
-        let format_options = self.format_options(&uri, &text, CODE_ACTION_TAB_WIDTH);
+        let format_options = self.format_options(&uri, &open.text, CODE_ACTION_TAB_WIDTH);
 
         let actions = crate::editing::code_actions::code_actions(
-            docs.as_deref().unwrap_or(&[]),
-            &text,
+            open.documents.as_deref().unwrap_or(&[]),
+            &open.text,
             range,
             &diagnostics,
             &uri,
@@ -1441,13 +1411,7 @@ impl LanguageServer for Backend {
             return Ok(None);
         }
 
-        let text = if let Ok(store) = self.document_store.lock() {
-            store.get(&uri).map(str::to_string)
-        } else {
-            return Ok(None);
-        };
-
-        let Some(text) = text else {
+        let Some(OpenDocument { text, .. }) = self.read_document(&uri, false) else {
             return Ok(None);
         };
 
@@ -1478,13 +1442,7 @@ impl LanguageServer for Backend {
 
         let requested = params.range;
 
-        let text = if let Ok(store) = self.document_store.lock() {
-            store.get(&uri).map(str::to_string)
-        } else {
-            return Ok(None);
-        };
-
-        let Some(text) = text else {
+        let Some(OpenDocument { text, .. }) = self.read_document(&uri, false) else {
             return Ok(None);
         };
 
@@ -1525,20 +1483,12 @@ impl LanguageServer for Backend {
         let ch = &params.ch;
         let tab_size = params.options.tab_size;
 
-        let (docs, text_present) = if let Ok(store) = self.document_store.lock() {
-            let text_present = store.get(&uri).is_some();
-            let docs = store.get_documents(&uri).cloned();
-            (docs, text_present)
-        } else {
+        let Some(open) = self.read_document(&uri, true) else {
             return Ok(None);
         };
 
-        if !text_present {
-            return Ok(None);
-        }
-
         let edits = crate::editing::on_type_formatting::format_on_type(
-            docs.as_deref().unwrap_or(&[]),
+            open.documents.as_deref().unwrap_or(&[]),
             position,
             ch,
             tab_size,
@@ -1555,19 +1505,12 @@ impl LanguageServer for Backend {
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
         let uri = params.text_document.uri;
-        let (text, docs) = if let Ok(store) = self.document_store.lock() {
-            let text = store.get(&uri).map(str::to_string);
-            let docs = store.get_documents(&uri).cloned();
-            (text, docs)
-        } else {
-            return Ok(None);
-        };
-        let Some(text) = text else {
+        let Some(open) = self.read_document(&uri, true) else {
             return Ok(None);
         };
         let tokens = crate::analysis::semantic_tokens::semantic_tokens(
-            docs.as_deref().unwrap_or(&[]),
-            &text,
+            open.documents.as_deref().unwrap_or(&[]),
+            &open.text,
         );
         if tokens.is_empty() {
             return Ok(None);
@@ -1584,20 +1527,12 @@ impl LanguageServer for Backend {
     ) -> Result<Option<DocumentSymbolResponse>> {
         let uri = params.text_document.uri;
 
-        let (text, docs) = if let Ok(store) = self.document_store.lock() {
-            let text = store.get(&uri).map(str::to_string);
-            let docs = store.get_documents(&uri).cloned();
-            (text, docs)
-        } else {
-            return Ok(None);
-        };
-
-        let Some(_text) = text else {
+        let Some(open) = self.read_document(&uri, true) else {
             return Ok(None);
         };
 
         let mut symbols =
-            crate::analysis::symbols::document_symbols(docs.as_deref().unwrap_or(&[]));
+            crate::analysis::symbols::document_symbols(open.documents.as_deref().unwrap_or(&[]));
         let limit = self.get_max_items_computed();
         symbols.truncate(limit);
 
@@ -1615,19 +1550,11 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri;
         let position = params.position;
 
-        let (docs, text_present) = if let Ok(store) = self.document_store.lock() {
-            let text_present = store.get(&uri).is_some();
-            let docs = store.get_documents(&uri).cloned();
-            (docs, text_present)
-        } else {
-            return Ok(None);
-        };
-
-        if !text_present {
-            return Ok(None);
-        }
-
-        let Some(docs) = docs else {
+        let Some(OpenDocument {
+            documents: Some(docs),
+            ..
+        }) = self.read_document(&uri, true)
+        else {
             return Ok(None);
         };
 
@@ -1640,19 +1567,11 @@ impl LanguageServer for Backend {
         let position = params.text_document_position.position;
         let new_name = params.new_name;
 
-        let (docs, text_present) = if let Ok(store) = self.document_store.lock() {
-            let text_present = store.get(&uri).is_some();
-            let docs = store.get_documents(&uri).cloned();
-            (docs, text_present)
-        } else {
-            return Ok(None);
-        };
-
-        if !text_present {
-            return Ok(None);
-        }
-
-        let Some(docs) = docs else {
+        let Some(OpenDocument {
+            documents: Some(docs),
+            ..
+        }) = self.read_document(&uri, true)
+        else {
             return Ok(None);
         };
 
@@ -1667,27 +1586,20 @@ impl LanguageServer for Backend {
         }
 
         let uri = params.text_document.uri;
-        // One lock for both: the spans of the AST fit only the text they were
-        // loaded from.
-        let (text, docs) = if let Ok(store) = self.document_store.lock() {
-            (
-                store.get(&uri).map(str::to_string),
-                store.get_documents(&uri).cloned(),
-            )
-        } else {
-            return Ok(Vec::new());
-        };
-        let Some(text) = text else {
+        let Some(open) = self.read_document(&uri, true) else {
             return Ok(Vec::new());
         };
 
-        let colors = crate::decorators::color::find_colors(docs.as_deref().unwrap_or(&[]), &text)
-            .into_iter()
-            .map(|m| ColorInformation {
-                range: m.range,
-                color: m.color,
-            })
-            .collect();
+        let colors = crate::decorators::color::find_colors(
+            open.documents.as_deref().unwrap_or(&[]),
+            &open.text,
+        )
+        .into_iter()
+        .map(|m| ColorInformation {
+            range: m.range,
+            color: m.color,
+        })
+        .collect();
 
         Ok(colors)
     }
@@ -2824,6 +2736,102 @@ mod tests {
 
         // A load of the text "a: 1\n" at the limit 3.
         assert_eq!(backend.load_is_current(&uri, "a: 1\n", 3), expected);
+    }
+
+    /// The key of the first entry of the first document's root mapping.
+    fn first_root_key(
+        documents: &[rlsp_yaml_parser::node::Document<rlsp_yaml_parser::Span>],
+    ) -> Option<&str> {
+        use rlsp_yaml_parser::node::Node;
+        let Node::Mapping { entries, .. } = &documents.first()?.root else {
+            return None;
+        };
+        let Node::Scalar { value, .. } = &entries.first()?.0 else {
+            return None;
+        };
+        Some(value)
+    }
+
+    fn open_in_store(service: &tower_lsp::LspService<Backend>, uri: &Url, text: &str) {
+        if let Ok(mut store) = service.inner().document_store.lock() {
+            store.open(uri.clone(), text.to_string(), DEFAULT_MAX_NESTING_DEPTH);
+        }
+    }
+
+    #[test]
+    fn read_document_hands_out_the_text_and_the_documents_loaded_from_it() {
+        let service = backend_with_settings(&serde_json::json!({}));
+        let uri = Url::parse("file:///test/read.yaml").unwrap();
+        open_in_store(&service, &uri, "name: value\n");
+
+        let open = service.inner().read_document(&uri, true).unwrap();
+
+        assert_eq!(open.text, "name: value\n");
+        assert_eq!(first_root_key(&open.documents.unwrap()), Some("name"));
+    }
+
+    #[test]
+    fn read_document_hands_out_no_documents_when_not_asked_for_them() {
+        let service = backend_with_settings(&serde_json::json!({}));
+        let uri = Url::parse("file:///test/read.yaml").unwrap();
+        open_in_store(&service, &uri, "name: value\n");
+
+        let open = service.inner().read_document(&uri, false).unwrap();
+
+        assert_eq!(open.text, "name: value\n");
+        assert!(open.documents.is_none());
+    }
+
+    #[test]
+    fn read_document_finds_nothing_for_a_document_that_is_not_open() {
+        let service = backend_with_settings(&serde_json::json!({}));
+        let uri = Url::parse("file:///test/never-opened.yaml").unwrap();
+
+        assert!(service.inner().read_document(&uri, true).is_none());
+    }
+
+    #[test]
+    fn read_document_hands_out_the_text_of_a_document_that_does_not_load() {
+        let service = backend_with_settings(&serde_json::json!({}));
+        let uri = Url::parse("file:///test/broken.yaml").unwrap();
+        open_in_store(&service, &uri, "a: [\n");
+
+        let open = service.inner().read_document(&uri, true).unwrap();
+
+        assert_eq!(open.text, "a: [\n");
+        assert!(open.documents.is_none());
+    }
+
+    #[test]
+    fn read_document_hands_out_the_documents_of_the_latest_text() {
+        let service = backend_with_settings(&serde_json::json!({}));
+        let uri = Url::parse("file:///test/changed.yaml").unwrap();
+        open_in_store(&service, &uri, "a: 1\n");
+        if let Ok(mut store) = service.inner().document_store.lock() {
+            store.change(&uri, "b: 2\n".to_string(), DEFAULT_MAX_NESTING_DEPTH);
+        }
+
+        let open = service.inner().read_document(&uri, true).unwrap();
+
+        assert_eq!(open.text, "b: 2\n");
+        assert_eq!(first_root_key(&open.documents.unwrap()), Some("b"));
+    }
+
+    #[test]
+    fn read_document_finds_nothing_when_the_store_lock_is_poisoned() {
+        let service = backend_with_settings(&serde_json::json!({}));
+        let uri = Url::parse("file:///test/read.yaml").unwrap();
+        open_in_store(&service, &uri, "name: value\n");
+        let backend = service.inner();
+        std::thread::scope(|scope| {
+            let poisoner = scope.spawn(|| {
+                let _guard = backend.document_store.lock().unwrap();
+                panic!("intentional panic to poison the store lock");
+            });
+            assert!(poisoner.join().is_err(), "thread should have panicked");
+        });
+
+        assert!(backend.read_document(&uri, true).is_none());
     }
 
     #[tokio::test]
