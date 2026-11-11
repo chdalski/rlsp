@@ -23,7 +23,7 @@ use tower_lsp::lsp_types::PublishDiagnosticsParams;
 
 use super::code_actions::{code_action_request, code_action_request_at};
 use super::document_color::document_color_request;
-use super::document_links::document_link_request;
+use super::document_links::{document_link_request, link_ranges};
 use super::folding_ranges::folding_range_request;
 use super::formatting_integration::formatting_request_with_tab_size;
 use super::helpers::*;
@@ -38,21 +38,6 @@ fn range(start: (u32, u32), end: (u32, u32)) -> Value {
         "start": { "line": start.0, "character": start.1 },
         "end": { "line": end.0, "character": end.1 }
     })
-}
-
-/// The ranges of the document links of `text`.
-async fn link_ranges(text: &str) -> Vec<Value> {
-    let uri = "file:///test/utf16-links.yaml";
-    let mut service = open(text, uri).await;
-    let resp = send(&mut service, document_link_request(2, uri)).await;
-    let resp = resp.expect("documentLink should return a response");
-    let result = resp.result().expect("documentLink should have a result");
-    result
-        .as_array()
-        .expect("documentLink should be an array")
-        .iter()
-        .map(|link| link["range"].clone())
-        .collect()
 }
 
 #[rstest]
@@ -78,6 +63,18 @@ async fn link_ranges(text: &str) -> Vec<Value> {
 #[case::second_document(
     "---\na: b\n---\nkey: \u{1f600} https://example.com\n",
     &[range((3, 8), (3, 27))]
+)]
+#[case::escapes_then_astral_character_then_url(
+    "k: \"\\x41\\x41\u{1f600}https://e.com\"\n",
+    &[range((0, 14), (0, 27))]
+)]
+#[case::astral_character_after_an_escaped_line_break(
+    "k: \"a\\\n  \u{1f600}https://x.com\"\n",
+    &[range((1, 4), (1, 17))]
+)]
+#[case::astral_characters_on_both_lines_of_a_url_across_an_escaped_line_break(
+    "k: \"\u{1f600}https://x.com/a\\\n  \u{1f600}b\"\n",
+    &[range((0, 6), (1, 5))]
 )]
 #[tokio::test]
 async fn a_document_link_after_an_astral_character_in_its_scalar_is_at_its_utf16_columns(

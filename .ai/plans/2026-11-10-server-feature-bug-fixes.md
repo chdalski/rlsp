@@ -36,7 +36,9 @@ bugs found in the same code are each fixed where they arise.
 - The YAML 1.2.2 specification (root `CLAUDE.md` References) defines the escape sequences (§5.7), line
   folding (§6.5), the double-quoted style with its escaped line break (§7.3.1), the `''` of the
   single-quoted style (§7.3.2), and the block scalar header with its indicator (§8.1.1) that Tasks 13
-  to 16 read; for the decoded characters, the value the parser loads is the authority.
+  to 16 read; for the characters an escape decodes to, the value the parser loads is the authority,
+  and the line breaks of the quoted styles are read as the specification says (see Decisions,
+  "Reader against the parser").
 
 ## Steps
 
@@ -55,7 +57,7 @@ bugs found in the same code are each fixed where they arise.
 - [x] Task 11: The "Delete unused anchor" quick fix answers a request with one pass over the document
 - [x] Task 12: A position on a node's text selects that node, not an earlier sibling
 - [x] Task 13: Colors and document links read a scalar's source text through one reader
-- [ ] Task 14: A document link covers the source text of its URL
+- [x] Task 14: A document link covers the source text of its URL
 - [ ] Task 15: Every block scalar value gets the token of its indicator
 - [ ] Task 16: A block scalar key gets the token of its indicator
 - [ ] Push to `main` and confirm the full CI matrix is green
@@ -313,25 +315,28 @@ on a continuation line of a multi-line plain or quoted scalar lands on the scala
 links of plain and quoted scalars come from the reader of Task 13, one logical line at a time; block
 scalars and `!include` keep the node's range.
 
-- [ ] A URL after an escape or a `''` covers its source text: `a: "\t https://x.com"` (0,7)-(0,20),
+- [x] A URL after an escape or a `''` covers its source text: `a: "\t https://x.com"` (0,7)-(0,20),
       `key: "\x41 https://example.com"` (0,11)-(0,30), `k: "a\0https://x.com"` (0,7)-(0,20),
       `k: 'it''s https://x.com'` (0,10)-(0,23), and `k: "\x41\x41😀https://e.com"` (0,13)-(0,26)
-- [ ] A URL holding an escape or a `''` covers its source text and keeps its target:
+- [x] A URL holding an escape or a `''` covers its source text and keeps its target:
       `k: "https://x.com/a\x41b"` (0,4)-(0,24) to `https://x.com/aAb`, `k: "https://x.com/\u00e9"`
       (0,4)-(0,24), `k: "https:\/\/x.com\/a"` (0,4)-(0,22) to `https://x.com/a`, and
       `k: 'https://x.com/it''s'` (0,4)-(0,23)
-- [ ] A URL on a continuation line covers it there: `k: a\n  https://x.com`,
+- [x] A URL on a continuation line covers it there: `k: a\n  https://x.com`,
       `k: "a\n  https://x.com"`, `k: 'a\n  https://x.com'`, `k: "a\r\n  https://x.com"\r\n`, and
       `k: "a\` followed by a line break and `  https://x.com"` each get (1,2)-(1,15)
-- [ ] A URL across an escaped line break, `k: "https://x.com/a\` followed by a line break and `  b"`,
+- [x] A URL across an escaped line break, `k: "https://x.com/a\` followed by a line break and `  b"`,
       gets (0,4)-(1,3) and the target `https://x.com/ab`
-- [ ] The ranges of block scalars and `!include` links, the targets of all links, and
-      `url_in_multi_line_quoted_scalar_keeps_its_first_line_range` stay as they are, and
-      `the_links_of_a_long_scalar_are_found_in_linear_time` passes
-- [ ] Through the server, `key: "\x41 https://example.com"` gets (0,11)-(0,30)
+- [x] The ranges of block scalars and `!include` links, the targets of all links, and
+      `url_in_multi_line_quoted_scalar_keeps_its_first_line_range` stay as they are, except for a URL
+      on either side of an empty line that follows an escaped line break (next criterion and
+      Decisions), and `the_links_of_a_long_scalar_are_found_in_linear_time` passes
+- [x] `k: "https://a.b/x\` followed by a line break, an empty line, and `  https://a.b/y"` gets two
+      links, (0,4)-(0,17) to `https://a.b/x` and (2,2)-(2,15) to `https://a.b/y`
+- [x] Through the server, `key: "\x41 https://example.com"` gets (0,11)-(0,30)
       (`tests/lsp_lifecycle/document_links.rs`, where a test pins (0,8)-(0,27) today) and
       `k: "\x41\x41😀https://e.com"` gets (0,14)-(0,27) in the client's columns
-- [ ] The doc comment of `find_document_links` and the name and comment of the escaped-link test in
+- [x] The doc comment of `find_document_links` and the name and comment of the escaped-link test in
       `tests/lsp_lifecycle/document_links.rs` describe the ranges this task gives
 
 ### Task 15: Every block scalar value gets the token of its indicator
@@ -421,6 +426,13 @@ scalar key; other keys keep today's rule.
   hold it, so a URL on a continuation line moves to that line; a URL across an escaped line break
   gets a range over both lines instead of being dropped, which would remove a link that works today.
   Links in block scalars keep the node's range, an open decision in `.ai/backlog.md`.
+- **Reader against the parser:** after an escaped line break, the parser drops the empty lines that
+  YAML 1.2.2 [112] reads as line feeds (`"a\` followed by a line break, an empty line, and `  b"`
+  loads as `ab`, not `a\nb`; a pre-existing parser bug in `.ai/backlog.md`). The reader follows the
+  specification there, so a link stops at such a line instead of joining the text before and after
+  it; the parser's value stays the authority for the decoding of escapes. The parser bug lies in
+  `rlsp-yaml-parser`, outside this plan's Goal, so it goes to the backlog for a parser plan instead
+  of becoming a task here.
 - **Indicator tokens:** a block scalar's `|` or `>` gets one operator token, for a value and for a
   key, built in one place; a block scalar key's indicator at the end of the text turns from a
   property token into that operator token, since the same cause gave it the property token.

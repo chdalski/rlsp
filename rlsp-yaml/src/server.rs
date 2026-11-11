@@ -1352,6 +1352,7 @@ impl LanguageServer for Backend {
 
         let links = crate::decorators::document_links::find_document_links(
             open.documents.as_deref().unwrap_or(&[]),
+            &open.text,
             Some(&uri),
         );
         if links.is_empty() {

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 use futures::StreamExt;
 use rlsp_yaml::server::Backend;
-use serde_json::json;
+use rstest::rstest;
+use serde_json::{Value, json};
 use tower_lsp::LspService;
 use tower_lsp::jsonrpc::Request;
 
@@ -72,36 +73,41 @@ async fn should_return_null_document_links_for_yaml_without_urls() {
     );
 }
 
-#[tokio::test]
-async fn a_document_link_after_an_escape_sequence_starts_early_by_the_characters_the_escape_saves()
-{
-    // In `key: "\x41 https://example.com"` the URL occupies columns 11 to 30 of
-    // the source line, and LSP 3.17 "Document Link Request" makes
-    // `DocumentLink.range` the range this link applies to, so that is the range
-    // the specification asks for. The server measures the URL's offset in the
-    // scalar's value, where `\x41` is the one character `A`, so the range
-    // starts and ends three columns early (8 to 27): one for each character the
-    // escape saves. It stays that way because the fix is a change to the
-    // document-link feature, which would map value offsets back through the
-    // escapes, and it has nothing to do with the unit the columns count in.
-    let uri = "file:///test/escaped-link.yaml";
-    let mut service = open("key: \"\\x41 https://example.com\"\n", uri).await;
-
+/// The ranges of the document links of `text`.
+pub async fn link_ranges(text: &str) -> Vec<Value> {
+    let uri = "file:///test/link-ranges.yaml";
+    let mut service = open(text, uri).await;
     let resp = send(&mut service, document_link_request(2, uri)).await;
     let resp = resp.expect("documentLink should return a response");
     let result = resp.result().expect("documentLink should have a result");
-
-    let ranges: Vec<_> = result
+    result
         .as_array()
         .expect("documentLink should be an array")
         .iter()
         .map(|link| link["range"].clone())
-        .collect();
-    assert_eq!(
-        ranges,
-        [json!({
-            "start": { "line": 0, "character": 8 },
-            "end": { "line": 0, "character": 27 }
-        })]
-    );
+        .collect()
+}
+
+fn range(start: (u32, u32), end: (u32, u32)) -> Value {
+    json!({
+        "start": { "line": start.0, "character": start.1 },
+        "end": { "line": end.0, "character": end.1 }
+    })
+}
+
+// LSP 3.17 "Document Link Request" makes `DocumentLink.range` the range this
+// link applies to, so a link covers the source text of its URL: the columns an
+// escape takes count, a URL on a continuation line is on that line, and a URL
+// across an escaped line break reaches over both lines. In
+// `key: "\x41 https://example.com"` the URL occupies columns 11 to 30.
+#[rstest]
+#[case::after_an_escape_sequence("key: \"\\x41 https://example.com\"\n", &[range((0, 11), (0, 30))])]
+#[case::on_a_continuation_line("k: \"a\n  https://x.com\"\n", &[range((1, 2), (1, 15))])]
+#[case::across_an_escaped_line_break("k: \"https://x.com/a\\\n  b\"\n", &[range((0, 4), (1, 3))])]
+#[tokio::test]
+async fn a_document_link_covers_the_source_text_of_its_url(
+    #[case] text: &str,
+    #[case] expected: &[Value],
+) {
+    assert_eq!(link_ranges(text).await, expected);
 }
