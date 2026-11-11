@@ -197,6 +197,17 @@ fn span_to_raw(
     }
 }
 
+/// The operator token of a block scalar's `|` or `>` at `line` and `column`.
+const fn block_indicator_token(line: u32, column: u32) -> AbsoluteToken {
+    AbsoluteToken {
+        line,
+        start: column,
+        length: 1,
+        token_type: TOKEN_OPERATOR,
+        token_modifiers_bitset: 0,
+    }
+}
+
 /// Classifies a scalar node's value and returns an `AbsoluteToken`, or `None` if
 /// the scalar should produce no token (empty value).
 fn classify_scalar_node(
@@ -206,26 +217,18 @@ fn classify_scalar_node(
     idx: &LineIndex,
 ) -> Option<AbsoluteToken> {
     let (start_line, start_col) = idx.line_column(loc.start);
+    let line = start_line.saturating_sub(1);
+
+    // The span of a block scalar ends on a later line, so the indicator is
+    // classified before any length is computed from the span.
+    if matches!(style, ScalarStyle::Literal(_) | ScalarStyle::Folded(_)) {
+        return Some(block_indicator_token(line, start_col));
+    }
+
     let (end_line, end_col) = idx.line_column(loc.end);
     let length = end_col.saturating_sub(start_col);
     if length == 0 {
         return None;
-    }
-
-    let line = start_line.saturating_sub(1);
-
-    // Block scalar indicators.
-    match style {
-        ScalarStyle::Literal(_) | ScalarStyle::Folded(_) => {
-            return Some(AbsoluteToken {
-                line,
-                start: start_col,
-                length: 1, // only the `|` or `>` sigil
-                token_type: TOKEN_OPERATOR,
-                token_modifiers_bitset: 0,
-            });
-        }
-        ScalarStyle::Plain | ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted => {}
     }
 
     // A token cannot span lines, and the span of a multi-line plain or quoted
@@ -472,16 +475,170 @@ mod tests {
         assert!(abs.iter().any(|t| t.3 == TOKEN_TYPE));
     }
 
+    // A block scalar's span ends on a later line, so the sigil's token cannot
+    // come from the span's length: each case pins every token of its input.
     #[rstest]
-    #[case::pipe("text: |")]
-    #[case::gt("text: >")]
-    #[case::pipe_minus("text: |-")]
-    #[case::gt_minus("text: >-")]
-    #[case::pipe_plus("text: |+")]
-    #[case::gt_plus("text: >+")]
-    fn block_scalar_produces_operator_token(#[case] input: &str) {
-        let abs = absolute(absolute_tokens(&parse_docs(input), input));
-        assert!(abs.iter().any(|t| t.3 == TOKEN_OPERATOR));
+    #[case::literal_at_document_root("|\n x\n", &[(0, 0, 1, TOKEN_OPERATOR, 0)])]
+    #[case::literal_in_mapping(
+        "k: |\n  text\n",
+        &[(0, 0, 1, TOKEN_PROPERTY, 0), (0, 3, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::folded_strip_in_mapping(
+        "k: >-\n  some long text\n",
+        &[(0, 0, 1, TOKEN_PROPERTY, 0), (0, 3, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::literal_in_sequence_item("- |\n    abcdef\n", &[(0, 2, 1, TOKEN_OPERATOR, 0)])]
+    #[case::nested_mapping_value(
+        "a:\n  b: |\n    xyz\n",
+        &[
+            (0, 0, 1, TOKEN_PROPERTY, 0),
+            (1, 2, 1, TOKEN_PROPERTY, 0),
+            (1, 5, 1, TOKEN_OPERATOR, 0),
+        ],
+    )]
+    #[case::sequence_item_in_mapping(
+        "- k: |\n    x\n",
+        &[(0, 2, 1, TOKEN_PROPERTY, 0), (0, 5, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::document_start_line("--- |\n x\n", &[(0, 4, 1, TOKEN_OPERATOR, 0)])]
+    #[case::last_line_shorter_than_the_sigil_column_without_line_break(
+        "k: |\n x",
+        &[(0, 0, 1, TOKEN_PROPERTY, 0), (0, 3, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::pipe_at_the_end_of_the_text(
+        "text: |",
+        &[(0, 0, 4, TOKEN_PROPERTY, 0), (0, 6, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::gt_at_the_end_of_the_text(
+        "text: >",
+        &[(0, 0, 4, TOKEN_PROPERTY, 0), (0, 6, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::pipe_minus_at_the_end_of_the_text(
+        "text: |-",
+        &[(0, 0, 4, TOKEN_PROPERTY, 0), (0, 6, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::gt_minus_at_the_end_of_the_text(
+        "text: >-",
+        &[(0, 0, 4, TOKEN_PROPERTY, 0), (0, 6, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::pipe_plus_at_the_end_of_the_text(
+        "text: |+",
+        &[(0, 0, 4, TOKEN_PROPERTY, 0), (0, 6, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::gt_plus_at_the_end_of_the_text(
+        "text: >+",
+        &[(0, 0, 4, TOKEN_PROPERTY, 0), (0, 6, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::content_at_the_end_of_the_text(
+        "k: |\n  tttt",
+        &[(0, 0, 1, TOKEN_PROPERTY, 0), (0, 3, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::empty_followed_by_a_key(
+        "k: |\nk2: v\n",
+        &[
+            (0, 0, 1, TOKEN_PROPERTY, 0),
+            (0, 3, 1, TOKEN_OPERATOR, 0),
+            (1, 0, 2, TOKEN_PROPERTY, 0),
+            (1, 4, 1, TOKEN_STRING, 0),
+        ],
+    )]
+    #[case::empty_at_the_end_of_the_text(
+        "k: |\n",
+        &[(0, 0, 1, TOKEN_PROPERTY, 0), (0, 3, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::empty_keep_with_a_blank_line(
+        "k: |+\n\n",
+        &[(0, 0, 1, TOKEN_PROPERTY, 0), (0, 3, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::trailing_blank_lines_give_one_token(
+        "k: |\n  x\n\n\n",
+        &[(0, 0, 1, TOKEN_PROPERTY, 0), (0, 3, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::content_lines_that_look_like_indicators(
+        "k: |\n  | no\n  > x\n",
+        &[(0, 0, 1, TOKEN_PROPERTY, 0), (0, 3, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::two_in_a_row(
+        "a: |\n  x\nb: >\n  y\n",
+        &[
+            (0, 0, 1, TOKEN_PROPERTY, 0),
+            (0, 3, 1, TOKEN_OPERATOR, 0),
+            (2, 0, 1, TOKEN_PROPERTY, 0),
+            (2, 3, 1, TOKEN_OPERATOR, 0),
+        ],
+    )]
+    #[case::sequence_of_block_scalars(
+        "- |\n a\n- >\n b\n",
+        &[(0, 2, 1, TOKEN_OPERATOR, 0), (2, 2, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::literal_with_indentation_indicator(
+        "k: |1\n  x\n",
+        &[(0, 0, 1, TOKEN_PROPERTY, 0), (0, 3, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::literal_strip_with_indentation_indicator(
+        "k: |-2\n   x\n",
+        &[(0, 0, 1, TOKEN_PROPERTY, 0), (0, 3, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::folded_keep_with_indentation_indicator(
+        "k: >+1\n  x\n",
+        &[(0, 0, 1, TOKEN_PROPERTY, 0), (0, 3, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::anchor_and_tag_before_the_sigil(
+        "k: &a !t |2\n   x\n",
+        &[
+            (0, 0, 1, TOKEN_PROPERTY, 0),
+            (0, 3, 2, TOKEN_VARIABLE, MOD_DECLARATION),
+            (0, 6, 2, TOKEN_TYPE, 0),
+            (0, 9, 1, TOKEN_OPERATOR, 0),
+        ],
+    )]
+    #[case::tag_before_the_sigil(
+        "k: !t |\n  x\n",
+        &[
+            (0, 0, 1, TOKEN_PROPERTY, 0),
+            (0, 3, 2, TOKEN_TYPE, 0),
+            (0, 6, 1, TOKEN_OPERATOR, 0),
+        ],
+    )]
+    #[case::comment_after_the_header(
+        "k: | # c\n  x\n",
+        &[
+            (0, 0, 1, TOKEN_PROPERTY, 0),
+            (0, 3, 1, TOKEN_OPERATOR, 0),
+            (0, 5, 3, TOKEN_COMMENT, 0),
+        ],
+    )]
+    #[case::multi_document(
+        "---\na: |\n x\n...\n---\nb: >\n y\n",
+        &[
+            (1, 0, 1, TOKEN_PROPERTY, 0),
+            (1, 3, 1, TOKEN_OPERATOR, 0),
+            (5, 0, 1, TOKEN_PROPERTY, 0),
+            (5, 3, 1, TOKEN_OPERATOR, 0),
+        ],
+    )]
+    #[case::crlf_line_endings(
+        "k: |\r\n  x\r\n",
+        &[(0, 0, 1, TOKEN_PROPERTY, 0), (0, 3, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::lone_cr_line_endings(
+        "k: |\r  x\r",
+        &[(0, 0, 1, TOKEN_PROPERTY, 0), (0, 3, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::two_byte_key_before_the_sigil(
+        "\u{e9}: |\n  x\n",
+        &[(0, 0, 1, TOKEN_PROPERTY, 0), (0, 3, 1, TOKEN_OPERATOR, 0)],
+    )]
+    #[case::astral_key_before_the_sigil(
+        "\u{1F600}: |\n x\n",
+        &[(0, 0, 1, TOKEN_PROPERTY, 0), (0, 3, 1, TOKEN_OPERATOR, 0)],
+    )]
+    fn block_scalar_header_gets_exactly_one_operator_token_at_its_sigil(
+        #[case] text: &str,
+        #[case] expected: &[(u32, u32, u32, u32, u32)],
+    ) {
+        let abs = absolute(absolute_tokens(&parse_docs(text), text));
+        assert_eq!(abs, expected, "input: {text:?}");
     }
 
     #[test]

@@ -41,3 +41,24 @@ async fn should_return_semantic_tokens_for_valid_yaml() {
         "semanticTokens/full result should not be null for valid YAML"
     );
 }
+
+#[tokio::test]
+async fn block_scalar_header_has_an_operator_token_over_the_server() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/block-scalar-tokens.yaml";
+    send(&mut service, did_open_notification(uri, "k: |\n  text\n")).await;
+
+    let resp = send(&mut service, semantic_tokens_request(2, uri)).await;
+    let resp = resp.expect("semanticTokens/full should return a response");
+    let result = resp
+        .result()
+        .expect("semanticTokens/full should have result");
+
+    // Token types: property = 0, operator = 7 (the legend's order).
+    assert_eq!(result["data"], json!([0, 0, 1, 0, 0, 0, 3, 1, 7, 0]));
+}

@@ -126,6 +126,7 @@ share a parent line with one sub-item each.
 
 ## Cleanup
 
+- `classify_scalar_node` in `rlsp-yaml/src/analysis/semantic_tokens.rs`: the `ScalarStyle::Literal(_) | ScalarStyle::Folded(_)` arms of its quoted-style `match` are unreachable since block scalars return early; `matches!(style, SingleQuoted | DoubleQuoted)` would show it; server-feature bug-fix plan Task 15 review.
 - `rlsp-yaml/src/decorators/scalar_source.rs`: `ScalarSource` holds the two bools `double_quoted` and `single_quoted`, of which at most one may be true (an enum of the escape kind would rule out the invalid state); the doc of `Positions::at` reads as if it gave `LineIndex::line_column`'s 1-based line; the test `a_source_char_takes_no_more_than_the_cell_it_replaced` asserts exactly 12 bytes; server-feature bug-fix plan Task 13 review.
 - `validate_yaml11_compat` in `rlsp-yaml/src/validation/validators/yaml11_compat.rs` builds the `yaml11Boolean` and `yaml11Octal` ranges from the start line and the end column instead of `span_to_lsp`; no defect, since a YAML 1.1 boolean or octal is one token on one line; consistency only; server-feature bug-fix plan Task 7 review.
 - `truncate_name` in `rlsp-yaml/src/validation/validators.rs` is `pub(super)`, while its child modules could use a private `fn`; server-feature bug-fix plan Task 1 review.

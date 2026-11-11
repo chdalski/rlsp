@@ -990,6 +990,7 @@ fn tokens_of(result: &Value) -> Vec<u64> {
     &[0, 1, 2, 1, 0, 0, 4, 2, 4, 1, 0, 3, 1, 1, 0, 0, 3, 2, 4, 0]
 )]
 #[case::block_scalar_sigil("{A}: |", &[0, 0, 2, 0, 0, 0, 4, 1, 7, 0])]
+#[case::block_scalar_sigil_with_content("{A}: |\n  x\n", &[0, 0, 2, 0, 0, 0, 4, 1, 7, 0])]
 #[case::no_astral_character("name: Alice\nage: 30\n", &[0, 0, 4, 0, 0, 0, 6, 5, 1, 0, 1, 0, 3, 0, 0, 0, 5, 2, 2, 0])]
 #[tokio::test]
 async fn a_semantic_token_is_at_its_utf16_columns_with_its_utf16_length(

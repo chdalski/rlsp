@@ -58,7 +58,7 @@ bugs found in the same code are each fixed where they arise.
 - [x] Task 12: A position on a node's text selects that node, not an earlier sibling
 - [x] Task 13: Colors and document links read a scalar's source text through one reader
 - [x] Task 14: A document link covers the source text of its URL
-- [ ] Task 15: Every block scalar value gets the token of its indicator
+- [x] Task 15: Every block scalar value gets the token of its indicator
 - [ ] Task 16: A block scalar key gets the token of its indicator
 - [ ] Push to `main` and confirm the full CI matrix is green
 
@@ -346,16 +346,16 @@ minus the start column and returns at length 0 before its block-scalar branch. A
 ends on a later line, so a block scalar followed by a line break, the usual case, gets no operator
 token for its `|` or `>`. Tokens are written as (line, start, length, type).
 
-- [ ] A block scalar value gains the operator token of its indicator, and every other token stays as
+- [x] A block scalar value gains the operator token of its indicator, and every other token stays as
       it is today: (0,3,1,operator) for `k: |\n  text\n`, `k: >-\n  some long text\n`, and
       `k: |\nk2: v\n`; (0,0,1,operator) for `|\n x\n`; (0,2,1,operator) for `- |\n    abcdef\n`;
       (1,5,1,operator) for `a:\n  b: |\n    xyz\n`; (0,6,1,operator) for `k: !t |\n  x\n`, after
       its type token (0,3,2,type); (0,3,1,operator) for `k: | # c\n  x\n`, before its comment
       token (0,5,3,comment)
-- [ ] `text: |` and `k: |\n  tttt` at the end of the text keep their operator tokens (0,6,1,operator)
-      and (0,3,1,operator), and the existing semantic-token tests pass with their assertions
-      unchanged
-- [ ] Through the server, the semantic tokens of `k: |\n  text\n` hold the operator token
+- [x] `text: |` and `k: |\n  tttt` at the end of the text keep their operator tokens (0,6,1,operator)
+      and (0,3,1,operator), and every existing semantic-token test passes with its assertions
+      unchanged, or, when new table rows cover it (see Decisions), is removed
+- [x] Through the server, the semantic tokens of `k: |\n  text\n` hold the operator token
       (0,3,1,operator)
 
 ### Task 16: A block scalar key gets the token of its indicator
@@ -374,8 +374,9 @@ scalar key; other keys keep today's rule.
 - [ ] `? |\n  k\n: |\n  v\n` gets (0,2,1,operator) and (2,2,1,operator) and no other token
 - [ ] `? |` at the end of the text gets (0,2,1,operator) instead of its property token
 - [ ] Other keys keep their tokens: `? "a\n  b"\n: v\n`, `? a\n  b\n: v\n`, and `{"a\n b": v}\n` get
-      no key token; `? "ab"\n: v\n` gets (0,2,4,property) and `? ab\n: v\n` (0,2,2,property); the
-      existing semantic-token tests pass with their assertions unchanged
+      no key token; `? "ab"\n: v\n` gets (0,2,4,property) and `? ab\n: v\n` (0,2,2,property); every
+      existing semantic-token test passes with its assertions unchanged, or, when new table rows
+      cover it (see Decisions), is removed
 - [ ] Through the server, the semantic tokens of `? |\n  k\n: v\n` hold (0,2,1,operator)
 
 ## Decisions
@@ -433,6 +434,12 @@ scalar key; other keys keep today's rule.
   it; the parser's value stays the authority for the decoding of escapes. The parser bug lies in
   `rlsp-yaml-parser`, outside this plan's Goal, so it goes to the backlog for a parser plan instead
   of becoming a task here.
+- **Replaced tests:** in Tasks 15 and 16, an existing semantic-token test that new table rows cover
+  is removed instead of kept beside them, since a test kept beside rows that assert the same is a
+  duplicate to maintain. A row covers a test when it has the same input, is checked at the same
+  entry point (`absolute_tokens`, or the server request), and asserts every token and every absence
+  the test asserted; each case of a parametrized test counts as one test. The handoff names each
+  removed test with its rows.
 - **Indicator tokens:** a block scalar's `|` or `>` gets one operator token, for a value and for a
   key, built in one place; a block scalar key's indicator at the end of the text turns from a
   property token into that operator token, since the same cause gave it the property token.
