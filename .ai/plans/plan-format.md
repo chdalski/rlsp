@@ -72,11 +72,17 @@ contradict earlier ones.
 - **Specifications and reference implementations** — if the
   user's request references a specification (e.g., YAML
   1.2, OAuth 2.0, RFC 7519) or the project's `CLAUDE.md`
-  References section lists authoritative sources, include
-  them here. The developer uses these to research correct
-  behavior before reading code — omitting them forces the
-  developer to guess what to look up or skip research
-  entirely.
+  References section lists one that defines behavior a
+  task adds, changes, or promises to keep unchanged, name
+  it here; name the sections that apply in each task that
+  rests on them. Every later check works from Context:
+  the developer researches what it names, tests are
+  derived from it, and the reviews compare against it
+  — a specification left out is checked by nobody. A
+  prior project listed its protocol specification in
+  References, yet most plans for that protocol's features
+  named it nowhere, and protocol violations passed every
+  gate for months.
 
 Context orients the developer; it is not a change
 inventory. Name the key files, types, and systems the work
@@ -93,8 +99,9 @@ default, widening a value's meaning, reshaping output.
 Nothing downstream flags those automatically, so name the
 affected readers only for that kind of change.
 
-Context holds only what applies to the whole plan. A fact
-that one task needs goes in that task's description — the
+Context holds only what applies to the whole plan, and
+each specification the Specifications bullet requires. A
+fact that one task needs goes in that task's description — the
 developer and the reviewer work one task at a time, and
 every plan-wide sentence is read again for every task.
 State facts as they are now ("labels of the form
@@ -102,11 +109,12 @@ State facts as they are now ("labels of the form
 Observe` renders"), not as the investigation that
 established them.
 
-A fact about something outside the repository that the
-plan rests on — how an external system behaves, what data
-production holds — is the exception: the code cannot show
-it, so name its source, such as the documentation, the
-query that was run, or who confirmed it. A fact without a
+A fact the plan rests on that the code it changes does
+not show — how an external system behaves, what data
+production holds, what code elsewhere in the repository
+does ("already handled upstream") — names its source: the
+documentation, the query that was run, who confirmed it,
+or the file and function that shows it. A fact without a
 source is an open question: settle it before approval, or
 make checking it a step that gates the tasks resting on
 it. A prior plan stated such a fact without a source; had
@@ -282,6 +290,21 @@ nor the user at approval see what the plan reverses. A
 prior plan overrode its target design with such a clause;
 an outside review found departures that no entry named.
 
+A known deviation the plan leaves in place — as a Non-Goal,
+as out of scope, or for a separate plan — is a departure
+too, and so is behavior the plan preserves ("behavior
+unchanged", "assertions unchanged") where it breaks a
+specification Context names. Check preserved behavior
+against the specification before the plan promises it, and
+give each deviation an entry that names the clause, so the
+user approves keeping it. A kept deviation is pinned like
+other preserved behavior, and its test names the clause
+and the entry; a test that pins a deviation no entry keeps
+makes it look intended. A prior project deferred a known
+protocol violation as out of scope in plan after plan for
+seven months, and one of its refactors kept a test that
+asserted a violation as "consistent with current behavior".
+
 A task that deletes or overwrites stored data beyond what
 reverting its commit restores — rows a migration or
 conversion rewrites, files outside the repository — needs
@@ -364,7 +387,8 @@ it. In particular, leave out:
   the rest.
 - **Restated project rules** — language, conventions, or
   constraints already in a `CLAUDE.md` file, which every
-  agent has loaded.
+  agent has loaded. A specification from References is no
+  project rule: Context names it.
 - **Guards against settled readings** — clauses that
   exclude a reading the code or a project rule already
   excludes. The implementor and the reviewer of each task
