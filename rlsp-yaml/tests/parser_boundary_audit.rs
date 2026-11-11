@@ -135,7 +135,14 @@ const ALLOW_LIST: &[AllowEntry] = &[
         file: "lsp_util.rs",
         func: "source_lines",
         marker: AllowMarker::CarveOut {
-            reason: "pre-parse lexical: splits text into source lines for the modeline and suppression-comment scans, reads no structure",
+            reason: "pre-parse lexical: splits text into source lines, the way LineIndex numbers them, for code actions that read one line's text by index, reads no structure",
+        },
+    },
+    AllowEntry {
+        file: "lsp_util.rs",
+        func: "source_lines_without_bom",
+        marker: AllowMarker::CarveOut {
+            reason: "pre-parse lexical: source lines of a text with the leading byte order mark dropped, for the modeline and suppression-comment scans, reads no structure",
         },
     },
     AllowEntry {

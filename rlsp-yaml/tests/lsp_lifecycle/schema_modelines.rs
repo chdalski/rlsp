@@ -340,3 +340,39 @@ async fn should_fetch_the_modeline_schema_url_without_text_of_the_next_line(
         proxy.seen()
     );
 }
+
+// ---- a byte order mark does not hide the modeline on line 1 ----
+
+#[rstest]
+#[case::without_bom("")]
+#[case::with_bom("\u{FEFF}")]
+#[tokio::test]
+async fn should_apply_the_schema_modeline_on_line_one_with_or_without_a_bom(#[case] bom: &str) {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    service.inner().seed_schema_cache(
+        MANY_BRANCHES_SCHEMA_URL,
+        rlsp_yaml::schema::parse_schema(&json!({ "required": ["name"] }))
+            .expect("schema should parse"),
+    );
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/bom-modeline.yaml";
+    let text = format!("{bom}# yaml-language-server: $schema={MANY_BRANCHES_SCHEMA_URL}\nkey: v\n");
+    send(&mut service, did_open_notification(uri, &text)).await;
+
+    let messages: Vec<String> = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist")
+        .into_iter()
+        .map(|d| d.message)
+        .collect();
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("missing required property 'name'")),
+        "the modeline schema should apply; got: {messages:?}"
+    );
+}

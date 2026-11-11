@@ -50,7 +50,7 @@ bugs found in the same code are each fixed where they arise.
 - [x] Task 6: A selection-range response has one entry per position
 - [x] Task 7: A duplicate-key diagnostic covers the whole key
 - [x] Task 8: The block-scalar action never turns a comment into content
-- [ ] Task 9: A BOM does not hide a modeline or a suppression comment on line 1
+- [x] Task 9: A BOM does not hide a modeline or a suppression comment on line 1
 - [ ] Task 10: The "(all required)" snippet inserts names and defaults as written
 - [ ] Task 11: The "Delete unused anchor" quick fix answers a request with one pass over the document
 - [ ] Task 12: A position on a node's text selects that node, not an earlier sibling
@@ -206,11 +206,11 @@ Only a document and a text that disagree reach this, so no server test can.
 (`src/validation/suppression.rs`) read line 1 with its leading U+FEFF, which `trim` keeps, so no
 `# yaml-language-server:` modeline and no suppression comment on that line matches.
 
-- [ ] After a leading BOM, the `$schema`, `$tags`, and `$yamlVersion` modelines and the
+- [x] After a leading BOM, the `$schema`, `$tags`, and `$yamlVersion` modelines and the
       `# rlsp-yaml-disable-file` and `# rlsp-yaml-disable-next-line` comments on line 1 take effect
       as they do without the BOM
-- [ ] `lsp_util::source_lines` still yields the BOM as part of line 1
-- [ ] Through the server, a BOM document with a `$schema` modeline gets that schema's diagnostic, and
+- [x] `lsp_util::source_lines` still yields the BOM as part of line 1
+- [x] Through the server, a BOM document with a `$schema` modeline gets that schema's diagnostic, and
       a BOM document with `$tags=!x` gets no `unknownTag` diagnostic for `!x`
 
 ### Task 10: The "(all required)" snippet inserts names and defaults as written

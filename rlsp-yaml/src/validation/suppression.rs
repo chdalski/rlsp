@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::lsp_util::source_lines;
+use crate::lsp_util::source_lines_without_bom;
 
 const NEXT_LINE_PREFIX: &str = "# rlsp-yaml-disable-next-line";
 const FILE_PREFIX: &str = "# rlsp-yaml-disable-file";
@@ -75,7 +75,7 @@ pub fn build_suppression_map(text: &str) -> SuppressionMap {
     let mut line_suppressions: HashMap<u32, SuppressionRule> = HashMap::new();
     let mut file_suppression: Option<SuppressionRule> = None;
 
-    for (idx, line) in source_lines(text).enumerate() {
+    for (idx, line) in source_lines_without_bom(text).enumerate() {
         let trimmed = line.trim();
 
         if let Some(rest) = trimmed.strip_prefix(NEXT_LINE_PREFIX) {
@@ -336,6 +336,80 @@ mod tests {
         let text = "# rlsp-yaml-disable-file\nkey: value\n";
         let map = build_suppression_map(text);
         assert!(map.is_suppressed(99, "any-code"));
+    }
+
+    // ── Section 7b: a byte order mark on line 1 ───────────────────────────────
+
+    #[rstest]
+    #[case::lf("\n")]
+    #[case::crlf("\r\n")]
+    #[case::lone_cr("\r")]
+    fn disable_next_line_after_a_bom_targets_the_following_line(#[case] line_break: &str) {
+        let text = format!(
+            "\u{FEFF}# rlsp-yaml-disable-next-line code-a{line_break}key: value{line_break}other: v{line_break}"
+        );
+        let map = build_suppression_map(&text);
+        assert!(!map.is_suppressed(0, "code-a"));
+        assert!(map.is_suppressed(1, "code-a"));
+        assert!(!map.is_suppressed(1, "code-b"));
+        assert!(!map.is_suppressed(2, "code-a"));
+    }
+
+    #[rstest]
+    #[case::lf("\n")]
+    #[case::crlf("\r\n")]
+    #[case::lone_cr("\r")]
+    fn disable_file_after_a_bom_suppresses_every_line(#[case] line_break: &str) {
+        let text =
+            format!("\u{FEFF}# rlsp-yaml-disable-file code-a{line_break}key: value{line_break}");
+        let map = build_suppression_map(&text);
+        assert!(map.is_suppressed(0, "code-a"));
+        assert!(map.is_suppressed(7, "code-a"));
+        assert!(!map.is_suppressed(7, "code-b"));
+    }
+
+    #[test]
+    fn disable_next_line_after_a_bom_and_indentation_targets_the_following_line() {
+        let map = build_suppression_map("\u{FEFF}  # rlsp-yaml-disable-next-line code-a\nkey: v\n");
+        assert!(map.is_suppressed(1, "code-a"));
+        assert!(!map.is_suppressed(0, "code-a"));
+    }
+
+    #[test]
+    fn disable_next_line_without_codes_after_a_bom_suppresses_all_codes_on_the_next_line() {
+        let map =
+            build_suppression_map("\u{FEFF}# rlsp-yaml-disable-next-line\nkey: v\nother: v\n");
+        assert!(map.is_suppressed(1, "any"));
+        assert!(!map.is_suppressed(0, "any"));
+        assert!(!map.is_suppressed(2, "any"));
+    }
+
+    #[test]
+    fn first_file_comment_wins_when_the_first_one_follows_a_bom() {
+        let map = build_suppression_map(
+            "\u{FEFF}# rlsp-yaml-disable-file code-a\n# rlsp-yaml-disable-file code-b\nkey: v\n",
+        );
+        assert!(map.is_suppressed(2, "code-a"));
+        assert!(!map.is_suppressed(2, "code-b"));
+    }
+
+    #[rstest]
+    #[case::bom_on_line_two("k: v\n\u{FEFF}# rlsp-yaml-disable-file\nx: y\n")]
+    #[case::two_boms("\u{FEFF}\u{FEFF}# rlsp-yaml-disable-file\nx: y\n")]
+    #[case::space_before_bom(" \u{FEFF}# rlsp-yaml-disable-file\nx: y\n")]
+    #[case::bom_after_the_comment_indicator("# \u{FEFF}rlsp-yaml-disable-file\nx: y\n")]
+    #[case::next_line_bom_on_line_two("k: v\n\u{FEFF}# rlsp-yaml-disable-next-line\nx: y\n")]
+    fn a_bom_that_does_not_lead_the_text_hides_a_suppression_comment(#[case] text: &str) {
+        let map = build_suppression_map(text);
+        assert!(!map.is_suppressed(1, "any"));
+        assert!(!map.is_suppressed(2, "any"));
+    }
+
+    #[test]
+    fn a_bom_alone_gives_no_suppression() {
+        let map = build_suppression_map("\u{FEFF}");
+        assert!(!map.is_suppressed(0, "any"));
+        assert!(!map.is_suppressed(1, "any"));
     }
 
     // ── Section 8: line breaks ────────────────────────────────────────────────

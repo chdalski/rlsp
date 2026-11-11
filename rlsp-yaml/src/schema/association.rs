@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use rlsp_yaml_parser::Span;
 use rlsp_yaml_parser::node::{Document, Node};
 
-use crate::lsp_util::source_lines;
+use crate::lsp_util::source_lines_without_bom;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Schema association — modeline
@@ -29,11 +29,12 @@ pub fn extract_schema_url(text: &str) -> Option<String> {
 /// The values of the modelines that start with `prefix`, in source order.
 ///
 /// Only the first 10 lines are read. A line matches when it starts with
-/// `prefix` after leading whitespace is dropped; the value is the rest of the
-/// line with surrounding whitespace trimmed, and may be empty. Each extractor
-/// decides which of the values it takes.
+/// `prefix` after leading whitespace (and, on line 1, a byte order mark) is
+/// dropped; the value is the rest of the line with surrounding whitespace
+/// trimmed, and may be empty. Each extractor decides which of the values it
+/// takes.
 fn modeline_values<'a>(text: &'a str, prefix: &'static str) -> impl Iterator<Item = &'a str> {
-    source_lines(text)
+    source_lines_without_bom(text)
         .take(10)
         .filter_map(move |line| line.trim().strip_prefix(prefix).map(str::trim))
 }
@@ -1083,6 +1084,73 @@ mod tests {
         assert_eq!(extract_schema_url(text).is_some(), has_url);
         assert_eq!(!extract_custom_tags(text).is_empty(), has_tags);
         assert_eq!(extract_yaml_version(text).is_some(), has_version);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // a byte order mark on line 1
+    // ══════════════════════════════════════════════════════════════════════════
+
+    #[rstest]
+    #[case::lf("\n")]
+    #[case::crlf("\r\n")]
+    #[case::lone_cr("\r")]
+    fn every_modeline_on_line_one_is_read_after_a_bom(#[case] line_break: &str) {
+        let text = format!(
+            "\u{FEFF}# yaml-language-server: $schema=https://example.com/s.json{line_break}k: v"
+        );
+        assert_eq!(
+            extract_schema_url(&text),
+            Some("https://example.com/s.json".to_string())
+        );
+        let text = format!("\u{FEFF}# yaml-language-server: $tags=!include, !ref{line_break}k: v");
+        assert_eq!(
+            extract_custom_tags(&text),
+            vec!["!include".to_string(), "!ref".to_string()]
+        );
+        let text = format!("\u{FEFF}# yaml-language-server: $yamlVersion=1.1{line_break}k: v");
+        assert_eq!(extract_yaml_version(&text), Some("1.1".to_string()));
+    }
+
+    #[test]
+    fn a_modeline_after_a_bom_and_indentation_is_read() {
+        let text = "\u{FEFF}  \t# yaml-language-server: $schema=https://example.com/s.json\n";
+        assert_eq!(
+            extract_schema_url(text),
+            Some("https://example.com/s.json".to_string())
+        );
+    }
+
+    #[test]
+    fn a_bom_does_not_shift_the_tenth_line_limit() {
+        let fill = "k: v\n".repeat(9);
+        let modeline = "# yaml-language-server: $schema=https://example.com/s.json\n";
+        assert_eq!(
+            extract_schema_url(&format!("\u{FEFF}{fill}{modeline}")),
+            Some("https://example.com/s.json".to_string())
+        );
+        assert_eq!(
+            extract_schema_url(&format!("\u{FEFF}{fill}k: v\n{modeline}")),
+            None
+        );
+    }
+
+    #[rstest]
+    #[case::bom_on_line_two("x: 1\n\u{FEFF}# yaml-language-server: $schema=https://e.com/s.json\n")]
+    #[case::two_boms("\u{FEFF}\u{FEFF}# yaml-language-server: $schema=https://e.com/s.json\n")]
+    #[case::space_before_bom(" \u{FEFF}# yaml-language-server: $schema=https://e.com/s.json\n")]
+    #[case::bom_inside_the_prefix("# yaml-language-server:\u{FEFF} $schema=https://e.com/s.json\n")]
+    #[case::bom_after_the_comment_indicator(
+        "# \u{FEFF}yaml-language-server: $schema=https://e.com/s.json\n"
+    )]
+    fn a_bom_hides_a_schema_modeline_only_where_it_is_not_a_leading_bom(#[case] text: &str) {
+        assert_eq!(extract_schema_url(text), None);
+    }
+
+    #[rstest]
+    #[case::bom_alone("\u{FEFF}")]
+    #[case::empty_value("\u{FEFF}# yaml-language-server: $schema=\n")]
+    fn a_leading_bom_without_a_modeline_value_gives_no_schema(#[case] text: &str) {
+        assert_eq!(extract_schema_url(text), None);
     }
 
     // ══════════════════════════════════════════════════════════════════════════

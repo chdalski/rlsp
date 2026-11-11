@@ -173,3 +173,43 @@ async fn should_allow_exactly_the_tags_of_the_modeline_for_every_line_break(
         "only !other is unknown; !include and !ref come from the modeline, got: {diags:?}"
     );
 }
+
+#[rstest]
+#[case::without_bom("", false)]
+#[case::with_bom("\u{FEFF}", false)]
+#[case::without_modeline("", true)]
+#[tokio::test]
+async fn should_read_the_tags_modeline_on_line_one_with_or_without_a_bom(
+    #[case] bom: &str,
+    #[case] omit_modeline: bool,
+) {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(
+        &mut service,
+        initialize_request_with_custom_tags(1, &["!include"]),
+    )
+    .await;
+    send(&mut service, initialized_notification()).await;
+
+    let modeline = if omit_modeline {
+        ""
+    } else {
+        "# yaml-language-server: $tags=!x\n"
+    };
+    let uri = "file:///test/bom-tags.yaml";
+    let text = format!("{bom}{modeline}value: !x foo\n");
+    send(&mut service, did_open_notification(uri, &text)).await;
+
+    let has_unknown_tag = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist")
+        .iter()
+        .any(|d| matches!(d.code.as_ref(), Some(NumberOrString::String(s)) if s == "unknownTag"));
+    assert_eq!(
+        has_unknown_tag, omit_modeline,
+        "unknownTag is reported exactly when the modeline is missing"
+    );
+}

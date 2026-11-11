@@ -16,6 +16,18 @@ pub fn source_lines(text: &str) -> impl Iterator<Item = &str> {
     std::iter::from_fn(move || lines.consume_next().map(|line| line.content))
 }
 
+/// The source lines of `text` as [`source_lines`] yields them, except that a
+/// byte order mark at the start of `text` is not part of line 1.
+///
+/// For readers that match a prefix of a line's text, such as a modeline or a
+/// suppression comment: the BOM (YAML 1.2.2 section 5.2) is no content, and
+/// `trim` keeps it. Only the first line loses it, and line numbers are the
+/// same as with [`source_lines`]. Callers that count columns use
+/// [`source_lines`], where the BOM takes one column.
+pub fn source_lines_without_bom(text: &str) -> impl Iterator<Item = &str> {
+    source_lines(text.strip_prefix('\u{FEFF}').unwrap_or(text))
+}
+
 /// The source lines of `text` with their own line breaks, in order.
 ///
 /// The lines are cut at the offsets [`LineBuffer`] reports, so they follow one
@@ -258,6 +270,9 @@ mod tests {
         "a\u{85}b\u{2028}c\u{2029}d\n",
         &["a\u{85}b\u{2028}c\u{2029}d"]
     )]
+    #[case::bom_stays_in_line_one("\u{FEFF}a\nb", &["\u{FEFF}a", "b"])]
+    #[case::bom_alone("\u{FEFF}", &["\u{FEFF}"])]
+    #[case::bom_on_line_two("a\n\u{FEFF}b", &["a", "\u{FEFF}b"])]
     fn source_lines_splits_at_yaml_line_breaks(#[case] text: &str, #[case] expected: &[&str]) {
         let lines: Vec<&str> = source_lines(text).collect();
 
@@ -266,6 +281,21 @@ mod tests {
             lines.iter().all(|line| !line.contains(['\r', '\n'])),
             "no line keeps a break: {lines:?}"
         );
+    }
+
+    #[rstest]
+    #[case::no_bom("a\nb", &["a", "b"])]
+    #[case::bom_leaves_line_one("\u{FEFF}a\nb", &["a", "b"])]
+    #[case::bom_alone("\u{FEFF}", &[])]
+    #[case::bom_on_line_two_stays("a\n\u{FEFF}b", &["a", "\u{FEFF}b"])]
+    #[case::second_bom_stays("\u{FEFF}\u{FEFF}a", &["\u{FEFF}a"])]
+    fn source_lines_without_bom_drops_one_leading_bom(
+        #[case] text: &str,
+        #[case] expected: &[&str],
+    ) {
+        let lines: Vec<&str> = source_lines_without_bom(text).collect();
+
+        assert_eq!(lines, expected);
     }
 
     // ── lines_with_breaks ────────────────────────────────────────────────────
