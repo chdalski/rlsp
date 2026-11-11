@@ -49,7 +49,7 @@ bugs found in the same code are each fixed where they arise.
 - [x] Task 5: No selection range misses its position
 - [x] Task 6: A selection-range response has one entry per position
 - [x] Task 7: A duplicate-key diagnostic covers the whole key
-- [ ] Task 8: The block-scalar action never turns a comment into content
+- [x] Task 8: The block-scalar action never turns a comment into content
 - [ ] Task 9: A BOM does not hide a modeline or a suppression comment on line 1
 - [ ] Task 10: The "(all required)" snippet inserts names and defaults as written
 - [ ] Task 11: The "Delete unused anchor" quick fix answers a request with one pass over the document
@@ -193,10 +193,12 @@ When a scalar has a trailing comment and `trailing_comment_line_end`
 action replaces only the scalar, and the comment stays after the block text, where it is content.
 Only a document and a text that disagree reach this, so no server test can.
 
-- [ ] No block-scalar action is offered for a scalar whose trailing comment the rest of its line does
+- [x] No block-scalar action is offered for a scalar whose trailing comment the rest of its line does
       not hold: the document loaded from `k: ` plus a value of 40 characters plus ` # c\n`, with a text
       whose comment reads `# d`
-- [ ] The existing tests of the block-scalar action pass with their assertions unchanged
+- [x] No block-scalar action is offered for a scalar without a trailing comment whose line holds more
+      than blanks after it in the text (gate demand, see Decisions)
+- [x] The existing tests of the block-scalar action pass with their assertions unchanged
 
 ### Task 9: A BOM does not hide a modeline or a suppression comment on line 1
 
@@ -400,6 +402,9 @@ scalar key; other keys keep today's rule.
   callers count columns from the line text, and the BOM takes one column there.
 - **Block-scalar guard:** when the trailing comment cannot be found on the line, the action is not
   offered — an edit could otherwise turn the comment into content.
+- **Gate demand on Task 8:** the guard also covers a scalar without a trailing comment in the
+  document: the action is offered only when the rest of its line in the text is blanks, since text
+  there, such as a comment the document does not hold, would also become content.
 - **Scalar source reader:** colors and document links map a scalar's decoded characters to their
   source text with one reader that decodes the escapes inside the scalar's parser-provided span — the
   arithmetic on parser spans that the root `CLAUDE.md` Crate Boundaries allow; the event stream holds

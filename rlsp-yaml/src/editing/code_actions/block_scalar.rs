@@ -29,6 +29,17 @@ pub(super) fn string_to_block_scalar(
 
     let base_indent = key_col;
     let comment_end = trailing_comment_line_end(text, scalar, scalar_loc.end);
+    // Whatever else the line holds after the scalar would stay behind the block
+    // text, where it is content.  Only a document and a text that disagree reach
+    // this.
+    let line_rest_is_clear = match scalar.trailing_comment() {
+        Some(_) => comment_end.is_some(),
+        None => rest_of_line(text, scalar_loc.end as usize)
+            .is_some_and(|rest| rest.trim_matches(BLANKS).is_empty()),
+    };
+    if !line_rest_is_clear {
+        return vec![];
+    }
     let blanks_end = trailing_blanks_end(text, scalar_loc.end);
 
     let make_block_action = |style: ScalarStyle, title: &str| -> Option<CodeAction> {
@@ -118,7 +129,8 @@ fn rest_of_line(text: &str, end: usize) -> Option<&str> {
 /// The byte offset of the end of the line `scalar` ends on, when the rest of
 /// that line is the scalar's trailing comment (after spaces or tabs) and
 /// nothing else.  `None` when the scalar has no trailing comment or the line
-/// holds anything else, so that no neighbouring text is ever replaced.
+/// holds anything else, so that no neighbouring text is ever replaced; the
+/// caller tells the two apart.
 fn trailing_comment_line_end(text: &str, scalar: &Node<Span>, scalar_end: u32) -> Option<u32> {
     let comment = scalar.trailing_comment()?;
     let end = scalar_end as usize;
@@ -235,6 +247,7 @@ mod tests {
     use crate::editing::formatter::YamlFormatOptions;
     use crate::test_utils::{parse_docs, test_uri};
 
+    use super::super::CodeAction;
     use super::super::test_helpers::{apply_block_scalar_edit, apply_text_edit};
     use super::string_to_block_scalar;
 
@@ -248,9 +261,8 @@ mod tests {
         count
     }
 
-    fn actions_for(yaml: &str) -> Vec<super::super::CodeAction> {
-        let docs = parse_docs(yaml);
-        string_to_block_scalar(&docs, yaml, 0, &test_uri(), &YamlFormatOptions::default())
+    fn actions_for(yaml: &str) -> Vec<CodeAction> {
+        actions_with_text(yaml, yaml, 0)
     }
 
     fn apply_folded_edit(yaml: &str) -> (String, tower_lsp::lsp_types::TextEdit) {
@@ -1028,5 +1040,137 @@ mod tests {
             "{result:?}"
         );
         assert!(result.ends_with("\nb: 1\n"), "{result:?}");
+    }
+
+    // ---- A document and a text that disagree about the comment ----
+
+    /// The actions for the scalar on `line` of `text`, with the document loaded
+    /// from `docs_from`: the two differ only in a test.
+    fn actions_with_text(docs_from: &str, text: &str, line: usize) -> Vec<CodeAction> {
+        string_to_block_scalar(
+            &parse_docs(docs_from),
+            text,
+            line,
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        )
+    }
+
+    // A comment the line of the text does not hold would stay behind the block
+    // text, where it is content: no action is offered.  `after_scalar` is what
+    // the text holds after the scalar; the document's comment is `# c`.
+    #[rstest]
+    #[case::different_comment(" # d\n")]
+    #[case::comment_missing_in_text("\n")]
+    #[case::comment_on_the_next_line("\n# c\n")]
+    #[case::no_blank_before_the_comment("# c\n")]
+    #[case::other_text_between_scalar_and_comment(" x # c\n")]
+    #[case::longer_comment_in_text(" # c d\n")]
+    #[case::no_break_space_before_the_comment("\u{A0}# c\n")]
+    #[case::crlf_before_the_comment("\r\n# c\r\n")]
+    #[case::lone_cr_before_the_comment("\r# c\r")]
+    #[case::text_ends_at_the_scalar("")]
+    fn no_action_when_the_comment_is_not_on_the_scalars_line_of_the_text(
+        #[case] after_scalar: &str,
+    ) {
+        let value = "a".repeat(40);
+        let text = format!("k: {value}{after_scalar}");
+        let actions = actions_with_text(&format!("k: {value} # c\n"), &text, 0);
+        assert!(actions.is_empty(), "{text:?}");
+    }
+
+    #[test]
+    fn no_action_when_the_comment_in_text_is_shorter_than_the_documents() {
+        let value = "a".repeat(40);
+        let actions = actions_with_text(
+            &format!("k: {value} # cd\n"),
+            &format!("k: {value} # c\n"),
+            0,
+        );
+        assert!(actions.is_empty());
+    }
+
+    #[rstest]
+    #[case::text_shorter_than_the_scalar_end("k: abc")]
+    #[case::empty_text("")]
+    fn no_action_when_the_text_ends_before_the_scalar(#[case] text: &str) {
+        let value = "a".repeat(40);
+        assert!(actions_with_text(&format!("k: {value} # c\n"), text, 0).is_empty());
+    }
+
+    #[rstest]
+    #[case::multiline_plain("a: this is a long string that\n  exceeds forty chars # c\nb: 1\n", 0)]
+    #[case::multiline_double_quoted(
+        "a: \"this is a long string\n  that exceeds forty chars\" # c\nb: 1\n",
+        0
+    )]
+    #[case::sequence_item(&format!("- \"{LONG_TEXT}\" # c\n"), 0)]
+    #[case::nested_key(&format!("x:\n  a: \"{LONG_TEXT}\" # c\n"), 1)]
+    #[case::single_quoted(&format!("a: '{LONG_TEXT}' # c\n"), 0)]
+    fn no_action_for_a_different_comment_on_every_kind_of_scalar(
+        #[case] docs_from: &str,
+        #[case] line: usize,
+    ) {
+        let text = docs_from.replace("# c", "# d");
+        assert!(
+            actions_with_text(docs_from, &text, line).is_empty(),
+            "{text:?}"
+        );
+    }
+
+    // The guard comes before the check whether the header can carry the comment.
+    #[test]
+    fn no_action_for_a_different_comment_when_the_header_cannot_carry_it() {
+        let docs_from = "a: \"this is a long string that\\n \\nexceeds forty chars\" # c\n";
+        let text = docs_from.replace("# c", "# d");
+        assert!(
+            actions_with_text(docs_from, &text, 0).is_empty(),
+            "{text:?}"
+        );
+    }
+
+    // The scalar's end lies inside a character of the text: no position is
+    // guessed, with a comment in the document or without.
+    #[rstest]
+    #[case::comment_in_the_document(" # c\n")]
+    #[case::no_comment_in_the_document("\n")]
+    fn no_action_when_the_scalar_end_lies_inside_a_char_of_the_text(#[case] after_value: &str) {
+        let value = "a".repeat(40);
+        let docs_from = format!("k: {value}{after_value}");
+        let text = format!("k: {}\u{E9} # c\n", "a".repeat(39));
+        assert!(
+            actions_with_text(&docs_from, &text, 0).is_empty(),
+            "{text:?}"
+        );
+    }
+
+    // Text after a scalar without a comment in the document would stay behind
+    // the block text as well.
+    #[rstest]
+    #[case::comment_in_text(" # d\n")]
+    #[case::other_text(" x\n")]
+    #[case::no_blank_before_the_comment("# d\n")]
+    fn no_action_when_the_text_holds_more_than_the_document_after_the_scalar(
+        #[case] after_scalar: &str,
+    ) {
+        let value = "a".repeat(40);
+        let text = format!("k: {value}{after_scalar}");
+        assert!(actions_with_text(&format!("k: {value}\n"), &text, 0).is_empty());
+    }
+
+    // The text ends right after the scalar: nothing follows it on the line.
+    #[test]
+    fn both_actions_are_offered_when_the_text_ends_at_the_scalar() {
+        let text = format!("k: {}", "a".repeat(40));
+        assert_eq!(actions_with_text(&text, &text, 0).len(), 2);
+    }
+
+    // Other blanks around the same comment are no disagreement.
+    #[test]
+    fn both_actions_are_offered_when_only_the_blanks_around_the_comment_differ() {
+        let value = "a".repeat(40);
+        let text = format!("k: {value} \t   # c  \n");
+        let actions = actions_with_text(&format!("k: {value} # c\n"), &text, 0);
+        assert_eq!(actions.len(), 2);
     }
 }
