@@ -60,6 +60,7 @@ bugs found in the same code are each fixed where they arise.
 - [x] Task 14: A document link covers the source text of its URL
 - [x] Task 15: Every block scalar value gets the token of its indicator
 - [x] Task 16: A block scalar key gets the token of its indicator
+- [ ] Task 17: The timing tests of document links and colors time the search, not the parser
 - [ ] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
@@ -379,13 +380,35 @@ scalar key; other keys keep today's rule.
       cover it (see Decisions), is removed
 - [x] Through the server, the semantic tokens of `? |\n  k\n: v\n` hold (0,2,1,operator)
 
+### Task 17: The timing tests of document links and colors time the search, not the parser
+
+The loader takes time with the square of the length of a double-quoted line of escapes (a parser
+bug in `.ai/backlog.md`), so `escapes_and_urls_on_one_long_line_are_found_in_linear_time` and
+`a_long_scalar_without_a_url_is_skipped_quickly` (`src/decorators/document_links.rs`) and the
+`one_long_line_of_escapes` case of `large_scalars_without_colors_are_scanned_in_linear_time`
+(`src/decorators/color.rs`), which load such a line inside their timer or test, time the parser.
+Each loads before the timer and times only the search, like
+`the_colors_of_many_scalars_on_one_line_are_found_in_linear_time`.
+
+- [ ] The two document-link tests load their document before `Instant::now()`, time only
+      `find_document_links`, and assert that it ends within 5 seconds; their inputs and their other
+      assertions stay as they are
+- [ ] The color case of a long line of escapes becomes a test of its own that loads `a: "` plus
+      `\x41` 20 000 times plus `"` before `Instant::now()`, times only `find_colors`, asserts that it
+      ends within 5 seconds, and asserts that it finds no color
+- [ ] No `#[timeout]` and no timed `Instant` region of a test in `rlsp-yaml/` holds a parser load
+      of a long line of escapes
+- [ ] `cargo test -p rlsp-yaml --lib decorators::` passes, and the review request reports the
+      measured time of each of the three timed searches in a debug build
+
 ## Decisions
 
-- **Run rules:** a pre-existing bug found while fixing Tasks 4, 6, 11, 12, or 16 goes to
+- **Run rules:** a pre-existing bug found while fixing Tasks 4, 6, 11, 12, 16, or 17 goes to
   `.ai/backlog.md`, and one found while fixing another task becomes a new task of this plan —
-  Tasks 4, 6, 11, 12, and 16 are already bugs found in this code, and attaching only one generation
-  of found bugs lets the run end. A fix whose correct behavior is open, or that changes visible
-  behavior beyond its bug, goes to the backlog's Open decisions, since the user decides those.
+  Tasks 4, 6, 11, 12, and 16 are already bugs found in this code, Task 17 fixes tests this plan
+  added, and attaching only one generation of found bugs lets the run end. A fix whose correct
+  behavior is open, or that changes visible behavior beyond its bug, goes to the backlog's Open
+  decisions, since the user decides those.
 - **Semantic-token positions:** their UTF-16 columns and lengths are not fixed here; the server's
   boundary conversion fixed them.
 - **Whole-tree walks:** the anchor validator, its quick fix, and the other validators walk the whole
@@ -440,6 +463,11 @@ scalar key; other keys keep today's rule.
   entry point (`absolute_tokens`, or the server request), and asserts every token and every absence
   the test asserted; each case of a parametrized test counts as one test. The handoff names each
   removed test with its rows.
+- **Timing tests:** a test that guards the linear time of a feature loads its document before the
+  timer and times only the feature, since the parser's own time is not what it guards; a longer
+  timeout or a smaller input would keep the parser in the timed part. The color case of escapes
+  shrinks to 20 000 escapes, the size of its document-link twin, so its load before the timer stays
+  short.
 - **Indicator tokens:** a block scalar's `|` or `>` gets one operator token, for a value and for a
   key, built in one place; a block scalar key's indicator at the end of the text turns from a
   property token into that operator token, since the same cause gave it the property token.
