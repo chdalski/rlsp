@@ -1473,13 +1473,17 @@ url3: https://another-valid.com
         assert_eq!(find_document_links(&docs, "", None).len(), 2);
     }
 
-    #[rstest]
-    #[timeout(std::time::Duration::from_secs(5))]
+    // The parser takes the square of the length of one line of escapes, so the
+    // document is loaded before the timed search.
+    #[test]
     fn escapes_and_urls_on_one_long_line_are_found_in_linear_time() {
         let text = format!("k: \"{}\"\n", "\\x41 http://a.b ".repeat(20_000));
+        let docs = load_docs(&text);
+        let start = std::time::Instant::now();
 
-        let result = links_of(&text, None);
+        let result = find_document_links(&docs, &text, None);
 
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
         assert_eq!(result.len(), 20_000);
         assert_eq!(result[19_999].range.start.character, 4 + 19_999 * 16 + 5);
         assert_eq!(result[19_999].range.end.character, 4 + 19_999 * 16 + 15);
@@ -1496,12 +1500,18 @@ url3: https://another-valid.com
         assert_eq!(result[19_999].range.start.line, 19_999);
     }
 
-    #[rstest]
-    #[timeout(std::time::Duration::from_secs(5))]
+    // The parser takes the square of the length of one line of escapes, so the
+    // document is loaded before the timed search.
+    #[test]
     fn a_long_scalar_without_a_url_is_skipped_quickly() {
         let text = format!("k: \"{}\"\n", "\\x41".repeat(20_000));
+        let docs = load_docs(&text);
+        let start = std::time::Instant::now();
 
-        assert!(links_of(&text, None).is_empty());
+        let result = find_document_links(&docs, &text, None);
+
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        assert!(result.is_empty());
     }
 
     // The targets are those the value-based search finds, and the source text

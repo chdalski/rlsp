@@ -906,10 +906,23 @@ mod tests {
     #[case::literal_scalar_of_many_lines(format!("a: |\n{}", "  rgb(rgb(\n".repeat(50_000)))]
     #[case::quoted_scalar_of_many_escaped_breaks(format!("a: \"x\\\n{}  \"\n", "  \\\n".repeat(100_000)))]
     #[case::quoted_scalar_of_many_lines(format!("a: \"x\n{}\"\n", "  hsl(hsl(\n".repeat(50_000)))]
-    #[case::one_long_line_of_escapes(format!("a: \"{}\"\n", "\\x41".repeat(100_000)))]
     #[case::one_long_line_of_doubled_quotes(format!("a: '{}'\n", "''".repeat(100_000)))]
     fn large_scalars_without_colors_are_scanned_in_linear_time(#[case] text: String) {
         assert!(colors_of(&text).is_empty());
+    }
+
+    // The parser takes the square of the length of one line of escapes, so the
+    // document is loaded before the timed scan.
+    #[test]
+    fn one_long_line_of_escapes_is_scanned_in_linear_time() {
+        let text = format!("a: \"{}\"\n", "\\x41".repeat(20_000));
+        let docs = parse_docs(&text);
+        let start = std::time::Instant::now();
+
+        let colors = find_colors(&docs, &text);
+
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        assert!(colors.is_empty());
     }
 
     #[test]

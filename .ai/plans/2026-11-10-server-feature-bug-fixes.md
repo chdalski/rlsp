@@ -60,7 +60,7 @@ bugs found in the same code are each fixed where they arise.
 - [x] Task 14: A document link covers the source text of its URL
 - [x] Task 15: Every block scalar value gets the token of its indicator
 - [x] Task 16: A block scalar key gets the token of its indicator
-- [ ] Task 17: The timing tests of document links and colors time the search, not the parser
+- [x] Task 17: The timing tests of document links and colors time the search, not the parser
 - [ ] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
@@ -390,15 +390,15 @@ bug in `.ai/backlog.md`), so `escapes_and_urls_on_one_long_line_are_found_in_lin
 Each loads before the timer and times only the search, like
 `the_colors_of_many_scalars_on_one_line_are_found_in_linear_time`.
 
-- [ ] The two document-link tests load their document before `Instant::now()`, time only
+- [x] The two document-link tests load their document before `Instant::now()`, time only
       `find_document_links`, and assert that it ends within 5 seconds; their inputs and their other
       assertions stay as they are
-- [ ] The color case of a long line of escapes becomes a test of its own that loads `a: "` plus
+- [x] The color case of a long line of escapes becomes a test of its own that loads `a: "` plus
       `\x41` 20 000 times plus `"` before `Instant::now()`, times only `find_colors`, asserts that it
       ends within 5 seconds, and asserts that it finds no color
-- [ ] No `#[timeout]` and no timed `Instant` region of a test in `rlsp-yaml/` holds a parser load
+- [x] No `#[timeout]` and no timed `Instant` region of a test in `rlsp-yaml/` holds a parser load
       of a long line of escapes
-- [ ] `cargo test -p rlsp-yaml --lib decorators::` passes, and the review request reports the
+- [x] `cargo test -p rlsp-yaml --lib decorators::` passes, and the review request reports the
       measured time of each of the three timed searches in a debug build
 
 ## Decisions
