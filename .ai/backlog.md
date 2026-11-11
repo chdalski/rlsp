@@ -43,7 +43,7 @@ share a parent line with one sub-item each.
 - `? ?\n    k\n` emits no value event for the outer key while libfyaml emits an empty scalar; comment plan Task 4 review.
 - `%TAG ! tag:x#y` and `!t#c` load while libfyaml rejects them; [39] `ns-uri-char` includes `#`, so settle it against the spec text in `design-decisions.md`; comment plan Task 4 review.
 - `k: [\n  'y' # c\n]\n` is rejected while the same input without the comment loads, and libfyaml rejects both ([197] `]` at column 0); comment plan Task 4 review.
-- Semantic token lengths count code points, not UTF-16 units; comment plan Task 4.
+- A document link in a single-line quoted scalar with an escape sequence before the URL (`a: "\t https://x.com"`) starts and ends one column early for each character the escapes save, because the URL's offset is measured in the decoded value, not in the source text (`rlsp-yaml/src/decorators/document_links.rs`); pre-existing, UTF-16 boundary plan design review.
 - `format_subtree` in `formatter.rs` indents a literal's blank lines with `base_indent`, so code actions produce whitespace-only lines (the value stays); comment plan Task 6 review.
 - An empty root document in the middle prints a blank line (`---\n\n---`) in `render_documents`, and `a:\n  # c\n` prints `a: ` with a trailing space; comment plan Task 6.
 - The formatter drops `%YAML` and `%TAG` directives, and blank-line pairing then loses every blank line in the rest of the file; comment plan Task 6 security review.
