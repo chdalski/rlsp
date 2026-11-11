@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: MIT
+use std::fmt::Write as _;
+
 use futures::StreamExt;
 use rlsp_yaml::server::Backend;
 use serde_json::json;
@@ -303,6 +305,70 @@ async fn should_not_offer_delete_unused_anchor_once_the_anchor_is_gone() {
             .await
             .is_empty()
     );
+}
+
+/// The `(line, start column, end column)` of the edit of a "Delete unused
+/// anchor" action.
+#[expect(clippy::indexing_slicing, reason = "JSON access in a test helper")]
+fn deleted_span(action: &serde_json::Value, uri: &str) -> (u64, u64, u64) {
+    let edit = &action["edit"]["changes"][uri][0];
+    assert_eq!(edit["newText"], "", "the fix only deletes: {action:?}");
+    let range = &edit["range"];
+    assert_eq!(range["start"]["line"], range["end"]["line"], "{action:?}");
+    (
+        range["start"]["line"].as_u64().expect("a line"),
+        range["start"]["character"].as_u64().expect("a column"),
+        range["end"]["character"].as_u64().expect("a column"),
+    )
+}
+
+#[tokio::test]
+async fn should_offer_one_delete_action_per_unused_anchor_in_line_order_for_a_large_document() {
+    let uri = "file:///test/delete-anchor-many.yaml";
+    let text = (0..2000).fold(String::new(), |mut text, i| {
+        writeln!(text, "k{i}: &a{i} v").expect("writing to a String");
+        text
+    });
+    let mut service = open(&text, uri).await;
+
+    let actions = unused_anchor_actions_of(&mut service, uri, 0, 1999).await;
+
+    assert_eq!(actions.len(), 2000);
+    for (i, action) in actions.iter().enumerate() {
+        let start = format!("k{i}: ").len() as u64;
+        let token = format!("&a{i} ").len() as u64;
+        assert_eq!(
+            deleted_span(action, uri),
+            (i as u64, start, start + token),
+            "action {i}"
+        );
+        assert_eq!(action["kind"], "quickfix", "action {i}");
+        assert_eq!(
+            action["diagnostics"][0]["code"], "unusedAnchor",
+            "action {i}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn should_resolve_each_anchor_of_many_documents_through_the_server() {
+    let uri = "file:///test/delete-anchor-documents.yaml";
+    let text = (0..300).fold(String::new(), |mut text, i| {
+        write!(text, "---\nk: &a{i} v\n").expect("writing to a String");
+        text
+    });
+    let mut service = open(&text, uri).await;
+
+    let actions = unused_anchor_actions_of(&mut service, uri, 0, 599).await;
+
+    assert_eq!(actions.len(), 300);
+    for (i, action) in actions.iter().enumerate() {
+        assert_eq!(
+            deleted_span(action, uri),
+            (2 * i as u64 + 1, 3, 3 + format!("&a{i} ").len() as u64),
+            "action {i}"
+        );
+    }
 }
 
 /// Open `text` and return the code actions the server offers for `line`.

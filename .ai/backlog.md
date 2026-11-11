@@ -30,6 +30,7 @@ share a parent line with one sub-item each.
 
 ## Bugs
 
+- The unused-anchor validator and its quick fix count an anchor as used when any alias of its name stands in the same document, while YAML 1.2.2 binds an alias to the nearest preceding anchor of that name: in `a: &x 1\nb: &x 2\nc: *x\n` the first `&x` is unused and gets no diagnostic (`collect_anchor_alias_entries` in `rlsp-yaml/src/navigation.rs` and its callers, among them `rlsp-yaml/src/validation/validators/anchors.rs`); pre-existing; server-feature bug-fix plan Task 11 test review.
 - A BOM followed by a line break, blanks, or the end of input (`\uFEFF`, `\uFEFF\nk: v\n`, `a: 1\n...\n\uFEFF\nb: 2\n`) panics debug builds at the `debug_assert!` "expected content after consuming blank/comment/directive lines" in `rlsp-yaml-parser/src/event_iter/directives.rs` and loads an extra empty document in release builds (`\uFEFF` gives one document where `\uFEFF# c\n` gives none); suspected, unverified: `skip_blank_lines_between_docs` in `lexer.rs` strips the BOM only after skipping blank lines; pre-existing; server-feature bug-fix plan design review of Task 9's follow-up.
 - The parser rejects a BOM between documents without `...` (`a: 1\n\uFEFF---\nb: 2\n`: "invalid character U+FEFF in document"), which the `c-byte-order-mark` alternative of YAML 1.2.2 [211] appears to allow (production text read through a fetch tool, unverified against the spec page); pre-existing; server-feature bug-fix plan design review of Task 9's follow-up.
 - Selection ranges pick the document by line, so text after `---` on a line where the previous document's root ends gets no range (`a: 1\n--- x\n` at (1,4)) (`selection_range_for_position`, `rlsp-yaml/src/analysis/selection.rs`); server-feature bug-fix plan design review of Task 12.
@@ -65,7 +66,7 @@ share a parent line with one sub-item each.
 - The first single-line plain scalar is bounded by input size only, not `MAX_SCALAR_LEN`, and blank lines between keys are lost when a value gets fewer lines (`a: x\n  y\n\nb: 1\n`); parser plan Task 6 review.
 - A core tag `!!map` on a block key is dropped on format, with the same data; parser plan Task 14 review.
 - `load("\u{FEFF}\nk: v\n")` panics on a `debug_assert` in `rlsp-yaml-parser/src/event_iter/directives.rs` ("expected content after consuming blank/comment/directive lines"); server bug-fix plan Task 1 review.
-- `LineIndex::line_column` in `rlsp-yaml-parser/src/pos.rs` costs time in proportion to the column per call, so a long line with many color matches (or other per-match position lookups) grows with the square of its length; server bug-fix plan Task 5 security review.
+- `LineIndex::line_column` in `rlsp-yaml-parser/src/pos.rs` costs time in proportion to the column per call, so a long line with many color matches (or other per-match position lookups) grows with the square of its length; server bug-fix plan Task 5 security review; the "Delete unused anchor" quick fix shows it too, together with the line-start `rfind` of `deletion_range` (`rlsp-yaml/src/editing/code_actions/delete_anchor.rs`): anchors all on one line (`[&a0 x, &a1 x, ...]`) take 2.9 / 7.5 / 28.8 / 112 ms for 1 000 to 8 000 anchors (server-feature bug-fix plan Task 11 review).
 
 ## Tests
 

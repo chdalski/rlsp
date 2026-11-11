@@ -52,7 +52,7 @@ bugs found in the same code are each fixed where they arise.
 - [x] Task 8: The block-scalar action never turns a comment into content
 - [x] Task 9: A BOM does not hide a modeline or a suppression comment on line 1
 - [x] Task 10: The "(all required)" snippet inserts names and defaults as written
-- [ ] Task 11: The "Delete unused anchor" quick fix answers a request with one pass over the document
+- [x] Task 11: The "Delete unused anchor" quick fix answers a request with one pass over the document
 - [ ] Task 12: A position on a node's text selects that node, not an earlier sibling
 - [ ] Task 13: Colors and document links read a scalar's source text through one reader
 - [ ] Task 14: A document link covers the source text of its URL
@@ -236,19 +236,22 @@ document. A request whose range covers a document with N unused anchors therefor
 the square of N, about 0.8 s for 5 000 in a release build. One index of the anchors, built at most
 once per request, answers every diagnostic.
 
-- [ ] One `code_actions` call with all `unusedAnchor` diagnostics of
+- [x] One `code_actions` call with all `unusedAnchor` diagnostics of
       `&k key: &v val\nl: [&a, b]\nm: &x 1\nn: &x 2\n---\no: &y 1\np: *y\n`, plus an `unusedAnchor`
       diagnostic at `&y`, whose anchor has an alias, returns the same actions, edits, and order as one
       call per diagnostic, joined in diagnostic order
-- [ ] Through the server, a code-action request over all lines of a document of the 2 000 lines
+- [x] Through the server, a code-action request over all lines of a document of the 2 000 lines
       `k0: &a0 v` to `k1999: &a1999 v` returns 2 000 "Delete unused anchor" actions in line order,
       the action of line i removing `&ai ` from line i
-- [ ] A benchmark group in `benches/insight.rs` measures `code_actions` over the whole range of a
+- [x] A benchmark group in `benches/insight.rs` measures `code_actions` over the whole range of a
       document with 1 000, 2 000, 4 000, and 8 000 unused anchors; each doubling raises the time by
       at most 2.5 times, and the review request reports the four times
-- [ ] The quick-fix cases of `tests/lsp_lifecycle/stack_depth.rs` pass, the ignored 512-level release
+- [x] The benchmark group also measures documents that mix unused anchors with used anchor-alias
+      pairs and texts of many documents with one anchor each, with the same bound (gate demand, see
+      Decisions)
+- [x] The quick-fix cases of `tests/lsp_lifecycle/stack_depth.rs` pass, the ignored 512-level release
       case included
-- [ ] The unit tests of `src/editing/code_actions/delete_anchor.rs` and `src/editing/code_actions.rs`,
+- [x] The unit tests of `src/editing/code_actions/delete_anchor.rs` and `src/editing/code_actions.rs`,
       `tests/unused_anchor_fix.rs`, and the unused-anchor cases of `tests/lsp_lifecycle/code_actions.rs`
       pass with their assertions unchanged
 
@@ -402,6 +405,10 @@ scalar key; other keys keep today's rule.
   callers count columns from the line text, and the BOM takes one column there.
 - **Block-scalar guard:** when the trailing comment cannot be found on the line, the action is not
   offered — an edit could otherwise turn the comment into content.
+- **Gate demands on Task 11:** the benchmark measures two more shapes, anchors mixed with used
+  anchor-alias pairs and many documents, since a per-anchor alias scan or document search would stay
+  quadratic in a document of unused anchors alone; and a document whose anchors stand on one line
+  was measured, which stays quadratic through the line-prefix count (a backlog entry).
 - **Gate demand on Task 8:** the guard also covers a scalar without a trailing comment in the
   document: the action is offered only when the rest of its line in the text is blanks, since text
   there, such as a comment the document does not hold, would also become content.

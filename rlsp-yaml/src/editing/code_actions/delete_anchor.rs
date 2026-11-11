@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 
+use std::collections::{HashMap, HashSet};
+
 use tower_lsp::lsp_types::{CodeAction, CodeActionKind, Diagnostic, Range, TextEdit};
 
 use rlsp_yaml_parser::node::Node;
@@ -10,30 +12,142 @@ use crate::navigation::collect_anchor_alias_entries;
 
 use super::make_action;
 
+/// The anchors of the documents a request is answered over, found by the range
+/// of their `&name` token: what an unused-anchor diagnostic selects.
+///
+/// Built once for all diagnostics of a request, so each diagnostic costs one
+/// lookup instead of a walk over the documents.
+pub(super) struct AnchorIndex<'a> {
+    docs: &'a [Document<Span>],
+    anchors: HashMap<RangeKey, IndexedAnchor<'a>>,
+    /// Per document, the names an alias refers to: the validator reports an
+    /// anchor unused only when its name is not among them, and deleting an
+    /// anchor with an alias would leave the alias without one.
+    aliased: Vec<HashSet<&'a str>>,
+}
+
+/// A [`Range`] as a map key: the type has no hash.
+type RangeKey = (u32, u32, u32, u32);
+
+const fn range_key(range: Range) -> RangeKey {
+    (
+        range.start.line,
+        range.start.character,
+        range.end.line,
+        range.end.character,
+    )
+}
+
+/// An anchor of an [`AnchorIndex`].
+struct IndexedAnchor<'a> {
+    /// Position of the anchor's document in `AnchorIndex::docs`.
+    doc: usize,
+    name: &'a str,
+    /// Span of the `&name` token.
+    loc: Span,
+    /// Whether the document stays valid without the token: a flow collection
+    /// entry that is an empty node needs the anchor to exist (`[&a, b]`), and a
+    /// document without `---` whose only content is the anchored empty node
+    /// would vanish from the stream with its token.
+    removable: bool,
+}
+
+/// What the walk of one document knows besides the node it is at.
+struct Walk<'a, 'm> {
+    doc: usize,
+    idx: &'a LineIndex,
+    /// The anchor token of the document's root when the document is nothing
+    /// but that anchored empty node and has no `---`.
+    bare_empty_root: Option<Span>,
+    anchors: &'m mut HashMap<RangeKey, IndexedAnchor<'a>>,
+}
+
+impl<'a> AnchorIndex<'a> {
+    /// Index every anchor of `docs`; the whole of each document is read: how
+    /// deep the documents nest is bounded where they are loaded.
+    pub(super) fn new(docs: &'a [Document<Span>]) -> Self {
+        let mut anchors = HashMap::new();
+        let mut aliased = Vec::with_capacity(docs.len());
+        for (doc_pos, doc) in docs.iter().enumerate() {
+            let bare_empty_root = if !doc.explicit_start && is_empty_node(&doc.root) {
+                doc.root.anchor_loc()
+            } else {
+                None
+            };
+            let mut walk = Walk {
+                doc: doc_pos,
+                idx: doc.line_index(),
+                bare_empty_root,
+                anchors: &mut anchors,
+            };
+            index_node(&doc.root, &mut walk, false);
+            aliased.push(
+                collect_anchor_alias_entries(doc)
+                    .1
+                    .into_iter()
+                    .map(|(name, _)| name)
+                    .collect(),
+            );
+        }
+        Self {
+            docs,
+            anchors,
+            aliased,
+        }
+    }
+}
+
+/// Index the anchors of `node` and below, in document order: the first anchor of
+/// a range wins, as the first one found by a search would.
+///
+/// `needs_node` is whether `node` is the whole of an entry of a flow
+/// collection: a flow sequence item, or the key of a flow mapping entry whose
+/// value is empty too.
+fn index_node<'a>(node: &'a Node<Span>, walk: &mut Walk<'a, '_>, needs_node: bool) {
+    if let (Some(name), Some(loc)) = (node.anchor(), node.anchor_loc()) {
+        walk.anchors
+            .entry(range_key(span_to_lsp(loc, walk.idx)))
+            .or_insert_with(|| IndexedAnchor {
+                doc: walk.doc,
+                name,
+                loc,
+                removable: !(needs_node && is_empty_node(node))
+                    && walk.bare_empty_root != Some(loc),
+            });
+    }
+    match node {
+        Node::Mapping { entries, style, .. } => {
+            let in_flow = *style == CollectionStyle::Flow;
+            for (key, value) in entries {
+                // `{&a : v}` keeps its entry without the anchor, `{&a, b}` does not.
+                index_node(key, walk, in_flow && is_empty_node(value));
+                index_node(value, walk, false);
+            }
+        }
+        Node::Sequence { items, style, .. } => {
+            let in_flow = *style == CollectionStyle::Flow;
+            for item in items {
+                index_node(item, walk, in_flow);
+            }
+        }
+        Node::Scalar { .. } | Node::Alias { .. } => {}
+    }
+}
+
 /// Offer to delete the `&name` token an unused-anchor diagnostic ranges over.
 ///
 /// The diagnostic only selects the anchor: the edit is computed from the
 /// anchor's span in the AST and the text around it, and nothing is offered when
-/// the diagnostic matches no anchor of `docs` (it is stale), when the anchor has
-/// an alias in the meantime, or when deleting it would break the document.
-///
-/// The whole of each document is read: how deep the documents nest is bounded
-/// where they are loaded.
+/// the diagnostic matches no anchor of `index` (it is stale), when the anchor
+/// has an alias in the meantime, or when deleting it would break the document.
 pub(super) fn delete_unused_anchor(
-    docs: &[Document<Span>],
+    index: &AnchorIndex<'_>,
     text: &str,
     diag: &Diagnostic,
     uri: &tower_lsp::lsp_types::Url,
 ) -> Option<CodeAction> {
-    let (doc, anchor) = docs.iter().find_map(|doc| {
-        find_anchor(&doc.root, diag.range, doc.line_index(), false).map(|found| (doc, found))
-    })?;
-    // A document without `---` whose only content is the anchored empty node
-    // would vanish from the stream with its token.
-    let bare_empty_root = !doc.explicit_start
-        && is_empty_node(&doc.root)
-        && doc.root.anchor_loc() == Some(anchor.loc);
-    if !anchor.removable || bare_empty_root || has_alias(doc, anchor.name) {
+    let anchor = index.anchors.get(&range_key(diag.range))?;
+    if !anchor.removable || index.aliased.get(anchor.doc)?.contains(anchor.name) {
         return None;
     }
 
@@ -44,7 +158,7 @@ pub(super) fn delete_unused_anchor(
     }
     let (delete_start, delete_end) = deletion_range(text, start, end)?;
 
-    let idx = doc.line_index();
+    let idx = index.docs.get(anchor.doc)?.line_index();
     Some(make_action(
         "Delete unused anchor".to_string(),
         uri,
@@ -60,56 +174,6 @@ pub(super) fn delete_unused_anchor(
     ))
 }
 
-/// The anchor an unused-anchor diagnostic ranges over.
-struct FoundAnchor<'a> {
-    name: &'a str,
-    /// Span of the `&name` token.
-    loc: Span,
-    /// Whether the document stays valid without the token: a flow collection
-    /// entry that is an empty node needs the anchor to exist (`[&a, b]`).
-    removable: bool,
-}
-
-/// Find the node whose anchor token spans exactly `range`.
-///
-/// `needs_node` is whether `node` is the whole of an entry of a flow
-/// collection: a flow sequence item, or the key of a flow mapping entry whose
-/// value is empty too.
-fn find_anchor<'a>(
-    node: &'a Node<Span>,
-    range: Range,
-    idx: &LineIndex,
-    needs_node: bool,
-) -> Option<FoundAnchor<'a>> {
-    if let (Some(name), Some(loc)) = (node.anchor(), node.anchor_loc())
-        && span_to_lsp(loc, idx) == range
-    {
-        return Some(FoundAnchor {
-            name,
-            loc,
-            removable: !(needs_node && is_empty_node(node)),
-        });
-    }
-    match node {
-        Node::Mapping { entries, style, .. } => {
-            let in_flow = *style == CollectionStyle::Flow;
-            entries.iter().find_map(|(key, value)| {
-                // `{&a : v}` keeps its entry without the anchor, `{&a, b}` does not.
-                let key_needs_node = in_flow && is_empty_node(value);
-                find_anchor(key, range, idx, key_needs_node)
-                    .or_else(|| find_anchor(value, range, idx, false))
-            })
-        }
-        Node::Sequence { items, style, .. } => {
-            let in_flow = *style == CollectionStyle::Flow;
-            items
-                .iter()
-                .find_map(|item| find_anchor(item, range, idx, in_flow))
-        }
-        Node::Scalar { .. } | Node::Alias { .. } => None,
-    }
-}
-
 /// An empty plain scalar without a tag token: the node `[&a, b]` stands for,
 /// which is nothing at all once the anchor is gone.  (The loader resolves the
 /// tag of an untagged node, so `tag` cannot tell; the tag token can.)
@@ -119,16 +183,6 @@ fn is_empty_node(node: &Node<Span>) -> bool {
             node,
             Node::Scalar { value, style: ScalarStyle::Plain, .. } if value.is_empty()
         )
-}
-
-/// Whether `doc` holds an alias to `name`: the validator reports an anchor
-/// unused only when it has none, and deleting an anchor with an alias would
-/// leave the alias without one.
-fn has_alias(doc: &Document<Span>, name: &str) -> bool {
-    collect_anchor_alias_entries(doc)
-        .1
-        .iter()
-        .any(|(alias, _)| *alias == name)
 }
 
 /// The byte range to delete for the anchor token at `start..end` of `buffer`.
@@ -540,5 +594,227 @@ mod tests {
             1
         );
         assert!(unused_anchor_actions(text, &docs, on_body, &diagnostics[0]).is_empty());
+    }
+
+    // ---- one request, many diagnostics ---------------------------------------
+
+    /// The "Delete unused anchor" actions of one `code_actions` call over all of
+    /// `diagnostics`, which must equal those of one call per diagnostic, joined
+    /// in the order of the diagnostics.
+    fn batch_equals_singles(
+        yaml: &str,
+        diagnostics: &[Diagnostic],
+        range: Range,
+    ) -> Vec<tower_lsp::lsp_types::CodeAction> {
+        let docs = docs_for(yaml);
+        let batch: Vec<_> = code_actions(
+            &docs,
+            yaml,
+            range,
+            diagnostics,
+            &test_uri(),
+            &YamlFormatOptions::default(),
+        )
+        .into_iter()
+        .filter(|a| a.title == TITLE)
+        .collect();
+        let singles: Vec<_> = diagnostics
+            .iter()
+            .flat_map(|diag| unused_anchor_actions(yaml, &docs, range, diag))
+            .collect();
+        assert_eq!(batch, singles, "{yaml:?}");
+        batch
+    }
+
+    /// `yaml` with the edit of `action` applied.
+    fn apply_action(yaml: &str, action: &tower_lsp::lsp_types::CodeAction) -> String {
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        apply_text_edit(yaml, &edits[0])
+    }
+
+    fn unused_anchor_diagnostics(yaml: &str) -> Vec<Diagnostic> {
+        validate_unused_anchors(&docs_for(yaml))
+    }
+
+    #[test]
+    fn one_call_over_all_diagnostics_equals_one_call_per_diagnostic() {
+        let text = "&k key: &v val\nl: [&a, b]\nm: &x 1\nn: &x 2\n---\no: &y 1\np: *y\n";
+        let mut diagnostics = unused_anchor_diagnostics(text);
+        assert_eq!(diagnostics.len(), 5, "&k, &v, &a, &x, &x");
+        // The anchor `&y` has an alias: its diagnostic is stale.
+        diagnostics.push(make_diagnostic(5, 3, 5, "unusedAnchor"));
+
+        let actions = batch_equals_singles(text, &diagnostics, whole_document());
+
+        let applied: Vec<String> = actions.iter().map(|a| apply_action(text, a)).collect();
+        assert_eq!(
+            applied,
+            [
+                "key: &v val\nl: [&a, b]\nm: &x 1\nn: &x 2\n---\no: &y 1\np: *y\n",
+                "&k key: val\nl: [&a, b]\nm: &x 1\nn: &x 2\n---\no: &y 1\np: *y\n",
+                "&k key: &v val\nl: [&a, b]\nm: 1\nn: &x 2\n---\no: &y 1\np: *y\n",
+                "&k key: &v val\nl: [&a, b]\nm: &x 1\nn: 2\n---\no: &y 1\np: *y\n",
+            ]
+        );
+    }
+
+    // One action per diagnostic, in the order of the diagnostics.
+    #[test]
+    fn the_actions_follow_the_order_of_the_diagnostics_and_repeat_with_them() {
+        let text = "a: &x 1\nb: &y 2\nc: &z 3\n";
+        let all = unused_anchor_diagnostics(text);
+        let diagnostics = [
+            all[2].clone(),
+            all[0].clone(),
+            all[1].clone(),
+            all[0].clone(),
+        ];
+
+        let actions = batch_equals_singles(text, &diagnostics, whole_document());
+
+        let applied: Vec<String> = actions.iter().map(|a| apply_action(text, a)).collect();
+        assert_eq!(
+            applied,
+            [
+                "a: &x 1\nb: &y 2\nc: 3\n",
+                "a: 1\nb: &y 2\nc: &z 3\n",
+                "a: &x 1\nb: 2\nc: &z 3\n",
+                "a: 1\nb: &y 2\nc: &z 3\n",
+            ]
+        );
+    }
+
+    // A refusal for one anchor leaves the other anchors of the request alone.
+    #[rstest]
+    #[case::sequence_item("[&a, b]\n---\nk: &z v\n", 1)]
+    #[case::mapping_key("{&a, b}\n---\nk: &z v\n", 1)]
+    #[case::bare_empty_root("&x\n---\nk: &z v\n", 1)]
+    #[case::removable_key("{&a : v}\n---\nk: &z v\n", 2)]
+    #[case::explicit_start("---\n&x\n---\nk: &z v\n", 2)]
+    #[case::alias_in_the_document("a: &x 1\nb: *x\n---\nk: &z v\n", 1)]
+    fn a_refused_anchor_does_not_disturb_the_others(#[case] text: &str, #[case] offered: usize) {
+        let mut diagnostics = unused_anchor_diagnostics(text);
+        // The diagnostic of an anchor with an alias is stale.
+        if text.contains("*x") {
+            diagnostics.insert(0, make_diagnostic(0, 3, 5, "unusedAnchor"));
+        }
+        let actions = batch_equals_singles(text, &diagnostics, whole_document());
+        assert_eq!(actions.len(), offered, "{text:?}");
+        assert!(
+            actions
+                .last()
+                .is_some_and(|a| apply_action(text, a).contains("k: v")),
+            "{text:?}: the anchor `&z` is deleted"
+        );
+    }
+
+    // Anchors of one name each get their own action; an alias blocks the
+    // anchors of its name in its own document only.
+    #[test]
+    fn anchors_of_one_name_are_told_apart_by_their_range_and_document() {
+        let text = "a: &x 1\nb: &x 2\nc: *x\n---\nd: &x 3\n---\ne: &x 4\nf: &x 5\n";
+        let diagnostics = [
+            make_diagnostic(0, 3, 5, "unusedAnchor"),
+            make_diagnostic(1, 3, 5, "unusedAnchor"),
+            make_diagnostic(4, 3, 5, "unusedAnchor"),
+            make_diagnostic(6, 3, 5, "unusedAnchor"),
+            make_diagnostic(7, 3, 5, "unusedAnchor"),
+        ];
+
+        let actions = batch_equals_singles(text, &diagnostics, whole_document());
+
+        let applied: Vec<String> = actions.iter().map(|a| apply_action(text, a)).collect();
+        assert_eq!(
+            applied,
+            [
+                "a: &x 1\nb: &x 2\nc: *x\n---\nd: 3\n---\ne: &x 4\nf: &x 5\n",
+                "a: &x 1\nb: &x 2\nc: *x\n---\nd: &x 3\n---\ne: 4\nf: &x 5\n",
+                "a: &x 1\nb: &x 2\nc: *x\n---\nd: &x 3\n---\ne: &x 4\nf: 5\n",
+            ]
+        );
+    }
+
+    // An alias blocks the anchors of exactly its name.
+    #[rstest]
+    #[case::longer_alias("a: &a 1\nb: *ab\n")]
+    #[case::shorter_alias("a: &ab 1\nb: *a\n")]
+    #[case::other_case("a: &A 1\nb: *a\n")]
+    fn an_alias_of_a_similar_name_does_not_block_the_fix(#[case] text: &str) {
+        let diagnostics: Vec<Diagnostic> = unused_anchor_diagnostics(text)
+            .into_iter()
+            .filter(|d| super::super::diagnostic_code(d) == Some("unusedAnchor"))
+            .collect();
+        assert_eq!(diagnostics.len(), 1, "{text:?}");
+        assert_eq!(
+            batch_equals_singles(text, &diagnostics, whole_document()).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn many_documents_each_resolve_to_their_own_anchor() {
+        let text: String = (0..50)
+            .map(|i| match i {
+                25 => "---\nk: v\n".to_string(),
+                _ => format!("---\nk: &a{i} v\n"),
+            })
+            .collect();
+        let mut diagnostics = unused_anchor_diagnostics(&text);
+        assert_eq!(diagnostics.len(), 49);
+        diagnostics.insert(10, make_diagnostic(51, 3, 7, "unusedAnchor"));
+
+        let actions = batch_equals_singles(&text, &diagnostics, whole_document());
+
+        let expected: Vec<String> = (0..50)
+            .filter(|i| *i != 25)
+            .map(|i| text.replacen(&format!("&a{i} "), "", 1))
+            .collect();
+        let applied: Vec<String> = actions.iter().map(|a| apply_action(&text, a)).collect();
+        assert_eq!(applied, expected);
+    }
+
+    // Only the diagnostics on the lines of the requested range are answered.
+    #[rstest]
+    #[case::second_line(1, 1, &[1])]
+    #[case::second_and_third_line(1, 2, &[1, 2])]
+    #[case::before(0, 0, &[0])]
+    #[case::past_the_end(5, 9, &[])]
+    fn the_diagnostics_outside_the_requested_range_get_no_action(
+        #[case] first: u32,
+        #[case] last: u32,
+        #[case] answered: &[usize],
+    ) {
+        let text = "a: &x 1\nb: &y 2\nc: &z 3\n";
+        let range = Range::new(Position::new(first, 0), Position::new(last, 0));
+
+        let actions = batch_equals_singles(text, &unused_anchor_diagnostics(text), range);
+
+        let expected: Vec<String> = ["&x ", "&y ", "&z "]
+            .iter()
+            .enumerate()
+            .filter(|(line, _)| answered.contains(line))
+            .map(|(_, token)| text.replacen(token, "", 1))
+            .collect();
+        let applied: Vec<String> = actions.iter().map(|a| apply_action(text, a)).collect();
+        assert_eq!(applied, expected);
+    }
+
+    // A stale diagnostic among valid ones offers nothing and disturbs nothing.
+    #[test]
+    fn a_stale_diagnostic_among_valid_ones_is_skipped() {
+        let text = "a: &x 1\nb: &y 2\n";
+        let all = unused_anchor_diagnostics(text);
+        let diagnostics = [
+            all[0].clone(),
+            make_diagnostic(0, 6, 7, "unusedAnchor"),
+            make_diagnostic(u32::MAX, 0, 1, "unusedAnchor"),
+            all[1].clone(),
+        ];
+        let range = Range::new(Position::new(0, 0), Position::new(u32::MAX, 0));
+
+        let actions = batch_equals_singles(text, &diagnostics, range);
+
+        let applied: Vec<String> = actions.iter().map(|a| apply_action(text, a)).collect();
+        assert_eq!(applied, ["a: 1\nb: &y 2\n", "a: &x 1\nb: 2\n"]);
     }
 }

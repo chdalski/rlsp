@@ -4,6 +4,7 @@ use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, Diagnostic, NumberOrString, TextEdit, WorkspaceEdit,
 };
 
+use std::cell::OnceCell;
 use std::collections::HashMap;
 
 use rlsp_yaml_parser::{Document, LineIndex, Span};
@@ -13,7 +14,7 @@ use crate::lsp_util::source_lines;
 
 use block_scalar::string_to_block_scalar;
 use block_to_flow::block_to_flow;
-use delete_anchor::delete_unused_anchor;
+use delete_anchor::{AnchorIndex, delete_unused_anchor};
 use flow_to_block::{flow_map_to_block, flow_seq_to_block};
 use quoted_bool::quoted_bool_to_unquoted;
 use tab_to_spaces::tab_to_spaces;
@@ -48,6 +49,10 @@ pub fn code_actions(
     uri: &tower_lsp::lsp_types::Url,
     options: &YamlFormatOptions,
 ) -> Vec<CodeAction> {
+    // The anchors are indexed for the first unused-anchor diagnostic and read by
+    // all the others.
+    let anchor_index = OnceCell::new();
+
     // Diagnostic-driven actions
     let diag_actions = diagnostics
         .iter()
@@ -59,9 +64,12 @@ pub fn code_actions(
             Some("flowSeq") => flow_seq_to_block(docs, text, diag, uri, options)
                 .into_iter()
                 .collect::<Vec<_>>(),
-            Some("unusedAnchor") => delete_unused_anchor(docs, text, diag, uri)
-                .into_iter()
-                .collect::<Vec<_>>(),
+            Some("unusedAnchor") => {
+                let index = anchor_index.get_or_init(|| AnchorIndex::new(docs));
+                delete_unused_anchor(index, text, diag, uri)
+                    .into_iter()
+                    .collect::<Vec<_>>()
+            }
             Some("yaml11Boolean" | "schemaYaml11Boolean") => {
                 yaml11_bool_actions(docs, diag, uri, options)
             }
