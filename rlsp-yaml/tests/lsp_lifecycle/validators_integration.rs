@@ -590,6 +590,35 @@ async fn should_not_suppress_duplicate_key_when_comment_targets_wrong_line() {
     );
 }
 
+#[rstest]
+#[case::comment_targets_the_start_line(
+    "\"a b\": 1\n# rlsp-yaml-disable-next-line duplicateKey\n? \"a\n  b\"\n: 2\n",
+    false
+)]
+#[case::comment_targets_another_line(
+    "# rlsp-yaml-disable-next-line duplicateKey\n\"a b\": 1\n? \"a\n  b\"\n: 2\n",
+    true
+)]
+#[tokio::test]
+async fn disable_next_line_matches_a_multiline_duplicate_key_by_its_start_line(
+    #[case] text: &str,
+    #[case] reported: bool,
+) {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/suppression-multiline-key.yaml";
+    send(&mut service, did_open_notification(uri, text)).await;
+
+    let diags = service
+        .inner()
+        .get_diagnostics(uri)
+        .expect("diagnostics should exist");
+    assert_eq!(has_code(&diags, "duplicateKey"), reported);
+}
+
 #[tokio::test]
 async fn should_suppress_flow_map_diagnostic_with_disable_next_line() {
     let (mut service, socket) = LspService::new(Backend::new);

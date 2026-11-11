@@ -48,7 +48,7 @@ bugs found in the same code are each fixed where they arise.
 - [x] Task 4: The other validators read the whole document
 - [x] Task 5: No selection range misses its position
 - [x] Task 6: A selection-range response has one entry per position
-- [ ] Task 7: A duplicate-key diagnostic covers the whole key
+- [x] Task 7: A duplicate-key diagnostic covers the whole key
 - [ ] Task 8: The block-scalar action never turns a comment into content
 - [ ] Task 9: A BOM does not hide a modeline or a suppression comment on line 1
 - [ ] Task 10: The "(all required)" snippet inserts names and defaults as written
@@ -182,9 +182,9 @@ returns one range today, which the client takes for (1,1).
 `push_duplicate_diagnostic` (`src/validation/validators/duplicate_keys.rs`) builds the range from the
 key's start line and end column, so a multi-line key gets a range on one line.
 
-- [ ] For `"a b": 1\n? "a\n  b"\n: 2\n` the duplicate-key diagnostic covers (1,2)-(2,4)
-- [ ] A single-line duplicate key keeps its range
-- [ ] Through the server, the diagnostic published for that document covers (1,2)-(2,4)
+- [x] For `"a b": 1\n? "a\n  b"\n: 2\n` the duplicate-key diagnostic covers (1,2)-(2,4)
+- [x] A single-line duplicate key keeps its range
+- [x] Through the server, the diagnostic published for that document covers (1,2)-(2,4)
 
 ### Task 8: The block-scalar action never turns a comment into content
 

@@ -270,6 +270,33 @@ async fn the_unused_anchor_diagnostic_is_published_at_utf16_columns(
     assert_eq!(ranges_of(&diagnostics, "unusedAnchor"), expected);
 }
 
+#[rstest]
+#[case::ascii_multiline("\"a b\": 1\n? \"a\n  b\"\n: 2\n", ((1, 2), (2, 4)))]
+#[case::ascii_single_line("a: 1\na: 2\n", ((1, 0), (1, 1)))]
+#[case::crlf_multiline("\"a b\": 1\r\n? \"a\r\n  b\"\r\n: 2\r\n", ((1, 2), (2, 4)))]
+#[case::astral_in_single_line_key("\"{A}\": 1\n\"{A}\": 2\n", ((1, 0), (1, 4)))]
+#[case::astral_in_end_line_of_multiline_key(
+    "\"{A} {A}\": 1\n? \"{A}\n  {A}\"\n: 2\n",
+    ((1, 2), (2, 5))
+)]
+#[case::astral_before_start_on_same_line("{\"{A}\": 1, \"{A}\": 2}\n", ((0, 10), (0, 14)))]
+#[tokio::test]
+async fn the_duplicate_key_diagnostic_is_published_at_utf16_columns(
+    #[case] template: &str,
+    #[case] expected: Span,
+) {
+    let uri = "file:///test/utf16-duplicate-key.yaml";
+    let (_service, mut published) =
+        open_collecting(&template.replace("{A}", ASTRAL), uri, None).await;
+
+    let diagnostics = first_publication(&mut published, uri).await;
+
+    assert_eq!(
+        ranges_of(&diagnostics, "duplicateKey"),
+        vec![range(expected.0, expected.1)]
+    );
+}
+
 #[tokio::test]
 async fn a_syntax_error_after_an_astral_character_keeps_the_end_of_the_line_column() {
     let uri = "file:///test/utf16-syntax-error.yaml";

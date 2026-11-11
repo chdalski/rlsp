@@ -4,9 +4,10 @@ use std::collections::HashSet;
 
 use rlsp_yaml_parser::node::{Document, Node};
 use rlsp_yaml_parser::{LineIndex, Span};
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString};
 
 use super::truncate_name;
+use crate::lsp_util::span_to_lsp;
 use crate::validation::ValidationSettings;
 
 /// Validate duplicate mapping keys in YAML documents.
@@ -86,14 +87,8 @@ fn push_duplicate_diagnostic(
     idx: &LineIndex,
 ) {
     let display_key = truncate_name(key);
-    let (start_line_1based, start_col) = idx.line_column(loc.start);
-    let (_, end_col) = idx.line_column(loc.end);
-    let start_line = start_line_1based.saturating_sub(1);
     diagnostics.push(Diagnostic {
-        range: Range::new(
-            Position::new(start_line, start_col),
-            Position::new(start_line, end_col),
-        ),
+        range: span_to_lsp(loc, idx),
         severity: Some(severity),
         code: Some(NumberOrString::String("duplicateKey".to_string())),
         message: format!("Duplicate key: '{display_key}'"),
@@ -105,7 +100,7 @@ fn push_duplicate_diagnostic(
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
-    use tower_lsp::lsp_types::{DiagnosticSeverity, NumberOrString};
+    use tower_lsp::lsp_types::{DiagnosticSeverity, NumberOrString, Position, Range};
 
     use super::*;
     use crate::test_utils::{assert_loads, nested_flow, staircase, text_of};
@@ -356,33 +351,37 @@ spec:
         assert_eq!(result[0].message, format!("Duplicate key: '{shown}'"));
     }
 
-    #[test]
-    fn should_report_correct_column_for_indented_duplicate_key() {
-        let text = "outer:\n  inner:\n    dup: 1\n    dup: 2\n";
+    #[rstest]
+    #[case::plain_single_line("abc: 1\nabc: 2\n", (1, 0), (1, 3))]
+    #[case::indented_single_line("outer:\n  inner:\n    dup: 1\n    dup: 2\n", (3, 4), (3, 7))]
+    #[case::flow_mapping("{a: 1, a: 2}\n", (0, 7), (0, 8))]
+    #[case::double_quoted_single_line("k: 1\n\"k\": 2\n", (1, 0), (1, 3))]
+    #[case::empty_quoted_key("\"\": 1\n\"\": 2\n", (1, 0), (1, 2))]
+    #[case::alias_key("x: &an 1\n? *an\n: 1\n? *an\n: 2\n", (3, 2), (3, 5))]
+    #[case::double_quoted_multiline("\"a b\": 1\n? \"a\n  b\"\n: 2\n", (1, 2), (2, 4))]
+    #[case::plain_multiline("? a\n  b\n: 1\n? a\n  b\n: 2\n", (3, 2), (4, 3))]
+    #[case::single_quoted_multiline_blank_line(
+        "? 'a\n\n  b'\n: 1\n? 'a\n\n  b'\n: 2\n",
+        (4, 2),
+        (6, 4)
+    )]
+    #[case::double_quoted_escaped_line_break("k: 1\n? \"k\\\n   \"\n: 2\n", (1, 2), (2, 4))]
+    #[case::literal_block_scalar_key("? |\n  a\n: 1\n? |\n  a\n: 2\n", (3, 2), (5, 0))]
+    #[case::crlf_multiline("\"a b\": 1\r\n? \"a\r\n  b\"\r\n: 2\r\n", (1, 2), (2, 4))]
+    #[case::cr_multiline("? a\r  b\r: 1\r? a\r  b\r: 2\r", (3, 2), (4, 3))]
+    #[case::astral_single_line("\"\u{1F600}\": 1\n\"\u{1F600}\": 2\n", (1, 0), (1, 3))]
+    #[case::astral_multiline(
+        "\"\u{1F600} \u{1F600}\": 1\n? \"\u{1F600}\n  \u{1F600}\"\n: 2\n",
+        (1, 2),
+        (2, 4)
+    )]
+    fn duplicate_key_range(#[case] text: &str, #[case] start: (u32, u32), #[case] end: (u32, u32)) {
         let result = parse_duplicate(text);
 
         assert_eq!(result.len(), 1);
         assert_eq!(
-            result[0].range.start.line, 3,
-            "duplicate is on line 3 (0-based)"
-        );
-        assert_eq!(
-            result[0].range.start.character, 4,
-            "exact column from AST loc, not indent approximation"
-        );
-    }
-
-    #[test]
-    fn should_report_correct_range_end_for_duplicate_key() {
-        let text = "abc: 1\nabc: 2\n";
-        let result = parse_duplicate(text);
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].range.start.character, 0);
-        assert_eq!(
-            result[0].range.end.character,
-            result[0].range.start.character + 3,
-            "end column = start + key length"
+            result[0].range,
+            Range::new(Position::new(start.0, start.1), Position::new(end.0, end.1))
         );
     }
 

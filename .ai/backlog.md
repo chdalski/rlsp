@@ -116,6 +116,7 @@ share a parent line with one sub-item each.
 
 ## Cleanup
 
+- `validate_yaml11_compat` in `rlsp-yaml/src/validation/validators/yaml11_compat.rs` builds the `yaml11Boolean` and `yaml11Octal` ranges from the start line and the end column instead of `span_to_lsp`; no defect, since a YAML 1.1 boolean or octal is one token on one line; consistency only; server-feature bug-fix plan Task 7 review.
 - `truncate_name` in `rlsp-yaml/src/validation/validators.rs` is `pub(super)`, while its child modules could use a private `fn`; server-feature bug-fix plan Task 1 review.
 - `MAX_LOGGED_SETTING_CHARS` import cycle, `unknownTag` match instead of `has_code`, `loggable_url` cannot strip userinfo from cannot-be-a-base URLs; tolerant-settings plan.
 - Schema cache: no eviction across URLs, no negative cache for rejected schemas; `cargo doc` fails on private links; share-ref-targets plan.
