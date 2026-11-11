@@ -94,6 +94,43 @@ const fn node_span(node: &Node<Span>) -> Span {
     }
 }
 
+/// The 0-based line and the column in code points of a byte offset.
+fn line_and_column(offset: u32, idx: &LineIndex) -> (usize, usize) {
+    let (line, col) = idx.line_column(offset);
+    (line.saturating_sub(1) as usize, col as usize)
+}
+
+/// The index of the sibling that holds the cursor, between its start and its
+/// end, both included. Siblings are in document order, so the last one that
+/// starts at or before the cursor is the only candidate, and a binary search
+/// finds it: a scan would cost time with the square of the width of a flow
+/// collection on one line, where every column lookup counts the line again.
+fn containing_sibling<T>(
+    siblings: &[T],
+    span_of: impl Fn(&T) -> Span,
+    line: usize,
+    col: usize,
+    idx: &LineIndex,
+) -> Option<usize> {
+    let after = siblings
+        .partition_point(|sibling| line_and_column(span_of(sibling).start, idx) <= (line, col));
+    let index = after.checked_sub(1)?;
+    let span = span_of(siblings.get(index)?);
+    (line_and_column(span.end, idx) >= (line, col)).then_some(index)
+}
+
+/// The siblings in the order the walk tries them: the one at `containing`
+/// first, because a block collection ends at the start of the next sibling and
+/// flow siblings share a line, so an earlier sibling can hold the cursor's line
+/// without holding the cursor. The others follow in document order, each
+/// sibling once.
+fn sibling_order<T>(siblings: &[T], containing: Option<usize>) -> impl Iterator<Item = &T> {
+    containing
+        .into_iter()
+        .chain((0..siblings.len()).filter(move |index| Some(*index) != containing))
+        .filter_map(|index| siblings.get(index))
+}
+
 /// Recursively collect ancestor spans for the cursor, innermost-first.
 ///
 /// `rlsp-yaml-parser` Pos convention: line is 1-based, column is 0-based.
@@ -113,7 +150,17 @@ fn collect_ancestor_spans(
 
     match node {
         Node::Mapping { entries, .. } => {
-            for (key, value) in entries {
+            let containing = containing_sibling(
+                entries,
+                |(key, value)| Span {
+                    start: node_span(key).start,
+                    end: node_span(value).end,
+                },
+                line,
+                col,
+                idx,
+            );
+            for (key, value) in sibling_order(entries, containing) {
                 let key_span = node_span(key);
                 let key_line_0 = idx.line_column(key_span.start).0.saturating_sub(1) as usize;
                 let val_end = node_span(value).end;
@@ -156,7 +203,8 @@ fn collect_ancestor_spans(
             }
         }
         Node::Sequence { items, .. } => {
-            for item in items {
+            let containing = containing_sibling(items, node_span, line, col, idx);
+            for item in sibling_order(items, containing) {
                 let item_span = node_span(item);
                 let start_line_0 = idx.line_column(item_span.start).0.saturating_sub(1) as usize;
                 let end_line_0 = idx.line_column(item_span.end).0.saturating_sub(1) as usize;
@@ -893,12 +941,103 @@ mod tests {
     #[case::second_document_comment_after_multiline(
         "a: 1\n---\nb: \"x\n  y\" # c\n", pos(3, 7), vec![r((2, 0), (4, 0))]
     )]
+    #[case::flow_sequence_between_items_keeps_root_only("[a, b]", pos(0, 3), vec![r((0, 0), (0, 5))])]
+    #[case::flow_mapping_value_of_second_entry(
+        "{a: 1, b: 2}", pos(0, 10),
+        vec![r((0, 10), (0, 11)), r((0, 7), (0, 11)), r((0, 0), (0, 11))]
+    )]
+    #[case::flow_mapping_key_of_second_entry(
+        "{a: 1, b: 2}", pos(0, 7),
+        vec![r((0, 7), (0, 8)), r((0, 7), (0, 11)), r((0, 0), (0, 11))]
+    )]
+    #[case::flow_mapping_between_entries_keeps_root_only(
+        "{a: 1, b: 2}", pos(0, 6), vec![r((0, 0), (0, 11))]
+    )]
+    #[case::flow_mapping_first_entry_unchanged(
+        "{a: 1, b: 2}", pos(0, 4),
+        vec![r((0, 4), (0, 5)), r((0, 1), (0, 5)), r((0, 0), (0, 11))]
+    )]
+    #[case::flow_mapping_value_end_before_comma(
+        "{a: 1,b: 2}", pos(0, 5),
+        vec![r((0, 4), (0, 5)), r((0, 1), (0, 5)), r((0, 0), (0, 10))]
+    )]
+    #[case::block_sequence_of_mappings_second_item(
+        "- a: 1\n  b: 2\n- c: 3\n", pos(2, 5),
+        vec![r((2, 5), (2, 6)), r((2, 2), (2, 6)), r((2, 2), (3, 0)), r((0, 0), (3, 0))]
+    )]
+    #[case::block_entry_after_sequence_value(
+        "a:\n- k: 1\nb: 2\n", pos(2, 3),
+        vec![r((2, 3), (2, 4)), r((2, 0), (2, 4)), r((0, 0), (3, 0))]
+    )]
+    #[case::block_boundary_selects_the_entry_that_starts_there(
+        "a:\n- k: 1\nb: 2\n", pos(2, 0),
+        vec![r((2, 0), (2, 1)), r((2, 0), (2, 4)), r((0, 0), (3, 0))]
+    )]
+    #[case::empty_value_before_entry(
+        "a:\nb: 2\nc:\n", pos(1, 3),
+        vec![r((1, 3), (1, 4)), r((1, 0), (1, 4)), r((0, 0), (3, 0))]
+    )]
+    #[case::nested_flow_across_lines(
+        "a:\n  b: [x, {y: 1,\n   z: 2}]\n  c: 3\n", pos(2, 6),
+        vec![
+            r((2, 6), (2, 7)), r((2, 3), (2, 7)), r((1, 9), (2, 7)),
+            r((1, 2), (2, 8)), r((0, 0), (4, 0))
+        ]
+    )]
+    #[case::flow_explicit_key_entries(
+        "{? a : b, ? c : d}", pos(0, 16),
+        vec![r((0, 16), (0, 17)), r((0, 12), (0, 17)), r((0, 0), (0, 17))]
+    )]
+    #[case::crlf_entry_after_sequence_value(
+        "a:\r\n- k: 1\r\nb: 2\r\n", pos(2, 3),
+        vec![r((2, 3), (2, 4)), r((2, 0), (2, 4)), r((0, 0), (3, 0))]
+    )]
+    // The next two rows pin the unchanged baseline of the open decision on
+    // positions without a node range (the root alone), not a wanted result.
+    #[case::simple_sequence_item_boundary_keeps_root_only(
+        "- a: 1\n- b: 2\n", pos(1, 0), vec![r((0, 0), (2, 0))]
+    )]
+    #[case::simple_sequence_item_indentation_keeps_root_only(
+        "- a: 1\n- b: 2\n", pos(1, 1), vec![r((0, 0), (2, 0))]
+    )]
     fn selection_chain_exact(
         #[case] text: &str,
         #[case] position: Position,
         #[case] expected: Chain,
     ) {
         assert_eq!(chain(text, position), expected);
+    }
+
+    // The chains of scalar sequence items list the item and the scalar, which
+    // have the same range, twice: an open bug that these rows must not pin, so
+    // an adjacent repeated range counts once.
+    #[rstest]
+    #[case::flow_sequence_second_item(
+        "[a, b]", pos(0, 4), vec![r((0, 4), (0, 5)), r((0, 0), (0, 5))]
+    )]
+    #[case::flow_sequence_in_mapping_before_next_entry(
+        "x: [a, b]\ny: 2\n", pos(0, 7),
+        vec![r((0, 7), (0, 8)), r((0, 0), (0, 8)), r((0, 0), (2, 0))]
+    )]
+    #[case::nested_flow_sequences(
+        "[[a, b], [c, d]]", pos(0, 13),
+        vec![r((0, 13), (0, 14)), r((0, 9), (0, 14)), r((0, 0), (0, 15))]
+    )]
+    #[case::multibyte_flow_columns_are_code_points(
+        "日本: [é, ü]\nk: v\n", pos(0, 8),
+        vec![r((0, 8), (0, 9)), r((0, 0), (0, 9)), r((0, 0), (2, 0))]
+    )]
+    #[case::second_document_flow_sequence(
+        "a: 1\n---\n[a, b]\n", pos(2, 4), vec![r((2, 4), (2, 5)), r((2, 0), (2, 5))]
+    )]
+    fn selection_chain_ignoring_repeated_ranges(
+        #[case] text: &str,
+        #[case] position: Position,
+        #[case] expected: Chain,
+    ) {
+        let mut found = chain(text, position);
+        found.dedup();
+        assert_eq!(found, expected);
     }
 
     // A position without a node gets no chain: the handler answers the empty
@@ -915,6 +1054,14 @@ mod tests {
     #[case::past_end_of_last_line_without_final_newline("key: value", pos(0, 11))]
     #[case::line_beyond_document("k: v\n", pos(99, 0))]
     #[case::empty_text("", pos(0, 0))]
+    #[case::sequence_item_ends_where_the_next_line_starts(
+        "- a: 1\n  b: \"p\n    q\"\n- c\n",
+        pos(3, 0)
+    )]
+    #[case::sequence_item_ends_before_the_next_item_indentation(
+        "- a: 1\n  b: \"p\n    q\"\n- c\n",
+        pos(3, 1)
+    )]
     fn selection_chain_without_node_is_none(#[case] text: &str, #[case] position: Position) {
         let docs = parse_docs_inner(text);
         assert_eq!(selection_ranges(&docs, &[position]), vec![None]);
@@ -985,6 +1132,142 @@ mod tests {
         range.0 <= position && position <= range.1
     }
 
+    /// The span of every scalar of `node`.
+    fn scalar_spans(node: &Node<Span>, out: &mut Vec<Span>) {
+        match node {
+            Node::Scalar { loc, .. } => out.push(*loc),
+            Node::Mapping { entries, .. } => {
+                for (key, value) in entries {
+                    scalar_spans(key, out);
+                    scalar_spans(value, out);
+                }
+            }
+            Node::Sequence { items, .. } => {
+                for item in items {
+                    scalar_spans(item, out);
+                }
+            }
+            Node::Alias { .. } => {}
+        }
+    }
+
+    // A position inside a single-line scalar is never answered with the
+    // document root alone: its innermost range lies within the scalar.
+    #[rstest]
+    #[case::flow_sequence("[a, b, c]")]
+    #[case::nested_flow_sequences("[[a, b], [c, d]]")]
+    #[case::flow_mapping("{a: 1, b: 2, c: 3}")]
+    #[case::flow_mapping_without_space("{a: 1,b: 2}")]
+    #[case::flow_explicit_keys("{? a : b, ? c : d}")]
+    #[case::flow_sequence_before_entry("x: [a, b]\ny: 2\n")]
+    #[case::entry_after_sequence_value("a:\n- k: 1\nb: 2\n")]
+    #[case::entries_around_empty_value("a:\nb: 2\nc:\n")]
+    #[case::sequence_of_mappings("- a: 1\n  b: 2\n- c: 3\n")]
+    #[case::sequence_of_mappings_with_multiline_value("- a: 1\n  b: \"p\n    q\"\n- c: 2\n")]
+    #[case::multibyte_flow_sequence("日本: [é, ü]\nk: v\n")]
+    #[case::second_document("a: 1\n---\n[a, b]\n")]
+    fn a_position_in_a_scalar_selects_inside_that_scalar(#[case] text: &str) {
+        let docs = parse_docs_inner(text);
+        let mut scalars = Vec::new();
+        for doc in &docs {
+            let mut spans = Vec::new();
+            scalar_spans(&doc.root, &mut spans);
+            scalars.extend(
+                spans
+                    .into_iter()
+                    .map(|span| span_to_lsp(span, doc.line_index()))
+                    .filter(|range| range.start.line == range.end.line && range.start != range.end),
+            );
+        }
+        assert!(!scalars.is_empty(), "{text:?} has no scalar");
+        for scalar in scalars {
+            for character in scalar.start.character..=scalar.end.character {
+                let position = pos(scalar.start.line, character);
+                let innermost = selection_ranges(&docs, &[position])
+                    .remove(0)
+                    .map(|chain| chain.range);
+                let inside = innermost
+                    .is_some_and(|range| scalar.start <= range.start && range.end <= scalar.end);
+                assert!(
+                    inside,
+                    "{text:?} at {position:?}: {innermost:?} is not inside {scalar:?}"
+                );
+            }
+        }
+    }
+
+    // The walk visits every node at most once per request: a wide document
+    // and a deep one, with the position on a late sibling at every level, stay
+    // fast and give the node under the position.
+    #[test]
+    fn a_late_sibling_of_a_wide_collection_is_selected() {
+        let wide = 100_000;
+        let mapping: String = (0..wide).fold(String::new(), |mut text, i| {
+            writeln!(text, "k{i}: {i}").unwrap();
+            text
+        });
+        let sequence: String = (0..wide).fold(String::new(), |mut text, i| {
+            writeln!(text, "- {i}").unwrap();
+            text
+        });
+        // The parser takes time with the square of the width of a flow
+        // collection on one line, so this one is narrower.
+        let flow_width = 10_000;
+        let flow = format!(
+            "[{}]",
+            (0..flow_width)
+                .map(|i| i.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        for (text, position, innermost) in [
+            (
+                &mapping,
+                pos(wide - 1, 0),
+                ((wide - 1, 0), (wide - 1, 2 + digits(wide - 1))),
+            ),
+            (
+                &sequence,
+                pos(wide - 1, 2),
+                ((wide - 1, 2), (wide - 1, 2 + digits(wide - 1))),
+            ),
+            (
+                &mapping,
+                pos(wide / 2, 0),
+                ((wide / 2, 0), (wide / 2, 2 + digits(wide / 2))),
+            ),
+        ] {
+            let found = chain(text, position);
+            assert_eq!(
+                found.first().map(|range| range.0),
+                Some(innermost.0),
+                "{position:?}"
+            );
+        }
+        let last = flow.chars().count() as u32 - 1 - digits(flow_width - 1);
+        let found = chain(&flow, pos(0, last));
+        assert_eq!(found.first().map(|range| range.0), Some((0, last)));
+    }
+
+    fn digits(number: u32) -> u32 {
+        number.to_string().len() as u32
+    }
+
+    #[test]
+    fn the_later_sibling_is_selected_at_every_level_of_a_deep_flow_sequence() {
+        let levels = 100;
+        let mut text = String::new();
+        for _ in 0..levels {
+            text.push_str("[a, ");
+        }
+        text.push('z');
+        text.push_str(&"]".repeat(levels));
+        let column = (levels * 4) as u32;
+        let found = chain(&text, pos(0, column));
+        assert_eq!(found.first(), Some(&r((0, column), (0, column + 1))));
+        assert!(found.len() > levels, "{} ranges", found.len());
+    }
+
     // Every range of every chain contains its position and every parent range
     // contains its child, for each position of a grid that reaches past the
     // ends of the lines and of the document.
@@ -1018,6 +1301,22 @@ mod tests {
     #[case::nested_sequence_values("data:\n  - nested:\n      - deep_value\n")]
     #[case::empty_value("empty:\nother: val\n")]
     #[case::alias_in_sequence("base: &anchor value\ncopy:\n  - *anchor\n")]
+    #[case::flow_sequence_grid("[a, b]")]
+    #[case::comment_line_inside_mapping_grid("key: value\n# a comment\nother: data\n")]
+    #[case::nested_flow_sequences_grid("[[a, b], [c, d]]")]
+    #[case::flow_sequence_before_entry("x: [a, b]\ny: 2\n")]
+    #[case::flow_mapping("{a: 1, b: 2}")]
+    #[case::flow_mapping_without_space("{a: 1,b: 2}")]
+    #[case::flow_mapping_empty_value("{a: , b: 2}")]
+    #[case::flow_explicit_keys("{? a : b, ? c : d}")]
+    #[case::nested_flow_across_lines_grid("a:\n  b: [x, {y: 1,\n   z: 2}]\n  c: 3\n")]
+    #[case::entry_after_sequence_value("a:\n- k: 1\nb: 2\n")]
+    #[case::entry_after_sequence_value_crlf("a:\r\n- k: 1\r\nb: 2\r\n")]
+    #[case::entries_around_empty_value("a:\nb: 2\nc:\n")]
+    #[case::sequence_of_mappings("- a: 1\n  b: 2\n- c: 3\n")]
+    #[case::sequence_of_one_line_mappings("- a: 1\n- b: 2\n")]
+    #[case::multibyte_flow_sequence("日本: [é, ü]\nk: v\n")]
+    #[case::second_document_flow_sequence_grid("a: 1\n---\n[a, b]\n")]
     fn selection_chain_invariants(#[case] text: &str) {
         let docs = parse_docs_inner(text);
         let line_lengths: Vec<u32> = text

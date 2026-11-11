@@ -824,6 +824,11 @@ async fn selection_result(text: &str, positions: &[(u32, u32)]) -> Value {
     (0, 5),
     selection_chain(&[((0, 3), (0, 7)), ((0, 0), (0, 7)), ((0, 0), (1, 0))])
 )]
+#[case::the_second_flow_entry_after_an_astral_key(
+    "{{A}: 1, b: 2}\n",
+    (0, 11),
+    selection_chain(&[((0, 11), (0, 12)), ((0, 8), (0, 12)), ((0, 0), (0, 12))])
+)]
 #[tokio::test]
 async fn a_selection_range_after_an_astral_character_is_in_client_positions(
     #[case] template: &str,

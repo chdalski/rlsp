@@ -120,6 +120,46 @@ async fn selection_range_inside_multiline_value_keeps_the_full_chain() {
     );
 }
 
+fn range_json(start: (u32, u32), end: (u32, u32)) -> serde_json::Value {
+    json!({
+        "start": { "line": start.0, "character": start.1 },
+        "end": { "line": end.0, "character": end.1 }
+    })
+}
+
+#[tokio::test]
+async fn selection_range_on_a_later_sibling_after_a_multiline_value_selects_that_sibling() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/selection_later_sibling.yaml";
+    send(
+        &mut service,
+        did_open_notification(uri, "- a: 1\n  b: \"p\n    q\"\n- c: 2\n"),
+    )
+    .await;
+
+    let resp = send(&mut service, selection_range_request(2, uri, 3, 2)).await;
+    let resp = resp.expect("selectionRange should return a response");
+    let result = resp.result().expect("selectionRange should have a result");
+    assert_eq!(
+        result,
+        &json!([{
+            "range": range_json((3, 2), (3, 3)),
+            "parent": {
+                "range": range_json((3, 2), (3, 6)),
+                "parent": {
+                    "range": range_json((3, 2), (4, 0)),
+                    "parent": { "range": range_json((0, 0), (4, 0)) }
+                }
+            }
+        }]),
+    );
+}
+
 fn empty_range_entry(line: u32, character: u32) -> serde_json::Value {
     json!({
         "range": {

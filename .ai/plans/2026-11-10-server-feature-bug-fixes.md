@@ -53,7 +53,7 @@ bugs found in the same code are each fixed where they arise.
 - [x] Task 9: A BOM does not hide a modeline or a suppression comment on line 1
 - [x] Task 10: The "(all required)" snippet inserts names and defaults as written
 - [x] Task 11: The "Delete unused anchor" quick fix answers a request with one pass over the document
-- [ ] Task 12: A position on a node's text selects that node, not an earlier sibling
+- [x] Task 12: A position on a node's text selects that node, not an earlier sibling
 - [ ] Task 13: Colors and document links read a scalar's source text through one reader
 - [ ] Task 14: A document link covers the source text of its URL
 - [ ] Task 15: Every block scalar value gets the token of its indicator
@@ -265,21 +265,21 @@ at (3,2) the chain belonged to the first item before Task 5 and is the document 
 it. The sibling whose range contains the position is tried first; the other siblings follow in
 document order as before.
 
-- [ ] `a:\n- k: 1\nb: 2\n` at (2,3) gets the chain `2` (2,3)-(2,4), the entry `b` (2,0)-(2,4), and
+- [x] `a:\n- k: 1\nb: 2\n` at (2,3) gets the chain `2` (2,3)-(2,4), the entry `b` (2,0)-(2,4), and
       the document root
-- [ ] `{a: 1, b: 2}` at (0,7) gets the key `b` (0,7)-(0,8), the entry (0,7)-(0,11), and the root
+- [x] `{a: 1, b: 2}` at (0,7) gets the key `b` (0,7)-(0,8), the entry (0,7)-(0,11), and the root
       (0,0)-(0,11); at (0,10) it gets the value `2` (0,10)-(0,11), the entry, and the root
-- [ ] `[a, b]` at (0,4) and `- a: 1\n  b: "p\n    q"\n- c\n` at (3,2) get the scalar under the
+- [x] `[a, b]` at (0,4) and `- a: 1\n  b: "p\n    q"\n- c\n` at (3,2) get the scalar under the
       position as their innermost range
-- [ ] A position that gets no node range before this task gets none: (3,0) and (3,1) of
+- [x] A position that gets no node range before this task gets none: (3,0) and (3,1) of
       `- a: 1\n  b: "p\n    q"\n- c\n`, `k: aaa\n  bbb\n` at (1,1), and
       `key: value\n# a comment\nother: data\n` at (1,5); `{a: 1, b: 2}` at (0,6) keeps the root as
       its only range
-- [ ] The every-position test of Task 5 covers these inputs and still holds
-- [ ] Through the server, `- a: 1\n  b: "p\n    q"\n- c: 2\n` at (3,2)
+- [x] The every-position test of Task 5 covers these inputs and still holds
+- [x] Through the server, `- a: 1\n  b: "p\n    q"\n- c: 2\n` at (3,2)
       (`tests/lsp_lifecycle/selection_ranges.rs`) gets the key `c` (3,2)-(3,3), the entry
       (3,2)-(3,6), the item (3,2)-(4,0), and the root (0,0)-(4,0)
-- [ ] The selection cases of `tests/lsp_lifecycle/stack_depth.rs` pass, the ignored 512-level release
+- [x] The selection cases of `tests/lsp_lifecycle/stack_depth.rs` pass, the ignored 512-level release
       cases included
 
 ### Task 13: Colors and document links read a scalar's source text through one reader
