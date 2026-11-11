@@ -6,3 +6,5 @@ pub mod code_lens;
 pub mod color;
 /// Document link provider for navigable URLs in YAML values.
 pub mod document_links;
+/// Reader of a scalar's source text, character by character with positions.
+pub mod scalar_source;

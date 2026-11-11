@@ -68,7 +68,7 @@ share a parent line with one sub-item each.
 - The first single-line plain scalar is bounded by input size only, not `MAX_SCALAR_LEN`, and blank lines between keys are lost when a value gets fewer lines (`a: x\n  y\n\nb: 1\n`); parser plan Task 6 review.
 - A core tag `!!map` on a block key is dropped on format, with the same data; parser plan Task 14 review.
 - `load("\u{FEFF}\nk: v\n")` panics on a `debug_assert` in `rlsp-yaml-parser/src/event_iter/directives.rs` ("expected content after consuming blank/comment/directive lines"); server bug-fix plan Task 1 review.
-- `LineIndex::line_column` in `rlsp-yaml-parser/src/pos.rs` costs time in proportion to the column per call, so a long line with many color matches (or other per-match position lookups) grows with the square of its length; server bug-fix plan Task 5 security review; the "Delete unused anchor" quick fix shows it too, together with the line-start `rfind` of `deletion_range` (`rlsp-yaml/src/editing/code_actions/delete_anchor.rs`): anchors all on one line (`[&a0 x, &a1 x, ...]`) take 2.9 / 7.5 / 28.8 / 112 ms for 1 000 to 8 000 anchors (server-feature bug-fix plan Task 11 review).
+- `LineIndex::line_column` in `rlsp-yaml-parser/src/pos.rs` costs time in proportion to the column per call, so a long line with many per-match position lookups grows with the square of its length (colors count positions once per line since server-feature bug-fix plan Task 13); server bug-fix plan Task 5 security review; the "Delete unused anchor" quick fix shows it too, together with the line-start `rfind` of `deletion_range` (`rlsp-yaml/src/editing/code_actions/delete_anchor.rs`): anchors all on one line (`[&a0 x, &a1 x, ...]`) take 2.9 / 7.5 / 28.8 / 112 ms for 1 000 to 8 000 anchors (server-feature bug-fix plan Task 11 review).
 
 ## Tests
 
@@ -123,6 +123,7 @@ share a parent line with one sub-item each.
 
 ## Cleanup
 
+- `rlsp-yaml/src/decorators/scalar_source.rs`: `ScalarSource` holds the two bools `double_quoted` and `single_quoted`, of which at most one may be true (an enum of the escape kind would rule out the invalid state); the doc of `Positions::at` reads as if it gave `LineIndex::line_column`'s 1-based line; the test `a_source_char_takes_no_more_than_the_cell_it_replaced` asserts exactly 12 bytes; server-feature bug-fix plan Task 13 review.
 - `validate_yaml11_compat` in `rlsp-yaml/src/validation/validators/yaml11_compat.rs` builds the `yaml11Boolean` and `yaml11Octal` ranges from the start line and the end column instead of `span_to_lsp`; no defect, since a YAML 1.1 boolean or octal is one token on one line; consistency only; server-feature bug-fix plan Task 7 review.
 - `truncate_name` in `rlsp-yaml/src/validation/validators.rs` is `pub(super)`, while its child modules could use a private `fn`; server-feature bug-fix plan Task 1 review.
 - `MAX_LOGGED_SETTING_CHARS` import cycle, `unknownTag` match instead of `has_code`, `loggable_url` cannot strip userinfo from cannot-be-a-base URLs; tolerant-settings plan.

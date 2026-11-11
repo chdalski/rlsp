@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 
 use rlsp_yaml_parser::node::{Document, Node};
-use rlsp_yaml_parser::{LineBuffer, LineIndex, ScalarStyle, Span};
+use rlsp_yaml_parser::{ScalarStyle, Span};
 use tower_lsp::lsp_types::{Color, ColorPresentation, Range};
 
-use crate::lsp_util::span_to_lsp;
+use super::scalar_source::{Positions, ScalarSource, SourceChar};
 
 /// A color found at a specific range in the document.
 pub struct ColorMatch {
@@ -188,9 +188,9 @@ static NAMED_COLORS: &[(&str, [u8; 3])] = &[
 #[must_use]
 pub fn find_colors(docs: &[Document<Span>], text: &str) -> Vec<ColorMatch> {
     let mut results = Vec::new();
+    let mut positions = Positions::new(text);
     for doc in docs {
-        let idx = doc.line_index();
-        walk_node_value(&doc.root, text, &mut results, idx);
+        walk_node_value(&doc.root, text, &mut results, &mut positions);
     }
     results
 }
@@ -277,19 +277,24 @@ const fn hsl_to_u32(v: f32) -> u32 {
 // ──────────────────────────────────────────────────────────────────────────────
 
 /// Walk `node` as a VALUE position, collecting color matches.
-fn walk_node_value(node: &Node<Span>, text: &str, results: &mut Vec<ColorMatch>, idx: &LineIndex) {
+fn walk_node_value(
+    node: &Node<Span>,
+    text: &str,
+    results: &mut Vec<ColorMatch>,
+    positions: &mut Positions<'_>,
+) {
     match node {
         Node::Scalar { style, loc, .. } => {
-            scan_scalar_for_colors(*style, *loc, text, results, idx);
+            scan_scalar_for_colors(*style, *loc, text, results, positions);
         }
         Node::Mapping { entries, .. } => {
             for (_key, value) in entries {
-                walk_node_value(value, text, results, idx);
+                walk_node_value(value, text, results, positions);
             }
         }
         Node::Sequence { items, .. } => {
             for item in items {
-                walk_node_value(item, text, results, idx);
+                walk_node_value(item, text, results, positions);
             }
         }
         Node::Alias { .. } => {}
@@ -301,102 +306,23 @@ fn walk_node_value(node: &Node<Span>, text: &str, results: &mut Vec<ColorMatch>,
 /// it the scan of a long line, linear in the size of the line.
 const MAX_COLOR_FUNCTION_LEN: usize = 128;
 
-/// One character of a scalar's source, or one escape sequence that stands for
-/// a character, with the byte offsets in the document it covers.
-#[derive(Clone, Copy)]
-struct Cell {
-    start: u32,
-    end: u32,
-    ch: char,
-}
-
-/// Scan a scalar's source text for color patterns, one source line at a time:
+/// Scan a scalar's source text for color patterns, one logical line at a time:
 /// a color never reaches over a line break.
 ///
-/// A block scalar's span starts at its `|` or `>` header, whose line (with any
-/// comment) is not content and is skipped. A span that does not fit `text`
-/// skips the scalar: nothing is guessed about where its colors lie.
+/// A span that does not fit `text` skips the scalar: nothing is guessed about
+/// where its colors lie.
 fn scan_scalar_for_colors(
     style: ScalarStyle,
     loc: Span,
     text: &str,
     results: &mut Vec<ColorMatch>,
-    idx: &LineIndex,
+    positions: &mut Positions<'_>,
 ) {
-    let Some(source) = text.get(loc.start as usize..loc.end as usize) else {
+    let Some(source) = ScalarSource::new(style, loc, text, positions) else {
         return;
     };
-    let is_block = matches!(style, ScalarStyle::Literal(_) | ScalarStyle::Folded(_));
-    let mut lines = ScalarLines {
-        lines: LineBuffer::new(source),
-        base: loc.start,
-        escapes: style == ScalarStyle::DoubleQuoted,
-        after_escaped_break: false,
-    };
-    if is_block {
-        let _header = lines.lines.consume_next();
-    }
-    for cells in lines {
-        scan_cells(&cells, results, idx);
-    }
-}
-
-/// The lines of a scalar's source as cells. Source lines that an escaped line
-/// break joins make up one line, as they read in the scalar's value.
-struct ScalarLines<'a> {
-    lines: LineBuffer<'a>,
-    /// Offset of the scalar's first byte in the document.
-    base: u32,
-    /// Whether backslash escapes are in effect (double-quoted scalars).
-    escapes: bool,
-    /// Whether the previous line ended in an escaped line break.
-    after_escaped_break: bool,
-}
-
-impl Iterator for ScalarLines<'_> {
-    type Item = Vec<Cell>;
-
-    fn next(&mut self) -> Option<Vec<Cell>> {
-        let mut cells = self.source_line()?;
-        while self.after_escaped_break {
-            let Some(joined) = self.source_line() else {
-                break;
-            };
-            cells.extend(joined);
-        }
-        Some(cells)
-    }
-}
-
-impl ScalarLines<'_> {
-    /// The cells of the next source line, escapes masked.
-    fn source_line(&mut self) -> Option<Vec<Cell>> {
-        let line = self.lines.consume_next()?;
-        // Offsets within the scalar's source fit `u32` because its span does.
-        let at =
-            |offset: usize| u32::try_from(offset).map_or(u32::MAX, |o| self.base.saturating_add(o));
-        let mut cells: Vec<Cell> = line
-            .content
-            .char_indices()
-            .map(|(o, ch)| Cell {
-                start: at(line.offset + o),
-                end: at(line.offset + o + ch.len_utf8()),
-                ch,
-            })
-            .collect();
-        if self.after_escaped_break {
-            // The leading blanks of the line after an escaped line break are
-            // not content.
-            let blanks = cells
-                .iter()
-                .take_while(|c| matches!(c.ch, ' ' | '\t'))
-                .count();
-            cells.drain(..blanks);
-        }
-        if self.escapes {
-            self.after_escaped_break = mask_escapes(&mut cells);
-        }
-        Some(cells)
+    for line in source {
+        scan_line(&line, results);
     }
 }
 
@@ -408,59 +334,19 @@ const WORD_PLACEHOLDER: char = 'é';
 /// Stands for an escape that decodes to a character that is no word character.
 const BOUNDARY_PLACEHOLDER: char = '\\';
 
-/// Replace each escape sequence in the `cells` of a double-quoted scalar's line
-/// by one placeholder cell that covers the sequence, so a color token is
-/// matched against what the escapes decode to at its borders. An escaped line
-/// break at the end of the line is dropped; returns whether there was one.
-fn mask_escapes(cells: &mut Vec<Cell>) -> bool {
-    let mut masked = Vec::with_capacity(cells.len());
-    let mut i = 0;
-    let mut escaped_break = false;
-    while let Some(&cell) = cells.get(i) {
-        if cell.ch != '\\' {
-            masked.push(cell);
-            i += 1;
-            continue;
-        }
-        let Some(kind) = cells.get(i + 1).map(|c| c.ch) else {
-            escaped_break = true;
-            break;
-        };
-        let digits = match kind {
-            'x' => 2,
-            'u' => 4,
-            'U' => 8,
-            _ => 0,
-        };
-        let decoded = if digits == 0 {
-            None
-        } else {
-            cells
-                .get(i + 2..i + 2 + digits)
-                .and_then(|hex| {
-                    hex.iter().try_fold(0u32, |acc, c| {
-                        c.ch.to_digit(16).map(|value| (acc << 4) | value)
-                    })
-                })
-                .and_then(char::from_u32)
-        };
-        let (placeholder, length) = match decoded {
-            Some(c) if c.is_alphanumeric() || c == '_' => (WORD_PLACEHOLDER, 2 + digits),
-            Some(_) => (BOUNDARY_PLACEHOLDER, 2 + digits),
-            // A simple escape decodes to no word character. A malformed
-            // numeric escape is a load error and cannot reach here.
-            None => (BOUNDARY_PLACEHOLDER, 2),
-        };
-        let last = cells.get(i + length - 1).unwrap_or(&cell);
-        masked.push(Cell {
-            start: cell.start,
-            end: last.end,
-            ch: placeholder,
-        });
-        i += length;
+/// The character a color token is matched against for `cell`.
+///
+/// A character an escape wrote stands for itself only as far as it is a word
+/// character or not: a color token is matched against what the escapes decode
+/// to at its borders, and never contains one.
+fn token_char(cell: &SourceChar) -> char {
+    if !cell.escaped() {
+        cell.ch()
+    } else if cell.ch().is_alphanumeric() || cell.ch() == '_' {
+        WORD_PLACEHOLDER
+    } else {
+        BOUNDARY_PLACEHOLDER
     }
-    *cells = masked;
-    escaped_break
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -469,17 +355,18 @@ fn mask_escapes(cells: &mut Vec<Cell>) -> bool {
 
 /// Scan the `cells` of one line of a scalar's value for color patterns. A
 /// color that lies over more than one source line is not reported.
-fn scan_cells(cells: &[Cell], results: &mut Vec<ColorMatch>, idx: &LineIndex) {
-    let chars: Vec<char> = cells.iter().map(|c| c.ch).collect();
+fn scan_line(cells: &[SourceChar], results: &mut Vec<ColorMatch>) {
+    let chars: Vec<char> = cells.iter().map(token_char).collect();
     let mut push_match = |from: usize, len: usize, color: Color| {
         if let (Some(start), Some(end)) = (
-            cells.get(from).map(|c| c.start),
-            cells.get(from + len - 1).map(|c| c.end),
-        ) {
-            let range = span_to_lsp(Span { start, end }, idx);
-            if range.start.line == range.end.line {
-                results.push(ColorMatch { range, color });
-            }
+            cells.get(from).map(SourceChar::start),
+            cells.get(from + len - 1).map(SourceChar::end),
+        ) && start.line == end.line
+        {
+            results.push(ColorMatch {
+                range: Range::new(start, end),
+                color,
+            });
         }
     };
     let mut i = 0;
@@ -806,7 +693,8 @@ mod tests {
     use tower_lsp::lsp_types::Position;
 
     use super::*;
-    use crate::test_utils::parse_docs;
+    use crate::lsp_util::span_to_lsp;
+    use crate::test_utils::{parse_docs, text_under};
 
     fn colors_of(yaml: &str) -> Vec<ColorMatch> {
         find_colors(&parse_docs(yaml), yaml)
@@ -817,21 +705,6 @@ mod tests {
             Position::new(start_line, start_col),
             Position::new(end_line, end_col),
         )
-    }
-
-    /// The text a client would replace for a single-line `range`: columns are
-    /// codepoints, lines end at `\n`, `\r\n`, or a lone `\r`.
-    fn text_under(yaml: &str, range: Range) -> String {
-        assert_eq!(range.start.line, range.end.line, "single-line range");
-        yaml.replace("\r\n", "\n")
-            .replace('\r', "\n")
-            .split('\n')
-            .nth(range.start.line as usize)
-            .expect("range line exists")
-            .chars()
-            .skip(range.start.character as usize)
-            .take((range.end.character - range.start.character) as usize)
-            .collect()
     }
 
     fn approx_eq(a: f32, b: f32) -> bool {
@@ -892,6 +765,7 @@ mod tests {
     #[case::single_quoted_hex("primary: '#ff0000'\n", &[(0, 10, 17, "#ff0000")])]
     #[case::double_quoted_hex("color: \"#ff0000\"\n", &[(0, 8, 15, "#ff0000")])]
     #[case::single_quoted_with_doubled_quote("c: 'it''s red'\n", &[(0, 10, 13, "red")])]
+    #[case::single_quoted_color_after_doubled_quote("a: 'it''red'\n", &[(0, 8, 11, "red")])]
     #[case::two_colors_in_one_scalar("a: \"red red\"\n", &[(0, 4, 7, "red"), (0, 8, 11, "red")])]
     #[case::two_entries("a: red\nb: red\n", &[(0, 3, 6, "red"), (1, 3, 6, "red")])]
     #[case::quoted_key_is_no_value("'red': blue\n", &[(0, 7, 11, "blue")])]
@@ -901,6 +775,9 @@ mod tests {
     // Properties and aliases
     #[case::anchor_name_is_no_color("a: &red blue\n", &[(0, 8, 12, "blue")])]
     #[case::tag_before_value("a: !!str red\n", &[(0, 9, 12, "red")])]
+    #[case::tag_before_double_quoted("a: !!str \"red\"\n", &[(0, 10, 13, "red")])]
+    #[case::anchor_before_single_quoted("a: &x 'it''s red'\n", &[(0, 13, 16, "red")])]
+    #[case::anchor_before_double_quoted_with_escape("a: &x \"\\x20red\"\n", &[(0, 11, 14, "red")])]
     #[case::tag_name_is_no_color("a: !red blue\n", &[(0, 8, 12, "blue")])]
     #[case::alias_is_no_scalar("a: &x blue\nb: *x\n", &[(0, 6, 10, "blue")])]
     // Flow collections
@@ -1029,6 +906,8 @@ mod tests {
     #[case::literal_scalar_of_many_lines(format!("a: |\n{}", "  rgb(rgb(\n".repeat(50_000)))]
     #[case::quoted_scalar_of_many_escaped_breaks(format!("a: \"x\\\n{}  \"\n", "  \\\n".repeat(100_000)))]
     #[case::quoted_scalar_of_many_lines(format!("a: \"x\n{}\"\n", "  hsl(hsl(\n".repeat(50_000)))]
+    #[case::one_long_line_of_escapes(format!("a: \"{}\"\n", "\\x41".repeat(100_000)))]
+    #[case::one_long_line_of_doubled_quotes(format!("a: '{}'\n", "''".repeat(100_000)))]
     fn large_scalars_without_colors_are_scanned_in_linear_time(#[case] text: String) {
         assert!(colors_of(&text).is_empty());
     }
@@ -1037,6 +916,46 @@ mod tests {
     fn large_folded_scalar_reports_every_color() {
         let text = format!("a: >\n{}", "  red rgb(1, 2, 3)\n".repeat(20_000));
         assert_eq!(colors_of(&text).len(), 40_000);
+    }
+
+    #[rstest]
+    #[timeout(std::time::Duration::from_secs(5))]
+    fn the_colors_of_a_long_scalar_are_found_in_linear_time() {
+        let text = format!("k: \"{}\"\n", "\u{1f600} red ".repeat(20_000));
+
+        let colors = colors_of(&text);
+
+        assert_eq!(colors.len(), 20_000);
+        // 4 columns for `k: "`, then 6 characters per round (an emoji, a
+        // space, the 3-character name, a space) and 2 into the last round.
+        assert_eq!(
+            colors[19_999].range,
+            range(0, 4 + 19_999 * 6 + 2, 0, 4 + 19_999 * 6 + 5)
+        );
+    }
+
+    // The parser takes the square of the length of one flow line, so the
+    // document is loaded before the timed scan and kept short.
+    #[test]
+    fn the_colors_of_many_scalars_on_one_line_are_found_in_linear_time() {
+        let text = format!("[{}red]\n", "red, ".repeat(9_999));
+        let docs = parse_docs(&text);
+        let start = std::time::Instant::now();
+
+        let colors = find_colors(&docs, &text);
+
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        assert_eq!(colors.len(), 10_000);
+        assert_eq!(
+            colors[9_999].range,
+            range(0, 1 + 9_999 * 5, 0, 4 + 9_999 * 5)
+        );
+    }
+
+    #[rstest]
+    #[timeout(std::time::Duration::from_secs(5))]
+    fn the_colors_of_many_scalars_are_found_in_linear_time() {
+        assert_eq!(colors_of(&"a: red\n".repeat(100_000)).len(), 100_000);
     }
 
     #[test]

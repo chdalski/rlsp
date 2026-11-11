@@ -12,6 +12,26 @@ pub fn parse_docs(text: &str) -> Vec<Document<Span>> {
     rlsp_yaml_parser::load(text).unwrap_or_default()
 }
 
+/// The text a client would replace for a single-line `range`: columns are
+/// codepoints, lines end at `\n`, `\r\n`, or a lone `\r`.
+///
+/// # Panics
+///
+/// Panics when `range` spans lines or starts on a line `yaml` does not have.
+#[must_use]
+pub fn text_under(yaml: &str, range: Range) -> String {
+    assert_eq!(range.start.line, range.end.line, "single-line range");
+    yaml.replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .split('\n')
+        .nth(range.start.line as usize)
+        .expect("range line exists")
+        .chars()
+        .skip(range.start.character as usize)
+        .take((range.end.character - range.start.character) as usize)
+        .collect()
+}
+
 /// A stable test file URI for use in unit tests.
 ///
 /// # Panics

@@ -54,7 +54,7 @@ bugs found in the same code are each fixed where they arise.
 - [x] Task 10: The "(all required)" snippet inserts names and defaults as written
 - [x] Task 11: The "Delete unused anchor" quick fix answers a request with one pass over the document
 - [x] Task 12: A position on a node's text selects that node, not an earlier sibling
-- [ ] Task 13: Colors and document links read a scalar's source text through one reader
+- [x] Task 13: Colors and document links read a scalar's source text through one reader
 - [ ] Task 14: A document link covers the source text of its URL
 - [ ] Task 15: Every block scalar value gets the token of its indicator
 - [ ] Task 16: A block scalar key gets the token of its indicator
@@ -293,14 +293,14 @@ the lines around an escaped line break, skips a block scalar's header line, and 
 of the YAML 1.2.2 double-quoted style. Colors turn the characters an escape wrote into the
 placeholders they use today, so a color written only through escapes stays unreported.
 
-- [ ] For every escape of the YAML 1.2.2 double-quoted style, the characters the reader decodes from
+- [x] For every escape of the YAML 1.2.2 double-quoted style, the characters the reader decodes from
       `k: "` plus the escape plus `"` are the value the parser loads
-- [ ] The reader's position of each character is the position `LineIndex::line_column` gives its
+- [x] The reader's position of each character is the position `LineIndex::line_column` gives its
       source offset, for plain, single-quoted, double-quoted, literal, and folded scalars, with `\n`,
       `\r\n`, and `\r` line breaks and after a BOM
-- [ ] The colors of a one-line scalar, `k: "` plus `😀 red ` 20 000 times plus `"`, are all reported
+- [x] The colors of a one-line scalar, `k: "` plus `😀 red ` 20 000 times plus `"`, are all reported
       within 5 seconds, the limit of `the_links_of_a_long_scalar_are_found_in_linear_time`
-- [ ] `src/decorators/color.rs` keeps no source reader of its own, and the tests of
+- [x] `src/decorators/color.rs` keeps no source reader of its own, and the tests of
       `src/decorators/color.rs`, `tests/lsp_lifecycle/document_color.rs`, and the color cases of
       `tests/lsp_lifecycle/utf16_positions.rs` pass with their assertions unchanged
 

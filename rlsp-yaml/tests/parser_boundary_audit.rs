@@ -216,6 +216,20 @@ const ALLOW_LIST: &[AllowEntry] = &[
         },
     },
     AllowEntry {
+        file: "decorators/scalar_source.rs",
+        func: "strip_break",
+        marker: AllowMarker::CarveOut {
+            reason: "byte-range arithmetic on a parser-provided span: cuts one line break off the start of the scalar's source, reads no structure",
+        },
+    },
+    AllowEntry {
+        file: "decorators/scalar_source.rs",
+        func: "skip_line",
+        marker: AllowMarker::CarveOut {
+            reason: "byte-range arithmetic on a parser-provided span: cuts the header line off a block scalar's source, reads no structure",
+        },
+    },
+    AllowEntry {
         file: "editing/code_actions/tab_to_spaces.rs",
         func: "tab_to_spaces",
         marker: AllowMarker::CarveOut {
