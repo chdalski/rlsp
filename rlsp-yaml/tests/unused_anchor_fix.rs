@@ -69,8 +69,8 @@ fn has_dangling_alias(yaml: &str) -> bool {
         .any(|alias| !anchors.contains(&alias))
 }
 
-/// The byte offset of an LSP position of `text`: lines end at `\n`, `\r\n` or a
-/// lone `\r`, columns count characters.
+/// The byte offset of a position of `text` that the features computed: lines
+/// end at `\n`, `\r\n` or a lone `\r`, columns count code points.
 fn offset_of(text: &str, position: Position) -> usize {
     let bytes = text.as_bytes();
     let (mut at, mut line) = (0, 0);
@@ -171,15 +171,6 @@ fn check_fixes(text: &str) -> Result<(), String> {
                 ));
             }
         } else {
-            // The refusal of a character outside the Basic Multilingual Plane
-            // is not about the document.
-            let line_start = text[..offset_of(text, diag.range.start)]
-                .rfind(['\n', '\r'])
-                .map_or(0, |at| at + 1);
-            let before = &text[line_start..offset_of(text, diag.range.start)];
-            if before.chars().any(|c| c.len_utf16() != 1) {
-                continue;
-            }
             let naive = naive_deletion(text, diag);
             if anchor_blind_data(&naive).as_deref() == Some(data.as_str())
                 && !has_dangling_alias(&naive)
@@ -227,6 +218,15 @@ fn check_fixes(text: &str) -> Result<(), String> {
 #[case::crlf("k: &a\r\n  x: 1\r\n")]
 #[case::lone_cr("k: &a\r  x: 1\r")]
 #[case::documents("a: &x 1\n---\n名前: 2\n---\nc: &z 3\n")]
+#[case::astral_key("😀: &a v # 😀\n")]
+#[case::astral_keys("😀 😀: &a\n  x: 1\n")]
+#[case::astral_line_before("😀: 1\nk: &a v\n")]
+#[case::astral_alone_on_the_line("# 😀\nk:\n  &x\n  😀: 1\n")]
+#[case::astral_flow("{😀: &a v, 😀😀: &b w}")]
+#[case::astral_crlf("😀: 1\r\n😀: &a v\r\n")]
+#[case::astral_lone_cr("😀: 1\r😀: &a v\r")]
+#[case::astral_in_a_flow_sequence_before("[😀, &a b]")]
+#[case::astral_after_a_byte_order_mark("\u{FEFF}😀: &a v\n")]
 #[case::used_and_unused("a: &used 1\nb: &unused 2\nc: *used\n")]
 #[case::same_name_twice("a: &x 1\nb: &x 2\n")]
 fn the_fix_keeps_the_data(#[case] text: &str) {

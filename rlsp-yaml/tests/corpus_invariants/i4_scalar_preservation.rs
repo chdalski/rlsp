@@ -7,7 +7,7 @@ use rlsp_yaml::parser::parse_yaml;
 use rlsp_yaml_parser::{Document, Node, Span};
 use tower_lsp::lsp_types::{CodeActionKind, Position, Range};
 
-use super::i2_range_validity::utf16_len;
+use super::i2_range_validity::char_count;
 use super::i3_code_action_round_trip::apply_text_edits;
 use super::shared::{collect_all_diagnostics, fmt_range};
 
@@ -18,7 +18,7 @@ pub fn check_i4_scalar_preservation(path: &Path, text: &str) -> Result<(), Strin
 
     let lines: Vec<&str> = text.lines().collect();
     let last_line = lines.len().saturating_sub(1) as u32;
-    let last_char = lines.last().map_or(0, |l| utf16_len(l) as u32);
+    let last_char = lines.last().map_or(0, |l| char_count(l) as u32);
     let whole_file = Range::new(Position::new(0, 0), Position::new(last_line, last_char));
 
     let file_name = path

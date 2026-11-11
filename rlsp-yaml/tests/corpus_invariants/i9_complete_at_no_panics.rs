@@ -6,7 +6,7 @@ use rlsp_yaml::completion::complete_at;
 use rlsp_yaml::parser::parse_yaml;
 use tower_lsp::lsp_types::Position;
 
-use super::i2_range_validity::utf16_len;
+use super::i2_range_validity::char_count;
 use super::shared::panic_message;
 
 // Mirrors the private constant in completion.rs — must be kept in sync.
@@ -16,10 +16,10 @@ pub fn check_i9_complete_at_no_panics(_path: &Path, text: &str) -> Result<(), St
     let docs = parse_yaml(text).documents;
 
     for (line, line_text) in text.lines().enumerate() {
-        let line_utf16 = utf16_len(line_text) as u32;
+        let line_chars = char_count(line_text) as u32;
         let col_0: u32 = 0;
-        let col_mid: u32 = safe_utf16_midpoint(line_text);
-        let col_end: u32 = line_utf16;
+        let col_mid: u32 = line_chars / 2;
+        let col_end: u32 = line_chars;
 
         // Deduplicate: avoid redundant calls on very short lines.
         let mut cols = vec![col_0];
@@ -49,29 +49,6 @@ pub fn check_i9_complete_at_no_panics(_path: &Path, text: &str) -> Result<(), St
     }
 
     Ok(())
-}
-
-/// Compute the UTF-16 midpoint of a line string, guarding against landing
-/// inside a surrogate pair (supplementary-plane characters take 2 UTF-16
-/// units; if `len / 2` falls on the second unit, advance by 1).
-pub fn safe_utf16_midpoint(line: &str) -> u32 {
-    let len = utf16_len(line) as u32;
-    let mut mid = len / 2;
-    // Walk UTF-16 units to verify `mid` lands on a code-point boundary.
-    let mut units: u32 = 0;
-    for ch in line.chars() {
-        let ch_units = ch.len_utf16() as u32;
-        if units == mid {
-            return mid; // already on a boundary
-        }
-        if units + ch_units > mid {
-            // `mid` falls inside a surrogate pair — advance past it.
-            mid = units + ch_units;
-            return mid;
-        }
-        units += ch_units;
-    }
-    mid
 }
 
 #[cfg(test)]
@@ -108,13 +85,13 @@ mod tests {
         assert!(run_i9("a: 1\nb: 2\nc: 3\n").is_ok());
     }
 
-    // UT-I9-5: BMP multi-byte UTF-8 ('é' = 2 UTF-8 bytes, 1 UTF-16 unit)
+    // UT-I9-5: BMP multi-byte UTF-8 ('é' = 2 UTF-8 bytes, 1 code point)
     #[test]
     fn i9_ut5_line_with_bmp_multibyte_char_returns_ok() {
         assert!(run_i9("café: value\n").is_ok());
     }
 
-    // UT-I9-6: supplementary-plane emoji (😀 = 4 UTF-8 bytes, 2 UTF-16 units)
+    // UT-I9-6: supplementary-plane emoji (😀 = 4 UTF-8 bytes, 1 code point)
     #[test]
     fn i9_ut6_line_with_supplementary_plane_char_returns_ok() {
         assert!(run_i9("a\u{1F600}b: v\n").is_ok());

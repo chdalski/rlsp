@@ -24,6 +24,8 @@ pub(crate) mod lsp_util;
 pub mod navigation;
 /// YAML document parsing utilities used by LSP handlers.
 pub mod parser;
+/// Position conversion at the server boundary.
+pub mod position_encoding;
 /// Scalar type inference helpers for YAML 1.2 Core schema.
 pub mod scalar_helpers;
 /// JSON Schema loading, resolution, and completion data.

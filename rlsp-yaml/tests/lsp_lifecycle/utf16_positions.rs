@@ -3,12 +3,16 @@
 //! character outside the Basic Multilingual Plane, one code point and two
 //! UTF-16 code units. Clients count columns in UTF-16 code units (LSP 3.17,
 //! "Position" and `PositionEncodingKind`; the default when the server names no
-//! encoding). Each case here holds a position the server already answers in
+//! encoding). Each case here holds a position the server sends or reads in
 //! UTF-16 code units.
+use rlsp_yaml::server::Backend;
 use rstest::rstest;
 use serde_json::{Value, json};
+use tokio::sync::mpsc::UnboundedReceiver;
+use tower_lsp::LspService;
+use tower_lsp::lsp_types::PublishDiagnosticsParams;
 
-use super::code_actions::code_action_request;
+use super::code_actions::{code_action_request, code_action_request_at};
 use super::document_links::document_link_request;
 use super::helpers::*;
 
@@ -144,4 +148,367 @@ async fn the_block_scalar_action_edits_from_and_to_utf16_columns(
             "{edited:?}"
         );
     }
+}
+
+// ---- published diagnostics and code actions ----
+
+/// The boolean-or-string schema that `open_collecting` seeds: every field of an
+/// object has the type `field_type`.
+fn field_schema(field_type: &str) -> Value {
+    json!({ "type": "object", "additionalProperties": { "type": field_type } })
+}
+
+const SCHEMA_URL: &str = "https://schemas.test/fields.json";
+
+/// A server with `text` open at `uri` and, for `field_type`, the schema that
+/// `SCHEMA_URL` names seeded, with what it publishes collected.
+async fn open_collecting(
+    text: &str,
+    uri: &str,
+    field_type: Option<&str>,
+) -> (
+    LspService<Backend>,
+    UnboundedReceiver<PublishDiagnosticsParams>,
+) {
+    let (mut service, socket) = LspService::new(Backend::new);
+    let published = collect_published_diagnostics(socket);
+    if let Some(field_type) = field_type {
+        service.inner().seed_schema_cache(
+            SCHEMA_URL,
+            rlsp_yaml::schema::parse_schema(&field_schema(field_type)).expect("the schema parses"),
+        );
+    }
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+    send(&mut service, did_open_notification(uri, text)).await;
+    (service, published)
+}
+
+/// The diagnostics of the first publication for `uri`, as JSON.
+async fn first_publication(
+    published: &mut UnboundedReceiver<PublishDiagnosticsParams>,
+    uri: &str,
+) -> Vec<Value> {
+    loop {
+        let publication = tokio::time::timeout(std::time::Duration::from_secs(5), published.recv())
+            .await
+            .expect("a publication arrives")
+            .expect("the channel is open");
+        if publication.uri.as_str() == uri {
+            return publication
+                .diagnostics
+                .iter()
+                .map(|diagnostic| serde_json::to_value(diagnostic).expect("JSON"))
+                .collect();
+        }
+    }
+}
+
+/// The actions the server answers for the range `start..end`.
+async fn actions_for(
+    service: &mut LspService<Backend>,
+    uri: &str,
+    start: (u32, u32),
+    end: (u32, u32),
+) -> Vec<Value> {
+    let resp = send(service, code_action_request_at(2, uri, start, end)).await;
+    let resp = resp.expect("codeAction should return a response");
+    resp.result()
+        .expect("codeAction should have a result")
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// The ranges of the diagnostics with the code `code`.
+fn ranges_of(diagnostics: &[Value], code: &str) -> Vec<Value> {
+    diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic["code"] == code)
+        .map(|diagnostic| diagnostic["range"].clone())
+        .collect()
+}
+
+/// A range as its start and end, each `(line, character)`.
+type Span = ((u32, u32), (u32, u32));
+
+#[rstest]
+#[case::astral_key("{A}: &a v\n", &[((0, 4), (0, 6))])]
+#[case::astral_on_the_previous_line_lf("{A}: 1\nk: &a v\n", &[((1, 3), (1, 5))])]
+#[case::astral_on_the_previous_line_crlf("{A}: 1\r\nk: &a v\r\n", &[((1, 3), (1, 5))])]
+#[case::astral_on_the_previous_line_cr("{A}: 1\rk: &a v\r", &[((1, 3), (1, 5))])]
+#[case::second_document("a: b\n---\n{A}: &a v\n", &[((2, 4), (2, 6))])]
+#[case::astral_after_the_token("k: &a v # {A}\n", &[((0, 3), (0, 5))])]
+#[case::astral_between_two_tokens("k: [&a 1, {A}, &b 2]\n", &[((0, 4), (0, 6)), ((0, 14), (0, 16))])]
+#[case::no_astral_character("k: &a v\n", &[((0, 3), (0, 5))])]
+#[tokio::test]
+async fn the_unused_anchor_diagnostic_is_published_at_utf16_columns(
+    #[case] template: &str,
+    #[case] expected: &[Span],
+) {
+    let uri = "file:///test/utf16-unused-anchor.yaml";
+    let (_service, mut published) =
+        open_collecting(&template.replace("{A}", ASTRAL), uri, None).await;
+
+    let diagnostics = first_publication(&mut published, uri).await;
+
+    let expected: Vec<Value> = expected.iter().map(|&(s, e)| range(s, e)).collect();
+    assert_eq!(ranges_of(&diagnostics, "unusedAnchor"), expected);
+}
+
+#[tokio::test]
+async fn a_syntax_error_after_an_astral_character_keeps_the_end_of_the_line_column() {
+    let uri = "file:///test/utf16-syntax-error.yaml";
+    let text = format!("{ASTRAL}: a: b\n");
+    let internal = rlsp_yaml::parser::parse_yaml(&text).diagnostics;
+    let internal = internal.first().expect("a syntax error").range;
+    assert_eq!(internal.end.character, u32::MAX);
+    assert!(
+        internal.start.character > 1,
+        "the error is after the character"
+    );
+    let (_service, mut published) = open_collecting(&text, uri, None).await;
+
+    let diagnostics = first_publication(&mut published, uri).await;
+
+    let published = &diagnostics[0]["range"];
+    assert_eq!(published["start"]["line"], internal.start.line);
+    assert_eq!(
+        published["start"]["character"],
+        internal.start.character + 1
+    );
+    assert_eq!(published["end"]["character"], u32::MAX);
+}
+
+#[tokio::test]
+async fn the_stored_diagnostics_keep_internal_positions() {
+    let uri = "file:///test/utf16-stored.yaml";
+    let (service, mut published) = open_collecting(&format!("{ASTRAL}: &a v\n"), uri, None).await;
+    let published = first_publication(&mut published, uri).await;
+
+    let stored = service.inner().get_diagnostics(uri).expect("diagnostics");
+
+    assert_eq!(published[0]["range"], range((0, 4), (0, 6)));
+    assert_eq!(
+        serde_json::to_value(stored[0].range).expect("JSON"),
+        range((0, 3), (0, 5))
+    );
+}
+
+#[tokio::test]
+async fn the_delete_anchor_action_edits_at_utf16_columns_and_carries_the_published_diagnostic() {
+    let uri = "file:///test/utf16-unused-anchor-fix.yaml";
+    let text = format!("{ASTRAL}: &a v\n");
+    let (mut service, mut published) = open_collecting(&text, uri, None).await;
+    let diagnostics = first_publication(&mut published, uri).await;
+
+    let actions = actions_for(&mut service, uri, (0, 0), (0, 0)).await;
+
+    let fix = actions
+        .iter()
+        .find(|action| action["title"] == "Delete unused anchor")
+        .expect("the fix is offered");
+    assert_eq!(
+        fix["edit"]["changes"][uri][0]["range"],
+        range((0, 4), (0, 7))
+    );
+    assert_eq!(fix["diagnostics"], json!(diagnostics));
+    assert_eq!(apply_action(&text, uri, fix), format!("{ASTRAL}: v\n"));
+}
+
+/// One case per kind of action that code actions offer, with an astral
+/// character before the node of the action on its line (`{A}`), the title the
+/// case must offer, the cursor column of the request in the document in which
+/// `{A}` is the one-unit `x`, the line of the request, and the type of the
+/// fields of the schema, for the cases that need one.
+#[rstest]
+#[case::flow_mapping("{A}: {k: v}\n", "Convert flow mapping to block style", 0, 0, None)]
+#[case::flow_sequence("{A}: [1, 2]\n", "Convert flow sequence to block style", 0, 0, None)]
+#[case::flow_sequence_over_two_lines(
+    "k: [a,\n  {A}b]\n",
+    "Convert flow sequence to block style",
+    0,
+    0,
+    None
+)]
+#[case::block_to_flow("{A}:\n  a: 1\n  b: 2\n", "Convert block to flow style", 0, 0, None)]
+#[case::block_to_flow_astral_on_the_last_line(
+    "k:\n  a: 1\n  {A}: 2\n",
+    "Convert block to flow style",
+    0,
+    0,
+    None
+)]
+#[case::unused_anchor("{A}: &a v\n", "Delete unused anchor", 0, 0, None)]
+#[case::unused_anchor_after_an_astral_line(
+    "# {A}\n{A}{A}: &a v\n",
+    "Delete unused anchor",
+    1,
+    0,
+    None
+)]
+#[case::yaml11_boolean("{A}: yes\n", "Quote value", 0, 0, None)]
+#[case::yaml11_octal("{A}: 0755\n", "Quote as string", 0, 0, None)]
+#[case::tabs("{A}: v\t# c\n", "Convert tabs to spaces", 0, 0, None)]
+#[case::quoted_boolean("{A}: \"true\"\n", "Convert quoted string to true", 0, 4, None)]
+#[case::block_scalar(
+    "{A}: \"this is a long string that goes on and on and on for ever\"\n",
+    "Convert to block scalar (literal)",
+    0,
+    0,
+    None
+)]
+#[case::schema_yaml11_boolean(
+    "# yaml-language-server: $schema=https://schemas.test/fields.json\n{A}: yes\n",
+    "Quote value",
+    1,
+    0,
+    Some("string")
+)]
+#[case::schema_yaml11_octal(
+    "# yaml-language-server: $schema=https://schemas.test/fields.json\n{A}: 0755\n",
+    "Quote as string",
+    1,
+    0,
+    Some("string")
+)]
+#[case::schema_yaml11_boolean_type(
+    "# yaml-language-server: $schema=https://schemas.test/fields.json\n{A}: yes\n",
+    "Convert to boolean",
+    1,
+    0,
+    Some("boolean")
+)]
+#[tokio::test]
+async fn every_action_edits_a_line_with_an_astral_character_like_one_without(
+    #[case] template: &str,
+    #[case] title: &str,
+    #[case] line: u32,
+    #[case] cursor: u32,
+    #[case] field_type: Option<&str>,
+) {
+    let uri = "file:///test/utf16-actions.yaml";
+    let astral = template.replace("{A}", ASTRAL);
+    let narrow = template.replace("{A}", "x");
+    assert_eq!(narrow.matches('x').count(), template.matches("{A}").count());
+
+    let (mut service, mut published) = open_collecting(&astral, uri, field_type).await;
+    let diagnostics = first_publication(&mut published, uri).await;
+    // The cursor moves one unit right for each astral character before it.
+    let shift = narrow
+        .split('\n')
+        .nth(line as usize)
+        .expect("the request line exists")
+        .chars()
+        .take(cursor as usize)
+        .filter(|&c| c == 'x')
+        .count();
+    let widened_cursor = cursor + u32::try_from(shift).expect("fits");
+    let widened = actions_for(
+        &mut service,
+        uri,
+        (line, widened_cursor),
+        (line, widened_cursor),
+    )
+    .await;
+    let (mut service, _published) = open_collecting(&narrow, uri, field_type).await;
+    let narrowed = actions_for(&mut service, uri, (line, cursor), (line, cursor)).await;
+
+    let titles = |actions: &[Value]| -> Vec<Value> {
+        actions
+            .iter()
+            .map(|action| action["title"].clone())
+            .collect()
+    };
+    assert!(
+        titles(&widened).contains(&json!(title)),
+        "{template:?} offers {title:?}: {widened:?}"
+    );
+    assert_eq!(titles(&widened), titles(&narrowed), "{template:?}");
+    for (action, narrow_action) in widened.iter().zip(&narrowed) {
+        assert_eq!(
+            apply_action(&astral, uri, action),
+            apply_action(&narrow, uri, narrow_action).replace('x', ASTRAL),
+            "{template:?}: {action}"
+        );
+        for diagnostic in action["diagnostics"].as_array().into_iter().flatten() {
+            assert!(
+                diagnostics.contains(diagnostic),
+                "{template:?}: {diagnostic} was not published: {diagnostics:?}"
+            );
+        }
+    }
+}
+
+// The quoted scalar `"true"` of `{A}: "true"` stands at the client columns 4
+// to 10; counted in code points it stands at 3 to 9, and a request at a client
+// column finds the node there.
+#[rstest]
+#[case::at_the_end_of_the_scalar(10, true)]
+#[case::at_its_start(4, true)]
+#[case::inside_it(7, true)]
+#[case::before_it(3, false)]
+#[case::in_the_key(1, false)]
+#[case::past_the_scalar(11, false)]
+#[tokio::test]
+async fn a_request_after_an_astral_character_finds_the_node_at_its_utf16_column(
+    #[case] column: u32,
+    #[case] found: bool,
+) {
+    let uri = "file:///test/utf16-cursor.yaml";
+    let (mut service, _published) =
+        open_collecting(&format!("{ASTRAL}: \"true\"\n"), uri, None).await;
+
+    for end in [(0, column), (0, 999)] {
+        let actions = actions_for(&mut service, uri, (0, column), end).await;
+
+        let titles: Vec<&str> = actions.iter().filter_map(|a| a["title"].as_str()).collect();
+        assert_eq!(
+            titles.contains(&"Convert quoted string to true"),
+            found,
+            "{end:?}: {titles:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_document_without_an_astral_character_is_answered_in_the_same_columns() {
+    let uri = "file:///test/utf16-ascii.yaml";
+    let text = "k: &a v\n";
+    let (mut service, mut published) = open_collecting(text, uri, None).await;
+    let diagnostics = first_publication(&mut published, uri).await;
+
+    let actions = actions_for(&mut service, uri, (0, 0), (0, 0)).await;
+
+    assert_eq!(
+        ranges_of(&diagnostics, "unusedAnchor"),
+        [range((0, 3), (0, 5))]
+    );
+    let fix = actions
+        .iter()
+        .find(|action| action["title"] == "Delete unused anchor")
+        .expect("the fix is offered");
+    assert_eq!(
+        fix["edit"]["changes"][uri][0]["range"],
+        range((0, 3), (0, 6))
+    );
+}
+
+#[rstest]
+#[case::the_maximum_range((u32::MAX, u32::MAX), (u32::MAX, u32::MAX))]
+#[case::past_the_document((9, 9), (9, 9))]
+#[case::the_maximum_end((0, 1), (u32::MAX, u32::MAX))]
+#[case::the_maximum_column((0, u32::MAX), (0, u32::MAX))]
+#[tokio::test]
+async fn a_request_with_a_range_far_outside_the_document_is_answered(
+    #[case] start: (u32, u32),
+    #[case] end: (u32, u32),
+) {
+    let uri = "file:///test/utf16-range.yaml";
+    let (mut service, _published) =
+        open_collecting(&format!("{ASTRAL}: &a [1]\n"), uri, None).await;
+
+    let resp = send(&mut service, code_action_request_at(2, uri, start, end)).await;
+
+    assert!(resp.expect("a response").is_ok());
 }

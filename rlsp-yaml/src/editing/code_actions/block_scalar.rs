@@ -6,6 +6,7 @@ use rlsp_yaml_parser::node::Node;
 use rlsp_yaml_parser::{Chomp, CollectionStyle, Document, LineIndex, ScalarStyle, Span};
 
 use crate::editing::formatter::{YamlFormatOptions, format_subtree, prints_block_header};
+use crate::lsp_util::offset_to_lsp;
 
 use super::{block_to_flow::node_loc, make_action};
 
@@ -100,18 +101,12 @@ pub(super) fn string_to_block_scalar(
     .collect()
 }
 
-/// The LSP position of a byte offset of `text`: the 0-based line and the column
-/// in UTF-16 code units.  `None` when the offset is not a char boundary of
-/// `text`, so that no edit is built on a position that was guessed.
+/// The position of a byte offset of `text`.  `None` when the offset is not a
+/// char boundary of `text`, so that no edit is built on a position that was
+/// guessed.
 fn lsp_position(text: &str, index: &LineIndex, offset: u32) -> Option<Position> {
-    let line = index.line_column(offset).0.saturating_sub(1);
-    let before = text.get(..offset as usize)?;
-    let line_start = before.rfind(['\n', '\r']).map_or(0, |i| i + 1);
-    let column: usize = before.get(line_start..)?.chars().map(char::len_utf16).sum();
-    Some(Position::new(
-        line,
-        u32::try_from(column).unwrap_or(u32::MAX),
-    ))
+    text.is_char_boundary(usize::try_from(offset).ok()?)
+        .then(|| offset_to_lsp(offset, index))
 }
 
 /// The rest of the line of `text` from the byte offset `end`: up to the next
@@ -916,7 +911,7 @@ mod tests {
         assert!(rest.starts_with(['|', '>']), "{result:?}");
     }
 
-    // The edit ends at the end of the line, counted in UTF-16 code units.
+    // The edit ends at the end of the line, counted in code points.
     #[rstest]
     #[case::emoji_in_key(format!("\u{1F600}: \"{LONG_TEXT}\"  \nb: 1\n"), 0)]
     #[case::emoji_in_scalar(
@@ -928,25 +923,28 @@ mod tests {
         0
     )]
     #[case::emoji_in_comment(format!("a: \"{LONG_TEXT}\"  # \u{1F600}\nb: 1\n"), 0)]
-    fn converting_ends_the_edit_at_the_end_of_the_line_in_utf16(
+    fn converting_ends_the_edit_at_the_end_of_the_line_in_code_points(
         #[case] yaml: String,
         #[case] line: usize,
         #[values("literal", "folded")] kind: &str,
     ) {
         let (_, edit) = apply_action(&yaml, line, kind);
         let line_text = yaml.split('\n').nth(line).expect("the line exists");
-        let units: usize = line_text.chars().map(char::len_utf16).sum();
         assert_eq!(edit.range.end.line as usize, line);
-        assert_eq!(edit.range.end.character as usize, units, "{edit:?}");
+        assert_eq!(
+            edit.range.end.character as usize,
+            line_text.chars().count(),
+            "{edit:?}"
+        );
     }
 
     #[rstest]
-    fn converting_a_multiline_scalar_ends_the_edit_on_its_last_line_in_utf16(
+    fn converting_a_multiline_scalar_ends_the_edit_on_its_last_line_in_code_points(
         #[values("literal", "folded")] kind: &str,
     ) {
         let yaml = "a: \"this is a long string\n  \u{1F600} that exceeds forty chars\"  \nb: 1\n";
         let (_, edit) = assert_converted(yaml, 0, kind, "\nb: 1\n");
-        assert_eq!(edit.range.end, Position::new(1, 32), "{edit:?}");
+        assert_eq!(edit.range.end, Position::new(1, 31), "{edit:?}");
     }
 
     // A value that cannot be a block scalar is printed double-quoted: the

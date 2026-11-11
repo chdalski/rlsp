@@ -5,7 +5,7 @@ use rlsp_yaml::editing::formatter::YamlFormatOptions;
 use rlsp_yaml::parser::parse_yaml;
 use tower_lsp::lsp_types::{Position, Range, TextEdit};
 
-use super::i2_range_validity::utf16_len;
+use super::i2_range_validity::char_count;
 use super::shared::{
     collect_all_diagnostics, collect_error_diagnostics, error_key, error_key_set, fmt_range,
 };
@@ -20,7 +20,7 @@ pub fn check_i3_code_action_round_trip(path: &Path, text: &str) -> Result<(), St
 
     let lines: Vec<&str> = text.lines().collect();
     let last_line = lines.len().saturating_sub(1) as u32;
-    let last_char = lines.last().map_or(0, |l| utf16_len(l) as u32);
+    let last_char = lines.last().map_or(0, |l| char_count(l) as u32);
     let whole_file = Range::new(Position::new(0, 0), Position::new(last_line, last_char));
 
     let file_name = path
@@ -123,21 +123,19 @@ pub fn apply_text_edits(text: &str, edits: &[TextEdit]) -> String {
     result
 }
 
-/// Convert an LSP `Position` (UTF-16 column) to a UTF-8 byte offset in `text`.
+/// Convert a `Position` of the features (column in code points) to a UTF-8 byte
+/// offset in `text`.
 pub fn lsp_pos_to_byte_offset(text: &str, pos: Position) -> usize {
     let mut line_start = 0;
     for (i, line) in text.split('\n').enumerate() {
         if i == pos.line as usize {
-            // Walk UTF-16 units to find the byte offset within the line.
-            let mut utf16_col = 0u32;
-            for (byte_pos, ch) in line.char_indices() {
-                if utf16_col == pos.character {
-                    return line_start + byte_pos;
-                }
-                utf16_col += ch.len_utf16() as u32;
-            }
-            // Column is at or past end of line (e.g., pointing to the newline).
-            return line_start + line.len();
+            // Column is at or past end of line (e.g., pointing to the newline)
+            // when the line has no such character.
+            return line_start
+                + line
+                    .char_indices()
+                    .nth(pos.character as usize)
+                    .map_or(line.len(), |(byte_pos, _)| byte_pos);
         }
         line_start += line.len() + 1; // +1 for '\n'
     }
@@ -236,12 +234,12 @@ mod tests {
         assert_eq!(apply_text_edits("unchanged", &[]), "unchanged");
     }
 
-    // UT-9: edit after multi-byte char uses UTF-16 columns
+    // UT-9: edit after multi-byte char uses code-point columns
     #[test]
-    fn i3_at9_edit_after_multibyte_char_uses_utf16_columns() {
-        // "a😀b" — emoji is 2 UTF-16 code units; 'b' is at UTF-16 col 3
+    fn i3_at9_edit_after_multibyte_char_uses_code_point_columns() {
+        // "a😀b" — emoji is 1 code point; 'b' is at col 2
         let edits = vec![TextEdit {
-            range: Range::new(Position::new(0, 3), Position::new(0, 4)),
+            range: Range::new(Position::new(0, 2), Position::new(0, 3)),
             new_text: "X".to_string(),
         }];
         assert_eq!(apply_text_edits("a\u{1F600}b", &edits), "a\u{1F600}X");

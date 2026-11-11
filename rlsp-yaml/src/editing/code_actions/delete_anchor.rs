@@ -142,10 +142,6 @@ fn has_alias(doc: &Document<Span>, name: &str) -> bool {
 ///   keeps its separator; the blanks after it when the token starts the line;
 /// - the token is alone on its line (blanks before it, a line break or the end
 ///   of input after it): the whole line with its line break.
-///
-/// `None` when the line before the token holds a character outside the Basic
-/// Multilingual Plane: LSP columns count UTF-16 code units and the columns of
-/// this server count characters, so the edit would delete the wrong text.
 fn deletion_range(buffer: &str, start: usize, end: usize) -> Option<(usize, usize)> {
     // A byte order mark is not text of the first line: nothing but blanks
     // before the token means the token starts the line.
@@ -154,9 +150,6 @@ fn deletion_range(buffer: &str, start: usize, end: usize) -> Option<(usize, usiz
         |at| at + 1,
     );
     let before = buffer.get(line_start..start)?;
-    if before.chars().any(|c| c.len_utf16() != 1) {
-        return None;
-    }
     let kept = before.trim_end_matches([' ', '\t']);
     let blanks_start = line_start + kept.len();
     let alone = kept.is_empty();
@@ -287,6 +280,11 @@ mod tests {
     #[case::explicit_key("? &k\n: v\n", "?\n: v\n")]
     #[case::multibyte_text("名前: &u v # ü\n", "名前: v # ü\n")]
     #[case::multibyte_name("k: &ü v\n", "k: v\n")]
+    #[case::astral_key("😀: &a v\n", "😀: v\n")]
+    #[case::astral_text_after("k: &a 😀 # 😀\n", "k: 😀 # 😀\n")]
+    #[case::astral_name("k: &😀 v\n", "k: v\n")]
+    #[case::astral_line_before("😀: 1\nk: &a v\n", "😀: 1\nk: v\n")]
+    #[case::astral_twice_before("😀😀: &a v\n", "😀😀: v\n")]
     #[case::empty_value("a: &x\n", "a:\n")]
     #[case::empty_value_at_the_end("a: &x", "a:")]
     #[case::empty_value_trailing_blanks("a: &x   \nb: 1\n", "a:\nb: 1\n")]
@@ -424,7 +422,6 @@ mod tests {
     #[case::inside_a_string("a: \"&x\"\n", (0, 4, 0, 6))]
     #[case::inside_a_comment("# &x\n", (0, 2, 0, 4))]
     #[case::inside_a_block_scalar("a: |\n  &x\n", (1, 2, 1, 4))]
-    #[case::inside_a_surrogate_pair("😀: &a v\n", (0, 1, 0, 3))]
     #[case::inside_a_line_break("k: &a\r\n", (0, 6, 0, 8))]
     fn a_diagnostic_that_is_no_anchor_token_offers_nothing(
         #[case] text: &str,
@@ -528,16 +525,6 @@ mod tests {
             edits[0].range,
             Range::new(Position::new(1, 3), Position::new(1, 6))
         );
-    }
-
-    // A character outside the Basic Multilingual Plane before the token makes the
-    // columns of this server differ from the UTF-16 columns of a client: no edit
-    // is better than a wrong one.
-    #[test]
-    fn no_fix_after_a_character_outside_the_basic_multilingual_plane() {
-        let text = "😀: &a v\n";
-        assert_eq!(validate_unused_anchors(&docs_for(text)).len(), 1);
-        assert_eq!(applied_fixes(text), [None]);
     }
 
     // The diagnostic is on the line of the token, not on the lines of the node.

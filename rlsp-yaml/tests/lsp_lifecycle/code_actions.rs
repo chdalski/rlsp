@@ -8,13 +8,18 @@ use tower_lsp::jsonrpc::Request;
 use super::helpers::*;
 
 pub fn code_action_request(id: i64, uri: &str, start_line: u32, end_line: u32) -> Request {
+    code_action_request_at(id, uri, (start_line, 0), (end_line, 0))
+}
+
+/// A code-action request for the range `start..end`, given as `(line, character)`.
+pub fn code_action_request_at(id: i64, uri: &str, start: (u32, u32), end: (u32, u32)) -> Request {
     Request::build("textDocument/codeAction")
         .id(id)
         .params(json!({
             "textDocument": { "uri": uri },
             "range": {
-                "start": { "line": start_line, "character": 0 },
-                "end":   { "line": end_line,   "character": 0 }
+                "start": { "line": start.0, "character": start.1 },
+                "end":   { "line": end.0,   "character": end.1 }
             },
             "context": { "diagnostics": [] }
         }))

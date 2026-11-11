@@ -111,6 +111,27 @@ const ALLOW_LIST: &[AllowEntry] = &[
         },
     },
     AllowEntry {
+        file: "position_encoding.rs",
+        func: "new",
+        marker: AllowMarker::CarveOut {
+            reason: "character-encoding concern: scans the bytes of a text for line breaks and astral characters to count the columns a client sees, reads no YAML structure",
+        },
+    },
+    AllowEntry {
+        file: "position_encoding.rs",
+        func: "lines_of",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture: independent line splitter that the converter's tests check against",
+        },
+    },
+    AllowEntry {
+        file: "position_encoding.rs",
+        func: "utf16_len",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture: independent UTF-16 length that the converter's tests check against",
+        },
+    },
+    AllowEntry {
         file: "lsp_util.rs",
         func: "source_lines",
         marker: AllowMarker::CarveOut {
@@ -163,7 +184,7 @@ const ALLOW_LIST: &[AllowEntry] = &[
         file: "editing/code_actions/block_scalar.rs",
         func: "lsp_position",
         marker: AllowMarker::CarveOut {
-            reason: "byte-range arithmetic on a parser-provided span: converts a span offset to an LSP line and UTF-16 column, reads no structure",
+            reason: "byte-range arithmetic on a parser-provided span: checks that a span offset is on a char boundary before it becomes a position, reads no structure",
         },
     },
     AllowEntry {

@@ -59,84 +59,37 @@ pub fn check_diagnostic_ranges(
             ));
         }
 
-        // Check 3: character values within UTF-16 code-unit length of their lines
-        // (skip sentinel u32::MAX — it means "to end of line")
+        // Check 3: character values within the code-point length of their lines,
+        // the unit the features count (skip sentinel u32::MAX — it means "to end
+        // of line"). A column in code points never splits a character.
         if r.start.character != u32::MAX {
-            let start_line_utf16 = utf16_len(lines[r.start.line as usize]);
-            if r.start.character > start_line_utf16 as u32 {
+            let start_line_chars = char_count(lines[r.start.line as usize]);
+            if r.start.character > start_line_chars as u32 {
                 return Err(format!(
-                    "diagnostic {code} start.character ({}) > utf16 length of line {} ({})",
-                    r.start.character, r.start.line, start_line_utf16
+                    "diagnostic {code} start.character ({}) > code-point length of line {} ({})",
+                    r.start.character, r.start.line, start_line_chars
                 ));
             }
         }
 
         if r.end.character != u32::MAX {
-            let end_line_utf16 = utf16_len(lines[r.end.line as usize]);
-            if r.end.character > end_line_utf16 as u32 {
+            let end_line_chars = char_count(lines[r.end.line as usize]);
+            if r.end.character > end_line_chars as u32 {
                 return Err(format!(
-                    "diagnostic {code} end.character ({}) > utf16 length of line {} ({})",
-                    r.end.character, r.end.line, end_line_utf16
+                    "diagnostic {code} end.character ({}) > code-point length of line {} ({})",
+                    r.end.character, r.end.line, end_line_chars
                 ));
             }
-        }
-
-        // Check 4: byte offsets derived from (line, character) must land on
-        // UTF-8 character boundaries.
-        if r.start.character != u32::MAX {
-            check_utf8_boundary(&lines, r.start.line, r.start.character, &code, "start")?;
-        }
-        if r.end.character != u32::MAX {
-            check_utf8_boundary(&lines, r.end.line, r.end.character, &code, "end")?;
         }
     }
 
     Ok(())
 }
 
-/// Count UTF-16 code units in a string.
-pub fn utf16_len(s: &str) -> usize {
-    s.chars().map(char::len_utf16).sum()
-}
-
-/// Walk UTF-16 code units to find the byte offset, then check it's a UTF-8
-/// char boundary. Returns Err with a message if the check fails.
-pub fn check_utf8_boundary(
-    lines: &[&str],
-    line: u32,
-    character: u32,
-    code: &str,
-    endpoint: &str,
-) -> Result<(), String> {
-    let line_str = lines[line as usize];
-    let mut utf16_units = 0u32;
-    let mut byte_offset = line_str.len(); // default: past end (for char == utf16_len)
-
-    for (byte_pos, ch) in line_str.char_indices() {
-        if utf16_units == character {
-            byte_offset = byte_pos;
-            break;
-        }
-        let units = ch.len_utf16() as u32;
-        if utf16_units + units > character {
-            // character falls in the middle of a surrogate pair — not a boundary
-            return Err(format!(
-                "diagnostic {code} {endpoint} position (line {line}, char {character}) \
-                 splits a UTF-16 surrogate pair; not a UTF-8 character boundary"
-            ));
-        }
-        utf16_units += units;
-    }
-
-    // Verify byte_offset is on a UTF-8 boundary
-    if !line_str.is_char_boundary(byte_offset) {
-        return Err(format!(
-            "diagnostic {code} {endpoint} position (line {line}, char {character}) \
-             byte offset {byte_offset} is not a UTF-8 character boundary in line {line_str:?}"
-        ));
-    }
-
-    Ok(())
+/// Count the code points of a string: the unit of the columns the features
+/// compute.
+pub fn char_count(s: &str) -> usize {
+    s.chars().count()
 }
 
 #[cfg(test)]
@@ -153,7 +106,7 @@ mod tests {
     // UT-2: valid ASCII range — synthetic in-bounds diagnostic passes
     #[test]
     fn i2_ut2_valid_ascii_range_passes() {
-        // "abc\n" — line 0 has UTF-16 len 3; range (0,0)-(0,3) is valid
+        // "abc\n" — line 0 has 3 code points; range (0,0)-(0,3) is valid
         let result = check_diagnostic_ranges("abc\n", &[make_diag(0, 0, 0, 3)]);
         assert!(
             result.is_ok(),
@@ -187,47 +140,41 @@ mod tests {
         assert!(result.is_err(), "end.line == line_count should fail");
     }
 
-    // UT-6: character beyond UTF-16 line length detected as invalid
+    // UT-6: character beyond the code-point line length detected as invalid
     #[test]
     fn i2_ut6_character_beyond_line_length_fails() {
-        // "abc\n" — line 0 has UTF-16 len 3; character 4 is out of bounds
+        // "abc\n" — line 0 has 3 code points; character 4 is out of bounds
         let result = check_diagnostic_ranges("abc\n", &[make_diag(0, 0, 0, 4)]);
         assert!(
             result.is_err(),
-            "character beyond utf16 line length should fail"
+            "character beyond the code-point line length should fail"
         );
     }
 
-    // UT-7: multi-byte UTF-8 character — utf16_len counts code units correctly
+    // UT-7: multi-byte UTF-8 character — char_count counts code points
     #[test]
-    fn i2_ut7_multibyte_utf8_counts_utf16_correctly() {
-        // "café" — 'é' is U+00E9, 1 UTF-16 code unit, 2 UTF-8 bytes
+    fn i2_ut7_multibyte_utf8_counts_code_points() {
+        // "café" — 'é' is U+00E9, 1 code point, 2 UTF-8 bytes
         let s = "café";
         assert_eq!(s.len(), 5); // UTF-8 bytes: c(1)+a(1)+f(1)+é(2)
-        assert_eq!(utf16_len(s), 4); // UTF-16 code units: 4
+        assert_eq!(char_count(s), 4);
     }
 
-    // UT-8: supplementary-plane character (emoji) — 2 UTF-16 code units, 4 UTF-8 bytes
+    // UT-8: supplementary-plane character (emoji) — 1 code point, 4 UTF-8 bytes
     #[test]
-    fn i2_ut8_supplementary_plane_counts_utf16_as_two_units() {
-        // U+1F600 GRINNING FACE — 4 UTF-8 bytes, 2 UTF-16 code units
+    fn i2_ut8_supplementary_plane_counts_as_one_code_point() {
+        // U+1F600 GRINNING FACE — 4 UTF-8 bytes
         let s = "a\u{1F600}b";
         assert_eq!(s.len(), 6); // UTF-8: 1+4+1
-        assert_eq!(utf16_len(s), 4); // UTF-16: 1+2+1
+        assert_eq!(char_count(s), 3);
     }
 
-    // UT-9: UTF-16 vs UTF-8 byte indexing correctness — column after emoji
+    // UT-9: the columns of a line with an emoji count it once
     #[test]
-    fn i2_ut9_utf16_column_after_emoji_is_correct() {
-        let s = "a\u{1F600}b";
-        // 'b' starts at UTF-16 offset 3
-        // Verify check_utf8_boundary finds 'b' at byte offset 5 (1 + 4)
-        let lines = &[s];
-        let result = check_utf8_boundary(lines, 0, 3, "test", "end");
-        assert!(
-            result.is_ok(),
-            "UTF-16 col 3 after emoji should be a valid boundary"
-        );
+    fn i2_ut9_columns_after_emoji_count_code_points() {
+        let text = "a\u{1F600}b\n";
+        assert!(check_diagnostic_ranges(text, &[make_diag(0, 0, 0, 3)]).is_ok());
+        assert!(check_diagnostic_ranges(text, &[make_diag(0, 0, 0, 4)]).is_err());
     }
 
     // UT-10: sentinel u32::MAX end.character passes check_diagnostic_ranges
@@ -250,20 +197,6 @@ mod tests {
         assert!(
             result.is_ok(),
             "valid multiline range should pass: {result:?}"
-        );
-    }
-
-    // UT-12: check_utf8_boundary correctly rejects mid-surrogate offset
-    #[test]
-    fn i2_ut12_mid_surrogate_offset_fails_boundary_check() {
-        // U+1F600 is a surrogate pair in UTF-16. UTF-16 column 1 splits it.
-        let s = "\u{1F600}x";
-        let lines = &[s];
-        // Column 1 falls inside the surrogate pair (emoji takes units 0 and 1)
-        let result = check_utf8_boundary(lines, 0, 1, "test", "start");
-        assert!(
-            result.is_err(),
-            "column 1 splits a surrogate pair, should fail"
         );
     }
 

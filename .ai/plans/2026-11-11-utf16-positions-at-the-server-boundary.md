@@ -49,7 +49,7 @@ converted back, at the boundary in `server.rs`, while the features keep counting
 - [x] Design review of the approach
 - [x] Task 1: Tests pin the answers the conversion keeps
 - [x] Task 2: Every document handler reads its document through one function
-- [ ] Task 3: Published diagnostics and code actions use client positions
+- [x] Task 3: Published diagnostics and code actions use client positions
 - [ ] Task 4: Requests that take a position read and answer client positions
 - [ ] Task 5: Whole-document responses use client positions
 - [ ] Push to `main` and confirm the full CI matrix is green
@@ -93,38 +93,38 @@ diagnostics the server publishes, and code actions, which read a range and answe
 diagnostics they fix. These two go together so that a published diagnostic and the one attached to
 its action never differ. LSP 3.17 sections "Text Documents" and "Position" apply.
 
-- [ ] The converter's unit and property tests show, on texts drawn from `a`, `😀`, `é`, `\r`, and
+- [x] The converter's unit and property tests show, on texts drawn from `a`, `😀`, `é`, `\r`, and
       `\n`:
-  - [ ] each client column equals the UTF-16 length of the line's text before the internal column,
+  - [x] each client column equals the UTF-16 length of the line's text before the internal column,
         computed independently of the converter
-  - [ ] converting a position to the client and back returns it, for every position not inside an
+  - [x] converting a position to the client and back returns it, for every position not inside an
         astral character, past the line end included
-  - [ ] a client column inside an astral character converts to the internal column of that character
-  - [ ] a column past the line end keeps its excess in both directions, and the internal column
+  - [x] a client column inside an astral character converts to the internal column of that character
+  - [x] a column past the line end keeps its excess in both directions, and the internal column
         `u32::MAX` converts to the client column `u32::MAX`
-  - [ ] lines are split at `\n`, `\r\n`, and a lone `\r`, as `LineIndex` splits them; a line past
+  - [x] lines are split at `\n`, `\r\n`, and a lone `\r`, as `LineIndex` splits them; a line past
         the last line and an empty text convert positions unchanged
-- [ ] For a text without astral characters, building the converter scans the text once and
+- [x] For a text without astral characters, building the converter scans the text once and
       allocates nothing, and every conversion returns its input
-- [ ] The boundary trait converts every position inside each response type it covers, nested values
+- [x] The boundary trait converts every position inside each response type it covers, nested values
       included, and each implementation names every field of its struct, so a new field in
       `lsp-types` fails to compile until it is handled
-- [ ] Through the server, the `unusedAnchor` diagnostic published for `😀: &a v\n` covers (0,4)-(0,6)
-- [ ] Through the server, "Delete unused anchor" is offered for `😀: &a v\n`, and its edit, applied
+- [x] Through the server, the `unusedAnchor` diagnostic published for `😀: &a v\n` covers (0,4)-(0,6)
+- [x] Through the server, "Delete unused anchor" is offered for `😀: &a v\n`, and its edit, applied
       with UTF-16 columns, gives `😀: v\n`; the diagnostic attached to the action equals the
       published one
-- [ ] Through the server, for every action kind that code actions offer, on a document with an
+- [x] Through the server, for every action kind that code actions offer, on a document with an
       astral character before the action's node on its line, the action's edit applied with UTF-16
       columns gives the text that the same action gives for the document with `x` in place of the
       astral character, with the astral character back in place of `x`
-- [ ] Through the server, a code-action request whose range starts after an astral character on its
+- [x] Through the server, a code-action request whose range starts after an astral character on its
       line gets the actions for the node at that client position
-- [ ] The diagnostics the server stores for code actions keep internal positions, and the doc
+- [x] The diagnostics the server stores for code actions keep internal positions, and the doc
       comment of the stored diagnostics says so
-- [ ] The block-scalar action computes its positions in code points, as the other actions do, and the
+- [x] The block-scalar action computes its positions in code points, as the other actions do, and the
       server test of Task 1 for its edit passes unchanged
-- [ ] `tests/unused_anchor_fix.rs` checks the fix on lines with an astral character too
-- [ ] The test helpers in `src/` and `tests/` that build, apply, or check the positions, edits, or
+- [x] `tests/unused_anchor_fix.rs` checks the fix on lines with an astral character too
+- [x] The test helpers in `src/` and `tests/` that build, apply, or check the positions, edits, or
       ranges that features take or answer, outside the server, count internal columns
 
 ### Task 4: Requests that take a position read and answer client positions
@@ -217,6 +217,15 @@ and length both count UTF-16 units. LSP 3.17 sections "Position" and "Semantic T
   exact answer, since "no item" would weaken the tests that asserted `null` before; the server-test
   helpers `open` and `apply_action` live once in `tests/lsp_lifecycle/helpers.rs`, as later tasks
   add cases that use them.
+- **Gate demands on Task 3:** a counting-allocator test file shows that a text without astral
+  characters allocates nothing and that memory grows with astral characters, not lines; a test walks
+  the serialized JSON of every covered type so no position escapes the boundary trait; a server case
+  checks that a syntax error after an astral character still ends at `u32::MAX`; and "Convert tabs
+  to spaces" counts its end column in code points instead of bytes, since a byte length is no
+  internal column.
+- **Round trip at `u32::MAX`:** a client column cannot exceed `u32::MAX`, so on a line with astral
+  characters the internal columns that close to `u32::MAX` saturate on the way out and do not come
+  back exactly; the round trip holds for every position whose client column does not saturate.
 
 ## Non-Goals
 

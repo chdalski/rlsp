@@ -27,6 +27,7 @@ use tower_lsp::{Client, LanguageServer};
 
 use crate::document_store::DocumentStore;
 use crate::parser;
+use crate::position_encoding::{ClientPositions, PositionConverter};
 use crate::schema::{self, ParseContext, SchemaCache, SchemaStoreCatalog};
 use crate::schema_validation::Completeness;
 pub use crate::settings::Settings;
@@ -218,9 +219,20 @@ fn truncate_chars(s: &str, max: usize) -> String {
     }
 }
 
+/// Whether a document handler gets a copy of the documents loaded from the
+/// text of an open document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LoadedDocuments {
+    Copy,
+    Skip,
+}
+
 /// What a document handler reads of an open document.
 struct OpenDocument {
     text: String,
+    /// Converts the positions of `text` between the code-point columns the
+    /// features count and the UTF-16 columns of the client.
+    converter: PositionConverter,
     /// The documents loaded from `text`, `None` when the load failed or was
     /// not asked for.
     documents: Option<Vec<rlsp_yaml_parser::node::Document<rlsp_yaml_parser::Span>>>,
@@ -249,6 +261,10 @@ pub struct Backend {
     schema_associations: Mutex<HashMap<Url, String>>,
     /// In-memory schema cache shared across all documents.
     schema_cache: Mutex<SchemaCache>,
+    /// The diagnostics last computed per document, with internal positions
+    /// (columns count code points): code actions compare them with the spans
+    /// of the AST. They are converted to client columns when published and
+    /// when attached to an action.
     diagnostics: Mutex<HashMap<Url, Vec<Diagnostic>>>,
     settings: Mutex<Settings>,
     /// Lazily-fetched `SchemaStore` catalog, cached for the session.
@@ -413,21 +429,28 @@ impl Backend {
 
     /// Read the open document at `uri` for a document handler, or `None` when
     /// it is not open. The text and the documents are read under one lock, so
-    /// the spans of the documents fit the text. `with_documents` is `false`
-    /// for a handler that reads the text only: it gets no copy of the
-    /// documents.
-    fn read_document(&self, uri: &Url, with_documents: bool) -> Option<OpenDocument> {
+    /// the spans of the documents fit the text, and the converter is built
+    /// from that text. `loaded` is [`LoadedDocuments::Skip`] for a handler that
+    /// reads the text only: it gets no copy of the documents.
+    fn read_document(&self, uri: &Url, loaded: LoadedDocuments) -> Option<OpenDocument> {
         let store = self.document_store.lock().ok()?;
         let text = store.get(uri)?.to_string();
-        let documents = if with_documents {
-            store.get_documents(uri).cloned()
-        } else {
-            None
+        let documents = match loaded {
+            LoadedDocuments::Copy => store.get_documents(uri).cloned(),
+            LoadedDocuments::Skip => None,
         };
-        Some(OpenDocument { text, documents })
+        drop(store);
+        let converter = PositionConverter::new(&text);
+        Some(OpenDocument {
+            text,
+            converter,
+            documents,
+        })
     }
 
-    /// Return the most recently published diagnostics for `uri`, or `None`.
+    /// Return the diagnostics last computed for `uri`, or `None`, with
+    /// internal positions: columns count code points, not the UTF-16 code
+    /// units of the client. The client gets them converted.
     pub fn get_diagnostics(&self, uri: &str) -> Option<Vec<Diagnostic>> {
         let parsed = Url::parse(uri).ok()?;
         let diags = self.diagnostics.lock().ok()?;
@@ -800,7 +823,11 @@ impl Backend {
         }
 
         self.client
-            .publish_diagnostics(uri, diagnostics, None)
+            .publish_diagnostics(
+                uri,
+                diagnostics.to_client(&PositionConverter::new(text)),
+                None,
+            )
             .await;
     }
 
@@ -1177,7 +1204,7 @@ impl LanguageServer for Backend {
         let Some(OpenDocument {
             documents: Some(docs),
             ..
-        }) = self.read_document(&uri, true)
+        }) = self.read_document(&uri, LoadedDocuments::Copy)
         else {
             return Ok(None);
         };
@@ -1208,7 +1235,7 @@ impl LanguageServer for Backend {
         let position = params.text_document_position.position;
 
         // Lock ordering: document_store → schema_associations → schema_cache
-        let Some(open) = self.read_document(&uri, true) else {
+        let Some(open) = self.read_document(&uri, LoadedDocuments::Copy) else {
             return Ok(None);
         };
 
@@ -1249,7 +1276,7 @@ impl LanguageServer for Backend {
         let Some(OpenDocument {
             documents: Some(docs),
             ..
-        }) = self.read_document(&uri, true)
+        }) = self.read_document(&uri, LoadedDocuments::Copy)
         else {
             return Ok(None);
         };
@@ -1266,7 +1293,7 @@ impl LanguageServer for Backend {
         let Some(OpenDocument {
             documents: Some(docs),
             ..
-        }) = self.read_document(&uri, true)
+        }) = self.read_document(&uri, LoadedDocuments::Copy)
         else {
             return Ok(None);
         };
@@ -1287,7 +1314,7 @@ impl LanguageServer for Backend {
     async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
         let uri = params.text_document.uri;
 
-        let Some(open) = self.read_document(&uri, true) else {
+        let Some(open) = self.read_document(&uri, LoadedDocuments::Copy) else {
             return Ok(None);
         };
 
@@ -1308,7 +1335,7 @@ impl LanguageServer for Backend {
     async fn document_link(&self, params: DocumentLinkParams) -> Result<Option<Vec<DocumentLink>>> {
         let uri = params.text_document.uri;
 
-        let Some(open) = self.read_document(&uri, true) else {
+        let Some(open) = self.read_document(&uri, LoadedDocuments::Copy) else {
             return Ok(None);
         };
 
@@ -1329,7 +1356,7 @@ impl LanguageServer for Backend {
     ) -> Result<Option<Vec<SelectionRange>>> {
         let uri = params.text_document.uri;
 
-        let Some(open) = self.read_document(&uri, true) else {
+        let Some(open) = self.read_document(&uri, LoadedDocuments::Copy) else {
             return Ok(None);
         };
 
@@ -1345,12 +1372,13 @@ impl LanguageServer for Backend {
     }
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
-        let uri = params.text_document.uri;
-        let range = params.range;
-
-        let Some(open) = self.read_document(&uri, true) else {
+        let Some(open) = self.read_document(&params.text_document.uri, LoadedDocuments::Copy)
+        else {
             return Ok(None);
         };
+        let params = params.to_internal(&open.converter);
+        let uri = params.text_document.uri;
+        let range = params.range;
 
         let diagnostics = self.get_diagnostics(uri.as_str()).unwrap_or_default();
 
@@ -1368,7 +1396,13 @@ impl LanguageServer for Backend {
             return Ok(None);
         }
 
-        Ok(Some(actions.into_iter().map(CodeAction::into).collect()))
+        Ok(Some(
+            actions
+                .to_client(&open.converter)
+                .into_iter()
+                .map(CodeAction::into)
+                .collect(),
+        ))
     }
 
     async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
@@ -1411,7 +1445,8 @@ impl LanguageServer for Backend {
             return Ok(None);
         }
 
-        let Some(OpenDocument { text, .. }) = self.read_document(&uri, false) else {
+        let Some(OpenDocument { text, .. }) = self.read_document(&uri, LoadedDocuments::Skip)
+        else {
             return Ok(None);
         };
 
@@ -1442,7 +1477,8 @@ impl LanguageServer for Backend {
 
         let requested = params.range;
 
-        let Some(OpenDocument { text, .. }) = self.read_document(&uri, false) else {
+        let Some(OpenDocument { text, .. }) = self.read_document(&uri, LoadedDocuments::Skip)
+        else {
             return Ok(None);
         };
 
@@ -1483,7 +1519,7 @@ impl LanguageServer for Backend {
         let ch = &params.ch;
         let tab_size = params.options.tab_size;
 
-        let Some(open) = self.read_document(&uri, true) else {
+        let Some(open) = self.read_document(&uri, LoadedDocuments::Copy) else {
             return Ok(None);
         };
 
@@ -1505,7 +1541,7 @@ impl LanguageServer for Backend {
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
         let uri = params.text_document.uri;
-        let Some(open) = self.read_document(&uri, true) else {
+        let Some(open) = self.read_document(&uri, LoadedDocuments::Copy) else {
             return Ok(None);
         };
         let tokens = crate::analysis::semantic_tokens::semantic_tokens(
@@ -1527,7 +1563,7 @@ impl LanguageServer for Backend {
     ) -> Result<Option<DocumentSymbolResponse>> {
         let uri = params.text_document.uri;
 
-        let Some(open) = self.read_document(&uri, true) else {
+        let Some(open) = self.read_document(&uri, LoadedDocuments::Copy) else {
             return Ok(None);
         };
 
@@ -1553,7 +1589,7 @@ impl LanguageServer for Backend {
         let Some(OpenDocument {
             documents: Some(docs),
             ..
-        }) = self.read_document(&uri, true)
+        }) = self.read_document(&uri, LoadedDocuments::Copy)
         else {
             return Ok(None);
         };
@@ -1570,7 +1606,7 @@ impl LanguageServer for Backend {
         let Some(OpenDocument {
             documents: Some(docs),
             ..
-        }) = self.read_document(&uri, true)
+        }) = self.read_document(&uri, LoadedDocuments::Copy)
         else {
             return Ok(None);
         };
@@ -1586,7 +1622,7 @@ impl LanguageServer for Backend {
         }
 
         let uri = params.text_document.uri;
-        let Some(open) = self.read_document(&uri, true) else {
+        let Some(open) = self.read_document(&uri, LoadedDocuments::Copy) else {
             return Ok(Vec::new());
         };
 
@@ -2764,7 +2800,10 @@ mod tests {
         let uri = Url::parse("file:///test/read.yaml").unwrap();
         open_in_store(&service, &uri, "name: value\n");
 
-        let open = service.inner().read_document(&uri, true).unwrap();
+        let open = service
+            .inner()
+            .read_document(&uri, LoadedDocuments::Copy)
+            .unwrap();
 
         assert_eq!(open.text, "name: value\n");
         assert_eq!(first_root_key(&open.documents.unwrap()), Some("name"));
@@ -2776,7 +2815,10 @@ mod tests {
         let uri = Url::parse("file:///test/read.yaml").unwrap();
         open_in_store(&service, &uri, "name: value\n");
 
-        let open = service.inner().read_document(&uri, false).unwrap();
+        let open = service
+            .inner()
+            .read_document(&uri, LoadedDocuments::Skip)
+            .unwrap();
 
         assert_eq!(open.text, "name: value\n");
         assert!(open.documents.is_none());
@@ -2787,7 +2829,12 @@ mod tests {
         let service = backend_with_settings(&serde_json::json!({}));
         let uri = Url::parse("file:///test/never-opened.yaml").unwrap();
 
-        assert!(service.inner().read_document(&uri, true).is_none());
+        assert!(
+            service
+                .inner()
+                .read_document(&uri, LoadedDocuments::Copy)
+                .is_none()
+        );
     }
 
     #[test]
@@ -2796,7 +2843,10 @@ mod tests {
         let uri = Url::parse("file:///test/broken.yaml").unwrap();
         open_in_store(&service, &uri, "a: [\n");
 
-        let open = service.inner().read_document(&uri, true).unwrap();
+        let open = service
+            .inner()
+            .read_document(&uri, LoadedDocuments::Copy)
+            .unwrap();
 
         assert_eq!(open.text, "a: [\n");
         assert!(open.documents.is_none());
@@ -2811,10 +2861,51 @@ mod tests {
             store.change(&uri, "b: 2\n".to_string(), DEFAULT_MAX_NESTING_DEPTH);
         }
 
-        let open = service.inner().read_document(&uri, true).unwrap();
+        let open = service
+            .inner()
+            .read_document(&uri, LoadedDocuments::Copy)
+            .unwrap();
 
         assert_eq!(open.text, "b: 2\n");
         assert_eq!(first_root_key(&open.documents.unwrap()), Some("b"));
+    }
+
+    // The converter maps the columns of the text that the read returns, whether
+    // or not the documents are asked for: formatting handlers read the text only.
+    #[rstest::rstest]
+    fn read_document_hands_out_a_converter_of_the_text(
+        #[values(LoadedDocuments::Copy, LoadedDocuments::Skip)] loaded: LoadedDocuments,
+    ) {
+        let service = backend_with_settings(&serde_json::json!({}));
+        let uri = Url::parse("file:///test/astral.yaml").unwrap();
+        open_in_store(&service, &uri, "\u{1f600}: 1\n");
+
+        let open = service.inner().read_document(&uri, loaded).unwrap();
+
+        assert_eq!(
+            open.converter.to_client(Position::new(0, 1)),
+            Position::new(0, 2)
+        );
+    }
+
+    #[test]
+    fn read_document_builds_the_converter_from_the_latest_text() {
+        let service = backend_with_settings(&serde_json::json!({}));
+        let uri = Url::parse("file:///test/astral-changed.yaml").unwrap();
+        open_in_store(&service, &uri, "\u{1f600}: 1\n");
+        if let Ok(mut store) = service.inner().document_store.lock() {
+            store.change(&uri, "a: 1\n".to_string(), DEFAULT_MAX_NESTING_DEPTH);
+        }
+
+        let open = service
+            .inner()
+            .read_document(&uri, LoadedDocuments::Copy)
+            .unwrap();
+
+        assert_eq!(
+            open.converter.to_client(Position::new(0, 1)),
+            Position::new(0, 1)
+        );
     }
 
     #[test]
@@ -2831,7 +2922,7 @@ mod tests {
             assert!(poisoner.join().is_err(), "thread should have panicked");
         });
 
-        assert!(backend.read_document(&uri, true).is_none());
+        assert!(backend.read_document(&uri, LoadedDocuments::Copy).is_none());
     }
 
     #[tokio::test]

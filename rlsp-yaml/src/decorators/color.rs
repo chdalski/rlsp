@@ -927,9 +927,8 @@ mod tests {
     #[case::double_quoted_over_lines("a: \"red\n  blue\"\n", &[(0, 4, 7, "red"), (1, 2, 6, "blue")])]
     #[case::double_quoted_blank_line("a: \"x\n\n  red\"\n", &[(2, 2, 5, "red")])]
     #[case::single_quoted_over_lines("a: 'x\n  red\n  blue'\n", &[(1, 2, 5, "red"), (2, 2, 6, "blue")])]
-    // Multibyte characters count as one column each: the columns are codepoints,
-    // the convention of every position of the server (`LineIndex`), not UTF-16
-    // code units. A later move to UTF-16 changes the astral case on purpose.
+    // Multibyte characters count as one column each: the features count columns
+    // in code points (`LineIndex`).
     #[case::cyrillic_key("ключ: red\n", &[(0, 6, 9, "red")])]
     #[case::astral_character_before("a: \"😀 red\"\n", &[(0, 6, 9, "red")])]
     // Line breaks
