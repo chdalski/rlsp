@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-11-11)
 **Created:** 2026-11-11
 
 # UTF-16 Positions at the Server Boundary
@@ -52,7 +52,7 @@ converted back, at the boundary in `server.rs`, while the features keep counting
 - [x] Task 3: Published diagnostics and code actions use client positions
 - [x] Task 4: Requests that take a position read and answer client positions
 - [x] Task 5: Whole-document responses use client positions
-- [ ] Push to `main` and confirm the full CI matrix is green
+- [x] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
