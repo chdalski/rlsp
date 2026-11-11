@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-11-11)
 **Created:** 2026-11-10
 
 # Server Feature Bug Fixes
@@ -61,7 +61,7 @@ bugs found in the same code are each fixed where they arise.
 - [x] Task 15: Every block scalar value gets the token of its indicator
 - [x] Task 16: A block scalar key gets the token of its indicator
 - [x] Task 17: The timing tests of document links and colors time the search, not the parser
-- [ ] Push to `main` and confirm the full CI matrix is green
+- [x] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
