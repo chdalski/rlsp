@@ -42,25 +42,6 @@ async fn should_return_folding_ranges_for_nested_yaml() {
     );
 }
 
-#[tokio::test]
-async fn should_return_empty_folding_ranges_for_unknown_document() {
-    let (mut service, socket) = LspService::new(Backend::new);
-    tokio::spawn(socket.for_each(|_| async {}));
-
-    send(&mut service, initialize_request(1)).await;
-    send(&mut service, initialized_notification()).await;
-
-    // Do NOT send didOpen for this URI
-    let uri = "file:///test/unknown.yaml";
-    let resp = send(&mut service, folding_range_request(2, uri)).await;
-    let resp = resp.expect("foldingRange should return a response");
-    let result = resp.result().expect("foldingRange should have result");
-    assert!(
-        result.is_null() || result.as_array().is_some_and(Vec::is_empty),
-        "foldingRange result should be null or empty for unknown document"
-    );
-}
-
 async fn comment_fold_lines(text: &str) -> Vec<(u64, u64)> {
     let (mut service, socket) = LspService::new(Backend::new);
     tokio::spawn(socket.for_each(|_| async {}));

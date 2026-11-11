@@ -63,25 +63,6 @@ async fn should_return_completion_items_for_valid_position() {
     );
 }
 
-#[tokio::test]
-async fn should_return_empty_completions_for_unknown_document() {
-    let (mut service, socket) = LspService::new(Backend::new);
-    tokio::spawn(socket.for_each(|_| async {}));
-
-    send(&mut service, initialize_request(1)).await;
-    send(&mut service, initialized_notification()).await;
-
-    // Do NOT send didOpen for this URI
-    let uri = "file:///test/unknown.yaml";
-    let resp = send(&mut service, completion_request(2, uri, 0, 0)).await;
-    let resp = resp.expect("completion should return a response");
-    let result = resp.result().expect("completion should have result");
-    assert!(
-        result.is_null() || result.as_array().is_some_and(Vec::is_empty),
-        "completion result should be null or empty for unknown document"
-    );
-}
-
 // ── complete_at AST-branch integration tests (B-1 through B-4) ───────────────
 
 // B-1: OnValue branch — cursor on a value position returns sibling values for the key

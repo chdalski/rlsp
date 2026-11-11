@@ -61,25 +61,6 @@ async fn should_return_null_hover_for_whitespace_position() {
     );
 }
 
-#[tokio::test]
-async fn should_return_none_for_hover_on_unknown_document() {
-    let (mut service, socket) = LspService::new(Backend::new);
-    tokio::spawn(socket.for_each(|_| async {}));
-
-    send(&mut service, initialize_request(1)).await;
-    send(&mut service, initialized_notification()).await;
-
-    // Do NOT send didOpen for this URI
-    let uri = "file:///test/unknown.yaml";
-    let resp = send(&mut service, hover_request(2, uri, 0, 0)).await;
-    let resp = resp.expect("hover should return a response");
-    let result = resp.result().expect("hover should have result");
-    assert!(
-        result.is_null(),
-        "hover result should be null for unknown document"
-    );
-}
-
 // ── Hover schema docs through the shared resolver ────────────────────────────
 
 const HOVER_SCHEMA_URL: &str = "https://example.com/test-hover-docs.json";

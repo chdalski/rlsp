@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-11-11
 
 # UTF-16 Positions at the Server Boundary
@@ -47,7 +47,7 @@ converted back, at the boundary in `server.rs`, while the features keep counting
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: Tests pin the answers the conversion keeps
+- [x] Task 1: Tests pin the answers the conversion keeps
 - [ ] Task 2: Every document handler reads its document through one function
 - [ ] Task 3: Published diagnostics and code actions use client positions
 - [ ] Task 4: Requests that take a position read and answer client positions
@@ -62,15 +62,15 @@ Tasks 2 to 5 change how handlers read documents and positions, and some answers 
 they are today. Server tests pin those answers first, so a later task shows that it kept them.
 Test-only.
 
-- [ ] For every document handler, a server test sends the request for a URI that was never opened
-      and asserts that the answer holds no item
-- [ ] Server tests pin, on a line with an astral character before the position, the answers that are
+- [x] For every document handler, a server test sends the request for a URI that was never opened
+      and asserts the exact answer without item it gives: `null`, and `[]` for document color
+- [x] Server tests pin, on a line with an astral character before the position, the answers that are
       right today: the edit of the block-scalar code action, the end of the full-format edit, and
       the range of a document link whose astral character lies inside the scalar before the URL
-- [ ] A server test pins the range of a document link in a single-line double-quoted scalar with an
+- [x] A server test pins the range of a document link in a single-line double-quoted scalar with an
       escape sequence before the URL as it is today, and its comment states the LSP 3.17 clause the
       range departs from and why the range stays as it is
-- [ ] The tests pass against the code before this task
+- [x] The tests pass against the code before this task
 
 ### Task 2: Every document handler reads its document through one function
 
@@ -213,6 +213,10 @@ and length both count UTF-16 units. LSP 3.17 sections "Position" and "Semantic T
   offset is measured in the scalar's value, not in its source text. This plan keeps it: the fix maps
   value offsets back through escapes, a change to the document-link feature that the position
   encoding does not touch.
+- **Gate demands on Task 1:** the never-opened-URI tests form one table that asserts each handler's
+  exact answer, since "no item" would weaken the tests that asserted `null` before; the server-test
+  helpers `open` and `apply_action` live once in `tests/lsp_lifecycle/helpers.rs`, as later tasks
+  add cases that use them.
 
 ## Non-Goals
 

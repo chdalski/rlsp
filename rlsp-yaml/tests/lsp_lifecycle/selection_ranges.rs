@@ -50,29 +50,6 @@ async fn should_return_selection_ranges_for_valid_yaml() {
 }
 
 #[tokio::test]
-async fn should_return_null_selection_ranges_for_unknown_document() {
-    let (mut service, socket) = LspService::new(Backend::new);
-    tokio::spawn(socket.for_each(|_| async {}));
-
-    send(&mut service, initialize_request(1)).await;
-    send(&mut service, initialized_notification()).await;
-
-    // Do NOT send didOpen for this URI
-    let uri = "file:///test/unknown.yaml";
-    let resp = send(
-        &mut service,
-        selection_range_request_for(2, uri, &[(0, 0), (1, 1)]),
-    )
-    .await;
-    let resp = resp.expect("selectionRange should return a response");
-    let result = resp.result().expect("selectionRange should have result");
-    assert!(
-        result.is_null(),
-        "selectionRange result should be null for unknown document, got {result}"
-    );
-}
-
-#[tokio::test]
 async fn selection_range_after_multiline_value_comment_returns_only_the_root() {
     let (mut service, socket) = LspService::new(Backend::new);
     tokio::spawn(socket.for_each(|_| async {}));

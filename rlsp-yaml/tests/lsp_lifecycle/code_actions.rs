@@ -67,25 +67,6 @@ async fn should_return_code_actions_for_document_with_actions() {
 }
 
 #[tokio::test]
-async fn should_return_null_code_actions_for_unknown_document() {
-    let (mut service, socket) = LspService::new(Backend::new);
-    tokio::spawn(socket.for_each(|_| async {}));
-
-    send(&mut service, initialize_request(1)).await;
-    send(&mut service, initialized_notification()).await;
-
-    // Do NOT send didOpen for this URI
-    let uri = "file:///test/unknown.yaml";
-    let resp = send(&mut service, code_action_request(2, uri, 0, 1)).await;
-    let resp = resp.expect("codeAction should return a response");
-    let result = resp.result().expect("codeAction should have result");
-    assert!(
-        result.is_null() || result.as_array().is_some_and(Vec::is_empty),
-        "codeAction result should be null or empty for unknown document"
-    );
-}
-
-#[tokio::test]
 async fn should_return_yaml11_bool_code_actions_via_server_handler() {
     let (mut service, socket) = LspService::new(Backend::new);
     tokio::spawn(socket.for_each(|_| async {}));
@@ -187,33 +168,6 @@ async fn should_offer_text_based_tab_action_for_document_that_does_not_load() {
 
 // ---- Delete unused anchor, through the server --------------------------------
 
-/// The byte offset of an LSP position of `text`: lines end at `\n`, `\r\n` or a
-/// lone `\r`, columns count characters (the test texts are in the Basic
-/// Multilingual Plane).
-fn offset_of(text: &str, position: &serde_json::Value) -> usize {
-    let line = position["line"].as_u64().expect("a line");
-    let character = position["character"].as_u64().expect("a character");
-    let bytes = text.as_bytes();
-    let (mut at, mut current) = (0, 0);
-    while current < line {
-        match bytes.get(at) {
-            Some(b'\r') if bytes.get(at + 1) == Some(&b'\n') => at += 2,
-            Some(b'\r' | b'\n') => at += 1,
-            Some(_) => {
-                at += 1;
-                continue;
-            }
-            None => break,
-        }
-        current += 1;
-    }
-    let skipped = usize::try_from(character).expect("fits");
-    text[at..]
-        .char_indices()
-        .nth(skipped)
-        .map_or(text.len(), |(offset, _)| at + offset)
-}
-
 /// Open `text`, request code actions for the lines `start_line..end_line` and
 /// return the "Delete unused anchor" actions as JSON.
 async fn unused_anchor_actions_of(
@@ -232,37 +186,6 @@ async fn unused_anchor_actions_of(
             .cloned()
             .collect()
     })
-}
-
-/// `text` with the edits of `action` applied.
-fn apply_action(text: &str, uri: &str, action: &serde_json::Value) -> String {
-    let edits = action
-        .pointer("/edit/changes")
-        .and_then(|changes| changes.get(uri))
-        .and_then(serde_json::Value::as_array)
-        .expect("edits for the document");
-    assert_eq!(edits.len(), 1, "one edit: {action}");
-    let edit = edits.first().expect("one edit");
-    let position = |pointer: &str| edit.pointer(pointer).expect("a position");
-    let start = offset_of(text, position("/range/start"));
-    let end = offset_of(text, position("/range/end"));
-    format!(
-        "{}{}{}",
-        &text[..start],
-        edit.get("newText")
-            .and_then(serde_json::Value::as_str)
-            .expect("new text"),
-        &text[end..]
-    )
-}
-
-async fn open(text: &str, uri: &str) -> LspService<Backend> {
-    let (mut service, socket) = LspService::new(Backend::new);
-    tokio::spawn(socket.for_each(|_| async {}));
-    send(&mut service, initialize_request(1)).await;
-    send(&mut service, initialized_notification()).await;
-    send(&mut service, did_open_notification(uri, text)).await;
-    service
 }
 
 #[tokio::test]

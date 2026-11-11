@@ -249,38 +249,6 @@ async fn disabled_respect_editorconfig_ignores_end_of_line_and_final_newline() {
 
 // ---- the edits the line-break handling produces, applied to the document ----
 
-/// The byte offset of an LSP position in `text`, found by an own scan for the
-/// breaks `\r\n`, `\r`, and `\n`, so the tests do not lean on the code they
-/// check. The character counts UTF-16 units, and one past the end of its line
-/// stands for that end.
-fn offset_of(text: &str, position: &Value) -> usize {
-    let line = position["line"].as_u64().expect("line");
-    let character = usize::try_from(position["character"].as_u64().expect("character"))
-        .expect("character fits");
-    let mut start = 0;
-    for _ in 0..line {
-        let Some(found) = text[start..].find(['\r', '\n']) else {
-            return text.len();
-        };
-        start += found;
-        start += if text[start..].starts_with("\r\n") {
-            2
-        } else {
-            1
-        };
-    }
-    let mut offset = start;
-    let mut units = 0;
-    for ch in text[start..].chars() {
-        if ch == '\r' || ch == '\n' || units >= character {
-            break;
-        }
-        units += ch.len_utf16();
-        offset += ch.len_utf8();
-    }
-    offset
-}
-
 /// `text` with the one edit of `result` applied, or `text` itself when
 /// `result` is null.
 fn apply_edit(text: &str, result: &Value) -> String {
@@ -504,21 +472,26 @@ async fn a_range_across_removed_blank_lines_keeps_every_key_once() {
 }
 
 #[rstest]
-#[case::formatting(Handler::Formatting)]
-#[case::range_formatting(Handler::RangeFormatting)]
+#[case::open_last_line("a:  1\nk:  \u{1f600}", 1, 1, (1, 6), "a: 1\nk: \u{1f600}\n")]
+#[case::open_last_line_crlf("a:  1\r\nk:  \u{1f600}", 1, 1, (1, 6), "a: 1\nk: \u{1f600}\n")]
+#[case::open_last_line_cr("a:  1\rk:  \u{1f600}", 1, 1, (1, 6), "a: 1\nk: \u{1f600}\n")]
+#[case::terminated_last_line("k:  \u{1f600}\nb:  2\n", 0, 1, (2, 0), "k: \u{1f600}\nb: 2\n")]
 #[tokio::test]
-async fn an_open_last_line_with_an_astral_character_ends_at_its_utf16_length(
-    #[case] handler: Handler,
+async fn an_edit_in_a_document_with_an_astral_character_ends_at_the_document_end_in_utf16_units(
+    #[values(Handler::Formatting, Handler::RangeFormatting)] handler: Handler,
+    #[case] text: &str,
+    #[case] first_line: u32,
+    #[case] last_line: u32,
+    #[case] end: (u32, u32),
+    #[case] expected: &str,
 ) {
-    let text = "a:  1\nk:  \u{1f600}";
-
-    let result = answer(handler, &json!({}), PLAIN_URI, text, 1, 1).await;
+    let result = answer(handler, &json!({}), PLAIN_URI, text, first_line, last_line).await;
 
     assert_eq!(
         result[0]["range"]["end"],
-        json!({"line": 1, "character": 6})
+        json!({"line": end.0, "character": end.1})
     );
-    assert_eq!(apply_edit(text, &result), "a: 1\nk: \u{1f600}\n");
+    assert_eq!(apply_edit(text, &result), expected);
 }
 
 #[rstest]

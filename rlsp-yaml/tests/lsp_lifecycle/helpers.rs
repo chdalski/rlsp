@@ -263,3 +263,67 @@ pub fn compose_schema() -> serde_json::Value {
         }
     })
 }
+
+/// The byte offset of an LSP position in `text`, found by an own scan for the
+/// breaks `\r\n`, `\r`, and `\n`, so the tests do not lean on the code they
+/// check. The character counts UTF-16 units, and one past the end of its line
+/// stands for that end.
+pub fn offset_of(text: &str, position: &serde_json::Value) -> usize {
+    let line = position["line"].as_u64().expect("line");
+    let character = usize::try_from(position["character"].as_u64().expect("character"))
+        .expect("character fits");
+    let mut start = 0;
+    for _ in 0..line {
+        let Some(found) = text[start..].find(['\r', '\n']) else {
+            return text.len();
+        };
+        start += found;
+        start += if text[start..].starts_with("\r\n") {
+            2
+        } else {
+            1
+        };
+    }
+    let mut offset = start;
+    let mut units = 0;
+    for ch in text[start..].chars() {
+        if ch == '\r' || ch == '\n' || units >= character {
+            break;
+        }
+        units += ch.len_utf16();
+        offset += ch.len_utf8();
+    }
+    offset
+}
+
+/// `text` with the edits of `action` applied.
+pub fn apply_action(text: &str, uri: &str, action: &serde_json::Value) -> String {
+    let edits = action
+        .pointer("/edit/changes")
+        .and_then(|changes| changes.get(uri))
+        .and_then(serde_json::Value::as_array)
+        .expect("edits for the document");
+    assert_eq!(edits.len(), 1, "one edit: {action}");
+    let edit = edits.first().expect("one edit");
+    let position = |pointer: &str| edit.pointer(pointer).expect("a position");
+    let start = offset_of(text, position("/range/start"));
+    let end = offset_of(text, position("/range/end"));
+    format!(
+        "{}{}{}",
+        &text[..start],
+        edit.get("newText")
+            .and_then(serde_json::Value::as_str)
+            .expect("new text"),
+        &text[end..]
+    )
+}
+
+/// A server with `text` open at `uri`.
+pub async fn open(text: &str, uri: &str) -> LspService<Backend> {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+    send(&mut service, did_open_notification(uri, text)).await;
+    service
+}

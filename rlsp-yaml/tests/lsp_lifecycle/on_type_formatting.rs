@@ -46,22 +46,3 @@ async fn should_return_indent_edit_on_type_newline_after_mapping_key() {
         "onTypeFormatting result should not be null after newline on mapping line"
     );
 }
-
-#[tokio::test]
-async fn should_return_null_on_type_formatting_for_unknown_document() {
-    let (mut service, socket) = LspService::new(Backend::new);
-    tokio::spawn(socket.for_each(|_| async {}));
-
-    send(&mut service, initialize_request(1)).await;
-    send(&mut service, initialized_notification()).await;
-
-    // Do NOT send didOpen for this URI
-    let uri = "file:///test/unknown.yaml";
-    let resp = send(&mut service, on_type_formatting_request(2, uri, 1, 0, "\n")).await;
-    let resp = resp.expect("onTypeFormatting should return a response");
-    let result = resp.result().expect("onTypeFormatting should have result");
-    assert!(
-        result.is_null() || result.as_array().is_some_and(Vec::is_empty),
-        "onTypeFormatting should be null or empty for unknown document"
-    );
-}

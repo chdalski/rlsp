@@ -29,6 +29,7 @@ mod schemastore_catalog;
 mod selection_ranges;
 mod semantic_tokens;
 mod stack_depth;
+mod utf16_positions;
 mod validation_limits;
 mod validators_integration;
 mod watched_files;
