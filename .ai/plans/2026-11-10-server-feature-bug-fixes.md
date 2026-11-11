@@ -7,17 +7,20 @@
 ## Goal
 
 Several language-server features of `rlsp-yaml` crash the server, report wrong diagnostics, return
-ranges that miss their position, insert text other than the schema's names, or take time with the
-square of the document's size. The bugs that `.ai/backlog.md` lists for these features, apart from
-the semantic-token positions (see Decisions), and the pre-existing bugs found in the same code are
-each fixed where they arise.
+ranges that miss their position, insert text other than the schema's names, leave out highlighting
+tokens, or take time with the square of the document's size. The bugs that `.ai/backlog.md` lists
+for these features, apart from the semantic-token positions (see Decisions), and the pre-existing
+bugs found in the same code are each fixed where they arise.
 
 ## Context
 
 - Paths are under `rlsp-yaml/`; commands are those of the root `CLAUDE.md`. Every task ends with
   build, tests, `cargo clippy --all-targets`, and fmt passing.
-- New range code builds positions with `lsp_util::span_to_lsp` and `lsp_util::offset_to_lsp`; columns
-  stay in code points (see Non-Goals).
+- New range code builds positions with `lsp_util::span_to_lsp` and `lsp_util::offset_to_lsp`, except
+  the scalar source reader of Task 13 (see Decisions); columns count code points, and the handlers
+  in `src/server.rs` convert them to the client's UTF-16 columns (root `CLAUDE.md` Conventions).
+- In the inputs of this plan, `\n` and `\r` stand for line breaks; every other backslash is a
+  backslash of the text.
 - **Depth** is the number of collections that enclose a node; the root node has depth 0.
 - The loader bounds depth: documents load with the `maxNestingDepth` setting, default
   `DEFAULT_MAX_NESTING_DEPTH` (256), at most `MAX_COLLECTION_DEPTH` (512,
@@ -27,7 +30,13 @@ each fixed where they arise.
 - A **chain** is a selection range with its parent ranges, innermost first. A range contains a
   position when the position lies between its start and its end, both included.
 - The Language Server Protocol 3.17 specification (root `CLAUDE.md` References) defines the
-  selection-range response and the snippet syntax that Tasks 5, 6, and 10 follow.
+  selection-range response and the snippet syntax that Tasks 5, 6, and 10 follow, the Document Link
+  Request whose `DocumentLink.range` Task 14 sets, and the Semantic Tokens whose tokens Tasks 15 and
+  16 emit, each on one line.
+- The YAML 1.2.2 specification (root `CLAUDE.md` References) defines the escape sequences (§5.7), line
+  folding (§6.5), the double-quoted style with its escaped line break (§7.3.1), the `''` of the
+  single-quoted style (§7.3.2), and the block scalar header with its indicator (§8.1.1) that Tasks 13
+  to 16 read; for the decoded characters, the value the parser loads is the authority.
 
 ## Steps
 
@@ -45,6 +54,10 @@ each fixed where they arise.
 - [ ] Task 10: The "(all required)" snippet inserts names and defaults as written
 - [ ] Task 11: The "Delete unused anchor" quick fix answers a request with one pass over the document
 - [ ] Task 12: A position on a node's text selects that node, not an earlier sibling
+- [ ] Task 13: Colors and document links read a scalar's source text through one reader
+- [ ] Task 14: A document link covers the source text of its URL
+- [ ] Task 15: Every block scalar value gets the token of its indicator
+- [ ] Task 16: A block scalar key gets the token of its indicator
 - [ ] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
@@ -264,17 +277,106 @@ document order as before.
 - [ ] The selection cases of `tests/lsp_lifecycle/stack_depth.rs` pass, the ignored 512-level release
       cases included
 
+### Task 13: Colors and document links read a scalar's source text through one reader
+
+`src/decorators/color.rs` reads a scalar's source text with a reader of its own (`Cell`,
+`ScalarLines`, `mask_escapes`, and the header skip of `scan_scalar_for_colors`), and Task 14 needs
+the same reading for document links. The reader moves to `src/decorators/scalar_source.rs`. It yields
+the scalar's content one logical line at a time: each character with its decoded value, whether an
+escape wrote it, and its start and end position. It removes the quotes, reads `''` as one `'`, joins
+the lines around an escaped line break, skips a block scalar's header line, and decodes every escape
+of the YAML 1.2.2 double-quoted style. Colors turn the characters an escape wrote into the
+placeholders they use today, so a color written only through escapes stays unreported.
+
+- [ ] For every escape of the YAML 1.2.2 double-quoted style, the characters the reader decodes from
+      `k: "` plus the escape plus `"` are the value the parser loads
+- [ ] The reader's position of each character is the position `LineIndex::line_column` gives its
+      source offset, for plain, single-quoted, double-quoted, literal, and folded scalars, with `\n`,
+      `\r\n`, and `\r` line breaks and after a BOM
+- [ ] The colors of a one-line scalar, `k: "` plus `😀 red ` 20 000 times plus `"`, are all reported
+      within 5 seconds, the limit of `the_links_of_a_long_scalar_are_found_in_linear_time`
+- [ ] `src/decorators/color.rs` keeps no source reader of its own, and the tests of
+      `src/decorators/color.rs`, `tests/lsp_lifecycle/document_color.rs`, and the color cases of
+      `tests/lsp_lifecycle/utf16_positions.rs` pass with their assertions unchanged
+
+### Task 14: A document link covers the source text of its URL
+
+`collect_node_links` (`src/decorators/document_links.rs`) finds a URL in the scalar's decoded value
+and uses the URL's character offset there as a column on the scalar's first source line. An escape
+or a `''` before the URL moves the link to the left, one inside the URL shortens the link, and a URL
+on a continuation line of a multi-line plain or quoted scalar lands on the scalar's first line. The
+links of plain and quoted scalars come from the reader of Task 13, one logical line at a time; block
+scalars and `!include` keep the node's range.
+
+- [ ] A URL after an escape or a `''` covers its source text: `a: "\t https://x.com"` (0,7)-(0,20),
+      `key: "\x41 https://example.com"` (0,11)-(0,30), `k: "a\0https://x.com"` (0,7)-(0,20),
+      `k: 'it''s https://x.com'` (0,10)-(0,23), and `k: "\x41\x41😀https://e.com"` (0,13)-(0,26)
+- [ ] A URL holding an escape or a `''` covers its source text and keeps its target:
+      `k: "https://x.com/a\x41b"` (0,4)-(0,24) to `https://x.com/aAb`, `k: "https://x.com/\u00e9"`
+      (0,4)-(0,24), `k: "https:\/\/x.com\/a"` (0,4)-(0,22) to `https://x.com/a`, and
+      `k: 'https://x.com/it''s'` (0,4)-(0,23)
+- [ ] A URL on a continuation line covers it there: `k: a\n  https://x.com`,
+      `k: "a\n  https://x.com"`, `k: 'a\n  https://x.com'`, `k: "a\r\n  https://x.com"\r\n`, and
+      `k: "a\` followed by a line break and `  https://x.com"` each get (1,2)-(1,15)
+- [ ] A URL across an escaped line break, `k: "https://x.com/a\` followed by a line break and `  b"`,
+      gets (0,4)-(1,3) and the target `https://x.com/ab`
+- [ ] The ranges of block scalars and `!include` links, the targets of all links, and
+      `url_in_multi_line_quoted_scalar_keeps_its_first_line_range` stay as they are, and
+      `the_links_of_a_long_scalar_are_found_in_linear_time` passes
+- [ ] Through the server, `key: "\x41 https://example.com"` gets (0,11)-(0,30)
+      (`tests/lsp_lifecycle/document_links.rs`, where a test pins (0,8)-(0,27) today) and
+      `k: "\x41\x41😀https://e.com"` gets (0,14)-(0,27) in the client's columns
+- [ ] The doc comment of `find_document_links` and the name and comment of the escaped-link test in
+      `tests/lsp_lifecycle/document_links.rs` describe the ranges this task gives
+
+### Task 15: Every block scalar value gets the token of its indicator
+
+`classify_scalar_node` (`src/analysis/semantic_tokens.rs`) computes a token length as the end column
+minus the start column and returns at length 0 before its block-scalar branch. A block scalar's span
+ends on a later line, so a block scalar followed by a line break, the usual case, gets no operator
+token for its `|` or `>`. Tokens are written as (line, start, length, type).
+
+- [ ] A block scalar value gains the operator token of its indicator, and every other token stays as
+      it is today: (0,3,1,operator) for `k: |\n  text\n`, `k: >-\n  some long text\n`, and
+      `k: |\nk2: v\n`; (0,0,1,operator) for `|\n x\n`; (0,2,1,operator) for `- |\n    abcdef\n`;
+      (1,5,1,operator) for `a:\n  b: |\n    xyz\n`; (0,6,1,operator) for `k: !t |\n  x\n`, after
+      its type token (0,3,2,type); (0,3,1,operator) for `k: | # c\n  x\n`, before its comment
+      token (0,5,3,comment)
+- [ ] `text: |` and `k: |\n  tttt` at the end of the text keep their operator tokens (0,6,1,operator)
+      and (0,3,1,operator), and the existing semantic-token tests pass with their assertions
+      unchanged
+- [ ] Through the server, the semantic tokens of `k: |\n  text\n` hold the operator token
+      (0,3,1,operator)
+
+### Task 16: A block scalar key gets the token of its indicator
+
+The key branch of `collect_node_tokens` (`src/analysis/semantic_tokens.rs`) reads every scalar key
+as key text: it emits a property token for a key on one line and never the operator token of a block
+indicator. A block scalar key spans lines, so it gets no token, and `? |` at the end of the text gets
+a property token for its indicator. The key branch emits the operator token of Task 15 for a block
+scalar key; other keys keep today's rule.
+
+- [ ] A block scalar key gains the operator token of its indicator, and every other token stays as it
+      is today: (0,2,1,operator) for `? |\n  k\n: v\n`, `? >-\n  k\n: v\n`, `? |\n  k\n`,
+      `? |\n: v\n`, and `? | # c\n  k\n: v\n`; (0,5,1,operator) for `? !t |\n  k\n: v\n` and
+      `? &a |\n  k\n: v\n`; (0,8,1,operator) for `? &a !t >\n  k\n: v\n`; (1,4,1,operator) for
+      `a:\n  ? |\n    k\n  : v\n`; (0,4,1,operator) for `- ? |\n    k\n  : v\n`
+- [ ] `? |\n  k\n: |\n  v\n` gets (0,2,1,operator) and (2,2,1,operator) and no other token
+- [ ] `? |` at the end of the text gets (0,2,1,operator) instead of its property token
+- [ ] Other keys keep their tokens: `? "a\n  b"\n: v\n`, `? a\n  b\n: v\n`, and `{"a\n b": v}\n` get
+      no key token; `? "ab"\n: v\n` gets (0,2,4,property) and `? ab\n: v\n` (0,2,2,property); the
+      existing semantic-token tests pass with their assertions unchanged
+- [ ] Through the server, the semantic tokens of `? |\n  k\n: v\n` hold (0,2,1,operator)
+
 ## Decisions
 
-- **Run rules:** a pre-existing bug found while fixing Tasks 4, 6, 11, or 12 goes to `.ai/backlog.md`,
-  and one found while fixing another task becomes a new task of this plan — Tasks 4, 6, 11, and 12
-  are already bugs found in this code, and attaching only one generation of found bugs lets the run
-  end. A fix whose correct behavior is open, or that changes visible behavior beyond its bug, goes to
-  the backlog's Open decisions, since the user decides those.
-- **Semantic-token positions:** the backlog entry that semantic-token lengths count code points, not
-  UTF-16 units, is not fixed here. Every position the server sends and reads counts code points, the
-  tokens' start columns included, so a fix in the semantic tokens alone would still misplace them; a
-  plan of its own converts positions at the server boundary.
+- **Run rules:** a pre-existing bug found while fixing Tasks 4, 6, 11, 12, or 16 goes to
+  `.ai/backlog.md`, and one found while fixing another task becomes a new task of this plan —
+  Tasks 4, 6, 11, 12, and 16 are already bugs found in this code, and attaching only one generation
+  of found bugs lets the run end. A fix whose correct behavior is open, or that changes visible
+  behavior beyond its bug, goes to the backlog's Open decisions, since the user decides those.
+- **Semantic-token positions:** their UTF-16 columns and lengths are not fixed here; the server's
+  boundary conversion fixed them.
 - **Whole-tree walks:** the anchor validator, its quick fix, and the other validators walk the whole
   document instead of stopping at a depth of their own — the loader already bounds depth, and
   `stack_depth.rs` measures every validator at that bound; a walk that stops reports absences it has
@@ -298,11 +400,22 @@ document order as before.
   callers count columns from the line text, and the BOM takes one column there.
 - **Block-scalar guard:** when the trailing comment cannot be found on the line, the action is not
   offered — an edit could otherwise turn the comment into content.
+- **Scalar source reader:** colors and document links map a scalar's decoded characters to their
+  source text with one reader that decodes the escapes inside the scalar's parser-provided span — the
+  arithmetic on parser spans that the root `CLAUDE.md` Crate Boundaries allow; the event stream holds
+  no map from value offsets to source offsets. The reader counts positions once per line instead of
+  calling `span_to_lsp` or `offset_to_lsp` per match, so a long line stays linear.
+- **Link ranges:** a link in a plain or quoted scalar covers its URL's source text on the lines that
+  hold it, so a URL on a continuation line moves to that line; a URL across an escaped line break
+  gets a range over both lines instead of being dropped, which would remove a link that works today.
+  Links in block scalars keep the node's range, an open decision in `.ai/backlog.md`.
+- **Indicator tokens:** a block scalar's `|` or `>` gets one operator token, for a value and for a
+  key, built in one place; a block scalar key's indicator at the end of the text turns from a
+  property token into that operator token, since the same cause gave it the property token.
+  Multi-line keys of the other styles still get no token.
 
 ## Non-Goals
 
-- Positions in UTF-16 units for the whole server, the semantic-token columns and lengths included
-  (separate plan after this one)
 - Selecting a node for a position that gets no range today — the indentation of a multi-line
   scalar's continuation line, a comment line inside or between entries — an open decision in
   `.ai/backlog.md`
