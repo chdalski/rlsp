@@ -98,26 +98,36 @@ async fn code_action_result(capabilities: &serde_json::Value, text: &str) -> ser
 
 const COMMENT_IN_COLLECTION: &str = "a: # note\n  b: 1\n";
 
+const BLOCK_SCALAR_IN_COLLECTION: &str = "a:\n  b: |\n    t\n";
+
 #[tokio::test]
 async fn should_offer_block_to_flow_disabled_to_a_client_that_supports_disabled_actions() {
     let capabilities = json!({ "textDocument": { "codeAction": { "disabledSupport": true } } });
 
-    let result = code_action_result(&capabilities, COMMENT_IN_COLLECTION).await;
+    for (text, reason) in [
+        (
+            COMMENT_IN_COLLECTION,
+            "Flow style would lose the comments in this collection",
+        ),
+        (
+            BLOCK_SCALAR_IN_COLLECTION,
+            "Flow style cannot hold the block scalar (| or >) in this collection",
+        ),
+    ] {
+        let result = code_action_result(&capabilities, text).await;
 
-    let actions = result.as_array().expect("result should be an array");
-    let action = actions
-        .iter()
-        .find(|a| a["title"] == "Convert block to flow style")
-        .unwrap_or_else(|| panic!("block-to-flow action expected; got: {result}"));
-    assert_eq!(
-        action["disabled"],
-        json!({ "reason": "Flow style would lose the comments in this collection" })
-    );
-    assert_eq!(action["kind"], "refactor.rewrite");
-    assert!(
-        action.get("edit").is_none(),
-        "no edit expected; got: {action}"
-    );
+        let actions = result.as_array().expect("result should be an array");
+        let action = actions
+            .iter()
+            .find(|a| a["title"] == "Convert block to flow style")
+            .unwrap_or_else(|| panic!("block-to-flow action expected; got: {result}"));
+        assert_eq!(action["disabled"], json!({ "reason": reason }));
+        assert_eq!(action["kind"], "refactor.rewrite");
+        assert!(
+            action.get("edit").is_none(),
+            "no edit expected; got: {action}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -128,13 +138,15 @@ async fn should_offer_no_disabled_action_to_a_client_without_disabled_support() 
         json!({ "textDocument": { "codeAction": {} } }),
         json!({ "textDocument": { "codeAction": { "disabledSupport": false } } }),
     ] {
-        let result = code_action_result(&capabilities, COMMENT_IN_COLLECTION).await;
+        for text in [COMMENT_IN_COLLECTION, BLOCK_SCALAR_IN_COLLECTION] {
+            let result = code_action_result(&capabilities, text).await;
 
-        // The collection has no other action, so the answer is empty.
-        assert!(
-            result.is_null(),
-            "capabilities {capabilities}: expected null; got: {result}"
-        );
+            // The collection has no other action, so the answer is empty.
+            assert!(
+                result.is_null(),
+                "capabilities {capabilities}, text {text:?}: expected null; got: {result}"
+            );
+        }
     }
 }
 

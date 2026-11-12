@@ -48,7 +48,7 @@ around it, and it must not run where its flow output cannot hold what the block 
 - [x] Task 1: The block-to-flow test helper applies the edit like a client
 - [x] Task 2: The conversion replaces only the converted range
 - [x] Task 3: A comment in the converted range disables the action
-- [ ] Task 4: A block scalar inside the collection disables the action
+- [x] Task 4: A block scalar inside the collection disables the action
 - [ ] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
@@ -131,16 +131,16 @@ A block scalar inside the collection keeps its `|` or `>` in the flow output, wh
 load (`a:\n  c: |\n    line1\n  b: 1\nd: 1\n`); YAML 1.2.2 §8.1 allows block scalars only in
 block context (Context). The action is offered disabled instead (Decisions).
 
-- [ ] When a block scalar (`|` or `>`) is a value, an item, or a key anywhere in the collection,
+- [x] When a block scalar (`|` or `>`) is a value, an item, or a key anywhere in the collection,
       the action is offered disabled with the reason "Flow style cannot hold the block scalar (| or
       >) in this collection" and no edit
-- [ ] When the collection holds both a block scalar and a comment, the reason is the block
+- [x] When the collection holds both a block scalar and a comment, the reason is the block
       scalar's
-- [ ] Fixtures cover `|` and `>` as a value, nested deeper, and as a key, and a collection with
+- [x] Fixtures cover `|` and `>` as a value, nested deeper, and as a key, and a collection with
       both a block scalar and a comment
-- [ ] A user can find in `feature-log.md` that a block scalar in the collection also disables the
+- [x] A user can find in `feature-log.md` that a block scalar in the collection also disables the
       action
-- [ ] `cargo clippy --workspace --all-targets` and `cargo test --workspace` pass
+- [x] `cargo clippy --workspace --all-targets` and `cargo test --workspace` pass
 
 ## Decisions
 

@@ -3,7 +3,9 @@
 use tower_lsp::lsp_types::{CodeAction, CodeActionDisabled, CodeActionKind, Range, TextEdit};
 
 use rlsp_yaml_parser::node::Node;
-use rlsp_yaml_parser::{CollectionStyle, Document, Event, LineIndex, Span, parse_events};
+use rlsp_yaml_parser::{
+    CollectionStyle, Document, Event, LineIndex, ScalarStyle, Span, parse_events,
+};
 
 use crate::editing::formatter::{YamlFormatOptions, format_subtree};
 use crate::lsp_util::{offset_to_lsp, source_lines};
@@ -14,6 +16,21 @@ const TITLE: &str = "Convert block to flow style";
 
 /// Why the action is offered disabled when the converted range holds a comment.
 const COMMENT_DISABLED_REASON: &str = "Flow style would lose the comments in this collection";
+
+/// Why the action is offered disabled when the collection holds a block scalar.
+const BLOCK_SCALAR_DISABLED_REASON: &str =
+    "Flow style cannot hold the block scalar (| or >) in this collection";
+
+fn disabled_action(reason: &str) -> CodeAction {
+    CodeAction {
+        title: TITLE.to_string(),
+        kind: Some(CodeActionKind::REFACTOR_REWRITE),
+        disabled: Some(CodeActionDisabled {
+            reason: reason.to_string(),
+        }),
+        ..CodeAction::default()
+    }
+}
 
 pub(super) fn block_to_flow(
     docs: &[Document<Span>],
@@ -32,6 +49,13 @@ pub(super) fn block_to_flow(
     let key_start_line = idx.line_column(key_loc.start).0 as usize;
     if loc_start_line <= key_start_line {
         return None;
+    }
+
+    // Block scalars exist only in block context (YAML 1.2.2 §8.1), so the flow
+    // output could not keep the `|` or `>` of one. This decides before the
+    // comment scan: it is cheaper, and the reason is the more basic one.
+    if holds_block_scalar(node) {
+        return Some(disabled_action(BLOCK_SCALAR_DISABLED_REASON));
     }
 
     // The edit replaces the converted range: from right after the key's colon to
@@ -74,14 +98,7 @@ pub(super) fn block_to_flow(
         .get(first_comment_at_or_after_start)
         .is_some_and(|span| span.start < end)
     {
-        return Some(CodeAction {
-            title: TITLE.to_string(),
-            kind: Some(CodeActionKind::REFACTOR_REWRITE),
-            disabled: Some(CodeActionDisabled {
-                reason: COMMENT_DISABLED_REASON.to_string(),
-            }),
-            ..CodeAction::default()
-        });
+        return Some(disabled_action(COMMENT_DISABLED_REASON));
     }
 
     let mut flow_node = node.clone();
@@ -239,6 +256,20 @@ const fn is_block_collection(node: &Node<Span>) -> bool {
             ..
         }
     )
+}
+
+/// Whether a `|` or `>` scalar is a key, a value or an item anywhere in the subtree.
+fn holds_block_scalar(node: &Node<Span>) -> bool {
+    match node {
+        Node::Scalar { style, .. } => {
+            matches!(style, ScalarStyle::Literal(_) | ScalarStyle::Folded(_))
+        }
+        Node::Mapping { entries, .. } => entries
+            .iter()
+            .any(|(key, value)| holds_block_scalar(key) || holds_block_scalar(value)),
+        Node::Sequence { items, .. } => items.iter().any(holds_block_scalar),
+        Node::Alias { .. } => false,
+    }
 }
 
 /// Recursively set `CollectionStyle::Flow` on every `Mapping` and `Sequence` in the subtree.
@@ -460,12 +491,6 @@ mod tests {
     #[case::last_value_with_only_a_tag("a:", "\n  b: 1\n  c: !mytag", "\n# n\nd: 1\n")]
     #[case::multiline_flow_as_last_value("a:", "\n  b: 1\n  c: [\n    1\n    ]", "\n# n\nd: 1\n")]
     #[case::comment_before_the_document_start("a:", "\n  b: 1", "\n# end\n---\nc: 1\n")]
-    #[case::hash_in_a_literal_block_scalar(
-        "a:",
-        "\n  c: |\n    x # y\n    # z\n  d: 1",
-        "\nz: 1\n"
-    )]
-    #[case::hash_in_a_folded_block_scalar("a:", "\n  c: >\n    x # y\n    # z", "\nz: 1\n")]
     #[case::hash_in_a_multiline_double_quoted_scalar(
         "a:",
         "\n  c: \"first # x\n    second # y\"",
@@ -580,12 +605,19 @@ mod tests {
     /// The disabled action has the title and the kind of the enabled one, a
     /// reason and no edit.
     fn assert_disabled(action: &CodeAction) {
+        assert_disabled_with(
+            action,
+            "Flow style would lose the comments in this collection",
+        );
+    }
+
+    fn assert_disabled_with(action: &CodeAction, reason: &str) {
         assert_eq!(action.title, "Convert block to flow style");
         assert_eq!(action.kind, Some(CodeActionKind::REFACTOR_REWRITE));
         assert_eq!(
             action.disabled,
             Some(CodeActionDisabled {
-                reason: "Flow style would lose the comments in this collection".to_string()
+                reason: reason.to_string()
             })
         );
         assert_eq!(action.edit, None);
@@ -633,9 +665,10 @@ mod tests {
         assert_eq!(outer.edit, None);
     }
 
-    #[test]
-    fn should_offer_no_disabled_action_when_block_style_is_enforced() {
-        let text = "a: # note\n  b: 1\n";
+    #[rstest]
+    #[case::comment("a: # note\n  b: 1\n")]
+    #[case::block_scalar("a:\n  b: |\n    t\n")]
+    fn should_offer_no_disabled_action_when_block_style_is_enforced(#[case] text: &str) {
         let options = YamlFormatOptions {
             format_enforce_block_style: true,
             ..YamlFormatOptions::default()
@@ -654,6 +687,183 @@ mod tests {
             actions.iter().all(|a| !a.title.contains("block to flow")),
             "{actions:?}"
         );
+    }
+
+    const BLOCK_SCALAR_REASON: &str =
+        "Flow style cannot hold the block scalar (| or >) in this collection";
+
+    // A flow collection cannot hold a block scalar (YAML 1.2.2 §8.1), so the
+    // action is offered disabled wherever the collection holds one: as a value,
+    // an item or a key, however deep, whatever its header and properties.
+    #[rstest]
+    #[case::literal_value("a:\n  b: |\n    t\n", 0)]
+    #[case::folded_value("a:\n  b: >\n    t\n", 0)]
+    #[case::literal_strip("a:\n  b: |-\n    t\n", 0)]
+    #[case::literal_keep("a:\n  b: |+\n    t\n", 0)]
+    #[case::folded_strip("a:\n  b: >-\n    t\n", 0)]
+    #[case::folded_keep("a:\n  b: >+\n    t\n", 0)]
+    #[case::indentation_indicator("a:\n  b: |2\n     t\n", 0)]
+    #[case::empty_in_the_middle("a:\n  b: |\n  c: 1\n", 0)]
+    #[case::empty_as_the_last_entry("a:\n  b: >\nd: 1\n", 0)]
+    #[case::empty_at_the_end_of_the_file("a:\n  b: |", 0)]
+    #[case::first_entry("a:\n  b: |\n    t\n  c: 1\n  d: 2\n", 0)]
+    #[case::middle_entry("a:\n  b: 1\n  c: |\n    t\n  d: 2\n", 0)]
+    #[case::last_entry("a:\n  b: 1\n  c: 2\n  d: |\n    t\n", 0)]
+    #[case::sequence_item("a:\n  - |\n    t\n  - x\n", 0)]
+    #[case::item_of_a_nested_sequence("a:\n  - - |\n      t\n    - x\n", 0)]
+    #[case::value_in_a_mapping_inside_a_sequence("a:\n  - b: 1\n    c: |\n      t\n", 0)]
+    #[case::nested_mappings("a:\n  b:\n    c: |\n      t\n", 0)]
+    #[case::nested_deeper_through_a_sequence("a:\n  b:\n    - c: 1\n      d: |\n          t\n", 0)]
+    #[case::literal_key("a:\n  ? |\n    k\n  : v\n", 0)]
+    #[case::folded_key("a:\n  ? >\n    k\n  : v\n", 0)]
+    #[case::value_of_an_explicit_key("a:\n  ? k\n  : |\n    v\n", 0)]
+    #[case::anchored("a:\n  b: &x |\n    t\n", 0)]
+    #[case::tagged("a:\n  b: !!str |\n    t\n", 0)]
+    #[case::anchored_and_aliased("a:\n  b: &x |\n    t\n  c: *x\n", 0)]
+    #[case::collection_with_an_anchor("a: &c\n  b: |\n    t\n", 0)]
+    #[case::key_line_of_a_sequence_item("- k:\n    b: |\n      t\n", 0)]
+    #[case::hash_lines_in_a_literal("a:\n  c: |\n    x # y\n    # z\n  d: 1\n", 0)]
+    #[case::hash_lines_in_a_folded("a:\n  c: >\n    x # y\n    # z\n", 0)]
+    #[case::crlf("a:\r\n  b: |\r\n    t\r\n", 0)]
+    #[case::lone_cr("a:\r  b: |\r    t\r", 0)]
+    #[case::byte_order_mark("\u{feff}a:\n  b: |\n    t\n", 0)]
+    #[case::multibyte("ключ:\n  b: |\n    日本語\n", 0)]
+    #[case::cursor_on_the_inner_collection("a:\n  b:\n    c: |\n      t\n", 1)]
+    #[case::second_document("x: 1\n---\na:\n  b: |\n    t\n", 2)]
+    fn should_disable_when_the_collection_holds_a_block_scalar(
+        #[case] text: &str,
+        #[case] line: u32,
+    ) {
+        let action = block_to_flow_action(text, line).expect("the action is offered");
+
+        assert_disabled_with(&action, BLOCK_SCALAR_REASON);
+    }
+
+    // With a block scalar and a comment in the collection, the block scalar
+    // gives the reason, wherever the comment is.
+    #[rstest]
+    #[case::comment_before_the_scalar("a:\n  # c\n  b: |\n    t\n")]
+    #[case::comment_on_the_key_line("a: # c\n  b: |\n    t\n")]
+    #[case::comment_after_the_scalar("a:\n  b: |\n    t\n  c: 1 # c\n")]
+    #[case::comment_in_the_header("a:\n  b: | # h\n    t\n")]
+    #[case::comment_in_a_nested_flow_collection("a:\n  b: [ # c\n    1]\n  d: |\n    t\n")]
+    fn should_prefer_the_block_scalar_reason_over_the_comment_reason(#[case] text: &str) {
+        let action = block_to_flow_action(text, 0).expect("the action is offered");
+
+        assert_disabled_with(&action, BLOCK_SCALAR_REASON);
+    }
+
+    // A block scalar outside the converted collection stays where it is.
+    #[rstest]
+    #[case::sibling_before("x: |\n  t\na:\n  b: 1\n", 2)]
+    #[case::sibling_after("a:\n  b: 1\nx: |\n  t\n", 0)]
+    #[case::hash_line_in_a_scalar_before("x: |\n  # not a comment\n  t\na:\n  b: 1\n", 3)]
+    #[case::hash_line_in_a_scalar_after("a:\n  b: 1\nx: >\n  # not a comment\n  t\n", 0)]
+    #[case::earlier_document("x: |\n  t\n---\na:\n  b: 1\n", 3)]
+    #[case::later_document("a:\n  b: 1\n---\nx: |\n  t\n", 0)]
+    #[case::sibling_sequence_item("- |\n  t\n- a:\n    b: 1\n", 2)]
+    #[case::alias_of_a_scalar_defined_outside("x: &x |\n  t\na:\n  b: *x\n", 2)]
+    #[case::inner_collection_of_one_that_holds_a_block_scalar(
+        "a:\n  b:\n    c: 1\n  d: |\n    t\n",
+        1
+    )]
+    fn should_stay_enabled_for_a_block_scalar_outside_the_collection(
+        #[case] text: &str,
+        #[case] line: u32,
+    ) {
+        let action = block_to_flow_action(text, line).expect("the action is offered");
+
+        assert_eq!(action.disabled, None);
+        let result = apply_block_to_flow_edit(text, line);
+        assert!(parse_yaml(&result).diagnostics.is_empty(), "{result}");
+    }
+
+    // Only a block scalar disables the action: the text of one does not.
+    #[rstest]
+    #[case::quoted_pipe("a:\n  b: \"|\"\n")]
+    #[case::single_quoted_greater_than("a:\n  b: '>'\n")]
+    #[case::pipe_inside_a_plain_scalar("a:\n  b: x|y\n")]
+    #[case::quoted_pipe_key("a:\n  \"|\": 1\n")]
+    #[case::pipe_on_a_line_of_a_multiline_quoted_scalar("a:\n  b: \"x\n    | y\"\n")]
+    #[case::flow_collections_without_block_scalars("a:\n  b: [1, 2]\n  c: { d: 1 }\n")]
+    fn should_stay_enabled_for_text_that_is_no_block_scalar(#[case] text: &str) {
+        let action = block_to_flow_action(text, 0).expect("the action is offered");
+
+        assert_eq!(action.disabled, None);
+        assert_loads_as_one_document(&apply_block_to_flow_edit(text, 0));
+    }
+
+    #[test]
+    fn should_give_the_comment_reason_for_a_comment_that_holds_a_pipe() {
+        let action =
+            block_to_flow_action("a:\n  b: 1 # |\n  c: 2\n", 0).expect("the action is offered");
+
+        assert_disabled(&action);
+    }
+
+    // The outer collection holds the block scalar of the inner one; the inner
+    // collection answers only for itself.
+    #[test]
+    fn should_decide_per_collection_for_block_scalars() {
+        let text = "a:\n  b:\n    c: |\n      t\n  d: 1\n";
+        assert_disabled_with(&block_to_flow_action(text, 0).unwrap(), BLOCK_SCALAR_REASON);
+        assert_disabled_with(&block_to_flow_action(text, 1).unwrap(), BLOCK_SCALAR_REASON);
+
+        let text = "a:\n  b:\n    c:\n      d: |\n        t\n";
+        for line in 0..3 {
+            assert_disabled_with(
+                &block_to_flow_action(text, line).unwrap(),
+                BLOCK_SCALAR_REASON,
+            );
+        }
+    }
+
+    // The invariant behind the block scalar check: an offered edit loads, and an
+    // action has either an edit or a reason.
+    #[test]
+    fn should_only_offer_edits_that_load() {
+        let text = "a:\n  b: 1\n  c: |\n    t\nd:\n  - x\n  - >\n    f\ne:\n  f:\n    g: 1\nh:\n  ? |\n    k\n  : v\ni:\n  - - 1\n    - 2\n";
+        for line in 0..u32::try_from(text.lines().count()).unwrap() {
+            let Some(action) = block_to_flow_action(text, line) else {
+                continue;
+            };
+            assert_eq!(
+                action.disabled.is_some(),
+                action.edit.is_none(),
+                "line {line}"
+            );
+            if action.edit.is_some() {
+                assert_loads_as_one_document(&apply_block_to_flow_edit(text, line));
+            }
+        }
+    }
+
+    // The walk over the collection is bounded by the loader's nesting limit and
+    // follows no alias, so it answers for a collection nested up to that limit.
+    #[rstest]
+    #[case::with_a_block_scalar_at_the_innermost_level(true)]
+    #[case::without_a_block_scalar(false)]
+    fn should_answer_for_a_collection_nested_up_to_the_limit(#[case] with_block_scalar: bool) {
+        let depth = 200;
+        let mut text = String::new();
+        for level in 0..depth {
+            text.push_str(&" ".repeat(level * 2));
+            text.push_str("k:\n");
+        }
+        text.push_str(&" ".repeat(depth * 2));
+        text.push_str(if with_block_scalar {
+            "k: |\n"
+        } else {
+            "k: v\n"
+        });
+        if with_block_scalar {
+            text.push_str(&" ".repeat(depth * 2 + 2));
+            text.push_str("t\n");
+        }
+
+        let action = block_to_flow_action(&text, 0).expect("the action is offered");
+
+        assert_eq!(action.disabled.is_some(), with_block_scalar);
     }
 
     // A comment in the converted range disables the action, whatever surrounds
@@ -717,6 +927,9 @@ mod tests {
     #[case::flow_mapping("a: { x: 1 } # c\n", 0)]
     #[case::cursor_on_a_child_line("a:\n  b: 1 # c\n", 1)]
     #[case::document_that_does_not_parse("a: # c\n  b: [\n", 0)]
+    #[case::block_scalar_value("a: |\n  t\nb: 1\n", 0)]
+    #[case::cursor_on_the_line_of_a_block_scalar_child("a:\n  b: |\n    t\n", 1)]
+    #[case::root_block_scalar("|\n  t\n", 0)]
     fn should_offer_no_action_where_there_is_no_block_collection(
         #[case] text: &str,
         #[case] line: u32,

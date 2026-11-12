@@ -31,6 +31,15 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### The "Convert block to flow style" Action Is Disabled When a Block Scalar Is in the Collection [completed]
+
+**Date:** 2026-11-12
+**Description:** The "Convert block to flow style" quick fix kept the `|` or `>` of a block scalar in the flow collection it printed, and the result did not load as YAML, because a flow collection cannot hold a block scalar. The action is now offered disabled instead, with the reason "Flow style cannot hold the block scalar (| or >) in this collection", and it changes nothing. A block scalar counts when it is a value, a sequence item or a key anywhere in the collection, however deep. A block scalar outside the collection does not matter, and the action stays enabled for it. When the collection holds both a block scalar and a comment, the reason names the block scalar. A client that does not announce `disabledSupport` gets no action for such a collection. To convert it, first turn the block scalar into a quoted scalar.
+**Complexity:** Low
+**Tier:** 1
+
+---
+
 ### The "Convert block to flow style" Action Is Disabled When a Comment Is in the Collection [completed]
 
 **Date:** 2026-11-12
