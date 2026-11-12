@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-11-12
 
 ## Goal
@@ -45,7 +45,7 @@ around it, and it must not run where its flow output cannot hold what the block 
 
 ## Steps
 
-- [ ] Task 1: The block-to-flow test helper applies the edit like a client
+- [x] Task 1: The block-to-flow test helper applies the edit like a client
 - [ ] Task 2: The conversion replaces only the converted range
 - [ ] Task 3: A comment in the converted range disables the action
 - [ ] Task 4: A block scalar inside the collection disables the action
@@ -59,10 +59,10 @@ around it, and it must not run where its flow output cannot hold what the block 
 line and appends a line break after `new_text`, so it cannot check an edit that ends inside a
 line, and it loses CR line breaks. Behavior is unchanged; only test code changes.
 
-- [ ] `apply_block_to_flow_edit` returns the document as a client that applies the action's edit
+- [x] `apply_block_to_flow_edit` returns the document as a client that applies the action's edit
       would, also for an edit that ends inside a line and for CR and CRLF line breaks
-- [ ] The tests in `block_to_flow.rs` that use it pass with their assertions unchanged
-- [ ] `cargo clippy --workspace --all-targets` and `cargo test --workspace` pass
+- [x] The tests in `block_to_flow.rs` that use it pass with their assertions unchanged
+- [x] `cargo clippy --workspace --all-targets` and `cargo test --workspace` pass
 
 ### Task 2: The conversion replaces only the converted range
 

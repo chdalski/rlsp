@@ -301,33 +301,7 @@ mod test_helpers {
             .find(|a| a.title.contains("block to flow"))
             .expect("expected block-to-flow action");
         let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
-        let edit = &edits[0];
-        let start_line = edit.range.start.line as usize;
-        let start_col = edit.range.start.character as usize;
-        let end_line = edit.range.end.line as usize;
-        let end_col = edit.range.end.character as usize;
-        let source_lines: Vec<&str> = text.lines().collect();
-        let mut result = String::new();
-        for (i, src_line) in source_lines.iter().enumerate() {
-            if i < start_line || i > end_line {
-                result.push_str(src_line);
-                result.push('\n');
-            } else if i == start_line && i == end_line {
-                result.push_str(&src_line[..start_col]);
-                result.push_str(&edit.new_text);
-                result.push_str(&src_line[end_col..]);
-                result.push('\n');
-            } else if i == start_line {
-                result.push_str(&src_line[..start_col]);
-                result.push_str(&edit.new_text);
-                result.push('\n');
-            } else if i == end_line {
-                result.push_str(&src_line[end_col..]);
-                result.push('\n');
-            }
-            // lines strictly between start and end are absorbed into the edit
-        }
-        result
+        apply_text_edit(text, &edits[0])
     }
 
     /// Apply the "Convert quoted string" (`quoted_bool`) edit to `yaml` at the given cursor column.
