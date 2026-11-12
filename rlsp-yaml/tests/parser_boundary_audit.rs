@@ -216,6 +216,13 @@ const ALLOW_LIST: &[AllowEntry] = &[
         },
     },
     AllowEntry {
+        file: "editing/code_actions/block_to_flow.rs",
+        func: "step_back_over_trivia",
+        marker: AllowMarker::CarveOut {
+            reason: "byte-range arithmetic on parser-provided spans: moves an offset back over blanks, line breaks and the parser's comment spans to the end of the last token, reads no structure",
+        },
+    },
+    AllowEntry {
         file: "decorators/scalar_source.rs",
         func: "strip_break",
         marker: AllowMarker::CarveOut {
@@ -373,6 +380,13 @@ const ALLOW_LIST: &[AllowEntry] = &[
         func: "flow_seq_action",
         marker: AllowMarker::CarveOut {
             reason: "test fixture — drives code action from raw text for unit tests",
+        },
+    },
+    AllowEntry {
+        file: "editing/code_actions.rs",
+        func: "block_to_flow_edit",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture — drives the block-to-flow action from raw text for code-action unit tests",
         },
     },
     AllowEntry {

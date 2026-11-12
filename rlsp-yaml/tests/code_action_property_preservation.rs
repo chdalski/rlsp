@@ -76,13 +76,19 @@ const BLOCK_SCALAR_TAG: &str =
 const BLOCK_SCALAR_ANCHOR_AND_TAG: &str =
     "description: &a !mytag \"this is a long string that exceeds forty characters in total\"\n";
 
-// block_to_flow: anchor/tag on the block-collection value. Edit range starts at key_end_col+1
-// (after the colon), which covers the &anchor/!tag prefix plus the entire collection body.
-// format_subtree re-emits the property exactly once; the source occurrence is inside the
-// replaced range. Net count: 1 -> 1.
+// block_to_flow: anchor/tag on the block-collection value. The edit range starts right after
+// the key's colon and ends at the end of the collection's content, so it covers the
+// &anchor/!tag prefix and the collection body. format_subtree re-emits the property exactly
+// once; the source occurrence is inside the replaced range. Net count: 1 -> 1.
 const BLOCK_TO_FLOW_ANCHOR: &str = "key: &anchor\n  a: 1\n  b: 2\n";
 const BLOCK_TO_FLOW_TAG: &str = "key: !mytag\n  a: 1\n  b: 2\n";
 const BLOCK_TO_FLOW_ANCHOR_AND_TAG: &str = "key: &a !mytag\n  a: 1\n  b: 2\n";
+// The properties of the first key are not the mapping's: they stay on the key.
+const BLOCK_TO_FLOW_FIRST_KEY_ANCHOR: &str = "key:\n  &k a: 1\n  b: 2\n";
+const BLOCK_TO_FLOW_FIRST_KEY_TAG: &str = "key:\n  !mytag a: 1\n  b: 2\n";
+// The same properties with a comment and a next sibling after the collection: both stay.
+const BLOCK_TO_FLOW_ANCHOR_AND_TAG_WITH_COMMENT: &str =
+    "key: &a !mytag\n  a: 1\n  b: 2 # n\nnext: 1\n";
 
 // flow_to_block (flow mapping): anchor/tag before the flow-map node. edit_start_col = loc.start
 // (the '{' position), so the &anchor/!tag prefix is outside the replaced range. The source
@@ -142,7 +148,7 @@ const YAML11_OCTAL_ANCHOR_AND_TAG: &str = "mode: &a !mytag 0755\n";
 #[case::string_to_block_scalar_anchor_and_tag(
     BLOCK_SCALAR_ANCHOR_AND_TAG, cursor_range(0, 0), vec![], "block scalar", vec!["&a", "!mytag"]
 )]
-// block_to_flow — edit range covers the property prefix; format_subtree re-emits exactly once
+// block_to_flow — the converted range covers the property prefix; format_subtree re-emits exactly once
 #[case::block_to_flow_anchor(
     BLOCK_TO_FLOW_ANCHOR, cursor_range(0, 0), vec![], "block to flow", vec!["&anchor"]
 )]
@@ -151,6 +157,19 @@ const YAML11_OCTAL_ANCHOR_AND_TAG: &str = "mode: &a !mytag 0755\n";
 )]
 #[case::block_to_flow_anchor_and_tag(
     BLOCK_TO_FLOW_ANCHOR_AND_TAG, cursor_range(0, 0), vec![], "block to flow", vec!["&a", "!mytag"]
+)]
+#[case::block_to_flow_anchor_and_tag_with_comment_after(
+    BLOCK_TO_FLOW_ANCHOR_AND_TAG_WITH_COMMENT,
+    cursor_range(0, 0),
+    vec![],
+    "block to flow",
+    vec!["&a", "!mytag", "# n", "next: 1"]
+)]
+#[case::block_to_flow_first_key_anchor(
+    BLOCK_TO_FLOW_FIRST_KEY_ANCHOR, cursor_range(0, 0), vec![], "block to flow", vec!["&k"]
+)]
+#[case::block_to_flow_first_key_tag(
+    BLOCK_TO_FLOW_FIRST_KEY_TAG, cursor_range(0, 0), vec![], "block to flow", vec!["!mytag"]
 )]
 // flow_to_block (flow mapping) — diagnostic-driven; fix: clear clone props
 #[case::flow_to_block_map_anchor(

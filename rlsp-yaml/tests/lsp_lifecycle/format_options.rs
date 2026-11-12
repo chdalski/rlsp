@@ -549,14 +549,14 @@ async fn range_formatting_with_a_range_outside_the_document_is_safe() {
 // The print_width case also pins CODE_ACTION_TAB_WIDTH: the wrapped lines are
 // indented by it.
 #[rstest]
-#[case::print_width(json!({ "formatPrintWidth": 20 }), BLOCK_SEQUENCE, "block to flow", Some(" [\n    aaaa,\n    bbbb,\n    cccc,\n    dddd,\n    eeee\n    ]\n"), Some(" [aaaa, bbbb, cccc, dddd, eeee]\n"))]
-#[case::bracket_spacing_off(json!({ "formatBracketSpacing": false }), "m:\n  a: 1\n  b: 2\n", "block to flow", Some(" {a: 1, b: 2}\n"), Some(" { a: 1, b: 2 }\n"))]
-#[case::single_quote(json!({ "formatSingleQuote": true }), "items:\n  - \"x, y\"\n  - 1\n", "block to flow", Some(" ['x, y', 1]\n"), Some(" [\"x, y\", 1]\n"))]
-#[case::preserve_quotes(json!({ "formatPreserveQuotes": true }), "items:\n  - \"abc\"\n  - d\n", "block to flow", Some(" [\"abc\", d]\n"), Some(" [abc, d]\n"))]
-#[case::yaml_version_1_1(json!({ "yamlVersion": "1.1" }), "items:\n  - \"yes\"\n  - d\n", "block to flow", Some(" [\"yes\", d]\n"), Some(" [yes, d]\n"))]
-#[case::yaml_version_modeline_over_setting(json!({ "yamlVersion": "1.1" }), "# yaml-language-server: $yamlVersion=1.2\nitems:\n  - \"yes\"\n  - d\n", "block to flow", Some(" [yes, d]\n"), Some(" [yes, d]\n"))]
-#[case::enforce_block_style(json!({ "formatEnforceBlockStyle": true }), BLOCK_SEQUENCE, "block to flow", None, Some(" [aaaa, bbbb, cccc, dddd, eeee]\n"))]
-#[case::max_nesting_depth(json!({ "maxNestingDepth": 1 }), BLOCK_SEQUENCE, "block to flow", None, Some(" [aaaa, bbbb, cccc, dddd, eeee]\n"))]
+#[case::print_width(json!({ "formatPrintWidth": 20 }), BLOCK_SEQUENCE, "block to flow", Some(" [\n    aaaa,\n    bbbb,\n    cccc,\n    dddd,\n    eeee\n    ]"), Some(" [aaaa, bbbb, cccc, dddd, eeee]"))]
+#[case::bracket_spacing_off(json!({ "formatBracketSpacing": false }), "m:\n  a: 1\n  b: 2\n", "block to flow", Some(" {a: 1, b: 2}"), Some(" { a: 1, b: 2 }"))]
+#[case::single_quote(json!({ "formatSingleQuote": true }), "items:\n  - \"x, y\"\n  - 1\n", "block to flow", Some(" ['x, y', 1]"), Some(" [\"x, y\", 1]"))]
+#[case::preserve_quotes(json!({ "formatPreserveQuotes": true }), "items:\n  - \"abc\"\n  - d\n", "block to flow", Some(" [\"abc\", d]"), Some(" [abc, d]"))]
+#[case::yaml_version_1_1(json!({ "yamlVersion": "1.1" }), "items:\n  - \"yes\"\n  - d\n", "block to flow", Some(" [\"yes\", d]"), Some(" [yes, d]"))]
+#[case::yaml_version_modeline_over_setting(json!({ "yamlVersion": "1.1" }), "# yaml-language-server: $yamlVersion=1.2\nitems:\n  - \"yes\"\n  - d\n", "block to flow", Some(" [yes, d]"), Some(" [yes, d]"))]
+#[case::enforce_block_style(json!({ "formatEnforceBlockStyle": true }), BLOCK_SEQUENCE, "block to flow", None, Some(" [aaaa, bbbb, cccc, dddd, eeee]"))]
+#[case::max_nesting_depth(json!({ "maxNestingDepth": 1 }), BLOCK_SEQUENCE, "block to flow", None, Some(" [aaaa, bbbb, cccc, dddd, eeee]"))]
 #[tokio::test]
 async fn code_action_follows_the_settings(
     #[case] settings: Value,
@@ -582,7 +582,7 @@ async fn code_action_uses_editorconfig_max_line_length_without_a_setting() {
 
     assert_eq!(
         edit.as_deref(),
-        Some(" [\n    aaaa,\n    bbbb,\n    cccc,\n    dddd,\n    eeee\n    ]\n")
+        Some(" [\n    aaaa,\n    bbbb,\n    cccc,\n    dddd,\n    eeee\n    ]")
     );
 }
 
@@ -593,7 +593,7 @@ async fn code_action_print_width_setting_wins_over_editorconfig() {
 
     let edit = code_action_edit(&settings, &file.uri, BLOCK_SEQUENCE, "block to flow").await;
 
-    assert_eq!(edit.as_deref(), Some(" [aaaa, bbbb, cccc, dddd, eeee]\n"));
+    assert_eq!(edit.as_deref(), Some(" [aaaa, bbbb, cccc, dddd, eeee]"));
 }
 
 #[tokio::test]
@@ -603,5 +603,5 @@ async fn code_action_ignores_editorconfig_when_respect_is_disabled() {
 
     let edit = code_action_edit(&settings, &file.uri, BLOCK_SEQUENCE, "block to flow").await;
 
-    assert_eq!(edit.as_deref(), Some(" [aaaa, bbbb, cccc, dddd, eeee]\n"));
+    assert_eq!(edit.as_deref(), Some(" [aaaa, bbbb, cccc, dddd, eeee]"));
 }

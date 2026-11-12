@@ -30,6 +30,10 @@ mod tab_to_spaces;
 mod yaml11_bool;
 mod yaml11_octal;
 
+/// What YAML calls separation space: the only characters that may sit between a
+/// token and the end of its line.
+const BLANKS: [char; 2] = [' ', '\t'];
+
 /// Compute code actions available for the given text, range, and diagnostics.
 ///
 /// Returns actions for:
@@ -90,7 +94,7 @@ pub fn code_actions(
             let mut actions: Vec<CodeAction> = [
                 tab_to_spaces(line, line_idx, uri, options),
                 quoted_bool_to_unquoted(docs, line_idx, col, uri, options),
-                block_to_flow(docs, line_idx, uri, options),
+                block_to_flow(docs, text, line_idx, uri, options),
             ]
             .into_iter()
             .flatten()
@@ -286,8 +290,9 @@ mod test_helpers {
             .clone()
     }
 
-    /// Apply the first block-to-flow edit to `text` and return the resulting string.
-    pub(super) fn apply_block_to_flow_edit(text: &str, line: u32) -> String {
+    /// The first edit of the block-to-flow action for the cursor at the start of
+    /// `line`, or `None` when the action is not offered.
+    pub(super) fn block_to_flow_edit(text: &str, line: u32) -> Option<TextEdit> {
         let actions = code_actions(
             &docs_for(text),
             text,
@@ -296,12 +301,15 @@ mod test_helpers {
             &test_uri(),
             &YamlFormatOptions::default(),
         );
-        let action = actions
-            .iter()
-            .find(|a| a.title.contains("block to flow"))
-            .expect("expected block-to-flow action");
+        let action = actions.iter().find(|a| a.title.contains("block to flow"))?;
         let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
-        apply_text_edit(text, &edits[0])
+        Some(edits[0].clone())
+    }
+
+    /// Apply the first block-to-flow edit to `text` and return the resulting string.
+    pub(super) fn apply_block_to_flow_edit(text: &str, line: u32) -> String {
+        let edit = block_to_flow_edit(text, line).expect("expected block-to-flow action");
+        apply_text_edit(text, &edit)
     }
 
     /// Apply the "Convert quoted string" (`quoted_bool`) edit to `yaml` at the given cursor column.
@@ -655,6 +663,35 @@ mod tests {
         );
         let reparsed = parse_yaml(&applied);
         assert!(reparsed.diagnostics.is_empty(), "{applied:?}");
+    }
+
+    // The edit ends with the flow collection, so the line breaks after it are the
+    // document's own: none is inserted or turned into another.
+    #[rstest]
+    #[case::trailing_comment(
+        "a:\n  b: 1\n  c: 2 # note\nd: 1\n",
+        "a: { b: 1, c: 2 } # note\nd: 1\n"
+    )]
+    #[case::blank_line_and_comment("a:\n  b: 1\n\n# keep\nd: 1\n", "a: { b: 1 }\n\n# keep\nd: 1\n")]
+    #[case::no_final_break("a:\n  b: 1", "a: { b: 1 }")]
+    #[case::blank_lines_at_the_end("a:\n  b: 1\n\n\n", "a: { b: 1 }\n\n\n")]
+    #[case::break_before_the_collection("a:\n  b: 1\nd: 1\n", "a: { b: 1 }\nd: 1\n")]
+    #[case::comment_at_the_end("a:\n  b: 1\n# end\n", "a: { b: 1 }\n# end\n")]
+    fn should_keep_the_line_breaks_after_the_converted_collection(
+        #[case] template: &str,
+        #[case] expected: &str,
+        #[values("\r\n", "\r")] line_break: &str,
+    ) {
+        let applied = assert_parity(
+            template,
+            line_break,
+            cursor_range(0, 0),
+            false,
+            &[BLOCK_TO_FLOW],
+            BLOCK_TO_FLOW,
+        );
+
+        assert_eq!(applied, expected.replace('\n', line_break));
     }
 
     #[rstest]

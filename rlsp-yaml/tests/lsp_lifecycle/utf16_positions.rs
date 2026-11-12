@@ -377,6 +377,13 @@ async fn the_delete_anchor_action_edits_at_utf16_columns_and_carries_the_publish
     0,
     None
 )]
+#[case::block_to_flow_astral_before_the_end_of_the_range(
+    "k:\n  a: 1\n  b: {A} # {A}\n",
+    "Convert block to flow style",
+    0,
+    0,
+    None
+)]
 #[case::unused_anchor("{A}: &a v\n", "Delete unused anchor", 0, 0, None)]
 #[case::unused_anchor_after_an_astral_line(
     "# {A}\n{A}{A}: &a v\n",

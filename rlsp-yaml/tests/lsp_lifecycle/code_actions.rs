@@ -152,6 +152,39 @@ async fn should_offer_block_to_flow_action_for_loading_document() {
     assert_eq!(titles, vec!["Convert block to flow style"]);
 }
 
+// The edit replaces the converted range only: the comment on the last line of
+// the collection is outside it, and the new text ends with the flow collection.
+#[tokio::test]
+async fn should_answer_an_edit_that_leaves_the_comment_after_the_collection() {
+    let uri = "file:///test/block-to-flow-keeps-comment.yaml";
+    let text = "a:\n  b: 1\n  c: 2 # note\nd: 1\n";
+    let mut service = open(text, uri).await;
+
+    let resp = send(&mut service, code_action_request(2, uri, 0, 1)).await;
+    let result = resp
+        .expect("a response")
+        .result()
+        .expect("a result")
+        .clone();
+
+    let actions = result.as_array().expect("an array");
+    assert_eq!(actions.len(), 1, "{result}");
+    assert_eq!(
+        actions[0]["edit"]["changes"][uri],
+        json!([{
+            "range": {
+                "start": { "line": 0, "character": 2 },
+                "end": { "line": 2, "character": 6 }
+            },
+            "newText": " { b: 1, c: 2 }"
+        }])
+    );
+    assert_eq!(
+        apply_action(text, uri, &actions[0]),
+        "a: { b: 1, c: 2 } # note\nd: 1\n"
+    );
+}
+
 #[tokio::test]
 async fn should_offer_no_structural_actions_for_document_that_does_not_load() {
     // Same block mapping on line 0 as the loading document above; the

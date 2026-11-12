@@ -65,6 +65,9 @@ fn simple_block_mapping() -> impl Strategy<Value = String> {
         // Block-to-flow candidates (block sequences and mappings)
         Just("items:\n  - one\n  - two\n".to_string()),
         Just("config:\n  host: localhost\n  port: \"8080\"\n".to_string()),
+        // Block-to-flow candidates followed by text the conversion keeps
+        Just("items:\n  - one\n  - two\n# tail\nnext: 1\n".to_string()),
+        Just("config:\n  host: h\n\n  port: 1 # p\n".to_string()),
         // Block-scalar candidate (long string in mapping value)
         Just("description: this is a very long plain scalar value that exceeds forty chars for sure\n".to_string()),
         // Tab candidate (tab in indentation)

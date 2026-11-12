@@ -46,7 +46,7 @@ around it, and it must not run where its flow output cannot hold what the block 
 ## Steps
 
 - [x] Task 1: The block-to-flow test helper applies the edit like a client
-- [ ] Task 2: The conversion replaces only the converted range
+- [x] Task 2: The conversion replaces only the converted range
 - [ ] Task 3: A comment in the converted range disables the action
 - [ ] Task 4: A block scalar inside the collection disables the action
 - [ ] Push to `main` and confirm the full CI matrix is green
@@ -70,34 +70,34 @@ The edit covers the converted range (Context), with its start and end found as t
 say, and `new_text` ends with the flow collection. Comments in the converted range are still left
 out in this task; Task 3 changes that.
 
-- [ ] `a:\n  b: 1\n  c: 2\n\n# keep me\nd: 1\n` becomes `a: { b: 1, c: 2 }\n\n# keep me\nd: 1\n`,
+- [x] `a:\n  b: 1\n  c: 2\n\n# keep me\nd: 1\n` becomes `a: { b: 1, c: 2 }\n\n# keep me\nd: 1\n`,
       and `a:\n  b: 1\n  c: 2 # note\nd: 1\n` becomes `a: { b: 1, c: 2 } # note\nd: 1\n`
-- [ ] The text after the collection stays as it was for an own-line comment indented at entry
+- [x] The text after the collection stays as it was for an own-line comment indented at entry
       level, a comment with trailing blanks and a tab, a comment at the end of the file with no
       next sibling, trailing blank lines at the end of the file, a missing final line break, a
       comment before `---`, a next sibling written as `- y`, `? c`, or `: v`, a cursor on an inner
       collection whose trailing comment sits at the outer level, and output that wraps over
       several lines
-- [ ] For an empty last value or item (`c:`, a bare `-`), a last value with only properties
+- [x] For an empty last value or item (`c:`, a bare `-`), a last value with only properties
       (`c: &x`), and a multi-line flow collection as last value with its `]` on a line of its own,
       the edit ends right after the `:`, the `-`, the property, or the `]`, and the comment after
       it stays
-- [ ] The blanks and line breaks between the `:` and the collection become the one space before
+- [x] The blanks and line breaks between the `:` and the collection become the one space before
       the flow collection
-- [ ] `a :\n  b: 1\nd: 1\n` becomes `a : { b: 1 }\nd: 1\n` and `? a\n:\n  b: 1\n` becomes
+- [x] `a :\n  b: 1\nd: 1\n` becomes `a : { b: 1 }\nd: 1\n` and `? a\n:\n  b: 1\n` becomes
       `? a\n: { b: 1 }\n`; both load, and an anchor or tag before the collection is printed once
-- [ ] In a CRLF document and in a bare-CR document, the line breaks after the converted collection
+- [x] In a CRLF document and in a bare-CR document, the line breaks after the converted collection
       are the document's own, and no LF is inserted after the flow collection; unit tests assert
       the exact resulting text
-- [ ] The cases above are code-action fixtures, except the line-break cases, which are unit tests
-- [ ] A lifecycle test asserts the exact edit the server answers for a collection followed by a
+- [x] The cases above are code-action fixtures, except the line-break cases, which are unit tests
+- [x] A lifecycle test asserts the exact edit the server answers for a collection followed by a
       comment, and the lifecycle tests that expect a `new_text` ending in a line break
       (`tests/lsp_lifecycle/format_options.rs`) expect the new text
-- [ ] No comment in `block_to_flow.rs` or `tests/code_action_property_preservation.rs` describes
+- [x] No comment in `block_to_flow.rs` or `tests/code_action_property_preservation.rs` describes
       the old edit range (a start one column after the key, an end at the next sibling)
-- [ ] A user can find in `rlsp-yaml/docs/feature-log.md` that the conversion keeps the text around
+- [x] A user can find in `rlsp-yaml/docs/feature-log.md` that the conversion keeps the text around
       the collection
-- [ ] `cargo clippy --workspace --all-targets` and `cargo test --workspace` pass
+- [x] `cargo clippy --workspace --all-targets` and `cargo test --workspace` pass
 
 ### Task 3: A comment in the converted range disables the action
 

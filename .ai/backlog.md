@@ -57,6 +57,7 @@ share a parent line with one sub-item each.
 - `- ` keeps a trailing space for null items and nested sequences; comment plan Task 7 test review.
 - `? ? a\n  : 1\n: v\n` is misread by the parser (the formatter avoids the form); comment plan Task 8 security review.
 - `? b\n` prints `b: ` with a trailing space, as `- ` does for nested sequences; comment plan Task 9 review.
+- An empty value in a flow mapping prints with two spaces before the closing brace: block-to-flow turns `a:\n  b: 1\n  c:\nd: 1\n` into `a: { b: 1, c:  }` (the fixture `block-to-flow-empty-last-value.md` pins it and says so); pre-existing (checked by the reviewer at c36d29d7), Low, cosmetic; block-to-flow plan Task 2 review.
 - Blank-line restoration loses every following blank line after an entry that `format_remove_duplicate_keys` removed; comment plan Task 9 test review.
 - Marker line and flow, rejected here and loaded by libfyaml: `--- :`, `--- : a`, `--- &a {a: 1}`, `--- &a [a: 1]`, `--- &a !t {a: 1}`, `--- &a {a: *a}`, `[!!null , b]`, `[&a , b]`, `[!t , b]`, `{?}`, `[?]`, implicit collection keys over the length limit; comment plan Task 11 review.
 - Flow keys differing from libfyaml: multi-line implicit keys `[ {a: 1,\n b: 2} : v ]` and `[ [a,\n b] : v ]` load here; `[ ? a, b: c ]` yields item `a`; `{ ? {a: b}, c: d }` omits the first entry's empty value; `? ? a` omits the null tag on its empty value, which `data_signature` hides; comment plan Task 11 review.

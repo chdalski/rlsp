@@ -31,6 +31,15 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### The "Convert block to flow style" Action Keeps the Text Around the Collection [completed]
+
+**Date:** 2026-11-12
+**Description:** The "Convert block to flow style" quick fix used to delete the text after the collection it converts: it replaced everything up to the next sibling, so a comment or a blank line after the last entry was gone. It now replaces only the collection, from the colon of the key to the end of the last entry, and keeps every character around it. `a:` with `b: 1` and `c: 2` below, then a blank line, a comment `# keep me` and `d: 1`, becomes `a: { b: 1, c: 2 }` with the blank line, the comment and `d: 1` unchanged below it, and a comment on the line of the last entry (`c: 2 # note`) stays behind the closing bracket. The same change fixes two keys that the action broke: `a :` lost its colon, and an explicit key whose `:` stands on its own line (`? a` then `:` then the block below) became invalid YAML. The comments inside the converted collection are still left out.
+**Complexity:** Low
+**Tier:** 1
+
+---
+
 ### Embedded Content Counts Toward the Schema Validation Depth [completed]
 
 **Date:** 2026-11-04

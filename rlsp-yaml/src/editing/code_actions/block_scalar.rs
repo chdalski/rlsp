@@ -8,11 +8,7 @@ use rlsp_yaml_parser::{Chomp, CollectionStyle, Document, LineIndex, ScalarStyle,
 use crate::editing::formatter::{YamlFormatOptions, format_subtree, prints_block_header};
 use crate::lsp_util::offset_to_lsp;
 
-use super::{block_to_flow::node_loc, make_action};
-
-/// What YAML calls separation space: the only characters that may sit between a
-/// scalar and the end of its line.
-const BLANKS: [char; 2] = [' ', '\t'];
+use super::{BLANKS, block_to_flow::node_loc, make_action};
 
 pub(super) fn string_to_block_scalar(
     docs: &[Document<Span>],
