@@ -20,6 +20,7 @@ use rlsp_yaml_parser::node::{Document, Node};
 use rlsp_yaml_parser::{LineIndex, ScalarStyle, Span};
 
 use super::YamlFormatOptions;
+use crate::lsp_util::last_line_of;
 
 /// A non-blank line of the original text, with the blank line that preceded it.
 struct SourceLine {
@@ -87,15 +88,8 @@ pub(super) fn block_scalar_lines(documents: &[Document<Span>]) -> Vec<Range<usiz
                 // `line_column` counts lines from 1, so the 1-based number of the
                 // header line is the 0-based number of the line below it.
                 let (header_line_1based, _) = index.line_column(loc.start);
-                let (end_line_1based, end_column) = index.line_column(loc.end);
                 let first_content = header_line_1based as usize;
-                let end_exclusive = if end_column == 0 {
-                    // The 1-based number of the line after the block is the
-                    // 0-based number of the block's last line plus 2.
-                    (end_line_1based as usize).saturating_sub(1)
-                } else {
-                    end_line_1based as usize
-                };
+                let end_exclusive = last_line_of(*loc, index) as usize + 1;
                 out.push(first_content..end_exclusive.max(first_content));
             }
             Node::Scalar { .. } | Node::Alias { .. } => {}
@@ -456,6 +450,30 @@ mod tests {
     fn block_scalar_lines_end_with_the_input_without_a_final_newline() {
         let documents = rlsp_yaml_parser::load("b: |\n  x").expect("test input must parse");
         assert_eq!(block_scalar_lines(&documents), vec![1..2]);
+    }
+
+    #[rstest]
+    #[case::crlf("a: 1\r\nb: |\r\n  x\r\n\r\n  y\r\nc: 2\r\n", &[(2, 5)])]
+    #[case::bare_cr("a: 1\rb: |\r  x\r\r  y\rc: 2\r", &[(2, 5)])]
+    #[case::keep_chomping_keeps_its_blank_lines("a: |+\n  x\n\n\nb: 1\n", &[(1, 4)])]
+    #[case::ends_at_a_final_lf_at_the_end_of_the_input("b: |\n  x\n", &[(1, 2)])]
+    #[case::ends_after_a_multibyte_character("b: |\n  \u{e9}", &[(1, 2)])]
+    #[case::empty_scalar_before_a_sibling("a: |\nb: 1\n", &[(1, 1)])]
+    #[case::header_at_the_end_of_the_input("a: |", &[(1, 1)])]
+    #[case::scalars_in_a_document_stream("---\na: |\n  x\n---\nb: |\n  y\n", &[(2, 3), (5, 6)])]
+    #[case::scalar_in_a_sequence("- |\n  x\n- y\n", &[(1, 2)])]
+    fn block_scalar_lines_follow_the_last_line_of_each_scalar(
+        #[case] text: &str,
+        #[case] expected: &[(usize, usize)],
+    ) {
+        let documents = rlsp_yaml_parser::load(text).expect("test input must parse");
+
+        let lines: Vec<(usize, usize)> = block_scalar_lines(&documents)
+            .into_iter()
+            .map(|lines| (lines.start, lines.end))
+            .collect();
+
+        assert_eq!(lines, expected);
     }
 
     #[test]

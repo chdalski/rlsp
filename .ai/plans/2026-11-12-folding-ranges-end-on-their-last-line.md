@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-11-12
 
 ## Goal
@@ -37,7 +37,7 @@ folding never hides a line outside the node.
 
 ## Steps
 
-- [ ] Task 1: One fold computation and one last-line rule
+- [x] Task 1: One fold computation and one last-line rule
 - [ ] Task 2: A structural fold ends on the last line of its last leaf
 - [ ] Push to `main` and confirm the full CI matrix is green
 
@@ -50,18 +50,18 @@ root), each with a double guard, and `rlsp-yaml/src/editing/formatter/blank_line
 rule that a span end at column 0 belongs to the line before. Each gets one home, so that Task 2
 changes one function. Behavior is unchanged.
 
-- [ ] `folding.rs` computes the lines of every structural fold in one function that all three
+- [x] `folding.rs` computes the lines of every structural fold in one function that all three
       fold sites use, and folds come out in the same order as before
-- [ ] One function in `rlsp-yaml/src/lsp_util.rs` gives the 0-based last line a span covers, and
+- [x] One function in `rlsp-yaml/src/lsp_util.rs` gives the 0-based last line a span covers, and
       `blank_lines.rs` holds no copy of its column-0 rule
-- [ ] A unit table pins that function: a span that ends at the start of line n, after LF, after
+- [x] A unit table pins that function: a span that ends at the start of line n, after LF, after
       CRLF, or after a bare CR, gives n − 1; a span that ends inside line n, at the end of input
       without a final line break or after a multi-byte character, gives n; an empty span at the
       start of line n gives n − 1, and an empty span at offset 0 gives 0
-- [ ] The tests in `folding.rs` and `blank_lines.rs`, `tests/lsp_lifecycle/folding_ranges.rs`,
+- [x] The tests in `folding.rs` and `blank_lines.rs`, `tests/lsp_lifecycle/folding_ranges.rs`,
       and `folding_ranges_respects_max_items_computed_limit`
       (`tests/lsp_lifecycle/validators_integration.rs`) pass with their assertions unchanged
-- [ ] `cargo clippy --workspace --all-targets` and `cargo test --workspace` pass
+- [x] `cargo clippy --workspace --all-targets` and `cargo test --workspace` pass
 
 ### Task 2: A structural fold ends on the last line of its last leaf
 

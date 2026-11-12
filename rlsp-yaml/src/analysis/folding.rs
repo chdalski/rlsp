@@ -31,14 +31,7 @@ pub fn folding_ranges(docs: &[Document<Span>], text: &str) -> Vec<FoldingRange> 
                 | Node::Scalar { loc, .. }
                 | Node::Alias { loc, .. } => loc,
             };
-            let start_line = idx.line_column(root_loc.start).0;
-            let end_line = idx.line_column(root_loc.end).0;
-            if end_line > start_line {
-                let (start, end) = node_span_0based(&doc.root, idx);
-                if end > start {
-                    push_fold(&mut ranges, start, end, Some(FoldingRangeKind::Region));
-                }
-            }
+            push_structural_fold(&mut ranges, *root_loc, idx, Some(FoldingRangeKind::Region));
             // Walk children only — the root is already covered by the Region fold above.
             collect_children_folds(&doc.root, &mut ranges, idx);
         } else {
@@ -51,20 +44,27 @@ pub fn folding_ranges(docs: &[Document<Span>], text: &str) -> Vec<FoldingRange> 
     ranges
 }
 
-/// Extract the 0-based `(start_line, end_line)` from a node's `loc` span.
+/// Push the fold of a structural node whose span is `loc`, unless the span
+/// stays on one source line.
 ///
-/// AST positions are 1-based; `saturating_sub(1)` converts to 0-based LSP lines.
-fn node_span_0based(node: &Node<Span>, idx: &LineIndex) -> (u32, u32) {
-    let loc = match node {
-        Node::Mapping { loc, .. }
-        | Node::Sequence { loc, .. }
-        | Node::Scalar { loc, .. }
-        | Node::Alias { loc, .. } => loc,
-    };
-    (
-        idx.line_column(loc.start).0.saturating_sub(1),
-        idx.line_column(loc.end).0.saturating_sub(1),
-    )
+/// The fold runs from the line the span starts on to the line it ends on.
+fn push_structural_fold(
+    ranges: &mut Vec<FoldingRange>,
+    loc: Span,
+    idx: &LineIndex,
+    kind: Option<FoldingRangeKind>,
+) {
+    // `line_column` counts lines from 1; LSP lines start at 0.
+    let start_line = idx.line_column(loc.start).0;
+    let end_line = idx.line_column(loc.end).0;
+    if end_line > start_line {
+        push_fold(
+            ranges,
+            start_line.saturating_sub(1),
+            end_line.saturating_sub(1),
+            kind,
+        );
+    }
 }
 
 /// Walk a node's immediate children and fold each `Mapping` / `Sequence` child.
@@ -89,30 +89,14 @@ fn collect_children_folds(node: &Node<Span>, ranges: &mut Vec<FoldingRange>, idx
 fn collect_node_folds(node: &Node<Span>, ranges: &mut Vec<FoldingRange>, idx: &LineIndex) {
     match node {
         Node::Mapping { entries, loc, .. } => {
-            let start_line = idx.line_column(loc.start).0;
-            let end_line = idx.line_column(loc.end).0;
-            if end_line > start_line {
-                let start = start_line.saturating_sub(1);
-                let end = end_line.saturating_sub(1);
-                if end > start {
-                    push_fold(ranges, start, end, None);
-                }
-            }
+            push_structural_fold(ranges, *loc, idx, None);
             for (k, v) in entries {
                 collect_node_folds(k, ranges, idx);
                 collect_node_folds(v, ranges, idx);
             }
         }
         Node::Sequence { items, loc, .. } => {
-            let start_line = idx.line_column(loc.start).0;
-            let end_line = idx.line_column(loc.end).0;
-            if end_line > start_line {
-                let start = start_line.saturating_sub(1);
-                let end = end_line.saturating_sub(1);
-                if end > start {
-                    push_fold(ranges, start, end, None);
-                }
-            }
+            push_structural_fold(ranges, *loc, idx, None);
             for item in items {
                 collect_node_folds(item, ranges, idx);
             }
@@ -588,5 +572,38 @@ mod tests {
         #[case] expected: &[(u32, u32)],
     ) {
         assert_eq!(comment_folds(text), expected);
+    }
+
+    // Structural folds come out outer before inner, the document-root Region
+    // fold of a stream before the folds of its children, and comment folds
+    // last: the handler truncates this list to `maxItemsComputed`.
+    #[rstest]
+    #[case::nested_mappings(
+        "a:\n  b:\n    c: 1\n    d: 2",
+        &[(0, 3, None), (1, 3, None), (2, 3, None)]
+    )]
+    #[case::multi_line_flow_sequence("k: [a,\n  b]", &[(0, 1, None), (0, 1, None)])]
+    #[case::multi_line_flow_mapping("k: {a: 1,\n  b: 2}", &[(0, 1, None), (0, 1, None)])]
+    #[case::single_line_block_sequence("- a", &[])]
+    #[case::single_line_flow_sequence("[a, b]", &[])]
+    #[case::single_line_flow_mapping("{a: 1}", &[])]
+    #[case::root_region_before_its_children_in_a_stream(
+        "---\n---\nc:\n  d:\n    x: 1\n    y: 2",
+        &[(2, 5, Some(FoldingRangeKind::Region)), (3, 5, None), (4, 5, None)]
+    )]
+    #[case::comment_folds_come_last(
+        "a:\n  # x\n  # y\n  b: 1",
+        &[(0, 3, None), (1, 2, Some(FoldingRangeKind::Comment))]
+    )]
+    fn structural_folds_come_out_in_pre_order_with_their_kind(
+        #[case] text: &str,
+        #[case] expected: &[(u32, u32, Option<FoldingRangeKind>)],
+    ) {
+        let folds: Vec<_> = folding_ranges(&load_docs(text), text)
+            .into_iter()
+            .map(|r| (r.start_line, r.end_line, r.kind))
+            .collect();
+
+        assert_eq!(folds, expected);
     }
 }

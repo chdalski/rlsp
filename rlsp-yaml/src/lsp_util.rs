@@ -184,6 +184,22 @@ pub fn span_to_lsp(span: Span, idx: &LineIndex) -> Range {
     Range::new(offset_to_lsp(span.start, idx), offset_to_lsp(span.end, idx))
 }
 
+/// The 0-based last line that `span` covers.
+///
+/// A span that ends at the start of a line, such as after a line break, does
+/// not cover that line: its last line is the one before. An empty span at the
+/// start of line `n` gives `n - 1`, saturating at line 0.
+#[must_use]
+pub fn last_line_of(span: Span, idx: &LineIndex) -> u32 {
+    let (line, column) = idx.line_column(span.end);
+    let end_line = line.saturating_sub(1);
+    if column == 0 {
+        end_line.saturating_sub(1)
+    } else {
+        end_line
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use rlsp_yaml_parser::LineIndex;
@@ -242,6 +258,34 @@ mod tests {
         assert_eq!(range.start.character, 0);
         assert_eq!(range.end.line, 0);
         assert_eq!(range.end.character, 3);
+    }
+
+    // ── last_line_of ─────────────────────────────────────────────────────────
+
+    #[rstest]
+    #[case::empty_input("", 0, 0, 0)]
+    #[case::empty_span_at_offset_zero("abc\n", 0, 0, 0)]
+    #[case::whole_single_line_without_break("abc", 0, 3, 0)]
+    #[case::ends_inside_a_line("a\nbcd\n", 0, 4, 1)]
+    #[case::ends_before_the_break_of_its_line("a\nbc\n", 0, 4, 1)]
+    #[case::ends_at_the_end_of_input_without_a_final_break("a\nbc", 0, 4, 1)]
+    #[case::ends_after_a_multibyte_character("a\nb\u{e9}", 0, 5, 1)]
+    #[case::ends_at_the_start_of_a_line_after_lf("a\nb\nc\n", 0, 4, 1)]
+    #[case::ends_at_the_start_of_a_line_after_crlf("a\r\nb\r\nc\r\n", 0, 6, 1)]
+    #[case::ends_at_the_start_of_a_line_after_a_bare_cr("a\rb\rc\r", 0, 4, 1)]
+    #[case::ends_at_the_start_of_line_one("a\nb", 0, 2, 0)]
+    #[case::ends_at_the_end_of_input_after_a_final_lf("a\nbc\n", 0, 5, 1)]
+    #[case::column_zero_after_a_multibyte_line("\u{e9}\nb", 0, 3, 0)]
+    #[case::empty_span_at_the_start_of_a_line("a\nb\nc", 4, 4, 1)]
+    #[case::empty_span_inside_a_line("a\nbc", 3, 3, 1)]
+    #[case::start_on_a_later_line_than_the_first("a\nb\nc\n", 2, 4, 1)]
+    fn last_line_of_gives_the_last_line_a_span_covers(
+        #[case] source: &str,
+        #[case] start: u32,
+        #[case] end: u32,
+        #[case] expected: u32,
+    ) {
+        assert_eq!(last_line_of(Span { start, end }, &idx(source)), expected);
     }
 
     // ── source_lines ─────────────────────────────────────────────────────────
