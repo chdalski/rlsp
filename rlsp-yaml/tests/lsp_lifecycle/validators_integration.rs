@@ -1422,11 +1422,12 @@ async fn folding_ranges_respects_max_items_computed_limit() {
     )
     .await;
 
-    // 5 nested mappings each produces a folding range — well above the limit of 2
+    // Each of the 5 nested mappings holds two lines, so it folds; with the
+    // mapping around them that is 6 folds, well above the limit of 2
     let uri = "file:///test/max_items_folding_truncate.yaml";
     let mut yaml_text = String::new();
     for i in 0..5 {
-        let _ = write!(yaml_text, "item_{i}:\n  key: value\n");
+        let _ = write!(yaml_text, "item_{i}:\n  key: value\n  other: value\n");
     }
     send(&mut service, did_open_notification(uri, &yaml_text)).await;
 
@@ -1435,6 +1436,12 @@ async fn folding_ranges_respects_max_items_computed_limit() {
     let result = resp.result().expect("foldingRange should have a result");
     let arr = result.as_array().expect("foldingRange should be an array");
     assert_eq!(arr.len(), 2, "foldingRange should be truncated to limit 2");
+    // The truncation keeps the outer fold and the first inner one.
+    let lines: Vec<_> = arr
+        .iter()
+        .map(|range| (range["startLine"].as_u64(), range["endLine"].as_u64()))
+        .collect();
+    assert_eq!(lines, [(Some(0), Some(14)), (Some(1), Some(2))]);
 }
 
 #[tokio::test]

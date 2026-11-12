@@ -38,7 +38,7 @@ folding never hides a line outside the node.
 ## Steps
 
 - [x] Task 1: One fold computation and one last-line rule
-- [ ] Task 2: A structural fold ends on the last line of its last leaf
+- [x] Task 2: A structural fold ends on the last line of its last leaf
 - [ ] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
@@ -78,36 +78,36 @@ count on folds of one-line collections, which this task removes:
 and the folding check of `tests/lsp_lifecycle/stack_depth.rs`, whose innermost collections hold one
 line in the `BlockMappings`, `BlockSequences`, and `QuestionKeys` shapes.
 
-- [ ] `a:\n  b: 1\nc: 2\n` gets exactly the folds `[(0, 2)]`, `a:\n  b: 1\n  c: 3\nd: 4\n` gets
+- [x] `a:\n  b: 1\nc: 2\n` gets exactly the folds `[(0, 2)]`, `a:\n  b: 1\n  c: 3\nd: 4\n` gets
       `[(0, 3), (1, 2)]`, and `key1: val1\nkey2: val2\n---\nkey3: val3\nkey4: val4\n` gets the
       Region folds `[(0, 1), (3, 4)]`
-- [ ] An empty last value or item ends no fold past the text before it:
+- [x] An empty last value or item ends no fold past the text before it:
       `a:\n  b: 1\n  c:\n\n# x\nd: 1\n` gets `[(0, 5), (1, 2)]`,
       `a:\n  b: 1\n  ? k\n\nc: 1\n` gets `[(0, 4), (1, 2)]`,
       `a:\n  b: !!str\n\n# x\nc: 1\n` gets `[(0, 4)]`, `a:\n  - x\n  -\n\n# x\nd: 1\n` gets
       `[(0, 5)]`, `a:\n  -\n  -\nb: 1\n` gets `[(0, 3)]`, and the stream
       `a: 1\nb: 2\n---\n---\nc: 3\nd: 4\n`, whose second document is empty, gets the Region folds
       `[(0, 1), (4, 5)]`
-- [ ] No structural fold ends on a line after its last leaf: trailing blank lines and trailing
+- [x] No structural fold ends on a line after its last leaf: trailing blank lines and trailing
       comments of a block collection, blank lines and comments before `---`, and the closing bracket
       of a flow collection on a line of its own stay outside the fold
-- [ ] A collection whose last leaf is a block scalar folds to the scalar's last line, its trailing
+- [x] A collection whose last leaf is a block scalar folds to the scalar's last line, its trailing
       blank lines included
-- [ ] The same document with LF, CRLF, or bare CR line breaks, and with or without a final line
+- [x] The same document with LF, CRLF, or bare CR line breaks, and with or without a final line
       break, gets the same fold lines
-- [ ] Folds keep their order (outer before inner) and their kinds (Region for each document root
+- [x] Folds keep their order (outer before inner) and their kinds (Region for each document root
       of a multi-document stream, none for collections); comment folds are unchanged
-- [ ] The structural tests named above are one table test with named cases that asserts the exact
+- [x] The structural tests named above are one table test with named cases that asserts the exact
       ordered list of (start line, end line, kind) per input; it covers the inputs of the tests it
       replaces and each case of the criteria above
-- [ ] `should_return_folding_ranges_for_nested_yaml` (`tests/lsp_lifecycle/folding_ranges.rs`)
+- [x] `should_return_folding_ranges_for_nested_yaml` (`tests/lsp_lifecycle/folding_ranges.rs`)
       asserts the exact folds `(0, 2)` and `(1, 2)` for its input through the server
-- [ ] `folding_ranges_respects_max_items_computed_limit` opens nested collections of two or more
+- [x] `folding_ranges_respects_max_items_computed_limit` opens nested collections of two or more
       lines each, which yield more folds than its limit of 2, and still asserts the truncation to 2;
       its comment describes that input
-- [ ] The folding check of `stack_depth.rs` still shows, for every block shape, that the fold walk
+- [x] The folding check of `stack_depth.rs` still shows, for every block shape, that the fold walk
       reaches the deepest collection that holds more than one line
-- [ ] `cargo clippy --workspace --all-targets` and `cargo test --workspace` pass
+- [x] `cargo clippy --workspace --all-targets` and `cargo test --workspace` pass
 
 ## Decisions
 

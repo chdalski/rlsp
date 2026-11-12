@@ -359,6 +359,8 @@ fn expected_reach(shape: Shape, call: Call, levels: usize) -> usize {
     match call {
         Call::DocumentSymbol => full_or_nothing(has_keys).saturating_sub(1),
         Call::SelectionRange => full_or_nothing(!matches!(shape, Shape::QuestionKeys)),
+        // The deepest collection of these shapes is one line and gets no fold.
+        Call::FoldingRange if !anchored => full_or_nothing(!flow).saturating_sub(1),
         Call::FoldingRange | Call::RangeFormatting => full_or_nothing(!flow),
         Call::SemanticTokens => full_or_nothing(has_keys),
         Call::Formatting => levels,

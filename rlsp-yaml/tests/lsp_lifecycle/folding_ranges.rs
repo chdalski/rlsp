@@ -35,11 +35,13 @@ async fn should_return_folding_ranges_for_nested_yaml() {
     let resp = resp.expect("foldingRange should return a response");
     let result = resp.result().expect("foldingRange should have a result");
     assert!(!result.is_null(), "foldingRange result should not be null");
-    let arr = result.as_array().expect("foldingRange should be an array");
-    assert!(
-        !arr.is_empty(),
-        "should return at least 1 folding range for nested YAML"
-    );
+    let folds: Vec<_> = result
+        .as_array()
+        .expect("foldingRange should be an array")
+        .iter()
+        .map(|range| (range["startLine"].as_u64(), range["endLine"].as_u64()))
+        .collect();
+    assert_eq!(folds, [(Some(0), Some(2)), (Some(1), Some(2))]);
 }
 
 async fn comment_fold_lines(text: &str) -> Vec<(u64, u64)> {
