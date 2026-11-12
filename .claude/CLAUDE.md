@@ -1039,12 +1039,17 @@ goes back through the reviewer. If a checked task's text no
 longer holds, correct it and give the reason in the commit
 message; this is the only case for editing a checked task.
 
-**Check CI after a push.** After any push, check the
-pipeline result for the pushed commit across every job of
-the matrix before you report the work as done: a green
-local run covers neither other platforms nor CI-only
-steps. A prior plan was reported complete while its CI
-stayed red for a whole session.
+**Check CI after a push that changes code.** After a push
+that changes code, tests, build files or CI configuration,
+check the pipeline result for the pushed commit across
+every job of the matrix before you report the work as
+done: a green local run covers neither other platforms nor
+CI-only steps. A push that changes only documentation,
+such as a plan status or a backlog entry, needs no new
+check when the commit before it is green: the pipeline
+runs the same code. Test fixtures written in Markdown are
+tests, not documentation. A prior plan was reported
+complete while its CI stayed red for a whole session.
 
 **New tasks after completion.** Each plan covers one
 feature or task. When the user requests a new task:
