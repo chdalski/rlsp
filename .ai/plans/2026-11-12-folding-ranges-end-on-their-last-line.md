@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-11-12)
 **Created:** 2026-11-12
 
 ## Goal
@@ -39,7 +39,7 @@ folding never hides a line outside the node.
 
 - [x] Task 1: One fold computation and one last-line rule
 - [x] Task 2: A structural fold ends on the last line of its last leaf
-- [ ] Push to `main` and confirm the full CI matrix is green
+- [x] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
