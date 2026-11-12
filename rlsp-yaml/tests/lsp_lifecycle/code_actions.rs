@@ -73,6 +73,200 @@ async fn should_return_code_actions_for_document_with_actions() {
     );
 }
 
+/// The answer to a code-action request for line 0 of `text`, from a server
+/// whose client announced `capabilities`.
+async fn code_action_result(capabilities: &serde_json::Value, text: &str) -> serde_json::Value {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(
+        &mut service,
+        initialize_request_with_capabilities(1, capabilities),
+    )
+    .await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/disabled-action.yaml";
+    send(&mut service, did_open_notification(uri, text)).await;
+
+    let resp = send(&mut service, code_action_request(2, uri, 0, 0)).await;
+    let resp = resp.expect("codeAction should return a response");
+    resp.result()
+        .expect("codeAction should have a result")
+        .clone()
+}
+
+const COMMENT_IN_COLLECTION: &str = "a: # note\n  b: 1\n";
+
+#[tokio::test]
+async fn should_offer_block_to_flow_disabled_to_a_client_that_supports_disabled_actions() {
+    let capabilities = json!({ "textDocument": { "codeAction": { "disabledSupport": true } } });
+
+    let result = code_action_result(&capabilities, COMMENT_IN_COLLECTION).await;
+
+    let actions = result.as_array().expect("result should be an array");
+    let action = actions
+        .iter()
+        .find(|a| a["title"] == "Convert block to flow style")
+        .unwrap_or_else(|| panic!("block-to-flow action expected; got: {result}"));
+    assert_eq!(
+        action["disabled"],
+        json!({ "reason": "Flow style would lose the comments in this collection" })
+    );
+    assert_eq!(action["kind"], "refactor.rewrite");
+    assert!(
+        action.get("edit").is_none(),
+        "no edit expected; got: {action}"
+    );
+}
+
+#[tokio::test]
+async fn should_offer_no_disabled_action_to_a_client_without_disabled_support() {
+    for capabilities in [
+        json!({}),
+        json!({ "textDocument": {} }),
+        json!({ "textDocument": { "codeAction": {} } }),
+        json!({ "textDocument": { "codeAction": { "disabledSupport": false } } }),
+    ] {
+        let result = code_action_result(&capabilities, COMMENT_IN_COLLECTION).await;
+
+        // The collection has no other action, so the answer is empty.
+        assert!(
+            result.is_null(),
+            "capabilities {capabilities}: expected null; got: {result}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn should_keep_the_enabled_actions_for_a_client_without_disabled_support() {
+    let result = code_action_result(&json!({}), "a:\n  b: 1\n").await;
+
+    let actions = result.as_array().expect("result should be an array");
+    let action = actions
+        .iter()
+        .find(|a| a["title"] == "Convert block to flow style")
+        .unwrap_or_else(|| panic!("block-to-flow action expected; got: {result}"));
+    assert!(action.get("disabled").is_none(), "{action}");
+    assert!(action.get("edit").is_some(), "{action}");
+}
+
+fn disabled_support() -> serde_json::Value {
+    json!({ "textDocument": { "codeAction": { "disabledSupport": true } } })
+}
+
+fn titles(result: &serde_json::Value) -> Vec<&str> {
+    result
+        .as_array()
+        .expect("result should be an array")
+        .iter()
+        .filter_map(|a| a["title"].as_str())
+        .collect()
+}
+
+#[tokio::test]
+async fn should_track_the_capability_per_server_instance() {
+    let with = code_action_result(&disabled_support(), COMMENT_IN_COLLECTION).await;
+    let without = code_action_result(&json!({}), COMMENT_IN_COLLECTION).await;
+    let with_again = code_action_result(&disabled_support(), COMMENT_IN_COLLECTION).await;
+
+    assert_eq!(titles(&with), ["Convert block to flow style"]);
+    assert!(without.is_null(), "{without}");
+    assert_eq!(with_again, with);
+}
+
+#[tokio::test]
+async fn should_follow_the_edits_of_the_document() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(
+        &mut service,
+        initialize_request_with_capabilities(1, &disabled_support()),
+    )
+    .await;
+    send(&mut service, initialized_notification()).await;
+    let uri = "file:///test/edits.yaml";
+    send(
+        &mut service,
+        did_open_notification(uri, COMMENT_IN_COLLECTION),
+    )
+    .await;
+
+    let mut answers = Vec::new();
+    for (id, version, text) in [
+        (2, None, COMMENT_IN_COLLECTION),
+        (3, Some(2), "a:\n  b: 1\n"),
+        (4, Some(3), COMMENT_IN_COLLECTION),
+    ] {
+        if let Some(version) = version {
+            send(&mut service, did_change_notification(uri, text, version)).await;
+        }
+        let resp = send(&mut service, code_action_request(id, uri, 0, 0)).await;
+        let result = resp.unwrap().result().unwrap().clone();
+        answers.push((
+            result[0]["disabled"].is_object(),
+            result[0]["edit"].is_object(),
+        ));
+    }
+
+    assert_eq!(answers, [(true, false), (false, true), (true, false)]);
+}
+
+#[tokio::test]
+async fn should_keep_the_enabled_action_next_to_the_dropped_disabled_one() {
+    // The tab after the comment gives an enabled action on the same line.
+    let text = "a: # note\t\n  b: 1\n";
+
+    let without = code_action_result(&json!({}), text).await;
+    let with = code_action_result(&disabled_support(), text).await;
+
+    assert!(!titles(&without).contains(&"Convert block to flow style"));
+    assert!(titles(&without).contains(&"Convert tabs to spaces"));
+    assert!(titles(&with).contains(&"Convert tabs to spaces"));
+    assert_eq!(titles(&with).len(), titles(&without).len() + 1);
+    assert!(titles(&with).contains(&"Convert block to flow style"));
+}
+
+#[tokio::test]
+async fn should_answer_the_disabled_action_for_text_beyond_the_basic_plane() {
+    for text in ["\u{1F600}: # c\n  b: 1\n", "ключ: # コメント\n  b: 1\n"] {
+        let result = code_action_result(&disabled_support(), text).await;
+
+        assert_eq!(titles(&result), ["Convert block to flow style"], "{text:?}");
+        assert!(result[0]["disabled"].is_object(), "{result}");
+    }
+}
+
+#[tokio::test]
+async fn should_offer_no_action_when_block_style_is_enforced_even_with_disabled_support() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+    send(
+        &mut service,
+        Request::build("initialize")
+            .id(1)
+            .params(json!({
+                "capabilities": disabled_support(),
+                "processId": null,
+                "rootUri": null,
+                "initializationOptions": { "formatEnforceBlockStyle": true }
+            }))
+            .finish(),
+    )
+    .await;
+    send(&mut service, initialized_notification()).await;
+    let uri = "file:///test/enforce.yaml";
+    send(
+        &mut service,
+        did_open_notification(uri, COMMENT_IN_COLLECTION),
+    )
+    .await;
+
+    let resp = send(&mut service, code_action_request(2, uri, 0, 0)).await;
+
+    assert!(resp.unwrap().result().unwrap().is_null());
+}
+
 #[tokio::test]
 async fn should_return_yaml11_bool_code_actions_via_server_handler() {
     let (mut service, socket) = LspService::new(Backend::new);

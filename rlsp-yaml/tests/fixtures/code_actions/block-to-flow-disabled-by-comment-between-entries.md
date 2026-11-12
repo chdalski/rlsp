@@ -1,0 +1,19 @@
+---
+test-name: block-to-flow-disabled-by-comment-between-entries
+category: block-to-flow
+cursor: 0:0
+disables-action: Convert block to flow style
+disabled-reason: Flow style would lose the comments in this collection
+---
+
+# Test: A comment between two entries is inside the converted range, so the action is offered disabled.
+
+## Test-Document
+
+```yaml
+a:
+  b: 1
+  # mid
+  c: 2
+d: 1
+```

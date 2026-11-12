@@ -92,9 +92,11 @@ All fields are between `---` delimiters. Most are flat key:value pairs;
 | `cursor` | yes | Zero-based `line:character` cursor position |
 | `applies-action` | see below | Title substring of the action to invoke |
 | `omits-action` | see below | Title substring asserted absent |
+| `disables-action` | see below | Title substring of the action asserted to be offered disabled |
+| `disabled-reason` | with `disables-action` | The exact reason the disabled action states |
 | `format-options:` | no | Block of indented key-value pairs overriding `YamlFormatOptions` fields |
 
-Exactly one of `applies-action` or `omits-action` must be set; they are mutually exclusive.
+Exactly one of `applies-action`, `omits-action` or `disables-action` must be set; they are mutually exclusive. `disabled-reason` is required with `disables-action` and allowed with nothing else.
 
 ### `format-options:` block
 
@@ -143,11 +145,22 @@ applied. This is correct for single-edit actions (tab-to-spaces,
 quoted-bool); document this if a future action produces multiple
 edits.
 
+The test fails if the matching action is disabled: a disabled
+action carries no edit, so use `disables-action` for it.
+
 **`omits-action: <title-substring>`**
 
 The harness asserts that no returned action title contains the
-substring. `## Expected-Document` is not required and should
-be omitted.
+substring. A disabled action counts as returned, so `omits-action`
+means no action at all. `## Expected-Document` is not required and
+should be omitted.
+
+**`disables-action: <title-substring>`** with **`disabled-reason: <text>`**
+
+The harness finds the first action whose title contains the
+substring and asserts that it is offered disabled
+(`CodeAction.disabled`) with exactly this reason and carries no
+edit. `## Expected-Document` is not required and should be omitted.
 
 ### Cursor convention
 
@@ -158,7 +171,7 @@ indices, matching the LSP `Position` type. Do not add 1.
 
 - `## Test-Document` — fenced YAML input (always required)
 - `## Expected-Document` — fenced YAML output (required for
-  `applies-action`; omit for `omits-action`)
+  `applies-action`; omit for `omits-action` and `disables-action`)
 
 The harness strips fenced code block delimiters and any
 language tag (e.g. ` ```yaml `). Content starts at the

@@ -29,11 +29,15 @@
 //   expected output here
 //   ```
 //
-// Two assertion modes (mutually exclusive):
+// Three assertion modes (mutually exclusive):
 //   applies-action — finds the action by title substring, applies its first
-//                    TextEdit to Test-Document, asserts result equals Expected-Document
-//   omits-action   — asserts no action with that title substring is returned;
-//                    Expected-Document is not required
+//                    TextEdit to Test-Document, asserts result equals Expected-Document;
+//                    fails on a disabled action
+//   omits-action   — asserts no action with that title substring is returned,
+//                    disabled or not; Expected-Document is not required
+//   disables-action — finds the action by title substring and asserts it is
+//                    offered disabled with the `disabled-reason` text and
+//                    carries no edit; Expected-Document is not required
 //
 // Optional frontmatter block:
 //   format-options — indented key-value pairs that override YamlFormatOptions
@@ -59,9 +63,11 @@ use tower_lsp::lsp_types::{Position, Range, TextEdit, Url};
 #[derive(Debug, PartialEq)]
 enum ActionMode {
     /// Assert the named action is offered and its first edit produces Expected-Document.
-    AppliesAction(String),
-    /// Assert no action with this title substring is offered.
-    OmitsAction(String),
+    Applies(String),
+    /// Assert no action with this title substring is offered, disabled or not.
+    Omits(String),
+    /// Assert the named action is offered disabled with this reason and no edit.
+    Disables { title: String, reason: String },
 }
 
 /// The parsed contents of a code-action fixture file.
@@ -78,7 +84,7 @@ struct FixtureSpec {
     format_options: YamlFormatOptions,
     /// Raw YAML from `## Test-Document`.
     test_document: String,
-    /// Raw YAML from `## Expected-Document`. Empty for `OmitsAction` mode.
+    /// Raw YAML from `## Expected-Document`. Empty unless `Applies` mode.
     expected_document: String,
 }
 
@@ -103,6 +109,8 @@ fn parse_frontmatter(
     let mut cursor: Option<(u32, u32)> = None;
     let mut applies_action: Option<String> = None;
     let mut omits_action: Option<String> = None;
+    let mut disables_action: Option<String> = None;
+    let mut disabled_reason: Option<String> = None;
     let mut options = YamlFormatOptions::default();
     let mut in_format_options = false;
 
@@ -145,16 +153,25 @@ fn parse_frontmatter(
                 }
                 "applies-action" => applies_action = Some(value.to_string()),
                 "omits-action" => omits_action = Some(value.to_string()),
+                "disables-action" => disables_action = Some(value.to_string()),
+                "disabled-reason" => disabled_reason = Some(value.to_string()),
                 _ => {}
             }
         }
     }
 
-    if applies_action.is_some() && omits_action.is_some() {
+    let modes_set = [&applies_action, &omits_action, &disables_action]
+        .into_iter()
+        .filter(|mode| mode.is_some())
+        .count();
+    if modes_set > 1 {
         return Err(
-            "applies-action and omits-action are mutually exclusive; only one may be set"
+            "applies-action, omits-action and disables-action are mutually exclusive; only one may be set"
                 .to_string(),
         );
+    }
+    if disabled_reason.is_some() && disables_action.is_none() {
+        return Err("disabled-reason requires disables-action".to_string());
     }
 
     let (cursor_line, cursor_char) = cursor.ok_or_else(|| {
@@ -162,12 +179,16 @@ fn parse_frontmatter(
     })?;
 
     let mode = if let Some(title) = applies_action {
-        ActionMode::AppliesAction(title)
+        ActionMode::Applies(title)
     } else if let Some(title) = omits_action {
-        ActionMode::OmitsAction(title)
+        ActionMode::Omits(title)
+    } else if let Some(title) = disables_action {
+        let reason = disabled_reason
+            .ok_or_else(|| "disables-action requires a disabled-reason field".to_string())?;
+        ActionMode::Disables { title, reason }
     } else {
         return Err(
-            "missing required frontmatter field: one of applies-action or omits-action must be set"
+            "missing required frontmatter field: one of applies-action, omits-action or disables-action must be set"
                 .to_string(),
         );
     };
@@ -255,8 +276,8 @@ fn parse_fixture(content: &str, path: &Path) -> FixtureSpec {
         extract_section(body, "Test-Document").unwrap_or_else(|e| panic_fixture(&path_str, &e));
 
     let expected_document = match &mode {
-        ActionMode::OmitsAction(_) => String::new(),
-        ActionMode::AppliesAction(_) => extract_section(body, "Expected-Document")
+        ActionMode::Omits(_) | ActionMode::Disables { .. } => String::new(),
+        ActionMode::Applies(_) => extract_section(body, "Expected-Document")
             .unwrap_or_else(|e| panic_fixture(&path_str, &e)),
     };
 
@@ -313,8 +334,12 @@ fn extract_first_edit(
 fn code_action_fixture(#[files("tests/fixtures/code_actions/*.md")] path: PathBuf) {
     let content = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic_fixture(&path.display().to_string(), &e.to_string()));
+    check_fixture(&content, &path);
+}
 
-    let fixture = parse_fixture(&content, &path);
+/// Run the fixture in `content`; `path` names it in failure messages.
+fn check_fixture(content: &str, path: &Path) {
+    let fixture = parse_fixture(content, path);
     let uri = test_uri();
     let docs = docs_for(&fixture.test_document);
     let range = cursor_range(fixture.cursor_line, fixture.cursor_char);
@@ -328,7 +353,7 @@ fn code_action_fixture(#[files("tests/fixtures/code_actions/*.md")] path: PathBu
     );
 
     match &fixture.mode {
-        ActionMode::AppliesAction(title_sub) => {
+        ActionMode::Applies(title_sub) => {
             let action = actions
                 .iter()
                 .find(|a| a.title.contains(title_sub.as_str()))
@@ -342,6 +367,15 @@ fn code_action_fixture(#[files("tests/fixtures/code_actions/*.md")] path: PathBu
                     )
                 });
 
+            if let Some(disabled) = &action.disabled {
+                panic_fixture(
+                    &path.display().to_string(),
+                    &format!(
+                        "action {:?} is disabled ({:?}); use disables-action",
+                        action.title, disabled.reason
+                    ),
+                );
+            }
             let edit = extract_first_edit(action, &uri, &path.display().to_string());
             let actual = apply_text_edit(&fixture.test_document, &edit);
 
@@ -365,7 +399,7 @@ fn code_action_fixture(#[files("tests/fixtures/code_actions/*.md")] path: PathBu
                 actual,
             );
         }
-        ActionMode::OmitsAction(title_sub) => {
+        ActionMode::Omits(title_sub) => {
             let found = actions
                 .iter()
                 .find(|a| a.title.contains(title_sub.as_str()));
@@ -374,6 +408,35 @@ fn code_action_fixture(#[files("tests/fixtures/code_actions/*.md")] path: PathBu
                 "fixture {}: expected no action with title containing {title_sub:?}, but found: {:?}",
                 path.display(),
                 found.map(|a| &a.title),
+            );
+        }
+        ActionMode::Disables { title, reason } => {
+            let path_str = path.display().to_string();
+            let action = actions
+                .iter()
+                .find(|a| a.title.contains(title.as_str()))
+                .unwrap_or_else(|| {
+                    panic_fixture(
+                        &path_str,
+                        &format!(
+                            "no action with title containing {title:?}; available: {:?}",
+                            actions.iter().map(|a| &a.title).collect::<Vec<_>>()
+                        ),
+                    )
+                });
+            let disabled = action.disabled.as_ref().unwrap_or_else(|| {
+                panic_fixture(
+                    &path_str,
+                    &format!("action {:?} is not disabled", action.title),
+                )
+            });
+            assert_eq!(
+                &disabled.reason, reason,
+                "fixture {path_str}: disabled reason mismatch"
+            );
+            assert!(
+                action.edit.is_none(),
+                "fixture {path_str}: a disabled action must carry no edit"
             );
         }
     }
@@ -409,7 +472,7 @@ mod self_tests {
     fn frontmatter_parses_applies_action() {
         let fm = "test-name: foo\ncursor: 0:0\napplies-action: Convert tabs\n";
         let (_, _, _, mode, _) = parse_frontmatter(fm).unwrap();
-        assert_eq!(mode, ActionMode::AppliesAction("Convert tabs".to_string()));
+        assert_eq!(mode, ActionMode::Applies("Convert tabs".to_string()));
     }
 
     // A4. omits-action is parsed.
@@ -417,7 +480,7 @@ mod self_tests {
     fn frontmatter_parses_omits_action() {
         let fm = "test-name: foo\ncursor: 0:0\nomits-action: Convert tabs\n";
         let (_, _, _, mode, _) = parse_frontmatter(fm).unwrap();
-        assert_eq!(mode, ActionMode::OmitsAction("Convert tabs".to_string()));
+        assert_eq!(mode, ActionMode::Omits("Convert tabs".to_string()));
     }
 
     // A5. Both applies-action and omits-action present returns error.
@@ -533,7 +596,7 @@ mod self_tests {
         let content = "---\ntest-name: foo\ncursor: 0:0\nomits-action: tabs to spaces\n---\n\n## Test-Document\n\n```yaml\n  key: value\n```\n";
         let path = PathBuf::from("test.md");
         let fixture = parse_fixture(content, &path);
-        assert!(matches!(fixture.mode, ActionMode::OmitsAction(_)));
+        assert!(matches!(fixture.mode, ActionMode::Omits(_)));
         assert_eq!(fixture.expected_document, "");
     }
 
@@ -716,7 +779,7 @@ mod self_tests {
         let range = cursor_range(0, 0);
         let actions = code_actions(&docs, text, range, &[], &uri, &YamlFormatOptions::default());
 
-        // Simulate the harness OmitsAction assertion — this should panic because
+        // Simulate the harness Omits assertion — this should panic because
         // the "tabs to spaces" action IS present when the document has a tab.
         let title_sub = "tabs to spaces";
         let found = actions.iter().find(|a| a.title.contains(title_sub));
@@ -725,6 +788,117 @@ mod self_tests {
             "fixture test.md: expected no action with title containing {title_sub:?}, but found: {:?}",
             found.map(|a| &a.title),
         );
+    }
+
+    // D5-D12. The disabled-action modes, driven through the whole fixture check.
+    fn block_to_flow_fixture(mode_lines: &str, document: &str) -> String {
+        format!(
+            "---\ntest-name: foo\ncursor: 0:0\n{mode_lines}\n---\n\n## Test-Document\n\n```yaml\n{document}```\n\n## Expected-Document\n\n```yaml\na: {{ b: 1 }}\n```\n"
+        )
+    }
+
+    const WITH_COMMENT: &str = "a: # note\n  b: 1\n";
+    const WITHOUT_COMMENT: &str = "a:\n  b: 1\n";
+    const REASON: &str = "Flow style would lose the comments in this collection";
+
+    #[test]
+    fn disables_action_passes_on_a_disabled_action_with_the_reason() {
+        let mode =
+            format!("disables-action: Convert block to flow style\ndisabled-reason: {REASON}");
+        check_fixture(
+            &block_to_flow_fixture(&mode, WITH_COMMENT),
+            Path::new("test.md"),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "is not disabled")]
+    fn disables_action_fails_on_an_enabled_action() {
+        let mode =
+            format!("disables-action: Convert block to flow style\ndisabled-reason: {REASON}");
+        check_fixture(
+            &block_to_flow_fixture(&mode, WITHOUT_COMMENT),
+            Path::new("test.md"),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "disabled reason mismatch")]
+    fn disables_action_fails_on_another_reason() {
+        let mode = "disables-action: Convert block to flow style\ndisabled-reason: other";
+        check_fixture(
+            &block_to_flow_fixture(mode, WITH_COMMENT),
+            Path::new("test.md"),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "no action with title containing")]
+    fn disables_action_fails_when_no_action_is_offered() {
+        let mode =
+            format!("disables-action: Convert block to flow style\ndisabled-reason: {REASON}");
+        check_fixture(
+            &block_to_flow_fixture(&mode, "a: 1\n"),
+            Path::new("test.md"),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "is disabled")]
+    fn applies_action_fails_on_a_disabled_action() {
+        check_fixture(
+            &block_to_flow_fixture("applies-action: Convert block to flow style", WITH_COMMENT),
+            Path::new("test.md"),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "expected no action with title containing")]
+    fn omits_action_fails_on_a_disabled_action() {
+        check_fixture(
+            &block_to_flow_fixture("omits-action: Convert block to flow style", WITH_COMMENT),
+            Path::new("test.md"),
+        );
+    }
+
+    #[test]
+    fn frontmatter_parses_disables_action_with_its_reason() {
+        let fm = "test-name: foo\ncursor: 0:0\ndisables-action: Convert\ndisabled-reason: A reason: with a colon\n";
+        let (_, _, _, mode, _) = parse_frontmatter(fm).unwrap();
+        assert_eq!(
+            mode,
+            ActionMode::Disables {
+                title: "Convert".to_string(),
+                reason: "A reason: with a colon".to_string()
+            }
+        );
+    }
+
+    #[rstest]
+    #[case::without_a_reason("disables-action: X\n", "disabled-reason")]
+    #[case::reason_without_the_mode("applies-action: X\ndisabled-reason: Y\n", "disables-action")]
+    #[case::with_applies(
+        "applies-action: X\ndisables-action: Y\ndisabled-reason: Z\n",
+        "mutually exclusive"
+    )]
+    #[case::with_omits(
+        "omits-action: X\ndisables-action: Y\ndisabled-reason: Z\n",
+        "mutually exclusive"
+    )]
+    fn frontmatter_rejects_a_wrong_disables_action_combination(
+        #[case] lines: &str,
+        #[case] expected_in_error: &str,
+    ) {
+        let fm = format!("test-name: foo\ncursor: 0:0\n{lines}");
+        let err = parse_frontmatter(&fm).unwrap_err();
+        assert!(err.contains(expected_in_error), "{err}");
+    }
+
+    #[test]
+    fn parse_fixture_disables_action_needs_no_expected_document() {
+        let content = "---\ntest-name: foo\ncursor: 0:0\ndisables-action: X\ndisabled-reason: Y\n---\n\n## Test-Document\n\n```yaml\na: 1\n```\n";
+        let fixture = parse_fixture(content, &PathBuf::from("test.md"));
+        assert_eq!(fixture.expected_document, "");
     }
 
     // ---- Group E: format-options frontmatter parsing -------------------------

@@ -384,6 +384,13 @@ const ALLOW_LIST: &[AllowEntry] = &[
     },
     AllowEntry {
         file: "editing/code_actions.rs",
+        func: "block_to_flow_action",
+        marker: AllowMarker::CarveOut {
+            reason: "test fixture — drives the block-to-flow action from raw text for code-action unit tests",
+        },
+    },
+    AllowEntry {
+        file: "editing/code_actions.rs",
         func: "block_to_flow_edit",
         marker: AllowMarker::CarveOut {
             reason: "test fixture — drives the block-to-flow action from raw text for code-action unit tests",

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-use tower_lsp::lsp_types::{CodeAction, CodeActionKind, Range, TextEdit};
+use tower_lsp::lsp_types::{CodeAction, CodeActionDisabled, CodeActionKind, Range, TextEdit};
 
 use rlsp_yaml_parser::node::Node;
 use rlsp_yaml_parser::{CollectionStyle, Document, Event, LineIndex, Span, parse_events};
@@ -9,6 +9,11 @@ use crate::editing::formatter::{YamlFormatOptions, format_subtree};
 use crate::lsp_util::{offset_to_lsp, source_lines};
 
 use super::{BLANKS, make_action};
+
+const TITLE: &str = "Convert block to flow style";
+
+/// Why the action is offered disabled when the converted range holds a comment.
+const COMMENT_DISABLED_REASON: &str = "Flow style would lose the comments in this collection";
 
 pub(super) fn block_to_flow(
     docs: &[Document<Span>],
@@ -26,20 +31,6 @@ pub(super) fn block_to_flow(
     let loc_start_line = idx.line_column(loc.start).0 as usize;
     let key_start_line = idx.line_column(key_loc.start).0 as usize;
     if loc_start_line <= key_start_line {
-        return None;
-    }
-
-    let mut flow_node = node.clone();
-    match &mut flow_node {
-        Node::Mapping { .. } | Node::Sequence { .. } => flip_to_flow(&mut flow_node),
-        Node::Scalar { .. } | Node::Alias { .. } => return None,
-    }
-
-    let base_indent = idx.line_column(key_loc.start).1 as usize + 2;
-    let formatted = format_subtree(&flow_node, options, base_indent);
-    let new_text = format!(" {formatted}");
-
-    if new_text.trim().is_empty() {
         return None;
     }
 
@@ -76,8 +67,39 @@ pub(super) fn block_to_flow(
         return None;
     }
 
+    // The flow collection the action prints holds no comments, so the edit would
+    // delete every comment in the converted range.
+    let first_comment_at_or_after_start = comments.partition_point(|span| span.start < start);
+    if comments
+        .get(first_comment_at_or_after_start)
+        .is_some_and(|span| span.start < end)
+    {
+        return Some(CodeAction {
+            title: TITLE.to_string(),
+            kind: Some(CodeActionKind::REFACTOR_REWRITE),
+            disabled: Some(CodeActionDisabled {
+                reason: COMMENT_DISABLED_REASON.to_string(),
+            }),
+            ..CodeAction::default()
+        });
+    }
+
+    let mut flow_node = node.clone();
+    match &mut flow_node {
+        Node::Mapping { .. } | Node::Sequence { .. } => flip_to_flow(&mut flow_node),
+        Node::Scalar { .. } | Node::Alias { .. } => return None,
+    }
+
+    let base_indent = idx.line_column(key_loc.start).1 as usize + 2;
+    let formatted = format_subtree(&flow_node, options, base_indent);
+    let new_text = format!(" {formatted}");
+
+    if new_text.trim().is_empty() {
+        return None;
+    }
+
     Some(make_action(
-        "Convert block to flow style".to_string(),
+        TITLE.to_string(),
         uri,
         vec![TextEdit {
             range: Range::new(offset_to_lsp(start, idx), offset_to_lsp(end, idx)),
@@ -252,12 +274,17 @@ pub(super) const fn node_loc(node: &Node<Span>) -> &Span {
 mod tests {
     use rstest::rstest;
 
-    use tower_lsp::lsp_types::{Position, Range};
+    use tower_lsp::lsp_types::{CodeAction, CodeActionDisabled, CodeActionKind, Position, Range};
 
+    use super::super::code_actions;
     use super::super::test_helpers::{
-        apply_block_to_flow_edit, apply_text_edit, block_to_flow_edit,
+        apply_block_to_flow_edit, apply_text_edit, block_to_flow_action, block_to_flow_edit,
+        cursor_range, docs_for,
     };
+    use crate::editing::formatter::YamlFormatOptions;
     use crate::parser::parse_yaml;
+    use crate::test_utils::test_uri;
+    use rlsp_yaml_parser::{Event, parse_events};
 
     // Pattern C: re-parseability assertion on the applied edit — fixture format verifies
     // text equality only; the round-trip parse check requires an explicit `parse_yaml` call.
@@ -418,7 +445,6 @@ mod tests {
     #[case::comment_with_special_characters("a:", "\n  b: 1\n  c: 2", " # done: yes ] }\nd: 1\n")]
     #[case::hash_in_double_quotes("a:", "\n  c: \"x # y\"", "\nd: 1\n")]
     #[case::hash_in_single_quotes("a:", "\n  c: 'a #b'", "\nd: 1\n")]
-    #[case::hash_in_a_plain_scalar("a:", "\n  c: a#b", "\nd: 1\n")]
     #[case::comment_after_a_quoted_hash("a:", "\n  c: \"x # y\"", " # real\nd: 1\n")]
     #[case::multiline_plain_scalar("a:", "\n  b: 1\n  c: first\n    second", "\n# n\nd: 1\n")]
     #[case::multiline_double_quoted_scalar("a:", "\n  c: \"first\n    second\"", "\n# n\nd: 1\n")]
@@ -434,6 +460,19 @@ mod tests {
     #[case::last_value_with_only_a_tag("a:", "\n  b: 1\n  c: !mytag", "\n# n\nd: 1\n")]
     #[case::multiline_flow_as_last_value("a:", "\n  b: 1\n  c: [\n    1\n    ]", "\n# n\nd: 1\n")]
     #[case::comment_before_the_document_start("a:", "\n  b: 1", "\n# end\n---\nc: 1\n")]
+    #[case::hash_in_a_literal_block_scalar(
+        "a:",
+        "\n  c: |\n    x # y\n    # z\n  d: 1",
+        "\nz: 1\n"
+    )]
+    #[case::hash_in_a_folded_block_scalar("a:", "\n  c: >\n    x # y\n    # z", "\nz: 1\n")]
+    #[case::hash_in_a_multiline_double_quoted_scalar(
+        "a:",
+        "\n  c: \"first # x\n    second # y\"",
+        "\nd: 1\n"
+    )]
+    #[case::hash_in_a_quoted_key("a:", "\n  \"k #1\": 2", "\nd: 1\n")]
+    #[case::hash_in_a_url_fragment("a:", "\n  u: http://x/#frag", "\nd: 1\n")]
     fn should_end_the_edit_after_the_content_of_the_collection(
         #[case] prefix: &str,
         #[case] replaced: &str,
@@ -516,48 +555,208 @@ mod tests {
         }
     }
 
-    // The flow style has no place for the comments inside the collection: none
-    // of them is printed, and the result is valid YAML with the same data.
+    // The flow style has no place for the comments inside the collection, so the
+    // action is offered disabled instead of deleting them.
     #[test]
     fn should_print_no_comment_inside_the_flow_collection() {
         let text = "a:\n  b: 1 # c\n  d: # e\n    f: 1\n  g: x\n";
-        let result = apply_block_to_flow_edit(text, 0);
-        assert!(
-            result.starts_with("a: { b: 1, d: { f: 1 }, g: x }\n"),
-            "{result:?}"
-        );
-        assert!(!result.contains('#'), "{result:?}");
-        assert!(parse_yaml(&result).diagnostics.is_empty(), "{result}");
+
+        assert_disabled(&block_to_flow_action(text, 0).expect("the action is offered"));
     }
 
     // A flow collection that holds a comment is printed in block style by the
-    // formatter; inside the flow collection the action builds it would be
-    // invalid, so the action leaves the comments out of the collection first.
+    // formatter and would be invalid inside the flow collection the action
+    // builds, so these comments disable the action too.
     #[rstest]
-    #[case::flow_sequence_with_comment_inside_a_mapping(
-        "a:\n  b: [ # c\n    1]\n  d: 2\n",
-        "a: { b: [1], d: 2 }\n"
-    )]
-    #[case::flow_sequence_with_comment_inside_a_sequence(
-        "a:\n  - [ # c\n    1]\n  - 2\n",
-        "a: [[1], 2]\n"
-    )]
-    #[case::flow_mapping_with_comment_inside_a_mapping(
-        "a:\n  b: { # c\n    x: 1}\n  d: 2\n",
-        "a: { b: { x: 1 }, d: 2 }\n"
-    )]
-    #[case::flow_collection_with_comment_on_itself("a:\n  - [1] # c\n  - 2\n", "a: [[1], 2]\n")]
-    #[case::flow_collection_deeper_down(
-        "a:\n  b:\n    - { x: [ # c\n        1] }\n",
-        "a: { b: [{ x: [1] }] }\n"
-    )]
-    fn should_print_no_comment_of_a_flow_collection_inside_the_result(
+    #[case::flow_sequence_with_comment_inside_a_mapping("a:\n  b: [ # c\n    1]\n  d: 2\n")]
+    #[case::flow_sequence_with_comment_inside_a_sequence("a:\n  - [ # c\n    1]\n  - 2\n")]
+    #[case::flow_mapping_with_comment_inside_a_mapping("a:\n  b: { # c\n    x: 1}\n  d: 2\n")]
+    #[case::flow_collection_with_comment_on_itself("a:\n  - [1] # c\n  - 2\n")]
+    #[case::flow_collection_deeper_down("a:\n  b:\n    - { x: [ # c\n        1] }\n")]
+    fn should_print_no_comment_of_a_flow_collection_inside_the_result(#[case] text: &str) {
+        assert_disabled(&block_to_flow_action(text, 0).expect("the action is offered"));
+    }
+
+    /// The disabled action has the title and the kind of the enabled one, a
+    /// reason and no edit.
+    fn assert_disabled(action: &CodeAction) {
+        assert_eq!(action.title, "Convert block to flow style");
+        assert_eq!(action.kind, Some(CodeActionKind::REFACTOR_REWRITE));
+        assert_eq!(
+            action.disabled,
+            Some(CodeActionDisabled {
+                reason: "Flow style would lose the comments in this collection".to_string()
+            })
+        );
+        assert_eq!(action.edit, None);
+        assert_eq!(action.command, None);
+        assert_eq!(action.diagnostics, None);
+        assert_eq!(action.is_preferred, None);
+        assert_eq!(action.data, None);
+    }
+
+    // Only comments inside the converted range disable the action: a comment
+    // around it stays where it is, and a `#` in a scalar is no comment.
+    #[rstest]
+    #[case::behind_the_colon_of_a_scalar_value("x: 1 # c\na:\n  b: 1\n")]
+    #[case::behind_the_key_of_the_last_entry_without_a_value("a:\n  b: 1\n  c: # n\nd: 1\n")]
+    #[case::below_the_last_entry_without_a_value("a:\n  b: 1\n  c:\n    # n\nd: 1\n")]
+    #[case::hash_in_a_plain_scalar("a:\n  c: a#b\n")]
+    #[case::hash_in_a_multiline_quoted_scalar("a:\n  c: \"x\n    # y\"\n")]
+    fn should_offer_the_action_enabled_when_no_comment_is_in_the_converted_range(
         #[case] text: &str,
-        #[case] expected: &str,
     ) {
-        let result = apply_block_to_flow_edit(text, 0);
-        assert!(result.starts_with(expected), "{result:?}");
-        assert!(!result.contains('#'), "{result:?}");
-        assert!(parse_yaml(&result).diagnostics.is_empty(), "{result}");
+        let line = u32::try_from(
+            text.lines()
+                .position(|line| line.starts_with("a:"))
+                .unwrap(),
+        )
+        .unwrap();
+        let action = block_to_flow_action(text, line).expect("the action is offered");
+
+        assert_eq!(action.disabled, None);
+        assert!(action.edit.is_some());
+    }
+
+    // The innermost collection decides: a comment outside it, even inside the
+    // outer collection, does not disable the inner action.
+    #[test]
+    fn should_look_only_at_the_collection_the_cursor_selects() {
+        let text = "a:\n  # lead\n  b:\n    c: 1\n";
+
+        let inner = block_to_flow_action(text, 2).expect("the action is offered");
+        let outer = block_to_flow_action(text, 0).expect("the action is offered");
+
+        assert_eq!(inner.disabled, None);
+        assert!(inner.edit.is_some());
+        assert!(outer.disabled.is_some());
+        assert_eq!(outer.edit, None);
+    }
+
+    #[test]
+    fn should_offer_no_disabled_action_when_block_style_is_enforced() {
+        let text = "a: # note\n  b: 1\n";
+        let options = YamlFormatOptions {
+            format_enforce_block_style: true,
+            ..YamlFormatOptions::default()
+        };
+
+        let actions = code_actions(
+            &docs_for(text),
+            text,
+            cursor_range(0, 0),
+            &[],
+            &test_uri(),
+            &options,
+        );
+
+        assert!(
+            actions.iter().all(|a| !a.title.contains("block to flow")),
+            "{actions:?}"
+        );
+    }
+
+    // A comment in the converted range disables the action, whatever surrounds
+    // it; the fixtures pin the position of the comment, these cases pin the rest.
+    #[rstest]
+    #[case::crlf_on_the_key_line("a: # note\r\n  b: 1\r\n", 0)]
+    #[case::lone_cr_on_the_key_line("a: # note\r  b: 1\r", 0)]
+    #[case::crlf_between_entries("a:\r\n  b: 1 # c\r\n  d: 2\r\n", 0)]
+    #[case::mixed_breaks("a:\r\n  b: 1\r  # c\n  d: 2\n", 0)]
+    #[case::byte_order_mark("\u{feff}a: # c\n  b: 1\n", 0)]
+    #[case::multibyte_key("ключ: # コメント\n  b: 1\n", 0)]
+    #[case::multibyte_inner_entry("ключ:\n  b: 日本語 # コメント\n  c: 1\n", 0)]
+    #[case::astral_key("😀: # c\n  b: 1\n", 0)]
+    #[case::behind_an_inner_sequence_item("a:\n  - x # c\n  - y\n", 0)]
+    #[case::before_the_last_entry("a:\n  b: 1\n# c\n  d: 2\n", 0)]
+    fn should_disable_whatever_surrounds_the_comment(#[case] text: &str, #[case] line: u32) {
+        assert_disabled(&block_to_flow_action(text, line).expect("the action is offered"));
+    }
+
+    // A comment that lies in the converted range of another collection does not
+    // disable the action of this one.
+    #[rstest]
+    #[case::in_a_sibling_before("x:\n  # c\n  y: 1\na:\n  b: 1\n", 3)]
+    #[case::in_a_sibling_after("a:\n  b: 1\nz:\n  # c\n  y: 1\n", 0)]
+    #[case::in_an_earlier_document("x: # c\n  y: 1\n---\na:\n  b: 1\n", 3)]
+    #[case::after_the_document_start_marker("--- # c\na:\n  b: 1\n", 1)]
+    #[case::in_the_collection_around_it("x:\n  a:\n    b: 1 # c\n", 1)]
+    fn should_stay_enabled_for_a_comment_in_another_collection(
+        #[case] text: &str,
+        #[case] line: u32,
+    ) {
+        let action = block_to_flow_action(text, line).expect("the action is offered");
+
+        assert_eq!(action.disabled, None);
+        assert!(action.edit.is_some());
+    }
+
+    // Each collection answers for its own range.
+    #[test]
+    fn should_decide_per_key_for_nested_collections() {
+        let text = "a:\n  b:\n    c: 1 # t\n  d: 2\n";
+
+        let outer = block_to_flow_action(text, 0).expect("the action is offered");
+        let inner = block_to_flow_action(text, 1).expect("the action is offered");
+
+        assert!(outer.disabled.is_some());
+        assert_eq!(inner.disabled, None);
+        assert!(inner.edit.is_some());
+
+        let text = "a: # c\n  b:\n    c: 1\n";
+        let inner = block_to_flow_action(text, 1).expect("the action is offered");
+        assert_eq!(inner.disabled, None);
+    }
+
+    // The action is not offered where there is no block collection to convert,
+    // and a comment does not make up one.
+    #[rstest]
+    #[case::scalar_value("a: 1 # c\nb:\n  x: 1\n", 0)]
+    #[case::empty_value("a:\n  # only a comment\nb: 1\n", 0)]
+    #[case::flow_sequence("a: [1, 2] # c\n", 0)]
+    #[case::flow_mapping("a: { x: 1 } # c\n", 0)]
+    #[case::cursor_on_a_child_line("a:\n  b: 1 # c\n", 1)]
+    #[case::document_that_does_not_parse("a: # c\n  b: [\n", 0)]
+    fn should_offer_no_action_where_there_is_no_block_collection(
+        #[case] text: &str,
+        #[case] line: u32,
+    ) {
+        assert_eq!(block_to_flow_action(text, line), None);
+    }
+
+    // The action offers either an edit or a reason, and an action with an edit
+    // keeps every comment of the document: for each prefix of a document and
+    // each line, the comments the parser finds before and after applying the
+    // edit are the same.
+    #[test]
+    fn should_keep_every_comment_when_the_action_has_an_edit() {
+        let text = "# a\nk: # b\n  a: 1 # c\n  # d\n  e:\n    - x # f\n    # g\n    - [ # h\n      y]\n  i: |\n    # not a comment\n    z\nj:\n  k: 1\n# l\n";
+        let comments = |text: &str| {
+            parse_events(text)
+                .filter(|event| matches!(event, Ok((Event::Comment { .. }, _))))
+                .count()
+        };
+        let line_count = text.matches('\n').count() + 1;
+        for (end, _) in text.char_indices().chain([(text.len(), ' ')]) {
+            let prefix = &text[..end];
+            for line in 0..line_count {
+                let line = u32::try_from(line).unwrap();
+                let Some(action) = block_to_flow_action(prefix, line) else {
+                    continue;
+                };
+                assert_eq!(
+                    action.disabled.is_some(),
+                    action.edit.is_none(),
+                    "{prefix:?} line {line}: {action:?}"
+                );
+                if let Some(edit) = block_to_flow_edit(prefix, line) {
+                    assert_eq!(
+                        comments(&apply_text_edit(prefix, &edit)),
+                        comments(prefix),
+                        "{prefix:?} line {line}"
+                    );
+                }
+            }
+        }
     }
 }

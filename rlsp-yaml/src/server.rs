@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use rlsp_yaml_parser::DEFAULT_MAX_NESTING_DEPTH;
 use tower_lsp::jsonrpc::Result;
@@ -269,6 +269,9 @@ pub struct Backend {
     settings: Mutex<Settings>,
     /// Lazily-fetched `SchemaStore` catalog, cached for the session.
     schemastore_catalog: Mutex<Option<Arc<SchemaStoreCatalog>>>,
+    /// Whether the client announced `textDocument.codeAction.disabledSupport` at
+    /// `initialize`. Set once; a client that never announces it is unsupported.
+    code_action_disabled_support: OnceLock<bool>,
 }
 
 impl Backend {
@@ -283,6 +286,7 @@ impl Backend {
             diagnostics: Mutex::new(HashMap::new()),
             settings: Mutex::new(Settings::default()),
             schemastore_catalog: Mutex::new(None),
+            code_action_disabled_support: OnceLock::new(),
         }
     }
 
@@ -1082,6 +1086,15 @@ impl LanguageServer for Backend {
             .as_ref()
             .and_then(SettingsRead::from_json)
             .unwrap_or_default();
+        let disabled_support = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|text_document| text_document.code_action.as_ref())
+            .and_then(|code_action| code_action.disabled_support)
+            .unwrap_or(false);
+        self.code_action_disabled_support
+            .get_or_init(|| disabled_support);
         // No document is open before `initialize`, so a changed nesting limit
         // has nothing to load again.
         self.store_settings(read).await;
@@ -1416,7 +1429,7 @@ impl LanguageServer for Backend {
 
         let format_options = self.format_options(&uri, &open.text, CODE_ACTION_TAB_WIDTH);
 
-        let actions = crate::editing::code_actions::code_actions(
+        let mut actions = crate::editing::code_actions::code_actions(
             open.documents.as_deref().unwrap_or(&[]),
             &open.text,
             range,
@@ -1424,6 +1437,16 @@ impl LanguageServer for Backend {
             &uri,
             &format_options,
         );
+        // A client that does not announce `disabledSupport` could show a disabled
+        // action as an ordinary one, so it gets none.
+        if !self
+            .code_action_disabled_support
+            .get()
+            .copied()
+            .unwrap_or(false)
+        {
+            actions.retain(|action| action.disabled.is_none());
+        }
         if actions.is_empty() {
             return Ok(None);
         }

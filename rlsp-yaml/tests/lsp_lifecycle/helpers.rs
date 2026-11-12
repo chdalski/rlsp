@@ -11,10 +11,15 @@ use tower_lsp::lsp_types::{LogMessageParams, MessageType, PublishDiagnosticsPara
 use tower_lsp::{ClientSocket, LspService};
 
 pub fn initialize_request(id: i64) -> Request {
+    initialize_request_with_capabilities(id, &json!({}))
+}
+
+/// An `initialize` request announcing the client `capabilities`.
+pub fn initialize_request_with_capabilities(id: i64, capabilities: &serde_json::Value) -> Request {
     Request::build("initialize")
         .id(id)
         .params(json!({
-            "capabilities": {},
+            "capabilities": capabilities,
             "processId": null,
             "rootUri": null
         }))

@@ -47,7 +47,7 @@ around it, and it must not run where its flow output cannot hold what the block 
 
 - [x] Task 1: The block-to-flow test helper applies the edit like a client
 - [x] Task 2: The conversion replaces only the converted range
-- [ ] Task 3: A comment in the converted range disables the action
+- [x] Task 3: A comment in the converted range disables the action
 - [ ] Task 4: A block scalar inside the collection disables the action
 - [ ] Push to `main` and confirm the full CI matrix is green
 
@@ -106,24 +106,24 @@ deleting the comment. `should_print_no_comment_inside_the_flow_collection` and t
 `should_print_no_comment_of_a_flow_collection_inside_the_result` (`block_to_flow.rs`) pin today's
 deletion and change with this task.
 
-- [ ] For a comment on the key's line (`a: # note`), an own-line comment before the first entry of
+- [x] For a comment on the key's line (`a: # note`), an own-line comment before the first entry of
       a mapping (`a:\n  # lead\n  b: 1\n`) and of a sequence (`a:\n  # lead\n  - x\n`), a comment
       after the collection's anchor or tag (`a: &x # note`), a comment between entries, and a
       comment behind an inner entry, the action is offered with the title "Convert block to flow
       style", the kind `refactor.rewrite`, no edit, and the reason "Flow style would lose the
       comments in this collection"
-- [ ] The two tests named above assert the disabled action for their inputs
-- [ ] For a client that does not announce `disabledSupport`, the `textDocument/codeAction` answer
+- [x] The two tests named above assert the disabled action for their inputs
+- [x] For a client that does not announce `disabledSupport`, the `textDocument/codeAction` answer
       holds no disabled action, and an answer left without any action is `null`
-- [ ] A lifecycle test requests code actions for a collection with a comment inside, once with
+- [x] A lifecycle test requests code actions for a collection with a comment inside, once with
       `disabledSupport: true`, which gets the disabled action with its reason and no edit, and once
       with empty capabilities, which gets no block-to-flow action
-- [ ] A code-action fixture can state that an action is offered disabled with a given reason;
+- [x] A code-action fixture can state that an action is offered disabled with a given reason;
       `applies-action` fails on a disabled action; `omits-action` means no action at all;
       `rlsp-yaml/tests/fixtures/CLAUDE.md` documents this, and the disabled cases are fixtures
-- [ ] A user can find in `feature-log.md` when and why the action appears disabled; the entry that
+- [x] A user can find in `feature-log.md` when and why the action appears disabled; the entry that
       says the conversion leaves out the comments inside the collection no longer says so
-- [ ] `cargo clippy --workspace --all-targets` and `cargo test --workspace` pass
+- [x] `cargo clippy --workspace --all-targets` and `cargo test --workspace` pass
 
 ### Task 4: A block scalar inside the collection disables the action
 
@@ -188,3 +188,12 @@ block context (Context). The action is offered disabled instead (Decisions).
   collections (separate plan after this one)
 - `format_subtree` joining wrapped lines with LF in CRLF and CR documents (`.ai/backlog.md`)
 - Changes to the VS Code extension
+
+## Task Notes
+
+- **Task 4:** the cases `hash_in_a_literal_block_scalar` and `hash_in_a_folded_block_scalar` of
+  `should_end_the_edit_after_the_content_of_the_collection` (`block_to_flow.rs`) expect an edit
+  and move to the block-scalar disabled cases; the fixtures
+  `block-to-flow-disabled-by-comment-between-a-block-scalar-and-the-next-entry` and
+  `block-to-flow-disabled-by-comment-in-a-block-scalar-header` hold a block scalar and a comment,
+  so their `disabled-reason` becomes the block scalar's

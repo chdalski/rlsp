@@ -290,19 +290,26 @@ mod test_helpers {
             .clone()
     }
 
-    /// The first edit of the block-to-flow action for the cursor at the start of
-    /// `line`, or `None` when the action is not offered.
-    pub(super) fn block_to_flow_edit(text: &str, line: u32) -> Option<TextEdit> {
-        let actions = code_actions(
+    /// The block-to-flow action for the cursor at the start of `line`, disabled
+    /// or not, or `None` when the action is not offered.
+    pub(super) fn block_to_flow_action(text: &str, line: u32) -> Option<CodeAction> {
+        code_actions(
             &docs_for(text),
             text,
             cursor_range(line, 0),
             &[],
             &test_uri(),
             &YamlFormatOptions::default(),
-        );
-        let action = actions.iter().find(|a| a.title.contains("block to flow"))?;
-        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&test_uri()];
+        )
+        .into_iter()
+        .find(|a| a.title.contains("block to flow"))
+    }
+
+    /// The first edit of the block-to-flow action for the cursor at the start of
+    /// `line`, or `None` when the action is not offered or is disabled.
+    pub(super) fn block_to_flow_edit(text: &str, line: u32) -> Option<TextEdit> {
+        let action = block_to_flow_action(text, line)?;
+        let edits = &action.edit.as_ref()?.changes.as_ref().unwrap()[&test_uri()];
         Some(edits[0].clone())
     }
 
