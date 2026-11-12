@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-11-12)
 **Created:** 2026-11-12
 
 ## Goal
@@ -49,7 +49,7 @@ around it, and it must not run where its flow output cannot hold what the block 
 - [x] Task 2: The conversion replaces only the converted range
 - [x] Task 3: A comment in the converted range disables the action
 - [x] Task 4: A block scalar inside the collection disables the action
-- [ ] Push to `main` and confirm the full CI matrix is green
+- [x] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
