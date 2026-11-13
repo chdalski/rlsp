@@ -1,6 +1,89 @@
 # Changelog
 
 
+## [0.15.0] - 2026-11-13
+
+### Bug Fixes
+
+- End multi-line plain spans at last content (5937894)
+- End a plain scalar at a comment line (0b75337)
+- Keep broken flow collections valid and their quotes (768434b)
+- Emit every comment as an event (b86edbc)
+- Print document-level comments from the AST (ce024d1)
+- Print comments at every node position (5617720)
+- Print a flow collection holding a comment as block (5b04cdf)
+- Keep comments of removed duplicate keys (023a225)
+- Fold only own-line comments (74371ba)
+- Keep the data of a file through format_yaml (8064dfd)
+- Pin that no comment is lost and fix data losses (1be1e63)
+- Read a plain scalar after --- like any root (1ea032e)
+- Report a % line inside a document as an error (d3f7e03)
+- Let a bare - look past comment lines (dc1b539)
+- Keep flow plain scalar text over lines (029f917)
+- Keep every anchor and tag on its node (4497ce4)
+- Read flow plain continuation lines as text (c991232)
+- Drop formatter workarounds for parser misreads (5900899)
+- Keep an explicit key's state in its mapping (b0747db)
+- Reject a block sequence entry after a tag (354013d)
+- Print collection keys with explicit entries in block form (893e823)
+- Keep the loader's stack frames small (3aba3e3)
+- Keep the formatter's stack frames small (a458393)
+- Count embedded content toward the validation depth (f215ab6)
+- Drive the server on a thread with an 8 MiB stack (0611e90)
+- Override glob onto patched major 14 (e6965c5)
+- Range unused-anchor diagnostics over the &name token (05b81a2)
+- End multi-line quoted scalar spans at the closing quote (da7e3d8)
+- Keep trailing blanks out of converted block scalars (00163eb)
+- Report document colors at their place in the source (23babbd)
+- Read modelines and suppressions by source lines (b3a54fc)
+- Read source lines in context code actions (9bff48d)
+- Replace the changed region in range formatting (15747c3)
+- Match one character with ? in SchemaStore patterns (82a3c6e)
+- Cut long names in validator messages at a char boundary (aaaf2c7)
+- Read whole documents for unused anchors and their fix (57fb865)
+- Read whole documents in the remaining validators (6def47d)
+- Drop selection ranges that miss their position (2f3f178)
+- Return one selection range per requested position (8c34222)
+- Cover the whole key in duplicate-key diagnostics (bb75cb4)
+- Never turn a comment into block-scalar content (a5b4f89)
+- Read modelines and suppression comments after a BOM (212d88e)
+- Escape names and defaults in the all-required snippet (6464297)
+- Index unused anchors once per code-action request (018209b)
+- Select the sibling that holds the position first (6ae16ca)
+- Cover the source text of a URL with its document link (d49403c)
+- Give every block scalar value its indicator token (4ff4c6e)
+- Give every block scalar key its indicator token (562087e)
+- End structural folds on the last line of their last leaf (d8b2313)
+- Keep the text around a block-to-flow conversion (6b1d84e)
+
+### Documentation
+
+- Name the dev container's blind spot in the canary doc (5034b71)
+
+### Features
+
+- Store every comment event in the AST (1b9521f)
+- Take the formatter's nesting limit as an option (af15406)
+- Lower the default nesting limit to 256 (259dbe3)
+- Add the maxNestingDepth server setting (8e1edbc)
+- Publish diagnostics and code actions in UTF-16 columns (4ce74e5)
+- Read and answer request positions in UTF-16 columns (2767171)
+- Answer whole-document requests in UTF-16 columns (836fe1a)
+- Offer block-to-flow disabled when a comment is inside (c8a9078)
+- Offer block-to-flow disabled when a block scalar is inside (29e0201)
+
+### Refactoring
+
+- Assemble node comments and colon with one helper (e48c355)
+- Build the server's format options in one place (39082bb)
+- Read the stored AST in code actions and colors (3f479ec)
+- Read the three modeline keys through one reader (1436cf6)
+- Match file globs over characters (4fc47b5)
+- Share the anchor and alias walk of references and rename (a181581)
+- Read open documents through one function (571fcca)
+- Read a scalar's source text through one reader (767a92f)
+- Share one fold helper and one last-line rule (9040345)
+
 ## [0.14.0] - 2026-10-29
 
 ### Bug Fixes
