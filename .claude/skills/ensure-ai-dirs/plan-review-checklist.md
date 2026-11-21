@@ -421,7 +421,9 @@ Plan":
   specification from References, which Context names
 - Clauses that exclude a reading the code or a project rule
   already excludes — except the remove-only clause §5 asks
-  for and a Decisions entry that declines a review finding
+  for, a Decisions entry that declines a review finding,
+  and one that records a design proposal settled from a
+  decision, a project rule or a pattern of the code
 - A fact stated in Context and again in a task, or a fact
   in Context that only one task needs — except a
   specification §8 requires in Context

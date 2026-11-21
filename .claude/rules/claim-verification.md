@@ -140,6 +140,16 @@ a checked fact: check it, or attribute it ("you wrote that
 this kind", taken from an earlier user comment, as fact; it
 was wrong, and the user had to correct it.
 
+The result of a query or script that stands in for what the
+code computes is such a claim. Name the code it rebuilds,
+and check it against every step between the source the
+query reads and the result the claim states — a read that
+drops a record before the logic it rebuilds, a later step
+that changes the result. A prior lead's query rebuilt a
+grouping step but not the read before it, which already
+dropped some records; two records landed in the wrong group
+on a decision page and in the docs.
+
 ### When You Are Corrected
 
 A correction of a premise means your picture of that area

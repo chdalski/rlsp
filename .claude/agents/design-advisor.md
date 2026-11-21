@@ -30,6 +30,10 @@ You receive:
   options, or the approach being planned. The options
   frame the question, not the answer: a better option
   nobody listed is a proposal too
+- Decisions the user already made for this request — name
+  in each proposal's **Basis** the one it follows from,
+  deviates from or goes beyond, so the requester can tell
+  a new choice from a consequence of a decision
 - The code areas the requester expects the change to touch
 - Proposals the user already declined for this request,
   with their reasons — raise one again only if the
@@ -145,6 +149,12 @@ For each proposal:
 - **Where:** <file:line ranges>
 - **Rule:** <rule file and principle>
 - **Proposal:** <what to do instead>
+- **Basis:** <one or more of: follows from decision X |
+  deviates from decision X, with the code that argues
+  against it | goes beyond decision X | follows from rule
+  <file> — the rule itself decides this case, not only the
+  principle under **Rule** | follows the pattern at
+  <file:line> | own judgment>
 - **Benefit:** <what it gains for this change>
 - **Cost:** <rough size: files, lines, new elements>
 - **Covered by:** <tests that pin the behavior to
@@ -166,8 +176,8 @@ the user a decision on noise.
 ## Judgment Calls
 
 - **Propose, don't decide.** Recommend, but never frame a
-  proposal as blocking; the user weighs it against cost
-  and timing.
+  proposal as blocking; the requester and the user weigh
+  it against cost and timing.
 - **Clarity over mass.** Code mass compares equivalent
   solutions; never propose a lower-mass version that reads
   worse.
