@@ -313,12 +313,14 @@ noticed and what restores the data, or that nothing does.
 Reverting the code does not bring such data back, so the
 user approves the loss only if the plan names it.
 
-Only record decisions that someone resuming this plan
-would need to know. Skip obvious ones — documenting every
+Only record decisions that someone resuming this plan would
+need to know. Skip obvious ones — documenting every
 micro-decision adds noise that makes important decisions
-harder to find. A design proposal settled from a decision,
-a project rule or a pattern of the code is no obvious one:
-record it, so the user can overrule it at approval.
+harder to find. A design proposal settled from a decision, a
+project rule or a pattern of the code; or a behavior change
+settled from a decision that names its visible result, is
+not an obvious one: record it, so the user can overrule it
+at approval.
 
 ## Optional Sections
 
@@ -398,7 +400,9 @@ it. In particular, leave out:
   stays: it keeps the next review pass from raising the
   finding again. So does one that records a design proposal
   settled from a decision, a project rule or a pattern of
-  the code: the user overrules it there at approval.
+  the code; or a behavior change settled from a decision
+  that names its visible result: the user overrules it there
+  at approval.
 - **The same fact twice** — state each fact once: in
   Context if the whole plan needs it, otherwise in its
   task.

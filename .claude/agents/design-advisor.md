@@ -154,7 +154,8 @@ For each proposal:
   against it | goes beyond decision X | follows from rule
   <file> — the rule itself decides this case, not only the
   principle under **Rule** | follows the pattern at
-  <file:line> | own judgment>
+  <file:line> — the code there already does the same for
+  this case | own judgment>
 - **Benefit:** <what it gains for this change>
 - **Cost:** <rough size: files, lines, new elements>
 - **Covered by:** <tests that pin the behavior to
