@@ -422,10 +422,8 @@ Plan":
 - Clauses that exclude a reading the code or a project rule
   already excludes — except the remove-only clause §5 asks
   for, a Decisions entry that declines a review finding, and
-  one that records a design proposal settled from a
-  decision, a project rule or a pattern of the code; or a
-  behavior change settled from a decision that names its
-  visible result
+  a Decisions entry that records a settled design proposal
+  or a settled behavior change (plan-format.md, Decisions)
 - A fact stated in Context and again in a task, or a fact
   in Context that only one task needs — except a
   specification §8 requires in Context

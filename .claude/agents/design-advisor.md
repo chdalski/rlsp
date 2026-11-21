@@ -38,6 +38,9 @@ You receive:
 - Proposals the user already declined for this request,
   with their reasons — raise one again only if the
   approach changed in a way that undoes that reason
+- Files a task of another plan will still change — read
+  them for context, but do not judge them and do not cite
+  a pattern in them as **Basis**: they are not final
 
 If the approach is too vague to judge — nothing says what
 the change adds or alters — return the missing facts as

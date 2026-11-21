@@ -77,10 +77,16 @@ present, where the user can still overrule it. A prior
 session put such details to the user as decisions; each
 question cost the user a read of its context and code for a
 choice with one sensible answer. This applies to details of
-how the chosen approach is built, wherever you find them;
-name one you find after you presented your understanding in
-the settled list. For an advisor's proposal or a behavior
-change, apply _Settle what follows from a decision_ below.
+how the chosen approach is built, wherever you find them.
+When you find one after you presented your understanding,
+name it in the settled list, or in the plan presentation
+message (Planning step 7) once the round is over; it goes
+into the plan's Context or a task's criteria, not into
+Decisions. A pattern in a file that a task of another plan
+will still change does not settle it: without another
+source, ask the user. For an advisor's proposal or a
+behavior change, apply _Settle what follows from a decision_
+below.
 
 **Settle what follows from a decision.** An approach the
 user proposed stays the user's choice. You settle an
@@ -96,14 +102,17 @@ recorded, the rule's text, the code at the named pattern
 (`claim-verification.md`). A pattern in a file that a task
 of another plan will still change is not a source; without
 another source, put that proposal to the user. Before you
-build the plan on items settled earlier — in a collection,
-or from a report a fresh one replaced — check each again at
-its source: a pattern at the code as it is now, a decision
-against the answers the user gave since. Take an item that
-no longer holds out of the settled list and Decisions, and
-put it to the user with the reason it came up. Record each
-settled item with its source ("follows from the decision on
-X", "follows from rule <file>", "follows the pattern at
+build on items settled earlier — in a collection, or from a
+report that a fresh report replaced — check each again at
+its source: a pattern in the code as it is now, a rule in
+its current text, a decision against the answers the user
+gave since. An item that no longer holds, or that a proposal
+of the fresh report contradicts, goes to the user with the
+reason it came up: take it out of the settled list, the plan
+— Decisions, Context or the criteria that hold it — and any
+page that shows it. Record each settled proposal and
+behavior change with its source ("follows from the decision
+on X", "follows from rule <file>", "follows the pattern at
 <file:line>") in the settled list of the question round
 (_Asking the User_) and in the plan's Decisions, and build
 it into the plan like a proposal the user took. Every other
@@ -117,14 +126,14 @@ plan. A preparatory refactor or a larger redesign adds a
 task or a plan, so it always goes to the user. A prior lead
 put ten proposals to the user as new questions; five of them
 followed from decisions the user had just made. Example: the
-user decided that a validation rule stays in the adapter. A
-proposal that moves the rule's helper, which only that rule
-uses, from the core into the adapter is settled: the helper
-is part of the rule, so it belongs where the rule stays. A
-proposal that moves the rule into the core deviates from the
-decision. A proposal that moves the other validation rules
-into the adapter as well goes beyond the decision. Both go
-to the user.
+user decided that the new validation rule goes into the
+adapter. A Shape proposal that puts the rule's new helper,
+which only that rule uses, into the adapter too and not into
+the core is settled: the helper is part of the rule, so it
+belongs where the rule goes. A proposal that puts the rule
+into the core deviates from the decision. A proposal that
+also moves the existing validation rules into the adapter
+goes beyond the decision. Both go to the user.
 
 **Challenge the approach, not the goal.** Treat a solution
 the user proposes as a hypothesis, not a spec — the user
@@ -194,18 +203,20 @@ After clarification is complete:
    only when all of these hold: no change since the report,
    committed or not, touches the files it judged; it left
    out no file this plan touches because a task of another
-   plan will still change it; and the user's answers changed
-   neither the approach nor a part of the design it judged.
-   Otherwise launch a fresh one. When that report serves,
-   the collection already decided its proposals: ask only
-   what it left open. While the developer is executing
-   another plan, also name the files its current task is
-   changing, so the advisor does not judge half-finished
-   code. Do not skip it for a small change — whether the
-   design matters depends on the code around the change, not
-   on the change's size. Before writing the plan, put its
-   open proposals to the user in the question round (_Asking
-   the User_), except those _Settle what follows from a
+   plan was still changing it when the report was made; and
+   the user's answers changed neither the approach nor a
+   part of the design it judged. Otherwise launch a fresh
+   one. When that report serves, the collection already
+   decided its proposals: ask only what it left open, and
+   check its settled items again as _Settle what follows
+   from a decision_ says. While another plan has open tasks,
+   also name the files they will still change, so the
+   advisor does not judge code that is not final. Do not
+   skip it for a small change — whether the design matters
+   depends on the code around the change, not on the
+   change's size. Before writing the plan, put its open
+   proposals to the user in the question round (_Asking the
+   User_), except those _Settle what follows from a
    decision_ settles; a proposal taken after review adds
    tasks that need a follow-up pass (step 6b–d):
    - **The Shape proposals as one design.** Explain how the
@@ -215,15 +226,15 @@ After clarification is complete:
      Settled Shape proposals are part of that example,
      marked with their source; the question asks about the
      rest. The user can overrule a settled Shape proposal
-     through the settled list. When no Shape proposal is
-     left to ask here — none came, or each is settled or
-     asked on its own — ask no Shape question; if settled
-     Shape proposals exist, show the example with them,
-     marked with their source. Shape proposals are parts of
-     one design — asked one by one, each costs the user a
-     decision on a part that makes sense only with the
-     others. A design you cannot explain on one example is
-     too large for one question: ask it part by part.
+     through the settled list. Ask no Shape question when no
+     Shape proposal is left to ask here: none came, or each
+     is settled or asked on its own. If settled Shape
+     proposals exist, still show the example with them.
+     Shape proposals are parts of one design — asked one by
+     one, each costs the user a decision on a part that
+     makes sense only with the others. A design you cannot
+     explain on one example is too large for one question:
+     ask it part by part.
    - **On its own** each preparatory refactor and larger
      redesign, since it adds tasks or plans, and each Shape
      proposal that competes with another proposal, carries
@@ -255,9 +266,9 @@ After clarification is complete:
    declined design proposal with its reason in Decisions, so
    the reviewer does not flag the structure the user chose
    to keep, and each proposal and behavior change you
-   settled, with its source as _Settle what follows from a
-   decision_ words it, so the user sees it at approval and
-   can still overrule it.
+   settled, with its source in the form _Settle what follows
+   from a decision_ gives, so the user sees it at approval
+   and can still overrule it.
 
    **When the plan promises unchanged behavior**, find
    before writing every input state in which the planned
@@ -981,15 +992,19 @@ to decide — that collection does all the work of the round:
 The advisor's proposals, the behavior changes and the
 settled list join the collection. Record each answer where
 the user gives it, for example on the page. When you create
-the plan file, copy every answer and every settled item,
-with its source, into its Decisions. If that code is not
-final yet — another plan's task still changes it — say so
-when you present the collection, and which kind of question
-can still follow once it is committed. A question that comes
-up later says why the collection could not have found it. A
-prior collection round had the advisor judge the questions;
-the planning report then brought ten more questions to a
-user who had just decided all of them.
+the plan file, check each settled item again as _Settle what
+follows from a decision_ says. Then copy every answer and
+every settled proposal and behavior change that still holds,
+with its source, into its Decisions, and each settled detail
+into Context or the criteria of its task. If the code the
+plan will touch is not final yet — another plan's task still
+changes it — say so when you present the collection, and
+which kind of question can still follow once it is
+committed. A question that comes up later says why the
+collection could not have found it. A prior collection round
+had the advisor judge the questions; the planning report
+then brought ten more questions to a user who had just
+decided all of them.
 
 **Each question stands on its own.** An explanation written
 above the dialog has often scrolled out of view and is
