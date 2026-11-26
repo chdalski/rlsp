@@ -22,7 +22,7 @@ jobs:
         with:
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@v2.90.3
+      - uses: taiki-e/install-action@v2.90.8
         with:
           tool: cargo-llvm-cov
       - name: Generate coverage report
