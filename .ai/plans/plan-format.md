@@ -313,10 +313,14 @@ noticed and what restores the data, or that nothing does.
 Reverting the code does not bring such data back, so the
 user approves the loss only if the plan names it.
 
-Only record decisions that someone resuming this plan
-would need to know. Skip obvious ones — documenting every
+Only record decisions that someone resuming this plan would
+need to know. Skip obvious ones — documenting every
 micro-decision adds noise that makes important decisions
-harder to find.
+harder to find. Two settled items are not obvious ones: a
+design proposal settled from a decision, a project rule or a
+pattern of the code, and a behavior change settled from a
+decision that names its visible result. Record each, so the
+user can overrule it at approval.
 
 ## Optional Sections
 
@@ -389,12 +393,15 @@ it. In particular, leave out:
   constraints already in a `CLAUDE.md` file, which every
   agent has loaded. A specification from References is no
   project rule: Context names it.
-- **Guards against settled readings** — clauses that
-  exclude a reading the code or a project rule already
-  excludes. The implementor and the reviewer of each task
-  work with both at hand. A Decisions entry that declines a
-  review finding stays: it keeps the next review pass from
-  raising the finding again.
+- **Guards against settled readings** — clauses that exclude
+  a reading the code or a project rule already excludes. The
+  implementor and the reviewer of each task work with both
+  at hand. A Decisions entry that declines a review finding
+  stays: it keeps the next review pass from raising the
+  finding again. So does one that records a settled design
+  proposal or a settled behavior change, as the Decisions
+  section above names them: the user overrules it there at
+  approval.
 - **The same fact twice** — state each fact once: in
   Context if the whole plan needs it, otherwise in its
   task.
