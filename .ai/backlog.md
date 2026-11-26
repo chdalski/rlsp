@@ -171,6 +171,7 @@ share a parent line with one sub-item each.
 
 ## Cleanup
 
+- The test helper `deletion_range_by_line_search` (`rlsp-yaml/src/editing/code_actions/delete_anchor.rs`) is called the definition and the old body, but its `(true, _, true)` arm uses `blanks_start` where the old code used `line_start` (equal in value there); parser robustness plan Task 7 review.
 - `LineIndex` (`rlsp-yaml-parser/src/pos.rs`) carries a `step` field and `with_step` only so that tests can use small steps, which costs each index 8 bytes and a runtime division; the test `checkpoint_table_of_equal_texts_is_equal` mostly checks the derived `PartialEq`; parser robustness plan Task 4 review.
 - `rlsp-yaml-parser/tests/loader.rs`: `load_limit_error_comes_before_a_later_parse_error` picks its expected error through match guards on the input's first character, where a case parameter would read more clearly; `rlsp-yaml-parser/tests/robustness.rs`: the doc comment of `many_end_events_before_an_error_come_before_it` has an overlong line; parser robustness plan Task 2 review.
 - `classify_scalar_node` in `rlsp-yaml/src/analysis/semantic_tokens.rs`: the `ScalarStyle::Literal(_) | ScalarStyle::Folded(_)` arms of its quoted-style `match` are unreachable since block scalars return early; `matches!(style, SingleQuoted | DoubleQuoted)` would show it; and `key_token` repeats its block-indicator steps (style test, `line_column(loc.start)`, `saturating_sub(1)`), which one helper could hold; server-feature bug-fix plan Tasks 15 and 16 reviews.

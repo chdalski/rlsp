@@ -46,7 +46,7 @@ where they arise.
 - [x] Task 4: `LineIndex::line_column` answers in bounded time on a long line
 - [x] Task 5: A long flow line is tokenized with a running column
 - [x] Task 6: A plain scalar in a flow collection is scanned to its own end
-- [ ] Task 7: The "Delete unused anchor" quick fix reads only the blanks before its anchor
+- [x] Task 7: The "Delete unused anchor" quick fix reads only the blanks before its anchor
 - [ ] Task 8: A single pair in a flow sequence spans its key and its value
 - [ ] Task 9: Alias expansion keeps to the nesting depth limit
 - [ ] Push to `main` and confirm the full CI matrix is green
@@ -216,11 +216,11 @@ task keeps the scalar ends of YAML 1.2.2 §7.3.3 (plain style) in flow context.
 start for each anchor, so the quick fixes of n anchors on one line cost time with the square of n.
 It reads back only over the blanks before the anchor, which is all its result depends on.
 
-- [ ] The `one_line` shape joins the `code_actions_unused_anchors` benchmark group
+- [x] The `one_line` shape joins the `code_actions_unused_anchors` benchmark group
       (`rlsp-yaml/benches/insight.rs`): `[&a0 x, &a1 x, …]` with 1 000, 2 000, 4 000, and 8 000
       anchors on one line; the steps from 2 000 to 4 000 and from 4 000 to 8 000 each raise the
       time by at most 2.5 times, and the review request reports the four times before and after
-- [ ] The tests of `rlsp-yaml/src/editing/code_actions/delete_anchor.rs`,
+- [x] The tests of `rlsp-yaml/src/editing/code_actions/delete_anchor.rs`,
       `rlsp-yaml/tests/unused_anchor_fix.rs`, and the unused-anchor cases of
       `rlsp-yaml/tests/lsp_lifecycle/code_actions.rs` pass with their assertions unchanged
 

@@ -125,8 +125,14 @@ fn bench_selection_ranges(c: &mut Criterion) {
     group.finish();
 }
 
-/// A shape of document: the name and the text of the entry `i`, appended.
-type Shape = (&'static str, fn(&mut String, usize));
+/// A shape of document: the name, the text before the first entry, the text of
+/// the entry `i`, appended, and the text after the last entry.
+type Shape = (
+    &'static str,
+    &'static str,
+    fn(&mut String, usize),
+    &'static str,
+);
 
 /// `code_actions` over the whole range of documents with 1 000 to 8 000 unused
 /// anchors: each doubling of the anchors must raise the time by at most 2.5
@@ -135,35 +141,63 @@ type Shape = (&'static str, fn(&mut String, usize));
 /// - `plain`: only unused anchors;
 /// - `with_aliases`: a used anchor with its alias for every eighth unused one
 ///   (a document holds at most 10 000 anchors);
-/// - `documents`: one unused anchor in each of as many documents.
+/// - `documents`: one unused anchor in each of as many documents;
+/// - `one_line`: all anchors in one flow sequence on a single line.
 fn bench_code_actions_unused_anchors(c: &mut Criterion) {
     let uri: Url = "file:///bench/unused-anchors.yaml"
         .parse()
         .expect("valid URI in benchmark setup");
     let options = YamlFormatOptions::default();
     let whole = Range::new(Position::new(0, 0), Position::new(u32::MAX, 0));
-    let shapes: [Shape; 3] = [
-        ("plain", |text, i| {
-            writeln!(text, "k{i}: &a{i} v").expect("writing to a String");
-        }),
-        ("with_aliases", |text, i| {
-            writeln!(text, "k{i}: &a{i} v").expect("writing to a String");
-            if i % 8 == 0 {
-                write!(text, "u{i}: &b{i} v\nr{i}: *b{i}\n").expect("writing to a String");
-            }
-        }),
-        ("documents", |text, i| {
-            write!(text, "---\nk: &a{i} v\n").expect("writing to a String");
-        }),
+    let shapes: [Shape; 4] = [
+        (
+            "plain",
+            "",
+            |text, i| {
+                writeln!(text, "k{i}: &a{i} v").expect("writing to a String");
+            },
+            "",
+        ),
+        (
+            "with_aliases",
+            "",
+            |text, i| {
+                writeln!(text, "k{i}: &a{i} v").expect("writing to a String");
+                if i % 8 == 0 {
+                    write!(text, "u{i}: &b{i} v\nr{i}: *b{i}\n").expect("writing to a String");
+                }
+            },
+            "",
+        ),
+        (
+            "documents",
+            "",
+            |text, i| {
+                write!(text, "---\nk: &a{i} v\n").expect("writing to a String");
+            },
+            "",
+        ),
+        (
+            "one_line",
+            "[",
+            |text, i| {
+                if i > 0 {
+                    text.push_str(", ");
+                }
+                write!(text, "&a{i} x").expect("writing to a String");
+            },
+            "]\n",
+        ),
     ];
 
     let mut group = c.benchmark_group("code_actions_unused_anchors");
-    for (shape, write_entry) in shapes {
+    for (shape, open, write_entry, close) in shapes {
         for n in [1_000, 2_000, 4_000, 8_000] {
-            let mut text = String::new();
+            let mut text = String::from(open);
             for i in 0..n {
                 write_entry(&mut text, i);
             }
+            text.push_str(close);
             let docs: Vec<Document<Span>> =
                 rlsp_yaml_parser::load(&text).expect("fixture YAML parses without error");
             let diagnostics = validate_unused_anchors(&docs);

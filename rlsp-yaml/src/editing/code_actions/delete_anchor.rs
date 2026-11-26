@@ -197,16 +197,14 @@ fn is_empty_node(node: &Node<Span>) -> bool {
 /// - the token is alone on its line (blanks before it, a line break or the end
 ///   of input after it): the whole line with its line break.
 fn deletion_range(buffer: &str, start: usize, end: usize) -> Option<(usize, usize)> {
-    // A byte order mark is not text of the first line: nothing but blanks
-    // before the token means the token starts the line.
-    let line_start = buffer.get(..start)?.rfind(['\n', '\r']).map_or_else(
-        || usize::from(buffer.starts_with('\u{FEFF}')) * '\u{FEFF}'.len_utf8(),
-        |at| at + 1,
-    );
-    let before = buffer.get(line_start..start)?;
-    let kept = before.trim_end_matches([' ', '\t']);
-    let blanks_start = line_start + kept.len();
-    let alone = kept.is_empty();
+    // Only the blanks before the token are read: searching back to the line
+    // start would cost time with the length of the line, once per token.  The
+    // token starts its line when the blanks begin the input, follow a line break
+    // or follow a byte order mark that begins the input (the mark is not text of
+    // the line).
+    let kept = buffer.get(..start)?.trim_end_matches([' ', '\t']);
+    let blanks_start = kept.len();
+    let alone = kept.is_empty() || kept.ends_with(['\n', '\r']) || kept == "\u{FEFF}";
 
     let content = buffer.get(end..)?.trim_start_matches([' ', '\t']);
     let blanks_end = buffer.len() - content.len();
@@ -220,7 +218,7 @@ fn deletion_range(buffer: &str, start: usize, end: usize) -> Option<(usize, usiz
     let comment = content.starts_with('#');
 
     Some(match (at_line_end, comment, alone) {
-        (true, _, true) => (line_start, blanks_end + break_len),
+        (true, _, true) => (blanks_start, blanks_end + break_len),
         (true, _, false) => (blanks_start, blanks_end),
         (false, true, false) => (blanks_start, end),
         (false, _, _) => (start, blanks_end),
@@ -241,6 +239,8 @@ mod tests {
     use crate::editing::formatter::YamlFormatOptions;
     use crate::test_utils::{nested_flow, test_uri};
     use crate::validation::validators::validate_unused_anchors;
+
+    use super::deletion_range;
 
     const TITLE: &str = "Delete unused anchor";
 
@@ -374,6 +374,104 @@ mod tests {
         assert_eq!(applied_fix(text), expected);
     }
 
+    // Where the line of the token starts decides whether the token is alone on
+    // its line: blanks that begin the input, follow a byte order mark or follow
+    // a line break of either kind leave the token alone; the same bytes after
+    // other text do not.
+    #[rstest]
+    #[case::indented_at_input_start("  &x\n  k: v\n", "  k: v\n")]
+    #[case::indented_at_input_start_before_comment("  &x # n\n  k: v\n", "  # n\n  k: v\n")]
+    #[case::blanks_after_bom("\u{FEFF}  &x\n  k: v\n", "\u{FEFF}  k: v\n")]
+    #[case::blanks_after_bom_before_comment(
+        "\u{FEFF}  &x # n\n  k: v\n",
+        "\u{FEFF}  # n\n  k: v\n"
+    )]
+    #[case::indented_after_crlf("k:\r\n  &x\r\n  a: 1\r\n", "k:\r\n  a: 1\r\n")]
+    #[case::indented_after_lone_cr("k:\r  &x\r  a: 1\r", "k:\r  a: 1\r")]
+    #[case::column_zero_after_crlf("a: 1\r\n---\r\n&x\r\nk: v\r\n", "a: 1\r\n---\r\nk: v\r\n")]
+    #[case::column_zero_after_lone_cr("a: 1\r---\r&x\rk: v\r", "a: 1\r---\rk: v\r")]
+    #[case::tab_after_the_indent("k:\n  \t&x\n  a: 1\n", "k:\n  a: 1\n")]
+    #[case::three_bytes_before_the_blanks_are_no_bom("ab: &a\nc: 1\n", "ab:\nc: 1\n")]
+    fn the_fix_finds_the_start_of_the_line_behind_blanks(
+        #[case] text: &str,
+        #[case] expected: &str,
+    ) {
+        assert_eq!(applied_fix(text), expected);
+    }
+
+    // The definition `deletion_range` must keep: search back to the start of
+    // the line, which costs time with the length of the line.
+    fn deletion_range_by_line_search(
+        buffer: &str,
+        start: usize,
+        end: usize,
+    ) -> Option<(usize, usize)> {
+        let line_start = buffer.get(..start)?.rfind(['\n', '\r']).map_or_else(
+            || usize::from(buffer.starts_with('\u{FEFF}')) * '\u{FEFF}'.len_utf8(),
+            |at| at + 1,
+        );
+        let before = buffer.get(line_start..start)?;
+        let kept = before.trim_end_matches([' ', '\t']);
+        let blanks_start = line_start + kept.len();
+        let alone = kept.is_empty();
+
+        let content = buffer.get(end..)?.trim_start_matches([' ', '\t']);
+        let blanks_end = buffer.len() - content.len();
+
+        let break_len = if content.starts_with("\r\n") {
+            2
+        } else {
+            usize::from(content.starts_with(['\r', '\n']))
+        };
+        let at_line_end = break_len > 0 || content.is_empty();
+        let comment = content.starts_with('#');
+
+        Some(match (at_line_end, comment, alone) {
+            (true, _, true) => (blanks_start, blanks_end + break_len),
+            (true, _, false) => (blanks_start, blanks_end),
+            (false, true, false) => (blanks_start, end),
+            (false, _, _) => (start, blanks_end),
+        })
+    }
+
+    // Every text of up to five characters over an alphabet of the characters that
+    // matter to the range (blanks, line breaks, a byte order mark, a comment, the
+    // token, a multi-byte character), with every position of an `&` in it as the
+    // start of the token: the caller hands over only a token that begins with
+    // `&`, so a start inside a byte order mark that begins the input is no case.
+    #[test]
+    fn deletion_range_equals_the_line_search_definition() {
+        const ALPHABET: [char; 9] = [' ', '\t', '\n', '\r', '\u{FEFF}', '&', 'x', '#', 'é'];
+        let mut texts = vec![String::new()];
+        let mut layer = texts.clone();
+        for _ in 0..5 {
+            layer = layer
+                .iter()
+                .flat_map(|text| ALPHABET.iter().map(move |c| format!("{text}{c}")))
+                .collect();
+            texts.extend(layer.iter().cloned());
+        }
+        for text in &texts {
+            let bounds: Vec<usize> = text
+                .char_indices()
+                .map(|(at, _)| at)
+                .chain([text.len()])
+                .collect();
+            for (i, &start) in bounds.iter().enumerate() {
+                if !text[start..].starts_with('&') {
+                    continue;
+                }
+                for &end in &bounds[i..] {
+                    assert_eq!(
+                        deletion_range(text, start, end),
+                        deletion_range_by_line_search(text, start, end),
+                        "{text:?} {start}..{end}"
+                    );
+                }
+            }
+        }
+    }
+
     // Deleting the token would leave an entry of a flow collection without a
     // node; the diagnostic stays, the fix is not offered.
     #[rstest]
@@ -406,6 +504,14 @@ mod tests {
     #[case::document_after_multibyte_documents(
         "名前: &p 1\n---\n名前: 2\n---\nc: &z 3\n",
         &["名前: 1\n---\n名前: 2\n---\nc: &z 3\n", "名前: &p 1\n---\n名前: 2\n---\nc: 3\n"]
+    )]
+    #[case::one_line_flow_sequence(
+        "[&a x, &b y, &c z]",
+        &["[x, &b y, &c z]", "[&a x, y, &c z]", "[&a x, &b y, z]"]
+    )]
+    #[case::one_line_with_blank_runs(
+        "[&a   x,\t&b\ty,   &c z]",
+        &["[x,\t&b\ty,   &c z]", "[&a   x,\ty,   &c z]", "[&a   x,\t&b\ty,   z]"]
     )]
     fn every_anchor_gets_a_fix_for_its_own_token(#[case] text: &str, #[case] expected: &[&str]) {
         let fixes: Vec<Option<String>> = applied_fixes(text);
