@@ -15,7 +15,7 @@ use rstest::rstest;
 use rlsp_yaml_parser::encoding::decode;
 use rlsp_yaml_parser::loader::{LoadError, LoaderBuilder};
 use rlsp_yaml_parser::node::Node;
-use rlsp_yaml_parser::{ErrorKind, Event, Span};
+use rlsp_yaml_parser::{ErrorKind, Event, Pos, Span};
 use rlsp_yaml_parser::{load, parse_events};
 
 // ===========================================================================
@@ -726,6 +726,88 @@ fn pathological_deeply_repeated_scalar_completes_quickly() {
         elapsed < Duration::from_secs(30),
         "took {elapsed:?}, expected < 30s"
     );
+}
+
+/// A line of `k: "` plus `escapes` times `\x41` plus `"`.
+fn escape_heavy_double_quoted_line(escapes: usize) -> String {
+    format!("k: \"{}\"\n", "\\x41".repeat(escapes))
+}
+
+#[test]
+fn many_escapes_in_a_double_quoted_line_are_linear_for_parse_events() {
+    let escapes = 400_000;
+    let input = escape_heavy_double_quoted_line(escapes);
+    let start = Instant::now();
+    let values = scalar_values_of(&input);
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed < Duration::from_secs(30),
+        "took {elapsed:?}, expected < 30s"
+    );
+    assert_eq!(values, ["k".to_owned(), "A".repeat(escapes)]);
+}
+
+#[test]
+fn many_escapes_in_a_double_quoted_line_are_linear_for_load() {
+    let escapes = 400_000;
+    let input = escape_heavy_double_quoted_line(escapes);
+    let start = Instant::now();
+    let docs = load(&input).unwrap();
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed < Duration::from_secs(30),
+        "took {elapsed:?}, expected < 30s"
+    );
+    let Node::Mapping { entries, .. } = &docs[0].root else {
+        panic!("expected a mapping, got {:?}", docs[0].root);
+    };
+    let Node::Scalar { value, .. } = &entries[0].1 else {
+        panic!("expected a scalar value, got {:?}", entries[0].1);
+    };
+    assert_eq!(*value, "A".repeat(escapes));
+}
+
+#[test]
+fn an_invalid_escape_after_many_escapes_is_reported_in_linear_time() {
+    // The error is at the backslash of `\q`: after `k: "` and the escapes.
+    let escapes = 400_000;
+    let input = format!("k: \"{}\\q\"\n", "\\x41".repeat(escapes));
+    let start = Instant::now();
+    let error = parse_events(&input).find_map(Result::err).unwrap();
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed < Duration::from_secs(30),
+        "took {elapsed:?}, expected < 30s"
+    );
+    assert_eq!(error.kind, ErrorKind::Syntax);
+    assert_eq!(
+        error.pos,
+        Pos {
+            byte_offset: 4 + 4 * escapes,
+            line: 1,
+            column: 4 + 4 * escapes,
+        }
+    );
+}
+
+#[test]
+fn an_invalid_escape_after_a_multibyte_character_is_reported_at_its_backslash() {
+    let input = "k: \"é\\x41\\q\"\n";
+    let expected = Pos {
+        byte_offset: 10,
+        line: 1,
+        column: 9,
+    };
+    let error = parse_events(input).find_map(Result::err).unwrap();
+    assert_eq!(error.kind, ErrorKind::Syntax);
+    assert_eq!(error.pos, expected);
+    match load(input) {
+        Err(LoadError::Parse { pos, kind, .. }) => {
+            assert_eq!(kind, ErrorKind::Syntax);
+            assert_eq!(pos, expected);
+        }
+        other => panic!("expected a parse error, got {other:?}"),
+    }
 }
 
 // ===========================================================================

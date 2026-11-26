@@ -42,7 +42,7 @@ where they arise.
 - [x] Task 1: A line that holds only a BOM is skipped between documents
 - [x] Task 2: The events recognized before an error come before it
 - [x] Task 10: The events of a flow collection come before an error inside it
-- [ ] Task 3: A double-quoted scalar of escapes is scanned in linear time
+- [x] Task 3: A double-quoted scalar of escapes is scanned in linear time
 - [ ] Task 4: `LineIndex::line_column` answers in bounded time on a long line
 - [ ] Task 5: A long flow line is tokenized with a running column
 - [ ] Task 6: A plain scalar in a flow collection is scanned to its own end
@@ -151,11 +151,12 @@ counting from the line start, though only an error message uses it, so a line of
 time with the square of n. The position is computed only when an escape is in error. The task
 rests on YAML 1.2.2 §5.7 (escaped characters) and §7.3.1 (double-quoted style).
 
-- [ ] A time test: `parse_events` and `load` on `k: "` plus `\x41` 400 000 times plus `"` each
+- [x] A time test: `parse_events` and `load` on `k: "` plus `\x41` 400 000 times plus `"` each
       end within the bound
-- [ ] The value loaded from that input is `A` 400 000 times
-- [ ] The error of `k: "é\x41\q"` has the kind and the position it has before this task, and
-      the existing escape-error tests pass with their assertions unchanged
+- [x] The value loaded from that input is `A` 400 000 times
+- [x] The error of `k: "é\x41\q"` has the kind and the position it has before this task, and
+      each existing escape-error test passes with its assertions unchanged or, when new table rows
+      cover it (see Decisions), is removed
 
 ### Task 4: `LineIndex::line_column` answers in bounded time on a long line
 
@@ -319,6 +320,10 @@ limit. The task rests on YAML 1.2.2 §7.1 (alias nodes); the limit is the librar
   reads it as a line feed.
 - **Gate demand on Task 1:** a line that holds only a BOM stays an error after a directive, as
   [209] requires; skipping it there would add a deviation, not keep one.
+- **Replaced tests:** an existing test that new table rows cover is removed instead of kept beside
+  them, since a test kept beside rows that assert the same is a duplicate to maintain. A row
+  covers a test when it has the same input, is checked at the same entry point, and asserts
+  everything the test asserted; the handoff names each removed test with its rows.
 - **Flow collection spans:** a flow collection's span ends at its closing indicator, without it;
   `flow_style.rs` and the folding tests of `rlsp-yaml` rely on that, so only the node docs change.
 - **`deletion_range` in this plan:** the quick fix lies in `rlsp-yaml`, and its backlog entry is

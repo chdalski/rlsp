@@ -700,15 +700,21 @@ const fn is_bidi_control(ch: char) -> bool {
 ///
 /// Returns `Err` for invalid escapes, non-printable hex results, or bidi
 /// characters.  Also enforces the 1 MiB scalar length cap on `owned`.
+///
+/// `line_start` and `line_before_escape` (the line's text before the `\`)
+/// locate the escape; the position is computed only when an error needs it,
+/// so a line of many valid escapes is scanned in linear time.
 fn decode_and_push_escape(
     after_backslash: &str,
-    escape_pos: Pos,
+    line_start: Pos,
+    line_before_escape: &str,
     owned: &mut Option<String>,
     prefix: &str,
 ) -> Result<usize, Error> {
+    let escape_pos = || crate::pos::advance_within_line(line_start, line_before_escape);
     let Some((decoded_ch, consumed)) = decode_escape(after_backslash) else {
         return Err(Error::syntax(
-            escape_pos,
+            escape_pos(),
             format!(
                 "invalid escape sequence '\\{}'",
                 after_backslash
@@ -725,7 +731,7 @@ fn decode_and_push_escape(
     let escape_prefix = after_backslash.chars().next().unwrap_or('\0');
     if matches!(escape_prefix, 'x' | 'u' | 'U') && !is_c_printable(decoded_ch) {
         return Err(Error::invalid_character(
-            escape_pos,
+            escape_pos(),
             format!(
                 "escape produces non-printable character U+{:04X}",
                 u32::from(decoded_ch)
@@ -737,7 +743,7 @@ fn decode_and_push_escape(
     // escapes (\u and \U can reach the bidi range; \x max is U+00FF).
     if is_bidi_control(decoded_ch) {
         return Err(Error::syntax(
-            escape_pos,
+            escape_pos(),
             format!(
                 "escape produces bidirectional control character U+{:04X}",
                 u32::from(decoded_ch)
@@ -751,7 +757,7 @@ fn decode_and_push_escape(
     // Maximum scalar length cap.
     if buf.len() > MAX_SCALAR_LEN {
         return Err(Error::syntax(
-            escape_pos,
+            escape_pos(),
             "scalar exceeds maximum allowed length (1 MiB)".to_owned(),
         ));
     }
@@ -845,8 +851,6 @@ pub(super) fn scan_double_quoted_line(
         }
         // b'\\' — escape sequence.
         {
-            let escape_pos =
-                crate::pos::advance_within_line(start_pos, body.get(..hit).unwrap_or_default());
             let after_backslash = body.get(hit + 1..).unwrap_or_default();
 
             if after_backslash.is_empty() {
@@ -866,7 +870,8 @@ pub(super) fn scan_double_quoted_line(
 
             let consumed = decode_and_push_escape(
                 after_backslash,
-                escape_pos,
+                start_pos,
+                body.get(..hit).unwrap_or_default(),
                 &mut owned,
                 body.get(..borrow_end).unwrap_or_default(),
             )?;
@@ -957,7 +962,8 @@ mod tests {
         DoubleQuotedLine, DoubleQuotedValue, SingleQuotedScan, scan_double_quoted_line,
         scan_single_quoted_line,
     };
-    use crate::error::Error;
+    use crate::error::{Error, ErrorKind};
+    use crate::limits::MAX_SCALAR_LEN;
     use crate::pos::{Pos, Span};
 
     fn make_lexer(input: &str) -> super::super::Lexer<'_> {
@@ -1342,39 +1348,266 @@ mod tests {
         }
     }
 
+    const fn at(byte_offset: usize, line: usize, column: usize) -> Pos {
+        Pos {
+            byte_offset,
+            line,
+            column,
+        }
+    }
+
+    // The error position of an escape is the position of its backslash,
+    // counted in code points from the line's start position.
+    #[rstest]
+    #[case::unknown_escape_at_line_start(
+        "\\q\"",
+        at(0, 1, 0),
+        ErrorKind::Syntax,
+        "invalid escape",
+        at(0, 1, 0)
+    )]
+    #[case::non_printable_hex_at_line_start(
+        "\\x01\"",
+        at(0, 1, 0),
+        ErrorKind::InvalidCharacter,
+        "non-printable",
+        at(0, 1, 0)
+    )]
+    #[case::bidi_at_line_start(
+        "\\u202A\"",
+        at(0, 1, 0),
+        ErrorKind::Syntax,
+        "bidirectional",
+        at(0, 1, 0)
+    )]
+    #[case::unknown_escape_after_two_byte_char(
+        "é\\q\"",
+        at(0, 1, 0),
+        ErrorKind::Syntax,
+        "invalid escape",
+        at(2, 1, 1)
+    )]
+    #[case::non_printable_after_three_byte_chars(
+        "日本語\\x01\"",
+        at(0, 1, 0),
+        ErrorKind::InvalidCharacter,
+        "non-printable",
+        at(9, 1, 3)
+    )]
+    #[case::bidi_after_four_byte_char(
+        "😀\\u202E\"",
+        at(0, 1, 0),
+        ErrorKind::Syntax,
+        "bidirectional",
+        at(4, 1, 1)
+    )]
+    #[case::bidi_eight_digit_form(
+        "é\\U0000202E\"",
+        at(0, 1, 0),
+        ErrorKind::Syntax,
+        "bidirectional",
+        at(2, 1, 1)
+    )]
+    #[case::unknown_escape_after_valid_escape(
+        "é\\x41\\q\"",
+        at(4, 1, 4),
+        ErrorKind::Syntax,
+        "invalid escape",
+        at(10, 1, 9)
+    )]
+    #[case::non_printable_after_named_escapes(
+        "\\n\\n\\x01\"",
+        at(0, 1, 0),
+        ErrorKind::InvalidCharacter,
+        "non-printable",
+        at(4, 1, 4)
+    )]
+    #[case::first_error_wins_over_later_one(
+        "\\q\\x01\"",
+        at(0, 1, 0),
+        ErrorKind::Syntax,
+        "invalid escape",
+        at(0, 1, 0)
+    )]
+    #[case::first_error_after_valid_escape(
+        "\\x41\\x01\\q\"",
+        at(0, 1, 0),
+        ErrorKind::InvalidCharacter,
+        "non-printable",
+        at(4, 1, 4)
+    )]
+    #[case::start_position_column_and_line_are_kept(
+        "ab\\q\"",
+        at(100, 7, 3),
+        ErrorKind::Syntax,
+        "invalid escape",
+        at(102, 7, 5)
+    )]
+    #[case::start_position_with_multibyte_prefix(
+        "é\\x01\"",
+        at(100, 7, 3),
+        ErrorKind::InvalidCharacter,
+        "non-printable",
+        at(102, 7, 4)
+    )]
+    #[case::truncated_hex_escape(
+        "a\\x4\"",
+        at(0, 1, 0),
+        ErrorKind::Syntax,
+        "invalid escape",
+        at(1, 1, 1)
+    )]
+    #[case::surrogate_escape(
+        "é\\uD800\"",
+        at(0, 1, 0),
+        ErrorKind::Syntax,
+        "invalid escape",
+        at(2, 1, 1)
+    )]
+    #[case::delete_hex_escape_is_not_printable(
+        "é\\x7F\"",
+        at(0, 1, 0),
+        ErrorKind::InvalidCharacter,
+        "non-printable",
+        at(2, 1, 1)
+    )]
+    #[case::left_to_right_mark(
+        "é\\u200E\"",
+        at(0, 1, 0),
+        ErrorKind::Syntax,
+        "bidirectional",
+        at(2, 1, 1)
+    )]
+    #[case::isolate_override(
+        "é\\u2066\"",
+        at(0, 1, 0),
+        ErrorKind::Syntax,
+        "bidirectional",
+        at(2, 1, 1)
+    )]
+    #[case::last_bidi_isolate(
+        "é\\u2069\"",
+        at(0, 1, 0),
+        ErrorKind::Syntax,
+        "bidirectional",
+        at(2, 1, 1)
+    )]
+    #[case::first_c1_control_is_not_printable(
+        "é\\x80\"",
+        at(0, 1, 0),
+        ErrorKind::InvalidCharacter,
+        "non-printable",
+        at(2, 1, 1)
+    )]
+    #[case::last_c1_control_is_not_printable(
+        "é\\x9F\"",
+        at(0, 1, 0),
+        ErrorKind::InvalidCharacter,
+        "non-printable",
+        at(2, 1, 1)
+    )]
+    #[case::fffe_is_not_printable(
+        "é\\uFFFE\"",
+        at(0, 1, 0),
+        ErrorKind::InvalidCharacter,
+        "non-printable",
+        at(2, 1, 1)
+    )]
+    #[case::ffff_is_not_printable(
+        "é\\uFFFF\"",
+        at(0, 1, 0),
+        ErrorKind::InvalidCharacter,
+        "non-printable",
+        at(2, 1, 1)
+    )]
+    fn dq_escape_error_cases(
+        #[case] input: &str,
+        #[case] start: Pos,
+        #[case] kind: ErrorKind,
+        #[case] message_fragment: &str,
+        #[case] expected_pos: Pos,
+    ) {
+        match scan_double_quoted_line(input, start, false) {
+            Err(e) => {
+                assert_eq!(e.kind, kind, "kind of {input:?}");
+                assert!(
+                    e.message.contains(message_fragment),
+                    "message of {input:?}: {}",
+                    e.message
+                );
+                assert_eq!(e.pos, expected_pos, "position of {input:?}");
+            }
+            Ok(_) => unreachable!("expected Err for {input:?}"),
+        }
+    }
+
+    // c-printable (YAML 1.2.2 §5.1) and the bidi controls end at these
+    // code points; the neighbours on each side decode.
+    #[rstest]
+    #[case::tilde_is_last_printable_ascii("\\x7E\"", "~")]
+    #[case::next_line_is_printable("\\x85\"", "\u{85}")]
+    #[case::no_break_space("\\xA0\"", "\u{A0}")]
+    #[case::before_the_first_bidi_mark("\\u200D\"", "\u{200D}")]
+    #[case::before_the_embedding_marks("\\u2029\"", "\u{2029}")]
+    #[case::after_the_embedding_marks("\\u202F\"", "\u{202F}")]
+    #[case::before_the_isolate_marks("\\u2065\"", "\u{2065}")]
+    #[case::after_the_isolate_marks("\\u206A\"", "\u{206A}")]
+    #[case::last_before_surrogates("\\uD7FF\"", "\u{D7FF}")]
+    #[case::first_after_surrogates("\\uE000\"", "\u{E000}")]
+    #[case::replacement_character_is_last_bmp_printable("\\uFFFD\"", "\u{FFFD}")]
+    #[case::last_code_point("\\U0010FFFF\"", "\u{10FFFF}")]
+    fn dq_escape_at_a_printable_boundary_is_accepted(#[case] input: &str, #[case] expected: &str) {
+        match dq_ok(input) {
+            DoubleQuotedLine::Closed { value, .. } => assert_eq!(value.into_string(), expected),
+            DoubleQuotedLine::Incomplete { .. } => unreachable!("expected Closed"),
+        }
+    }
+
+    // The length cap of an escape is reported at the escape, not at the line
+    // start, and one decoded character fewer is still accepted.
     #[test]
-    fn dq_bidi_escape_is_rejected() {
-        match scan_double_quoted_line("\\u202A\"", START, false) {
-            Err(e) => assert!(
-                e.message.contains("bidirectional"),
-                "message: {}",
-                e.message
-            ),
-            Ok(_) => unreachable!("expected Err for bidi escape"),
+    fn dq_escape_filling_the_scalar_to_the_cap_is_accepted() {
+        let input = format!("{}\\n\"", "a".repeat(MAX_SCALAR_LEN - 1));
+        match dq_ok(&input) {
+            DoubleQuotedLine::Closed { value, .. } => {
+                assert_eq!(value.into_string().len(), MAX_SCALAR_LEN);
+            }
+            DoubleQuotedLine::Incomplete { .. } => unreachable!("expected Closed"),
+        }
+    }
+
+    #[rstest]
+    #[case::ascii_prefix("a", MAX_SCALAR_LEN, at(MAX_SCALAR_LEN, 1, MAX_SCALAR_LEN))]
+    #[case::two_byte_prefix("é", MAX_SCALAR_LEN / 2, at(MAX_SCALAR_LEN, 1, MAX_SCALAR_LEN / 2))]
+    fn dq_escape_beyond_the_cap_is_reported_at_the_escape(
+        #[case] unit: &str,
+        #[case] repeat: usize,
+        #[case] expected_pos: Pos,
+    ) {
+        let input = format!("{}\\n\"", unit.repeat(repeat));
+        match scan_double_quoted_line(&input, START, false) {
+            Err(e) => {
+                assert_eq!(e.kind, ErrorKind::Syntax);
+                assert!(
+                    e.message.contains("maximum allowed length"),
+                    "{}",
+                    e.message
+                );
+                assert_eq!(e.pos, expected_pos);
+            }
+            Ok(_) => unreachable!("expected Err for a scalar over the cap"),
         }
     }
 
     #[test]
-    fn dq_non_printable_hex_escape_is_rejected() {
-        match scan_double_quoted_line("\\x01\"", START, false) {
-            Err(e) => assert!(
-                e.message.contains("non-printable"),
-                "message: {}",
-                e.message
+    fn dq_every_escape_of_one_line_decodes_between_multibyte_text() {
+        match dq_ok("é\\0\\a\\b\\t\\n\\v\\f\\r\\e\\ \\\"\\/\\\\\\N\\_\\L\\P\\x41é\\U0001F600ü\"")
+        {
+            DoubleQuotedLine::Closed { value, .. } => assert_eq!(
+                value.into_string(),
+                "é\0\u{7}\u{8}\t\n\u{b}\u{c}\r\u{1b} \"/\\\u{85}\u{a0}\u{2028}\u{2029}Aé😀ü"
             ),
-            Ok(_) => unreachable!("expected Err for non-printable escape"),
-        }
-    }
-
-    #[test]
-    fn dq_unknown_escape_is_rejected() {
-        match scan_double_quoted_line("\\q\"", START, false) {
-            Err(e) => assert!(
-                e.message.contains("invalid escape"),
-                "message: {}",
-                e.message
-            ),
-            Ok(_) => unreachable!("expected Err for unknown escape"),
+            DoubleQuotedLine::Incomplete { .. } => unreachable!("expected Closed"),
         }
     }
 
@@ -2124,6 +2357,50 @@ mod tests {
         match make_lexer(input).try_consume_double_quoted(Some(n)) {
             Err(e) => e,
             Ok(_) => unreachable!("expected Err, got Ok"),
+        }
+    }
+
+    // An escape error on a continuation line is positioned from the start of
+    // that line's content after its leading blanks.
+    #[rstest]
+    #[case::second_line_after_blanks_and_multibyte(
+        "\"abc\n  é\\q\"",
+        None,
+        ErrorKind::Syntax,
+        at(9, 2, 3)
+    )]
+    #[case::second_line_non_printable(
+        "\"abc\n  \\x01\"",
+        None,
+        ErrorKind::InvalidCharacter,
+        at(7, 2, 2)
+    )]
+    #[case::second_line_without_blanks("\"abc\n\\q\"", None, ErrorKind::Syntax, at(5, 2, 0))]
+    #[case::second_line_with_block_indent(
+        "\"abc\n  \\q\"",
+        Some(1),
+        ErrorKind::Syntax,
+        at(7, 2, 2)
+    )]
+    #[case::after_line_continuation_escape("\"a\\\n  \\q\"", None, ErrorKind::Syntax, at(6, 2, 2))]
+    #[case::third_line_after_blank_line(
+        "\"a\n\n  b\\u202A\"",
+        None,
+        ErrorKind::Syntax,
+        at(7, 3, 3)
+    )]
+    fn dq_escape_error_position_cases(
+        #[case] input: &str,
+        #[case] indent: Option<usize>,
+        #[case] kind: ErrorKind,
+        #[case] expected_pos: Pos,
+    ) {
+        match make_lexer(input).try_consume_double_quoted(indent) {
+            Err(e) => {
+                assert_eq!(e.kind, kind, "kind of {input:?}");
+                assert_eq!(e.pos, expected_pos, "position of {input:?}");
+            }
+            Ok(_) => unreachable!("expected Err for {input:?}"),
         }
     }
 

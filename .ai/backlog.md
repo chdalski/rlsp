@@ -188,6 +188,7 @@ share a parent line with one sub-item each.
 
 ## Documentation
 
+- The doc comment of `decode_and_push_escape` (`rlsp-yaml-parser/src/lexer/quoted.rs`) opens with a sentence that describes `scan_double_quoted_line`; pre-existing; parser robustness plan Task 3 review.
 - `configuration.md` diagnostic-code table misses emitted codes (`schemaAdditionalProperties` and others); user queued it.
 - The doc comment on `consume_leading_comments` in `loader/stream.rs` still says block-level and own-line only, which no longer holds for `- # c`, `--- # c`, and the document-level callers; comment plan Task 5 review.
 - `rlsp-yaml-parser/docs/architecture.md`, Resolved bullet: the added lines lack the list item's indent; comment plan Task 5 review.
