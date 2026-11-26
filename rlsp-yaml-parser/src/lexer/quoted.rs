@@ -61,7 +61,7 @@ impl<'input> Lexer<'input> {
         let Some(consumed_first) = self.buf.consume_next() else {
             unreachable!("peek returned Some but consume returned None")
         };
-        self.current_pos = pos_after_line(&consumed_first);
+        self.set_current_pos_after(&consumed_first);
 
         // The body starts after the opening `'`.
         let body_start = &consumed_first.content[leading_bytes + 1..];
@@ -315,7 +315,7 @@ impl<'input> Lexer<'input> {
         let Some(consumed_first) = self.buf.consume_next() else {
             unreachable!("peek returned Some but consume returned None")
         };
-        self.current_pos = pos_after_line(&consumed_first);
+        self.set_current_pos_after(&consumed_first);
 
         // Body starts after the opening `"`.
         let body_start = &consumed_first.content[leading_bytes + 1..];

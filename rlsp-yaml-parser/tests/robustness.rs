@@ -1462,3 +1462,370 @@ e: # \x07
         "{result:?}"
     );
 }
+
+// ===========================================================================
+// Group: a long flow line is tokenized with a running column
+// ===========================================================================
+
+/// The 1-based line and 0-based codepoint column of byte `at` of `input`,
+/// counted from the text; `\n`, `\r\n` and `\r` each end a line.
+fn line_and_column(input: &str, at: usize) -> (usize, usize) {
+    let (mut line, mut column) = (1, 0);
+    let mut chars = input[..at].chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\n' || (c == '\r' && chars.peek() != Some(&'\n')) {
+            line += 1;
+            column = 0;
+        } else if c != '\r' {
+            column += 1;
+        }
+    }
+    (line, column)
+}
+
+/// A flow sequence on one line: `[`, `lead`, `q i0 q, q i1 q, …`, `suffix`,
+/// `]`, with `q` the quote character.  Returns the text and the byte range of
+/// every item.
+fn quoted_items_line(
+    quote: char,
+    count: usize,
+    lead: &str,
+    suffix: &str,
+) -> (String, Vec<std::ops::Range<usize>>) {
+    let mut text = format!("[{lead}");
+    let mut ranges = Vec::with_capacity(count);
+    for n in 0..count {
+        if n > 0 {
+            text.push_str(", ");
+        }
+        let start = text.len();
+        write!(text, "{quote}i{n}{quote}").unwrap();
+        ranges.push(start..text.len());
+    }
+    text.push_str(suffix);
+    text.push(']');
+    (text, ranges)
+}
+
+/// Time budget of the tests below: far above their run time and far below
+/// what the count from the line start took on the same inputs.
+const FLOW_LINE_BUDGET: Duration = Duration::from_secs(30);
+
+fn scalar_count_within_budget(input: &str) -> usize {
+    let start = Instant::now();
+    let mut scalars = 0;
+    for item in parse_events(input) {
+        if let (Event::Scalar { .. }, _) = item.unwrap() {
+            scalars += 1;
+        }
+    }
+    let elapsed = start.elapsed();
+    assert!(elapsed < FLOW_LINE_BUDGET, "took {elapsed:?}");
+    scalars
+}
+
+#[rstest]
+#[case::double_quoted_items(quoted_items_line('"', 200_000, "", "").0, 200_000)]
+#[case::single_quoted_items(quoted_items_line('\'', 200_000, "", "").0, 200_000)]
+#[case::double_quoted_items_after_a_multi_byte_item(
+    quoted_items_line('"', 200_000, "\"é\", ", "").0,
+    200_001
+)]
+#[case::multi_byte_item_at_the_end_of_the_line(
+    quoted_items_line('"', 200_000, "", ", \"é\"").0,
+    200_001
+)]
+#[case::quoted_pairs_of_a_mapping(
+    format!("{{{}}}", (0..100_000).map(|n| format!("\"k{n}\": \"v{n}\"")).collect::<Vec<_>>().join(", ")),
+    200_000
+)]
+#[case::plain_pairs_of_a_mapping(
+    format!("{{{}}}", (0..100_000).map(|n| format!("k{n}: v{n}")).collect::<Vec<_>>().join(", ")),
+    200_000
+)]
+fn many_items_on_one_flow_line_are_linear(#[case] input: String, #[case] scalars: usize) {
+    assert_eq!(scalar_count_within_budget(&input), scalars);
+}
+
+#[test]
+fn many_empty_collections_on_one_flow_line_are_linear() {
+    let input = format!("[{}[]]", "[], ".repeat(299_999));
+    let start = Instant::now();
+    let sequences = parse_events(&input)
+        .filter(|item| matches!(item, Ok((Event::SequenceStart { .. }, _))))
+        .count();
+    let elapsed = start.elapsed();
+    assert_eq!(sequences, 300_001);
+    assert!(elapsed < FLOW_LINE_BUDGET, "took {elapsed:?}");
+}
+
+#[rstest]
+#[case::double_quoted_ascii('"', "")]
+#[case::double_quoted_after_a_multi_byte_item('"', "\"é\", ")]
+#[case::single_quoted_ascii('\'', "")]
+#[case::single_quoted_after_a_multi_byte_item('\'', "'é', ")]
+fn the_spans_of_the_items_on_a_long_flow_line_match_their_text_offsets(
+    #[case] quote: char,
+    #[case] lead: &str,
+) {
+    let (input, ranges) = quoted_items_line(quote, 200_000, lead, "");
+    let spans: Vec<Span> = parse_events(&input)
+        .filter_map(|item| match item.unwrap() {
+            (Event::Scalar { .. }, span) => Some(span),
+            _ => None,
+        })
+        .collect();
+    let skipped = usize::from(!lead.is_empty());
+    assert_eq!(spans.len(), ranges.len() + skipped);
+    for (n, range) in ranges.iter().enumerate().step_by(1_000) {
+        let span = spans[n + skipped];
+        assert_eq!(
+            (span.start as usize, span.end as usize),
+            (range.start, range.end),
+            "item {n}"
+        );
+    }
+}
+
+#[rstest]
+#[case::ascii("")]
+#[case::after_a_multi_byte_item("\"é\", ")]
+fn the_loaded_spans_of_the_items_on_a_flow_line_match_their_text_offsets(#[case] lead: &str) {
+    let (input, ranges) = quoted_items_line('"', 5_000, lead, "");
+    let docs = load(&input).unwrap();
+    let Node::Sequence { items, .. } = &docs[0].root else {
+        panic!("not a sequence: {:?}", docs[0].root);
+    };
+    let skipped = usize::from(!lead.is_empty());
+    assert_eq!(items.len(), ranges.len() + skipped);
+    for (n, range) in ranges.iter().enumerate().step_by(100) {
+        let Node::Scalar { loc, .. } = &items[n + skipped] else {
+            panic!("not a scalar: {:?}", items[n + skipped]);
+        };
+        assert_eq!(
+            (loc.start as usize, loc.end as usize),
+            (range.start, range.end),
+            "item {n}"
+        );
+    }
+}
+
+/// An error at `needle`, the last one in `input`: the position of its first
+/// byte, counted from the text.
+fn assert_error_at_last(input: &str, needle: &str) {
+    let error = parse_events(input).find_map(Result::err);
+    assert!(error.is_some(), "no error in {input:?}");
+    let error = error.unwrap();
+    let at = input.rfind(needle).unwrap();
+    let (line, column) = line_and_column(input, at);
+    assert_eq!(
+        (error.pos.byte_offset, error.pos.line, error.pos.column),
+        (at, line, column),
+        "{error}"
+    );
+}
+
+#[rstest]
+#[case::quote_after_a_quoted_item("\"x\" \"y\"]", "\"y")]
+#[case::plain_after_a_quoted_item("\"x\" y]", "y]")]
+#[case::collection_after_a_collection("a, [b] [c]]", "[c")]
+#[case::second_comma("a,, b]", ", b")]
+#[case::block_sequence_indicator("a, - b]", "- b")]
+#[case::block_scalar_indicator("a, | b]", "| b")]
+#[case::directive_indicator("a, %b]", "%b")]
+#[case::content_after_the_collection("a] x", "x")]
+#[case::comment_without_space("a]#c", "#c")]
+#[case::content_after_a_quoted_item_and_the_collection("\"é\"]  x", "x")]
+fn an_error_after_a_long_flow_line_is_at_the_column_of_its_text(
+    #[case] tail: &str,
+    #[case] needle: &str,
+    #[values("", "é, ", "日本, ", "\t")] lead: &str,
+    #[values(0, 2_000)] before: usize,
+    #[values("a, ", "\"é\", ")] item: &str,
+) {
+    let input = format!("[{lead}{}{tail}", item.repeat(before));
+    assert_error_at_last(&input, needle);
+}
+
+#[rstest]
+#[case::quote_after_a_quoted_value("{é: 1, \"a\": \"b\" \"c\"}", "\"c")]
+#[case::quoted_keys("{\"é\": 1, \"a\": \"b\" \"c\"}", "\"c")]
+fn an_error_in_a_flow_mapping_is_at_the_column_of_its_text(
+    #[case] input: &str,
+    #[case] needle: &str,
+) {
+    assert_error_at_last(input, needle);
+}
+
+#[rstest]
+#[case::second_line("[a,\n é, \"c\" \"e\"]", "\"e", Pos { byte_offset: 13, line: 2, column: 8 })]
+#[case::inline_property("&a [é, \"x\" \"y\"]", "\"y", Pos { byte_offset: 12, line: 1, column: 11 })]
+#[case::inline_property_plain("&a [é, \"x\" y]", "y]", Pos { byte_offset: 12, line: 1, column: 11 })]
+#[case::tag_in_a_block_mapping("key: !!seq [é, \"x\" \"y\"]", "\"y", Pos { byte_offset: 20, line: 1, column: 19 })]
+#[case::tab_before_the_collection("\t[é, \"x\" \"y\"]", "\"y", Pos { byte_offset: 10, line: 1, column: 9 })]
+#[case::content_after_the_collection("[é, a]   x", "x", Pos { byte_offset: 10, line: 1, column: 9 })]
+#[case::content_after_a_quoted_item("[\"é\", a]  x", "x", Pos { byte_offset: 11, line: 1, column: 10 })]
+#[case::crlf_line("[a,\r\n é, \"c\" \"e\"]", "\"e", Pos { byte_offset: 14, line: 2, column: 8 })]
+#[case::bare_cr_line("[a,\r é, \"c\" \"e\"]", "\"e", Pos { byte_offset: 13, line: 2, column: 8 })]
+#[case::blank_lines("[a,\n\n\n  é, \"c\" \"e\"]", "\"e", Pos { byte_offset: 16, line: 4, column: 9 })]
+#[case::identical_lines("[\n a,\n a,\n a,\n a,,\n]", ",\n]", Pos { byte_offset: 17, line: 5, column: 3 })]
+fn a_computed_error_position_is_the_one_of_the_text(
+    #[case] input: &str,
+    #[case] needle: &str,
+    #[case] expected: Pos,
+) {
+    let error = parse_events(input).find_map(Result::err).unwrap();
+    let at = input.rfind(needle).unwrap();
+    let (line, column) = line_and_column(input, at);
+    assert_eq!(
+        (expected.byte_offset, expected.line, expected.column),
+        (at, line, column),
+        "the expectation of the case is computed from the text"
+    );
+    assert_eq!(error.pos, expected, "{error}");
+}
+
+#[rstest]
+#[case::multi_byte("[é\n ü\n ö]", "é ü ö", 1, 11)]
+#[case::crlf("[é\r\n ü]", "é ü", 1, 8)]
+#[case::bare_cr("[é\r ü]", "é ü", 1, 7)]
+fn the_span_of_a_plain_scalar_over_lines_ends_at_its_last_character(
+    #[case] input: &str,
+    #[case] value: &str,
+    #[case] start: u32,
+    #[case] end: u32,
+) {
+    let spans: Vec<(String, Span)> = parse_events(input)
+        .filter_map(|item| match item.unwrap() {
+            (Event::Scalar { value, .. }, span) => Some((value.into_owned(), span)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(spans, vec![(value.to_owned(), Span { start, end })]);
+}
+
+#[rstest]
+#[case::one_character_over_the_limit("é", 1_025, false)]
+#[case::at_the_limit("é", 1_024, true)]
+#[case::ascii_over_the_limit("k", 1_025, false)]
+#[case::ascii_at_the_limit("k", 1_024, true)]
+fn an_implicit_key_after_a_long_prefix_is_judged_and_placed_by_its_own_text(
+    #[case] key_char: &str,
+    #[case] key_len: usize,
+    #[case] accepted: bool,
+    #[values("x, ", "é, ")] item: &str,
+) {
+    let input = format!("[{}{}: v]", item.repeat(1_000), key_char.repeat(key_len));
+    let error = parse_events(&input).find_map(Result::err);
+    if accepted {
+        assert!(error.is_none(), "{error:?}");
+    } else {
+        let error = error.unwrap();
+        let at = input.rfind(':').unwrap();
+        let (line, column) = line_and_column(&input, at);
+        assert_eq!(
+            (error.pos.byte_offset, error.pos.line, error.pos.column),
+            (at, line, column),
+            "{error}"
+        );
+    }
+}
+
+#[rstest]
+#[case::without_a_final_line_break("")]
+#[case::with_a_final_line_break("\n")]
+fn a_comment_after_a_long_flow_line_is_at_its_text(
+    #[case] ending: &str,
+    #[values('"', '\'')] quote: char,
+) {
+    let (line, _) = quoted_items_line(quote, 50_000, "", "");
+    let input = format!("{line} # c{ending}");
+    let events: Vec<(Event<'_>, Span)> = parse_events(&input).map(Result::unwrap).collect();
+    let comment_at = input.rfind('#').unwrap();
+    let text_end = input.trim_end_matches('\n').len();
+    let comment = events
+        .iter()
+        .find(|(event, _)| matches!(event, Event::Comment { .. }))
+        .unwrap();
+    assert_eq!(
+        (comment.1.start as usize, comment.1.end as usize),
+        (comment_at, text_end)
+    );
+}
+
+#[rstest]
+fn the_end_of_the_stream_after_a_long_flow_line_without_a_final_line_break_is_the_end_of_the_input(
+    #[values('"', '\'')] quote: char,
+) {
+    let (line, _) = quoted_items_line(quote, 50_000, "", "");
+    let input = format!("{line} # c");
+    let (stream_end, span) = parse_events(&input).map(Result::unwrap).last().unwrap();
+    assert!(matches!(stream_end, Event::StreamEnd));
+    assert_eq!(
+        (span.start as usize, span.end as usize),
+        (input.len(), input.len())
+    );
+}
+
+mod generated_flow_sequences {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn token() -> impl Strategy<Value = String> {
+        prop_oneof![
+            (0u32..1000).prop_map(|n| format!("p{n}")),
+            (0u32..1000).prop_map(|n| format!("\u{e9}{n}")),
+            (0u32..1000).prop_map(|n| format!("\u{65e5}\u{672c}{n}")),
+            (0u32..1000).prop_map(|n| format!("\"q{n}\"")),
+            (0u32..1000).prop_map(|n| format!("\"\u{e9}{n}\"")),
+            (0u32..1000).prop_map(|n| format!("'s{n}'")),
+        ]
+    }
+
+    fn separator() -> impl Strategy<Value = &'static str> {
+        prop_oneof![
+            Just(","),
+            Just(", "),
+            Just(",  "),
+            Just(",\t"),
+            Just(",\n "),
+            Just(",\r\n  "),
+            Just(",\r "),
+            Just(", # c\n "),
+        ]
+    }
+
+    proptest! {
+        #[test]
+        fn every_scalar_is_reported_at_its_source_text(
+            entries in proptest::collection::vec((token(), separator()), 1..30),
+            lead in prop_oneof![Just(""), Just("\u{e9}, "), Just("\"\u{65e5}\", ")],
+        ) {
+            let mut input = format!("[{lead}");
+            let mut expected: Vec<(usize, &str)> = Vec::new();
+            if !lead.is_empty() {
+                expected.push((1, lead.trim_end_matches(", ")));
+            }
+            let last = entries.len() - 1;
+            for (n, (token, separator)) in entries.iter().enumerate() {
+                expected.push((input.len(), token));
+                input.push_str(token);
+                if n < last {
+                    input.push_str(separator);
+                }
+            }
+            input.push(']');
+            let mut spans: Vec<Span> = Vec::new();
+            for item in parse_events(&input) {
+                if let (Event::Scalar { .. }, span) = item.unwrap() {
+                    spans.push(span);
+                }
+            }
+            prop_assert_eq!(spans.len(), expected.len());
+            for (span, (start, token)) in spans.iter().zip(&expected) {
+                prop_assert_eq!(span.start as usize, *start);
+                prop_assert_eq!(&input[span.start as usize..span.end as usize], *token);
+            }
+        }
+    }
+}

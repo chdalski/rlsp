@@ -9,7 +9,7 @@
 use crate::chars::{find_non_c_printable, is_ns_anchor_char};
 use crate::error::Error;
 use crate::event_iter::line_mapping::is_implicit_key_line;
-use crate::lines::{Line, LineBuffer, pos_after_line};
+use crate::lines::{BreakType, Line, LineBuffer, pos_after_line};
 use crate::pos::{Pos, Span};
 
 pub use crate::chars::is_ns_char;
@@ -74,6 +74,12 @@ pub struct Lexer<'input> {
     /// skipped — valid YAML never contains non-printable bytes, so the
     /// common case pays no per-scalar validation overhead.
     pub(super) input_all_printable: bool,
+    /// The last line content whose characters [`Self::set_current_pos_after`]
+    /// counted, with their number.  The flow reader gives the lexer the rest of
+    /// its line again after every quoted scalar; each rest is a suffix of the one
+    /// before, so counting it takes the difference to that one, not the length
+    /// of the line.
+    counted_content: Option<(&'input str, usize)>,
 }
 
 impl<'input> Lexer<'input> {
@@ -88,6 +94,7 @@ impl<'input> Lexer<'input> {
             plain_scalar_suffix_error: None,
             marker_inline_error: None,
             input_all_printable: find_non_c_printable(input.as_bytes()).is_none(),
+            counted_content: None,
         }
     }
 
@@ -454,8 +461,41 @@ impl<'input> Lexer<'input> {
     /// Consume the currently-primed line (any content) and advance position.
     pub fn consume_line(&mut self) {
         if let Some(line) = self.buf.consume_next() {
-            self.current_pos = pos_after_line(&line);
+            self.set_current_pos_after(&line);
         }
+    }
+
+    /// Set `current_pos` to the position after `line`, as [`pos_after_line`]
+    /// gives it, for a line that may be the rest of a long line the lexer has
+    /// seen before.
+    pub(super) fn set_current_pos_after(&mut self, line: &Line<'input>) {
+        self.current_pos = match line.break_type {
+            BreakType::Eof => Pos {
+                byte_offset: line.offset + line.content.len(),
+                line: line.pos.line,
+                column: line.pos.column + self.count_chars(line.content),
+            },
+            BreakType::Lf | BreakType::Cr | BreakType::CrLf => pos_after_line(line),
+        };
+    }
+
+    /// The number of characters in `content`.  When `content` is a suffix of the
+    /// string counted last and the part before it is not longer than `content`
+    /// itself, the count is that of the string less the characters before the
+    /// suffix.
+    fn count_chars(&mut self, content: &'input str) -> usize {
+        let from_before = self.counted_content.and_then(|(counted, chars)| {
+            let skipped = content
+                .as_ptr()
+                .addr()
+                .checked_sub(counted.as_ptr().addr())?;
+            let before = counted.get(..skipped)?;
+            (skipped + content.len() == counted.len() && skipped <= content.len())
+                .then(|| chars - crate::pos::column_at(before, before.len()))
+        });
+        let chars = from_before.unwrap_or_else(|| crate::pos::column_at(content, content.len()));
+        self.counted_content = Some((content, chars));
+        chars
     }
 
     /// True when no more lines remain.
@@ -484,7 +524,7 @@ impl<'input> Lexer<'input> {
     /// Drain all remaining lines and return the position after the last byte.
     pub fn drain_to_end(&mut self) -> Pos {
         while let Some(line) = self.buf.consume_next() {
-            self.current_pos = pos_after_line(&line);
+            self.set_current_pos_after(&line);
         }
         self.current_pos
     }
@@ -612,6 +652,46 @@ mod tests {
 
     fn make_lexer(input: &str) -> Lexer<'_> {
         Lexer::new(input)
+    }
+
+    /// The position after the rest of `input` that starts at byte `start`: a
+    /// synthetic last line, as the flow reader gives the lexer after a token.
+    fn rest_line_from(input: &str, start: usize) -> Line<'_> {
+        Line {
+            content: &input[start..],
+            offset: start,
+            indent: 0,
+            break_type: BreakType::Eof,
+            pos: Pos {
+                byte_offset: start,
+                line: 1,
+                column: input[..start].chars().count(),
+            },
+        }
+    }
+
+    #[rstest]
+    #[case::ascii("[a, bb, ccc, d]")]
+    #[case::multi_byte("[\"é\", 日本語, b, \u{1F600}x]")]
+    fn current_pos_after_the_rest_of_a_line_is_the_same_whichever_rest_came_before(
+        #[case] input: &str,
+    ) {
+        let starts: Vec<usize> = (0..=input.len())
+            .filter(|&i| input.is_char_boundary(i))
+            .collect();
+        for &before in &starts {
+            for &start in &starts {
+                let mut lexer = make_lexer(input);
+                lexer.set_current_pos_after(&rest_line_from(input, before));
+                let line = rest_line_from(input, start);
+                lexer.set_current_pos_after(&line);
+                assert_eq!(
+                    lexer.current_pos,
+                    pos_after_line(&line),
+                    "rest from {start} after rest from {before}"
+                );
+            }
+        }
     }
 
     // -----------------------------------------------------------------------

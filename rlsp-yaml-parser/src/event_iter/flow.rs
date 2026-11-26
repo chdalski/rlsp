@@ -299,12 +299,13 @@ impl<'input> EventIter<'input> {
         // `cur_content` / `cur_base_pos` always mirror what `peek_next_line()`
         // returns.  After any call that changes the buffer (consume_line /
         // prepend_inline_line), we immediately re-sync via peek.
-        //
-        // Helper: advance `pos` over `content[..byte_len]`, one char at a time.
 
-        let abs_pos = |base: Pos, content: &str, i: usize| -> Pos {
-            crate::pos::advance_within_line(base, &content[..i])
-        };
+        // The position of byte `i` of the line `content`, which starts at `base`.
+        // A cursor answers it from the token before, so a line of many tokens
+        // costs time in proportion to its length.
+        let mut column_cursor = crate::pos::ColumnCursor::new();
+        let mut abs_pos =
+            |base: Pos, content: &str, i: usize| -> Pos { column_cursor.pos_at(base, content, i) };
 
         // -----------------------------------------------------------------------
         // Initialise: read the current line, locate the opening delimiter.

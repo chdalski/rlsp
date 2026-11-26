@@ -72,6 +72,76 @@ pub fn advance_within_line(pos: Pos, content: &str) -> Pos {
     }
 }
 
+/// Resolves byte indices of a line to positions by moving from the index it
+/// answered last, so that a run of nearby indices costs the distance they
+/// cover, not their distance from the line start.
+///
+/// The flow-collection reader asks for the position of every token of a line.
+/// Counting each from the line start makes a line of n tokens cost time with
+/// the square of n.
+#[derive(Debug, Clone, Copy)]
+pub struct ColumnCursor {
+    /// Position of the line start the cursor stands in.
+    base: Pos,
+    /// Address of the line content; with `base` it names the line, because
+    /// every content string is a slice of the one input.
+    content_addr: usize,
+    /// Byte index the cursor stands at, and its position.
+    index: usize,
+    pos: Pos,
+}
+
+impl ColumnCursor {
+    /// A cursor that stands in no line yet.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            base: Pos::ORIGIN,
+            content_addr: 0,
+            index: 0,
+            pos: Pos::ORIGIN,
+        }
+    }
+
+    /// The position of byte `index` of `content`, a line that starts at `base`.
+    ///
+    /// The cursor moves by the distance to the index it stood at, in either
+    /// direction. A call on another line, or on one the cursor has no position
+    /// in, counts from the start of `content`.
+    pub fn pos_at(&mut self, base: Pos, content: &str, index: usize) -> Pos {
+        let content_addr = content.as_ptr().addr();
+        if self.base != base || self.content_addr != content_addr || self.index > content.len() {
+            *self = Self {
+                base,
+                content_addr,
+                index: 0,
+                pos: base,
+            };
+        }
+        // An index inside a char counts as the start of that char, one past the
+        // end as the end: a defined answer for an index no caller gives.
+        let index = content.floor_char_boundary(index);
+        self.pos = if let Some(forward) = content.get(self.index..index) {
+            advance_within_line(self.pos, forward)
+        } else {
+            let backward = content.get(index..self.index).unwrap_or_default();
+            Pos {
+                byte_offset: self.pos.byte_offset - backward.len(),
+                line: self.pos.line,
+                column: self.pos.column - column_at(backward, backward.len()),
+            }
+        };
+        self.index = index;
+        self.pos
+    }
+}
+
+impl Default for ColumnCursor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // LineIndex
 // ---------------------------------------------------------------------------
@@ -316,6 +386,162 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+
+    // -----------------------------------------------------------------------
+    // ColumnCursor
+    // -----------------------------------------------------------------------
+
+    /// The position a count from the line start gives.
+    fn counted_from_start(base: Pos, content: &str, index: usize) -> Pos {
+        advance_within_line(base, &content[..index])
+    }
+
+    fn char_boundaries(content: &str) -> Vec<usize> {
+        (0..=content.len())
+            .filter(|&i| content.is_char_boundary(i))
+            .collect()
+    }
+
+    #[rstest]
+    #[case::ascii("[a, b, c]")]
+    #[case::two_byte("[\"é\", ü]")]
+    #[case::three_and_four_byte("日本語, \u{1F600}x")]
+    #[case::empty("")]
+    fn cursor_answers_every_index_after_every_other_as_a_count_from_the_start(
+        #[case] content: &str,
+    ) {
+        let base = Pos {
+            byte_offset: 40,
+            line: 3,
+            column: 7,
+        };
+        let boundaries = char_boundaries(content);
+        for &from in &boundaries {
+            for &to in &boundaries {
+                let mut cursor = ColumnCursor::new();
+                cursor.pos_at(base, content, from);
+                assert_eq!(
+                    cursor.pos_at(base, content, to),
+                    counted_from_start(base, content, to),
+                    "{content:?}: {from} then {to}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn cursor_counts_a_new_line_from_its_own_start() {
+        let first = Pos {
+            byte_offset: 0,
+            line: 1,
+            column: 0,
+        };
+        let second = Pos {
+            byte_offset: 20,
+            line: 2,
+            column: 0,
+        };
+        let mut cursor = ColumnCursor::new();
+        cursor.pos_at(first, "[é, é, é, é]", 9);
+        assert_eq!(
+            cursor.pos_at(second, "[a, b]", 4),
+            counted_from_start(second, "[a, b]", 4)
+        );
+    }
+
+    #[test]
+    fn cursor_counts_from_the_start_when_a_line_with_the_same_start_is_shorter() {
+        let base = Pos {
+            byte_offset: 0,
+            line: 1,
+            column: 0,
+        };
+        let input = "[é, é, é]";
+        let mut cursor = ColumnCursor::new();
+        cursor.pos_at(base, input, input.len());
+        let shorter = &input[..4];
+        assert_eq!(
+            cursor.pos_at(base, shorter, 3),
+            counted_from_start(base, shorter, 3)
+        );
+    }
+
+    #[test]
+    fn cursor_gives_a_defined_position_for_an_index_inside_a_char_or_past_the_end() {
+        let base = Pos::ORIGIN;
+        let content = "a\u{e9}b";
+        let mut cursor = ColumnCursor::new();
+        assert_eq!(
+            cursor.pos_at(base, content, 2),
+            counted_from_start(base, content, 1)
+        );
+        assert_eq!(
+            cursor.pos_at(base, content, 99),
+            counted_from_start(base, content, content.len())
+        );
+    }
+
+    #[test]
+    fn cursor_counts_the_same_text_from_each_of_two_bases() {
+        let content = "[a, \u{e9}, c]";
+        let mut cursor = ColumnCursor::new();
+        for base in [
+            Pos {
+                byte_offset: 0,
+                line: 1,
+                column: 0,
+            },
+            Pos {
+                byte_offset: 50,
+                line: 2,
+                column: 3,
+            },
+        ] {
+            assert_eq!(
+                cursor.pos_at(base, content, 6),
+                counted_from_start(base, content, 6)
+            );
+        }
+    }
+
+    proptest! {
+        // The queries of a run over several lines, forward, backward and across
+        // lines, are each a count from the start of their line.
+        #[test]
+        fn cursor_matches_a_count_from_the_line_start_for_any_run_of_queries(
+            lines in proptest::collection::vec(
+                proptest::collection::vec(
+                    prop_oneof![
+                        Just("a"),
+                        Just("\u{e9}"),
+                        Just("\u{65e5}"),
+                        Just("\u{1F600}"),
+                        Just(" "),
+                        Just("\t"),
+                        Just(","),
+                    ],
+                    0..20,
+                ),
+                1..4,
+            ),
+            queries in proptest::collection::vec((0usize..4, 0usize..80), 1..40),
+        ) {
+            let lines: Vec<String> = lines.iter().map(|parts| parts.concat()).collect();
+            let bases: Vec<Pos> = (0..lines.len())
+                .map(|n| Pos { byte_offset: 100 * n, line: n + 1, column: n })
+                .collect();
+            let mut cursor = ColumnCursor::new();
+            for (which, wanted) in queries {
+                let n = which % lines.len();
+                let line = &lines[n];
+                let index = line.floor_char_boundary(wanted.min(line.len()));
+                prop_assert_eq!(
+                    cursor.pos_at(bases[n], line, index),
+                    counted_from_start(bases[n], line, index)
+                );
+            }
+        }
+    }
 
     // -----------------------------------------------------------------------
     // Pos tests (kept because Pos is still a public type)

@@ -44,7 +44,7 @@ where they arise.
 - [x] Task 10: The events of a flow collection come before an error inside it
 - [x] Task 3: A double-quoted scalar of escapes is scanned in linear time
 - [x] Task 4: `LineIndex::line_column` answers in bounded time on a long line
-- [ ] Task 5: A long flow line is tokenized with a running column
+- [x] Task 5: A long flow line is tokenized with a running column
 - [ ] Task 6: A plain scalar in a flow collection is scanned to its own end
 - [ ] Task 7: The "Delete unused anchor" quick fix reads only the blanks before its anchor
 - [ ] Task 8: A single pair in a flow sequence spans its key and its value
@@ -184,13 +184,17 @@ line start, so a flow collection of n items on one line costs time with the squa
 cursor that moves forward from the last token replaces the count. The task keeps the events of
 YAML 1.2.2 §7.4 (flow collection styles).
 
-- [ ] A time test: `parse_events` on `[` plus `"i0", "i1", …` up to `"i199999"` plus `]` on one
+- [x] A time test: `parse_events` on `[` plus `"i0", "i1", …` up to `"i199999"` plus `]` on one
       line ends within the bound
-- [ ] The events of that input carry the spans a count from the line start gives: a test compares
+- [x] The events of that input carry the spans a count from the line start gives: a test compares
       the span of every 1 000th item with the offset computed from the text, for that line and
       for the same line with a leading `"é", `
-- [ ] The yaml-test-suite runs for events and for the loader and the tests of `tests/` pass with
+- [x] The yaml-test-suite runs for events and for the loader and the tests of `tests/` pass with
       their assertions unchanged
+- [x] Time tests also hold for `['i0', …, 'i199999']`, for `["i0", …, "i199999", "é"]`, for a
+      line of flow pairs, and for a line of empty collections; after `["a", "b", …] # c`, with
+      and without a final line break, the comment's span is the one computed from the text (gate
+      demand, see Decisions)
 
 ### Task 6: A plain scalar in a flow collection is scanned to its own end
 
@@ -324,6 +328,11 @@ limit. The task rests on YAML 1.2.2 §7.1 (alias nodes); the limit is the librar
   them, since a test kept beside rows that assert the same is a duplicate to maintain. A row
   covers a test when it has the same input, is checked at the same entry point, and asserts
   everything the test asserted; the handoff names each removed test with its rows.
+- **Gate demand on Task 5:** quoted items were slow from a second place with the same cause: the
+  lexer counted the characters of the rest of the line again each time the flow loop handed that
+  rest back after a quoted scalar. The lexer now keeps the last counted rest and its character
+  count, and a rest that is a suffix of it costs only the skipped part; this needs no assumption
+  about the positions of synthetic lines, which a cached end position would.
 - **Flow collection spans:** a flow collection's span ends at its closing indicator, without it;
   `flow_style.rs` and the folding tests of `rlsp-yaml` rely on that, so only the node docs change.
 - **`deletion_range` in this plan:** the quick fix lies in `rlsp-yaml`, and its backlog entry is
