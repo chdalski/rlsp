@@ -41,7 +41,7 @@ where they arise.
 - [x] Design review of the approach
 - [x] Task 1: A line that holds only a BOM is skipped between documents
 - [x] Task 2: The events recognized before an error come before it
-- [ ] Task 10: The events of a flow collection come before an error inside it
+- [x] Task 10: The events of a flow collection come before an error inside it
 - [ ] Task 3: A double-quoted scalar of escapes is scanned in linear time
 - [ ] Task 4: `LineIndex::line_column` answers in bounded time on a long line
 - [ ] Task 5: A long flow line is tokenized with a running column
@@ -113,34 +113,34 @@ reach the queue on every return, through one wrapper around the function's body.
 the flow collections of YAML 1.2.2 §7.4; the specification does not say which events precede an
 error. Events are listed after the stream start and the document start.
 
-- [ ] `parse_events` on `[a, b # \x01\n]\n` yields the flow sequence start at 0..0, `a` at 1..2,
+- [x] `parse_events` on `[a, b # \x01\n]\n` yields the flow sequence start at 0..0, `a` at 1..2,
       `b` at 4..5, and then the error at line 1, column 8
-- [ ] `[a, [b, c # \x01\n` yields the sequence start at 0..0, `a` at 1..2, the sequence start at
+- [x] `[a, [b, c # \x01\n` yields the sequence start at 0..0, `a` at 1..2, the sequence start at
       4..4, `b` at 5..6, `c` at 8..9, and then the error at line 1, column 12;
       `{a: 1, b: # \x01\n}\n` yields the flow mapping start at 0..0, `a` at 1..2, `1` at 4..5, `b`
       at 7..8, and then the error at line 1, column 12
-- [ ] `[a, # c\n b, \x01]\n` yields the sequence start, `a` at 1..2, the comment ` c` at 4..7, `b`
+- [x] `[a, # c\n b, \x01]\n` yields the sequence start, `a` at 1..2, the comment ` c` at 4..7, `b`
       at 9..10, and then the error at line 2, column 4; `[a, b` yields the sequence start, `a`,
       `b` at 4..5, and then the error at line 1, column 5
-- [ ] `k: [a, \x01]\n` yields the block mapping start at 0..0, `k` at 0..1, the sequence start at
+- [x] `k: [a, \x01]\n` yields the block mapping start at 0..0, `k` at 0..1, the sequence start at
       3..3, `a` at 4..5, and then the error at line 1, column 7; `[a, b]]\n` yields the sequence
       with its end at 5..5 and then the error at line 1, column 6
-- [ ] `[a\n b # \x01\n]\n` yields the sequence start, the scalar `a b` at 1..5, and then the error
+- [x] `[a\n b # \x01\n]\n` yields the sequence start, the scalar `a b` at 1..5, and then the error
       at line 2, column 5; `[*a, \x01]\n` yields the sequence start, the alias `a` at 1..3, and
       then the error at line 1, column 5
-- [ ] `[a: 1, b # \x01\n` yields the sequence start, a mapping start, `a` at 1..2, `1` at 4..5, a
+- [x] `[a: 1, b # \x01\n` yields the sequence start, a mapping start, `a` at 1..2, `1` at 4..5, a
       mapping end, `b` at 7..8, and then the error at line 1, column 11; the test asserts the kind
       of the mapping start and end, not their spans
-- [ ] The error is the last item of every stream, with the kind and the position it has before
+- [x] The error is the last item of every stream, with the kind and the position it has before
       this task, and every existing test passes with its assertions unchanged
-- [ ] `load` with the default options in `LoadMode::Lossless` returns
+- [x] `load` with the default options in `LoadMode::Lossless` returns
       `NestingDepthLimitExceeded` at line 1, column 256 for `[` 300 times plus `a, \x01` and
       `AnchorCountLimitExceeded` for a flow sequence of 10 001 anchored items that ends in
       `, \x01]`, as the same shapes in block style do; the tests name the Decisions entry "Events
       before an error"
-- [ ] Through the server, the semantic tokens of `[a, # c\n b, \x01]\n` hold the comment token of
+- [x] Through the server, the semantic tokens of `[a, # c\n b, \x01]\n` hold the comment token of
       `# c` (`rlsp-yaml/tests/lsp_lifecycle/semantic_tokens.rs`)
-- [ ] `rlsp-yaml/docs/feature-log.md` says that comments inside a flow collection before a parse
+- [x] `rlsp-yaml/docs/feature-log.md` says that comments inside a flow collection before a parse
       error keep their highlighting and that a document that passes a limit before a syntax error
       gets the limit's diagnostic
 

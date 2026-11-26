@@ -2,11 +2,11 @@
 
 //! Flow-collection state machine.
 //!
-//! Contains `handle_flow_collection`, the single largest method in the
-//! codebase. The function declares a local `FlowFrame` enum and contains
-//! an explicit "repetition is intentional" design note — both must be
-//! preserved verbatim through any future edits. See the design note in
-//! the function body for the rationale.
+//! Contains `read_flow_collection` (the body of `handle_flow_collection`),
+//! the single largest method in the codebase. The function declares a local
+//! `FlowFrame` enum and contains an explicit "repetition is intentional"
+//! design note — both must be preserved verbatim through any future edits.
+//! See the design note in the function body for the rationale.
 
 use std::borrow::Cow;
 
@@ -113,11 +113,32 @@ impl<'input> EventIter<'input> {
     ///   `String` buffer holds the entire flow body.
     /// - **Unterminated collection:** reaching EOF without the matching closing
     ///   delimiter returns `Err`.
+    ///
+    /// ## Events before an error
+    ///
+    /// The events read before an error reach the queue ahead of it, so a
+    /// consumer sees everything the parser recognized up to the error.  They
+    /// are those built at that point: the block mapping start of an implicit
+    /// key and the properties held from an earlier line are added only once
+    /// the collection is closed, so an error leaves them out.
+    pub(crate) fn handle_flow_collection(&mut self) -> StepResult<'input> {
+        let mut events: Vec<(Event<'input>, Span)> = Vec::new();
+        let step = self.read_flow_collection(&mut events);
+        // On success the body has handed its events over already (before
+        // `consume_own_key_indicator`), so this holds the events of an error
+        // return only.
+        self.queue.extend(events);
+        step
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "match-on-event-type; splitting would obscure flow"
     )]
-    pub(crate) fn handle_flow_collection(&mut self) -> StepResult<'input> {
+    fn read_flow_collection(
+        &mut self,
+        events: &mut Vec<(Event<'input>, Span)>,
+    ) -> StepResult<'input> {
         // -----------------------------------------------------------------------
         // Local types for the explicit flow-parser stack.
         // -----------------------------------------------------------------------
@@ -323,8 +344,6 @@ impl<'input> EventIter<'input> {
         // entry.  `self.input[start_byte..colon_byte]` is counted against the
         // YAML 1.2 §7.4.3 limit of 1024 characters for an implicit key.
         let mut key_stack: Vec<FlowKey> = Vec::new();
-        // All events assembled during this call (pushed to self.queue at end).
-        let mut events: Vec<(Event<'input>, Span)> = Vec::new();
         // Set to the indent of the enclosing block mapping to open when this
         // flow collection is used as an implicit complex mapping key
         // (`[flow]: value` or `{ flow }: value`).  `None` means not a key.
@@ -707,7 +726,7 @@ impl<'input> EventIter<'input> {
                         },
                     ) => {
                         finish_sequence_entry(
-                            &mut events,
+                            events,
                             SequenceEntry {
                                 has_value,
                                 after_colon,
@@ -983,7 +1002,7 @@ impl<'input> EventIter<'input> {
                             )
                         });
                     finish_sequence_entry(
-                        &mut events,
+                        events,
                         SequenceEntry {
                             has_value,
                             after_colon,
@@ -2265,8 +2284,8 @@ impl<'input> EventIter<'input> {
         // collection that was a key or value in a block mapping.
         self.tick_mapping_phase_after_scalar();
 
-        // Push all accumulated events to the queue.
-        self.queue.extend(events);
+        // Hand the accumulated events to the queue.
+        self.queue.extend(events.drain(..));
         if implicit_key_mapping_indent.is_some() {
             // The collection is an implicit key: its own `:` follows.
             return self.consume_own_key_indicator();

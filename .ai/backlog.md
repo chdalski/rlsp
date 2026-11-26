@@ -43,7 +43,7 @@ share a parent line with one sub-item each.
 - Valid YAML rejected: `[x]\t: 2\n`; libfyaml comparison.
 - Invalid YAML accepted: `a:\nw\n`, `&x\n!!str\n&x v\n`, `? ? a\n[x] :\n`, `?\n!!str\nb: 1\n`, a `]` at the key's column after a quoted item; the `value_on_the_next_line` and `value_with_indented_continuation` cases of `plain_scalar_in_a_collection_at_column_zero_keeps_valid_continuations` (`rlsp-yaml-parser/tests/smoke/scalars.rs`) pin `a:\nw\n` as valid; libfyaml comparison and test audit.
 - U+FEFF in a comment body loads though [75] `nb-char` excludes it (libfyaml accepts it too), and `bnf-§6.md` [75] says Strict-conformant; comment plan Task 2.
-- `["q"\t# c\n]\n` and `["q"\t, b]\n` are rejected as tab indentation in flow context while libfyaml accepts them; comment plan Task 4 review.
+- `["q"\t# c\n]\n` and `["q"\t, b]\n` are rejected as tab indentation in flow context while libfyaml accepts them; comment plan Task 4 review; `[a,\n\tb]` is rejected too, though [69] `s-flow-line-prefix` appears to allow a tab after the indentation (unverified against libfyaml; parser robustness plan Task 10 test review).
 - `? ?\n    k\n` emits no value event for the outer key while libfyaml emits an empty scalar; comment plan Task 4 review.
 - `%TAG ! tag:x#y` and `!t#c` load while libfyaml rejects them; [39] `ns-uri-char` includes `#`, so settle it against the spec text in `design-decisions.md`; comment plan Task 4 review.
 - `k: [\n  'y' # c\n]\n` is rejected while the same input without the comment loads, and libfyaml rejects both ([197] `]` at column 0); comment plan Task 4 review.

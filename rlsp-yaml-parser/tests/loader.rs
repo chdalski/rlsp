@@ -2612,6 +2612,82 @@ fn load_limit_error_comes_before_a_later_parse_error(
     );
 }
 
+/// The events of a flow collection that come before its parse error reach the
+/// loader, so a limit they pass is reported before the error, as in block
+/// style: the default limits of `load` in `LoadMode::Lossless` and of a
+/// resolving load.  This is the effect the plan's Decisions entry "Events
+/// before an error" names.  A document that stays within the limit reports its
+/// parse error.
+#[rstest]
+#[case::nesting_at_the_limit("[".repeat(256) + "a, \x01", None)]
+#[case::nesting_one_over_the_limit("[".repeat(257) + "a, \x01", Some((256, 1, 256)))]
+#[case::nesting_far_over_the_limit("[".repeat(300) + "a, \x01", Some((256, 1, 256)))]
+fn flow_nesting_limit_error_comes_before_a_later_parse_error(
+    #[case] input: String,
+    #[case] limit_error: Option<(usize, usize, usize)>,
+    #[values(true, false)] resolved: bool,
+) {
+    let builder = if resolved {
+        LoaderBuilder::new().resolved()
+    } else {
+        LoaderBuilder::new()
+    };
+    match (builder.build().load(&input), limit_error) {
+        (Err(LoadError::NestingDepthLimitExceeded { limit, pos }), Some(expected)) => {
+            assert_eq!((limit, pos.line, pos.column), expected);
+        }
+        (
+            Err(LoadError::Parse {
+                kind, pos, message, ..
+            }),
+            None,
+        ) => {
+            let error = parse_error_of(&input);
+            assert_eq!((kind, pos, message), (error.kind, error.pos, error.message));
+        }
+        (other, _) => panic!("unexpected result: {other:?}"),
+    }
+}
+
+/// Same as above for the anchor count, the effect of the plan's Decisions entry
+/// "Events before an error": the anchor that passes the limit comes before the
+/// parse error at the end of the flow sequence.
+#[rstest]
+#[case::anchors_at_the_limit(10_000, false)]
+#[case::anchors_one_over_the_limit(10_001, true)]
+fn flow_anchor_limit_error_comes_before_a_later_parse_error(
+    #[case] anchors: usize,
+    #[case] over_the_limit: bool,
+    #[values(true, false)] resolved: bool,
+) {
+    let items: String = (0..anchors)
+        .map(|i| ["&a", &i.to_string(), " x, "].concat())
+        .collect();
+    let input = format!("[{items}\x01]");
+    let builder = if resolved {
+        LoaderBuilder::new().resolved()
+    } else {
+        LoaderBuilder::new()
+    };
+    match (builder.build().load(&input), over_the_limit) {
+        (Err(LoadError::AnchorCountLimitExceeded { limit, pos }), true) => {
+            assert_eq!(limit, 10_000);
+            let last_anchor = input.find("&a10000 ").expect("the last anchor");
+            assert_eq!((pos.line, pos.column), (1, last_anchor));
+        }
+        (
+            Err(LoadError::Parse {
+                kind, pos, message, ..
+            }),
+            false,
+        ) => {
+            let error = parse_error_of(&input);
+            assert_eq!((kind, pos, message), (error.kind, error.pos, error.message));
+        }
+        (other, _) => panic!("unexpected result: {other:?}"),
+    }
+}
+
 /// `load` returns an error, never the documents that precede it.
 #[test]
 fn load_returns_no_documents_when_a_later_document_has_a_parse_error() {

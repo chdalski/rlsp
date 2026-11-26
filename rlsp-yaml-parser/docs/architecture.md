@@ -285,7 +285,7 @@ as a key so a valid key is never rejected.
 
 A key that starts with an alias or a flow collection is not seen by
 `peek_mapping_entry`, so it cannot go through `handle_mapping_entry`.  The alias
-arm (once it sees the `:`) and the end of `handle_flow_collection` (once the
+arm (once it sees the `:`) and the end of `read_flow_collection` (once the
 closing bracket is followed by `:`) call `settle_before_key()` instead: it closes
 a sequence at the mapping's column, emits the empty scalars of a bare `?` and of
 a key without a value, and tells the caller whether a block mapping must still be

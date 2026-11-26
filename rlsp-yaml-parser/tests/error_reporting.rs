@@ -18,7 +18,8 @@ use rstest::rstest;
 use rlsp_yaml_parser::loader::LoadError;
 use rlsp_yaml_parser::node::Node;
 use rlsp_yaml_parser::{
-    Error, ErrorKind, Event, LoaderBuilder, MAX_COMMENT_LEN, load, parse_events,
+    CollectionStyle, Error, ErrorKind, Event, LoaderBuilder, MAX_COLLECTION_DEPTH, MAX_COMMENT_LEN,
+    MAX_SCALAR_LEN, load, parse_events,
 };
 
 // ---------------------------------------------------------------------------
@@ -294,6 +295,8 @@ fn brief(input: &str) -> Vec<String> {
 #[case::alias_key_in_second_document("k: v\n---\n*a : # \x07\n")]
 #[case::flow_sequence_with_bad_comment("[a, b # \x01\n]\n")]
 #[case::nested_flow_sequence_with_bad_comment("[a, [b, c # \x01\n")]
+#[case::mismatched_flow_close("[a, b}\n")]
+#[case::text_after_a_closed_flow_sequence("[a] b\n")]
 fn error_is_the_last_item_and_the_stream_stays_ended(#[case] input: &str) {
     let mut iter = parse_events(input);
     let mut items = Vec::new();
@@ -397,8 +400,530 @@ fn error_is_the_last_item_and_the_stream_stays_ended(#[case] input: &str) {
         "Err InvalidCharacter 1:6",
     ],
 )]
+#[case::flow_sequence_with_bad_comment(
+    "[a, b # \x01\n]\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "SequenceStart Flow 0..0",
+        "Scalar a 1..2",
+        "Scalar b 4..5",
+        "Err InvalidCharacter 1:8",
+    ],
+)]
+#[case::nested_flow_sequence_with_bad_comment(
+    "[a, [b, c # \x01\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "SequenceStart Flow 0..0",
+        "Scalar a 1..2",
+        "SequenceStart Flow 4..4",
+        "Scalar b 5..6",
+        "Scalar c 8..9",
+        "Err InvalidCharacter 1:12",
+    ],
+)]
+#[case::flow_mapping_with_bad_comment(
+    "{a: 1, b: # \x01\n}\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "MappingStart Flow 0..0",
+        "Scalar a 1..2",
+        "Scalar 1 4..5",
+        "Scalar b 7..8",
+        "Err InvalidCharacter 1:12",
+    ],
+)]
+#[case::comment_inside_flow_sequence_before_an_error(
+    "[a, # c\n b, \x01]\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "SequenceStart Flow 0..0",
+        "Scalar a 1..2",
+        "Comment  c 4..7",
+        "Scalar b 9..10",
+        "Err Syntax 2:4",
+    ],
+)]
+#[case::unterminated_flow_sequence(
+    "[a, b",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "SequenceStart Flow 0..0",
+        "Scalar a 1..2",
+        "Scalar b 4..5",
+        "Err Syntax 1:5",
+    ],
+)]
+#[case::flow_sequence_in_block_mapping(
+    "k: [a, \x01]\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "MappingStart Block 0..0",
+        "Scalar k 0..1",
+        "SequenceStart Flow 3..3",
+        "Scalar a 4..5",
+        "Err Syntax 1:7",
+    ],
+)]
+#[case::extra_closing_bracket(
+    "[a, b]]\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "SequenceStart Flow 0..0",
+        "Scalar a 1..2",
+        "Scalar b 4..5",
+        "SequenceEnd 5..5",
+        "Err Syntax 1:6",
+    ],
+)]
+#[case::multiline_plain_scalar_before_bad_comment(
+    "[a\n b # \x01\n]\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "SequenceStart Flow 0..0",
+        "Scalar a b 1..5",
+        "Err InvalidCharacter 2:5",
+    ],
+)]
+#[case::alias_before_an_error(
+    "[*a, \x01]\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "SequenceStart Flow 0..0",
+        "Alias a 1..3",
+        "Err Syntax 1:5",
+    ],
+)]
+#[case::mismatched_close_in_sequence(
+    "[a, b}\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "SequenceStart Flow 0..0",
+        "Scalar a 1..2",
+        "Scalar b 4..5",
+        "Err Syntax 1:5",
+    ],
+)]
+#[case::mismatched_close_in_mapping(
+    "{a: 1]\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "MappingStart Flow 0..0",
+        "Scalar a 1..2",
+        "Scalar 1 4..5",
+        "Err Syntax 1:5",
+    ],
+)]
+#[case::mismatched_close_in_nested_mapping(
+    "[a, {b: c]\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "SequenceStart Flow 0..0",
+        "Scalar a 1..2",
+        "MappingStart Flow 4..4",
+        "Scalar b 5..6",
+        "Scalar c 8..9",
+        "Err Syntax 1:9",
+    ],
+)]
+#[case::unterminated_mapping_after_value(
+    "{a: 1, b",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "MappingStart Flow 0..0",
+        "Scalar a 1..2",
+        "Scalar 1 4..5",
+        "Scalar b 7..8",
+        "Err Syntax 1:8",
+    ],
+)]
+#[case::unterminated_mapping_key_without_value(
+    "{a",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "MappingStart Flow 0..0",
+        "Scalar a 1..2",
+        "Err Syntax 1:2",
+    ],
+)]
+#[case::text_after_closed_sequence(
+    "[a] b\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "SequenceStart Flow 0..0",
+        "Scalar a 1..2",
+        "SequenceEnd 2..2",
+        "Err Syntax 1:4",
+    ],
+)]
+#[case::comment_glued_to_closing_bracket(
+    "[a]# c\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "SequenceStart Flow 0..0",
+        "Scalar a 1..2",
+        "SequenceEnd 2..2",
+        "Err Syntax 1:3",
+    ],
+)]
+#[case::multiline_flow_key_has_no_block_mapping_start(
+    "[a,\n b]: v\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "SequenceStart Flow 0..0",
+        "Scalar a 1..2",
+        "Scalar b 5..6",
+        "SequenceEnd 6..6",
+        "Err Syntax 2:3",
+    ],
+)]
+#[case::document_marker_inside_flow(
+    "[a,\n---\n]\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "SequenceStart Flow 0..0",
+        "Scalar a 1..2",
+        "Err Syntax 2:0",
+    ],
+)]
+#[case::error_before_a_flow_key_opens_its_mapping(
+    "[x, \x01]: v\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "SequenceStart Flow 0..0",
+        "Scalar x 1..2",
+        "Err Syntax 1:4",
+    ],
+)]
+#[case::error_in_flow_after_block_entries(
+    "x: 1\nk: [a, \x01]\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "MappingStart Block 0..0",
+        "Scalar x 0..1",
+        "Scalar 1 3..4",
+        "Scalar k 5..6",
+        "SequenceStart Flow 8..8",
+        "Scalar a 9..10",
+        "Err Syntax 2:7",
+    ],
+)]
+#[case::error_in_flow_in_block_sequence(
+    "- [a, \x01]\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "SequenceStart Block 0..0",
+        "SequenceStart Flow 2..2",
+        "Scalar a 3..4",
+        "Err Syntax 1:6",
+    ],
+)]
+#[case::error_in_flow_nested_in_block_and_flow(
+    "k: {a: [b, \x01]}\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "MappingStart Block 0..0",
+        "Scalar k 0..1",
+        "MappingStart Flow 3..3",
+        "Scalar a 4..5",
+        "SequenceStart Flow 7..7",
+        "Scalar b 8..9",
+        "Err Syntax 1:11",
+    ],
+)]
+#[case::quoted_scalar_before_missing_comma(
+    "['a' 'b']\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "SequenceStart Flow 0..0",
+        "Scalar a 1..4",
+        "Err Syntax 1:5",
+    ],
+)]
+#[case::unterminated_quoted_after_quoted(
+    "[\"a\", \"b",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "SequenceStart Flow 0..0",
+        "Scalar a 1..4",
+        "Err Syntax 1:8",
+    ],
+)]
+#[case::alias_with_property(
+    "[b, &x *a]\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "SequenceStart Flow 0..0",
+        "Scalar b 1..2",
+        "Err Syntax 1:7",
+    ],
+)]
+#[case::pending_anchor_reaches_no_event(
+    "[a, &x \x01]\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "SequenceStart Flow 0..0",
+        "Scalar a 1..2",
+        "Err Syntax 1:7",
+    ],
+)]
 fn events_queued_before_an_error_come_before_it(#[case] input: &str, #[case] expected: &[&str]) {
     assert_eq!(brief(input), expected);
+}
+
+/// Like `brief`, without the spans of the mapping starts and ends and of empty
+/// scalars: those of a flow pair are inserted where the pair turns out to be
+/// one, and the cases that use this helper pin which events exist, not where
+/// they sit.
+fn brief_without_pair_spans(input: &str) -> Vec<String> {
+    brief(input)
+        .into_iter()
+        .map(|item| {
+            if item.starts_with("MappingStart")
+                || item.starts_with("MappingEnd")
+                || item.starts_with("Scalar  ")
+            {
+                item.rsplit_once(' ')
+                    .map_or_else(|| item.clone(), |(kind, _)| kind.to_owned())
+            } else {
+                item
+            }
+        })
+        .collect()
+}
+
+/// A pair of a flow sequence that an error interrupts keeps the events built
+/// until then: its mapping start appears once its `:` was read, and a `?` alone
+/// yields no event (YAML 1.2.2 [150] `ns-flow-pair`, [151]; the specification
+/// does not say which events precede an error).
+#[rstest]
+#[case::pair_then_error_in_the_next_entry(
+    "[a: 1, b # \x01\n",
+    &[
+        "SequenceStart Flow 0..0",
+        "MappingStart Flow",
+        "Scalar a 1..2",
+        "Scalar 1 4..5",
+        "MappingEnd",
+        "Scalar b 7..8",
+        "Err InvalidCharacter 1:11",
+    ],
+)]
+#[case::unfinished_implicit_pair_keeps_its_start(
+    "[a: 1 # \x01\n]\n",
+    &[
+        "SequenceStart Flow 0..0",
+        "MappingStart Flow",
+        "Scalar a 1..2",
+        "Scalar 1 4..5",
+        "Err InvalidCharacter 1:8",
+    ],
+)]
+#[case::implicit_pair_without_value(
+    "[a: # \x01\n]\n",
+    &[
+        "SequenceStart Flow 0..0",
+        "MappingStart Flow",
+        "Scalar a 1..2",
+        "Err InvalidCharacter 1:6",
+    ],
+)]
+#[case::explicit_key_alone_has_no_mapping_start(
+    "[? a # \x01\n]\n",
+    &["SequenceStart Flow 0..0", "Scalar a 3..4", "Err InvalidCharacter 1:7"],
+)]
+#[case::explicit_pair_finished_by_a_comma(
+    "[? a, \x01]\n",
+    &[
+        "SequenceStart Flow 0..0",
+        "MappingStart Flow",
+        "Scalar a 3..4",
+        "Scalar ",
+        "MappingEnd",
+        "Err Syntax 1:6",
+    ],
+)]
+fn flow_pair_events_before_an_error(#[case] input: &str, #[case] expected: &[&str]) {
+    let mut items = vec![
+        "StreamStart 0..0".to_owned(),
+        "DocumentStart 0..0".to_owned(),
+    ];
+    items.extend(expected.iter().map(|item| (*item).to_owned()));
+    assert_eq!(brief_without_pair_spans(input), items);
+}
+
+/// Nesting deeper than `MAX_COLLECTION_DEPTH` is an error after the events of
+/// the collections that still fit.
+#[rstest]
+#[case::at_the_limit(
+    MAX_COLLECTION_DEPTH,
+    "unterminated flow collection: unexpected end of input"
+)]
+#[case::one_over_the_limit(MAX_COLLECTION_DEPTH + 1, "collection nesting depth exceeds limit")]
+fn flow_depth_limit_comes_after_the_starts_before_it(#[case] depth: usize, #[case] message: &str) {
+    let input = "[".repeat(depth);
+    let items: Vec<_> = parse_events(&input).collect();
+    let starts = items
+        .iter()
+        .filter(|item| {
+            matches!(
+                item,
+                Ok((
+                    Event::SequenceStart {
+                        style: CollectionStyle::Flow,
+                        ..
+                    },
+                    _
+                ))
+            )
+        })
+        .count();
+    assert_eq!(starts, MAX_COLLECTION_DEPTH);
+    let Some(Err(error)) = items.last() else {
+        panic!(
+            "the stream should end with its error, got: {:?}",
+            items.last()
+        );
+    };
+    assert_eq!(error.kind, ErrorKind::Syntax);
+    assert_eq!(error.pos.line, 1);
+    assert_eq!(error.pos.column, MAX_COLLECTION_DEPTH);
+    assert_eq!(error.message, message);
+    assert_eq!(items.iter().filter(|item| item.is_err()).count(), 1);
+}
+
+/// The properties of a node come with its event, also when an error follows.
+#[test]
+fn properties_reach_the_events_before_an_error() {
+    let anchor_tag = |event: &Event<'_>| match event {
+        Event::SequenceStart { meta, .. } | Event::Scalar { meta, .. } => {
+            meta.as_ref().map(|meta| {
+                (
+                    meta.anchor.map(str::to_owned),
+                    meta.tag.as_deref().map(str::to_owned),
+                )
+            })
+        }
+        Event::StreamStart
+        | Event::StreamEnd
+        | Event::DocumentStart { .. }
+        | Event::DocumentEnd { .. }
+        | Event::MappingStart { .. }
+        | Event::MappingEnd
+        | Event::SequenceEnd
+        | Event::Alias { .. }
+        | Event::Comment { .. } => None,
+    };
+    let metas = |input: &str| -> Vec<_> {
+        parse_events(input)
+            .filter_map(Result::ok)
+            .filter_map(|(event, _)| anchor_tag(&event))
+            .collect()
+    };
+    let owned = |anchor: Option<&str>, tag: Option<&str>| {
+        (anchor.map(str::to_owned), tag.map(str::to_owned))
+    };
+    assert_eq!(
+        metas("&s !!seq [a, \x01]\n"),
+        [owned(Some("s"), Some("tag:yaml.org,2002:seq"))]
+    );
+    assert_eq!(
+        metas("[&x a, !!str b, \x01]\n"),
+        [
+            owned(Some("x"), None),
+            owned(None, Some("tag:yaml.org,2002:str"))
+        ]
+    );
+    assert_eq!(metas("k: &s [a, \x01]\n"), [owned(Some("s"), None)]);
+}
+
+/// Whatever the cut or the byte that breaks a flow collection, the stream holds
+/// at most one error, it is the last item, nothing follows it, and every span
+/// of the events before it lies on character boundaries inside the input.
+#[test]
+fn flow_collections_cut_or_broken_anywhere_end_in_one_last_error() {
+    let documents = [
+        "[a, \"b\", 'c', &x d, *x, [e, f], {g: h, ? i, j: [k]}, ? l: m, n: o, \u{e9}, \u{1F600}] # t\n",
+        "k: {p: [q, r]} # t\nj: [s, {t: u}]\n",
+    ];
+    let mut inputs = Vec::new();
+    for document in documents {
+        for (at, _) in document.char_indices() {
+            inputs.push(document[..at].to_owned());
+            inputs.push(format!("{}\x01{}", &document[..at], &document[at..]));
+        }
+    }
+    for input in &inputs {
+        let mut iter = parse_events(input);
+        let mut ended_with_error = false;
+        for item in iter.by_ref() {
+            let Ok((_, span)) = item else {
+                ended_with_error = true;
+                break;
+            };
+            assert!(
+                span.start <= span.end
+                    && span.end as usize <= input.len()
+                    && input.is_char_boundary(span.start as usize)
+                    && input.is_char_boundary(span.end as usize),
+                "bad span {span:?} for {input:?}"
+            );
+        }
+        if ended_with_error {
+            assert!(
+                iter.next().is_none(),
+                "an item follows the error of {input:?}"
+            );
+            assert!(
+                iter.next().is_none(),
+                "an item follows the error of {input:?}"
+            );
+        }
+    }
+}
+
+/// A plain scalar that goes over `MAX_SCALAR_LEN` on a continuation line is an
+/// error; the scalar before it keeps its span and its text.
+#[test]
+fn flow_scalar_over_the_limit_leaves_the_event_before_it_unchanged() {
+    let input = format!("[a\n {}", "b".repeat(MAX_SCALAR_LEN));
+    let items = brief(&input);
+    assert_eq!(
+        items,
+        [
+            "StreamStart 0..0",
+            "DocumentStart 0..0",
+            "SequenceStart Flow 0..0",
+            "Scalar a 1..2",
+            "Err Syntax 2:1",
+        ]
+    );
 }
 
 /// A comment longer than `MAX_COMMENT_LEN` is an error that ends the stream

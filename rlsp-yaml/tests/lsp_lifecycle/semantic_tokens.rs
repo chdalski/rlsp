@@ -76,6 +76,8 @@ async fn block_scalar_header_has_an_operator_token_over_the_server(
 #[rstest]
 #[case::ascii("# c\n%YAML 1.2\n%YAML 1.2\n---\n", json!([0, 0, 3, 6, 0]))]
 #[case::two_utf16_units_per_emoji("# \u{1F600}\n%YAML 1.2\n%YAML 1.2\n---\n", json!([0, 0, 4, 6, 0]))]
+#[case::flow_sequence("[a, # c\n b, \x01]\n", json!([0, 4, 3, 6, 0]))]
+#[case::flow_sequence_after_an_emoji("[\u{1F600}, # c\n b, \x01]\n", json!([0, 5, 3, 6, 0]))]
 #[tokio::test]
 async fn comment_before_a_parse_error_has_a_token_over_the_server(
     #[case] text: &str,
