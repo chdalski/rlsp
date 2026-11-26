@@ -29,6 +29,7 @@ share a parent line with one sub-item each.
 
 ## Bugs
 
+- In a flow plain scalar, a `:` before a character that is no `ns-char` (a control byte, the BOM, U+0080 to U+009F) counts as content: `[a:\u0001b]` yields the scalar `a:` before its error, where [130] `ns-plain-char` allows `:` only before `ns-plain-safe` (`scan_plain_line_flow`, `rlsp-yaml-parser/src/lexer/plain.rs`); an error follows in every such case; pre-existing (same at df8af7ee); parser robustness plan Task 6 test review, for the parser conformance plan.
 - The spans of `DocumentEnd` and `StreamEnd` stand before the final line break after a flow line that ends in a comment or a quoted item: `["a", "b"] # c\n` (15 bytes) gives 14..14, `[a] # c\n` gives 7..7, `["a"]\n` gives 5..5, while `[a]\n` gives 4..4 (`rlsp-yaml-parser`, the position after a synthetic rest line); pre-existing (same at a3fea6bb); parser robustness plan Task 5 review.
 - After a comment line, the parser strips the BOM of the same line twice, because `step_between_docs` re-enters `consume_preamble_between_docs` after each comment and `signal_document_boundary` strips one BOM per call: `# c\n\uFEFF\uFEFFk: v\n` loads (key at 10..11), and `# c\n\uFEFF\uFEFF\n` and `# c\n\uFEFF\uFEFF\nk: v\n` are accepted, while `\uFEFF\uFEFF\n` without the comment is an error; a flag that a line was already stripped would make all three errors; pre-existing (checked at 75aa3d46); parser robustness plan Task 1 review, for the parser conformance plan.
 - `  \uFEFFk: v\n` loads with the key `\uFEFFk`, though [27] `nb-char` excludes the BOM from plain scalars; pre-existing; parser robustness plan Task 1 test review, for the parser conformance plan.
@@ -190,6 +191,7 @@ share a parent line with one sub-item each.
 
 ## Documentation
 
+- The doc comment of `scan_plain_line_flow` (`rlsp-yaml-parser/src/lexer/plain.rs`) says the function is `pub(crate)` and called from `lib.rs`; it is `pub` and called from `event_iter/flow.rs`; pre-existing; parser robustness plan Task 6 review.
 - The doc comment of `decode_and_push_escape` (`rlsp-yaml-parser/src/lexer/quoted.rs`) opens with a sentence that describes `scan_double_quoted_line`; pre-existing; parser robustness plan Task 3 review.
 - `configuration.md` diagnostic-code table misses emitted codes (`schemaAdditionalProperties` and others); user queued it.
 - The doc comment on `consume_leading_comments` in `loader/stream.rs` still says block-level and own-line only, which no longer holds for `- # c`, `--- # c`, and the document-level callers; comment plan Task 5 review.

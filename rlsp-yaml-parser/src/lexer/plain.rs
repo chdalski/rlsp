@@ -504,67 +504,47 @@ pub fn scan_plain_line_flow(content: &str) -> &str {
     let mut committed_end: usize = 0;
     let mut prev_was_ws = false;
 
+    // One pass over the bytes of the scalar itself: the scan ends at the
+    // first flow indicator, so its cost depends on the scalar's length and
+    // not on the rest of the line.
     while pos < len {
-        // Use memchr2 to jump ahead to the next `:` or `#`. Flow indicators
-        // (`,`, `[`, `]`, `{`, `}`) are checked byte-by-byte in the segment
-        // loop since they're simple ASCII terminators.
-        let candidate =
-            memchr2(b':', b'#', bytes.get(pos..).unwrap_or_default()).map(|off| pos + off);
-
-        let end = candidate.unwrap_or(len);
-        while pos < end {
-            let Some(&b) = bytes.get(pos) else { break };
-            if b >= 0x80 {
-                let Some(ch) = content.get(pos..).and_then(|s| s.chars().next()) else {
-                    break;
-                };
-                let ch_len = ch.len_utf8();
-                if !ns_plain_safe_block(ch) {
-                    return &content[..committed_end];
-                }
-                committed_end = pos + ch_len;
-                prev_was_ws = false;
-                pos += ch_len;
-            } else {
-                match b {
-                    b' ' | b'\t' => {
-                        prev_was_ws = true;
-                        pos += 1;
-                    }
-                    // Flow indicators, line breaks, NUL, control bytes, and DEL
-                    // all terminate the plain scalar.
-                    b',' | b'[' | b']' | b'{' | b'}' | 0x00..=0x1F | 0x7F => {
-                        return &content[..committed_end];
-                    }
-                    _ => {
-                        committed_end = pos + 1;
-                        prev_was_ws = false;
-                        pos += 1;
-                    }
-                }
-            }
-        }
-
-        let Some(hit) = candidate else { break };
-        let Some(&b) = bytes.get(hit) else { break };
-        if b == b'#' {
-            if prev_was_ws {
+        let Some(&b) = bytes.get(pos) else { break };
+        if b >= 0x80 {
+            // `pos` is on a char boundary: ASCII advances by 1, non-ASCII by
+            // `ch.len_utf8()`.
+            let Some(ch) = content.get(pos..).and_then(|s| s.chars().next()) else {
+                break;
+            };
+            if !ns_plain_safe_block(ch) {
                 break;
             }
-        } else {
-            // b == b':'
-            // In flow context, `:` terminates when followed by space, tab,
-            // flow indicator, or end-of-content.
-            match bytes.get(hit + 1).copied() {
-                None | Some(b' ' | b'\t' | b',' | b'[' | b']' | b'{' | b'}') => break,
-                // Non-ASCII next char: ns_plain_safe_block is true for all
-                // valid non-ASCII ns-chars, so `:` is content — fall through.
-                Some(_) => {}
+            pos += ch.len_utf8();
+            committed_end = pos;
+            prev_was_ws = false;
+            continue;
+        }
+        match b {
+            b' ' | b'\t' => prev_was_ws = true,
+            // Flow indicators, line breaks, NUL, control bytes, and DEL
+            // all terminate the plain scalar.
+            b',' | b'[' | b']' | b'{' | b'}' | 0x00..=0x1F | 0x7F => break,
+            // `#` after whitespace starts a comment.
+            b'#' if prev_was_ws => break,
+            // `:` terminates when followed by space, tab, flow indicator, or
+            // end-of-content; any other next character makes it content.
+            b':' if matches!(
+                bytes.get(pos + 1).copied(),
+                None | Some(b' ' | b'\t' | b',' | b'[' | b']' | b'{' | b'}')
+            ) =>
+            {
+                break;
+            }
+            _ => {
+                committed_end = pos + 1;
+                prev_was_ws = false;
             }
         }
-        committed_end = hit + 1;
-        prev_was_ws = false;
-        pos = hit + 1;
+        pos += 1;
     }
 
     &content[..committed_end]
@@ -666,6 +646,20 @@ mod tests {
     #[case::nul_mid_scalar_terminates("hello\0world", "hello")]
     #[case::bom_mid_scalar_terminates("hello\u{FEFF}world", "hello")]
     #[case::mixed_ascii_cjk_no_terminator("abc中文", "abc中文")]
+    #[case::cjk_before_flow_indicator_ends_at_the_indicator("日本語]rest", "日本語")]
+    #[case::colon_after_two_byte_char_is_content("é:b", "é:b")]
+    #[case::colon_space_after_two_byte_char_terminates("é: b", "é")]
+    #[case::colon_at_end_after_two_byte_char_terminates("é:", "é")]
+    #[case::colon_before_two_byte_char_is_content("a:é", "a:é")]
+    #[case::colon_before_four_byte_char_is_content("a:😀", "a:😀")]
+    #[case::colon_at_start_before_cjk_is_content(":日", ":日")]
+    #[case::colon_at_end_after_cjk_terminates("日:", "日")]
+    #[case::hash_between_cjk_is_content("日#本", "日#本")]
+    #[case::hash_after_space_after_cjk_starts_comment("日 #本", "日")]
+    #[case::hash_before_cjk_is_content("a#日", "a#日")]
+    #[case::flow_indicator_after_colon_and_multibyte_ends_there("a:é]", "a:é")]
+    #[case::comma_after_multibyte_hides_a_later_colon("é,:", "é")]
+    #[case::colon_before_nel_is_content("a:\u{85}b", "a:\u{85}b")]
     fn scan_plain_line_flow_multibyte_cases(#[case] input: &str, #[case] expected: &str) {
         assert_eq!(scan_plain_line_flow(input), expected);
     }
@@ -690,13 +684,6 @@ mod tests {
         let result = scan_fn(input);
         assert_eq!(result, expected);
         let _ = result.chars().count(); // must not panic (valid UTF-8 boundary)
-    }
-
-    #[test]
-    fn flow_slice_valid_utf8_after_flow_indicator() {
-        let result = scan_plain_line_flow("日本語]rest");
-        assert_eq!(result, "日本語");
-        assert_eq!(result.chars().count(), 3);
     }
 
     // -----------------------------------------------------------------------
@@ -1019,8 +1006,163 @@ mod tests {
     #[case::colon_at_eol_terminates("key:", "key")]
     #[case::colon_followed_by_alnum_is_content("a:b", "a:b")]
     #[case::trailing_whitespace_excluded("abc   ", "abc")]
+    #[case::lone_colon_terminates(":", "")]
+    #[case::colon_at_start_before_safe_char_is_content(":a", ":a")]
+    #[case::colon_space_at_start_terminates(": a", "")]
+    #[case::double_colon_at_end_keeps_the_first("::", ":")]
+    #[case::double_colon_between_chars_is_content("a::b", "a::b")]
+    #[case::triple_colon_at_end_keeps_the_first_two("a:::", "a::")]
+    #[case::trailing_colon_after_colon_content_terminates("a:b:", "a:b")]
+    #[case::colon_tab_terminates("a:\tb", "a")]
+    #[case::colon_after_space_before_safe_char_is_content("a :b", "a :b")]
+    #[case::space_colon_space_terminates("a : b", "a")]
+    #[case::colon_comma_terminates("a:,b", "a")]
+    #[case::colon_open_bracket_terminates("a:[b", "a")]
+    #[case::colon_close_bracket_terminates("a:]b", "a")]
+    #[case::colon_open_brace_terminates("a:{b", "a")]
+    #[case::colon_hash_at_start_is_content(":#", ":#")]
+    #[case::colon_hash_inside_is_content("a:#b", "a:#b")]
+    #[case::hash_colon_inside_is_content("a#:b", "a#:b")]
+    #[case::hash_colon_at_end_keeps_the_hash("a#:", "a#")]
+    #[case::hash_colon_space_keeps_the_hash("a#: b", "a#")]
+    #[case::hash_colon_at_start_keeps_the_hash("#:", "#")]
+    #[case::comment_after_space_hides_a_colon("a #:", "a")]
+    #[case::hash_after_tab_starts_comment("a\t#c", "a")]
+    #[case::hash_after_space_and_tab_starts_comment("a \t#", "a")]
+    #[case::lone_hash_after_space_starts_comment("a #", "a")]
+    #[case::trailing_hash_is_content("a#", "a#")]
+    #[case::double_hash_is_content("a##", "a##")]
+    #[case::hash_after_inner_space_text_is_content("a b#c", "a b#c")]
+    #[case::second_hash_in_a_comment_is_not_scanned("a #b#c", "a")]
+    #[case::hash_after_leading_space_starts_comment(" #x", "")]
+    #[case::hash_after_leading_tab_starts_comment("\t#x", "")]
+    #[case::trailing_space_and_tab_excluded("a  \t ", "a")]
+    #[case::comma_hides_a_later_colon("ab,c:d", "ab")]
+    #[case::close_bracket_hides_a_later_hash("ab]cd#e", "ab")]
+    #[case::comment_hides_a_later_comma("a #b,c", "a")]
+    #[case::control_byte_hides_a_later_colon("a\u{1}:b", "a")]
+    #[case::line_break_hides_a_later_colon("a\n:b", "a")]
     fn scan_plain_line_flow_cases(#[case] input: &str, #[case] expected: &str) {
         assert_eq!(scan_plain_line_flow(input), expected);
+    }
+
+    // -----------------------------------------------------------------------
+    // Group SPF-D: scan_plain_line_flow against the scan that searched the rest
+    // of the line with memchr2 for each scalar
+    // -----------------------------------------------------------------------
+
+    /// The scan before it handled `:` and `#` in its byte loop: a verbatim
+    /// copy that shows the new scan ends every scalar where this one did.
+    fn scan_plain_line_flow_reference(content: &str) -> &str {
+        let bytes = content.as_bytes();
+        let len = bytes.len();
+        let mut pos = 0;
+        let mut committed_end: usize = 0;
+        let mut prev_was_ws = false;
+
+        while pos < len {
+            // Use memchr2 to jump ahead to the next `:` or `#`. Flow indicators
+            // (`,`, `[`, `]`, `{`, `}`) are checked byte-by-byte in the segment
+            // loop since they're simple ASCII terminators.
+            let candidate =
+                memchr2(b':', b'#', bytes.get(pos..).unwrap_or_default()).map(|off| pos + off);
+
+            let end = candidate.unwrap_or(len);
+            while pos < end {
+                let Some(&b) = bytes.get(pos) else { break };
+                if b >= 0x80 {
+                    let Some(ch) = content.get(pos..).and_then(|s| s.chars().next()) else {
+                        break;
+                    };
+                    let ch_len = ch.len_utf8();
+                    if !ns_plain_safe_block(ch) {
+                        return &content[..committed_end];
+                    }
+                    committed_end = pos + ch_len;
+                    prev_was_ws = false;
+                    pos += ch_len;
+                } else {
+                    match b {
+                        b' ' | b'\t' => {
+                            prev_was_ws = true;
+                            pos += 1;
+                        }
+                        // Flow indicators, line breaks, NUL, control bytes, and DEL
+                        // all terminate the plain scalar.
+                        b',' | b'[' | b']' | b'{' | b'}' | 0x00..=0x1F | 0x7F => {
+                            return &content[..committed_end];
+                        }
+                        _ => {
+                            committed_end = pos + 1;
+                            prev_was_ws = false;
+                            pos += 1;
+                        }
+                    }
+                }
+            }
+
+            let Some(hit) = candidate else { break };
+            let Some(&b) = bytes.get(hit) else { break };
+            if b == b'#' {
+                if prev_was_ws {
+                    break;
+                }
+            } else {
+                // b == b':'
+                // In flow context, `:` terminates when followed by space, tab,
+                // flow indicator, or end-of-content.
+                match bytes.get(hit + 1).copied() {
+                    None | Some(b' ' | b'\t' | b',' | b'[' | b']' | b'{' | b'}') => break,
+                    // Non-ASCII next char: ns_plain_safe_block is true for all
+                    // valid non-ASCII ns-chars, so `:` is content — fall through.
+                    Some(_) => {}
+                }
+            }
+            committed_end = hit + 1;
+            prev_was_ws = false;
+            pos = hit + 1;
+        }
+
+        &content[..committed_end]
+    }
+
+    /// Every string of up to `max_len` characters over `alphabet`.
+    fn all_strings(alphabet: &[char], max_len: usize) -> Vec<String> {
+        let mut all = vec![String::new()];
+        let mut layer = vec![String::new()];
+        for _ in 0..max_len {
+            layer = layer
+                .iter()
+                .flat_map(|prefix| {
+                    alphabet.iter().map(move |ch| {
+                        let mut next = prefix.clone();
+                        next.push(*ch);
+                        next
+                    })
+                })
+                .collect();
+            all.extend(layer.iter().cloned());
+        }
+        all
+    }
+
+    #[rstest]
+    #[case::ascii_alphabet_up_to_length_seven(&['a', ' ', '\t', ':', '#', ',', 'é', '\u{1}'], 7)]
+    #[case::wide_alphabet_up_to_length_four(
+        &['a', ' ', '\t', ':', '#', ',', '[', ']', '{', '}', 'é', '日', '😀', '\u{1}', '\u{85}', '\u{FEFF}', '\n'],
+        4
+    )]
+    fn scan_plain_line_flow_ends_where_the_memchr2_scan_did(
+        #[case] alphabet: &[char],
+        #[case] max_len: usize,
+    ) {
+        for input in all_strings(alphabet, max_len) {
+            assert_eq!(
+                scan_plain_line_flow(&input),
+                scan_plain_line_flow_reference(&input),
+                "input: {input:?}"
+            );
+        }
     }
 
     // -----------------------------------------------------------------------

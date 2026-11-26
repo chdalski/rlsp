@@ -1543,8 +1543,84 @@ fn scalar_count_within_budget(input: &str) -> usize {
     format!("{{{}}}", (0..100_000).map(|n| format!("k{n}: v{n}")).collect::<Vec<_>>().join(", ")),
     200_000
 )]
+#[case::plain_items(plain_items_line(200_000, |n| format!("item{n}")), 200_000)]
 fn many_items_on_one_flow_line_are_linear(#[case] input: String, #[case] scalars: usize) {
     assert_eq!(scalar_count_within_budget(&input), scalars);
+}
+
+/// The content events of `input` in a compact form: `[`, `]`, `{`, `}`,
+/// `'value'` for a scalar, `#text` for a comment; `None` on a parse error.
+fn compact_events(input: &str) -> Option<String> {
+    let mut parts = Vec::new();
+    for item in parse_events(input) {
+        match item.ok()?.0 {
+            Event::SequenceStart { .. } => parts.push("[".to_owned()),
+            Event::SequenceEnd => parts.push("]".to_owned()),
+            Event::MappingStart { .. } => parts.push("{".to_owned()),
+            Event::MappingEnd => parts.push("}".to_owned()),
+            Event::Scalar { value, .. } => parts.push(format!("'{value}'")),
+            Event::Comment { text } => parts.push(format!("#{text}")),
+            Event::StreamStart
+            | Event::StreamEnd
+            | Event::Alias { .. }
+            | Event::DocumentStart { .. }
+            | Event::DocumentEnd { .. } => {}
+        }
+    }
+    Some(parts.join(" "))
+}
+
+#[rstest]
+#[case::colon_before_a_safe_char_is_content("[a:b, c]", "[ 'a:b' 'c' ]")]
+#[case::colon_space_ends_a_key("[a: b, c]", "[ { 'a' 'b' } 'c' ]")]
+#[case::comment_after_a_space_ends_the_scalar("[a #c\n]", "[ 'a' #c ]")]
+#[case::comment_after_a_tab_ends_the_scalar("[a\t#c\n]", "[ 'a' #c ]")]
+#[case::hash_without_a_space_is_content("[a#b, c]", "[ 'a#b' 'c' ]")]
+#[case::colon_in_a_value_is_content("{a: b:c}", "{ 'a' 'b:c' }")]
+#[case::url_is_one_scalar("[http://x.y, z]", "[ 'http://x.y' 'z' ]")]
+#[case::colon_after_a_space_is_content("[a :b]", "[ 'a :b' ]")]
+#[case::colon_before_a_comma_ends_a_key("[a:, b]", "[ { 'a' '' } 'b' ]")]
+#[case::colon_before_the_close_ends_a_key("[a:b:]", "[ { 'a:b' '' } ]")]
+#[case::double_colon_is_content("[a::b]", "[ 'a::b' ]")]
+#[case::hash_after_a_colon_is_content("[a:#b]", "[ 'a:#b' ]")]
+#[case::colon_tab_ends_a_key("[a:\tb]", "[ { 'a' 'b' } ]")]
+#[case::colon_after_a_multi_byte_char_is_content("[é:b, c]", "[ 'é:b' 'c' ]")]
+#[case::comment_after_a_value_in_a_mapping("{a: b #c\n}", "{ 'a' 'b' #c }")]
+#[case::continuation_line_with_a_colon_is_content("[a\n b:c, d]", "[ 'a b:c' 'd' ]")]
+#[case::continuation_line_with_a_hash_is_content("[a\n b#c]", "[ 'a b#c' ]")]
+#[case::continuation_line_starting_with_a_colon_is_content("[a\n :b]", "[ 'a :b' ]")]
+#[case::continuation_line_with_a_colon_space_ends_a_key("[a\n b: c]", "[ { 'a b' 'c' } ]")]
+fn a_plain_scalar_in_a_flow_collection_ends_where_the_specification_says(
+    #[case] input: &str,
+    #[case] expected: &str,
+) {
+    assert_eq!(compact_events(input).as_deref(), Some(expected));
+}
+
+#[test]
+fn a_comment_line_ends_a_multi_line_flow_plain_scalar() {
+    assert_eq!(compact_events("[a\n #c\n b]"), None);
+}
+
+/// A flow sequence of `count` plain items made by `item`, on one line.
+fn plain_items_line(count: usize, item: impl Fn(usize) -> String) -> String {
+    format!("[{}]", (0..count).map(item).collect::<Vec<_>>().join(", "))
+}
+
+#[test]
+fn many_plain_items_on_one_flow_line_are_linear_for_the_loader() {
+    let input = plain_items_line(200_000, |n| format!("item{n}"));
+    let start = Instant::now();
+    let documents = load(&input).unwrap();
+    let elapsed = start.elapsed();
+    assert!(elapsed < FLOW_LINE_BUDGET, "took {elapsed:?}");
+    let [document] = documents.as_slice() else {
+        panic!("expected one document, got {}", documents.len());
+    };
+    let Node::Sequence { items, .. } = &document.root else {
+        panic!("expected a sequence, got {:?}", document.root);
+    };
+    assert_eq!(items.len(), 200_000);
 }
 
 #[test]

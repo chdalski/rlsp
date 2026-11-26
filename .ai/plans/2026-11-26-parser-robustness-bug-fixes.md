@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** NotStarted
+**Status:** InProgress
 **Created:** 2026-11-26
 
 # Parser Robustness Bug Fixes
@@ -45,7 +45,7 @@ where they arise.
 - [x] Task 3: A double-quoted scalar of escapes is scanned in linear time
 - [x] Task 4: `LineIndex::line_column` answers in bounded time on a long line
 - [x] Task 5: A long flow line is tokenized with a running column
-- [ ] Task 6: A plain scalar in a flow collection is scanned to its own end
+- [x] Task 6: A plain scalar in a flow collection is scanned to its own end
 - [ ] Task 7: The "Delete unused anchor" quick fix reads only the blanks before its anchor
 - [ ] Task 8: A single pair in a flow sequence spans its key and its value
 - [ ] Task 9: Alias expansion keeps to the nesting depth limit
@@ -203,10 +203,10 @@ for each plain scalar, though its byte loop stops at the first flow indicator, s
 one line cost time with the square of n. The scan handles `:` and `#` where it meets them. The
 task keeps the scalar ends of YAML 1.2.2 §7.3.3 (plain style) in flow context.
 
-- [ ] A time test: `parse_events` on `[item0, item1, …]` with 200 000 plain items on one line
+- [x] A time test: `parse_events` on `[item0, item1, …]` with 200 000 plain items on one line
       ends within the bound
-- [ ] A time test: `load` of the same input ends within the bound (it rests on Tasks 4 and 5)
-- [ ] Plain scalars in flow collections end where they end before this task: `[a:b, c]`,
+- [x] A time test: `load` of the same input ends within the bound (it rests on Tasks 4 and 5)
+- [x] Plain scalars in flow collections end where they end before this task: `[a:b, c]`,
       `[a: b, c]`, `[a #c\n]`, `[a#b, c]`, `{a: b:c}`, `[http://x.y, z]`, and `[a :b]` yield the
       same events, and the yaml-test-suite runs for events and for the loader pass
 
