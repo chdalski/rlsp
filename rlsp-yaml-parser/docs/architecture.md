@@ -195,14 +195,17 @@ It owns the `Lexer` and all parser state. `parse_events(input)` constructs an
 | `BeforeStream` | Initial state; emits `StreamStart` and transitions to `BetweenDocs` |
 | `BetweenDocs` | Between documents: consumes blank lines, comments, and directives; detects `---` or bare content |
 | `InDocument` | Inside a document: consumes lines until a boundary marker or EOF |
-| `Done` | Terminal state after `StreamEnd` or a fatal error |
+| `Done` | Terminal state after `StreamEnd` or a fatal error (the error itself may still be waiting for the queue to drain) |
 
 `Iterator::next` is a tight loop:
 
 1. Drain the event queue (`VecDeque<(Event, Span)>`) if non-empty.
-2. Call the appropriate step function for the current state.
-3. If the step returns `StepResult::Continue`, loop; if it returns
-   `StepResult::Yield(result)`, return `result`.
+2. Return the held error, if there is one (see below).
+3. Call the appropriate step function for the current state.
+4. If the step returns `StepResult::Continue`, loop; if it returns
+   `StepResult::Yield(Ok(event))`, return `event`.  A
+   `StepResult::Yield(Err(error))` ends the stream: `next` holds the error in
+   `pending_error`, sets the state to `Done`, and loops.
 
 The queue exists because a single parse step can produce multiple consecutive
 events — for example, opening a sequence emits `SequenceStart` before the

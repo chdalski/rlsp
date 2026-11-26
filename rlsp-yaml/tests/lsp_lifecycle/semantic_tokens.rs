@@ -70,3 +70,32 @@ async fn block_scalar_header_has_an_operator_token_over_the_server(
     // Token types: property = 0, string = 1, operator = 7 (the legend's order).
     assert_eq!(result["data"], expected);
 }
+
+/// A comment before a parse error keeps its token: the parser emits the events
+/// it recognized before the error.  The length is in UTF-16 units.
+#[rstest]
+#[case::ascii("# c\n%YAML 1.2\n%YAML 1.2\n---\n", json!([0, 0, 3, 6, 0]))]
+#[case::two_utf16_units_per_emoji("# \u{1F600}\n%YAML 1.2\n%YAML 1.2\n---\n", json!([0, 0, 4, 6, 0]))]
+#[tokio::test]
+async fn comment_before_a_parse_error_has_a_token_over_the_server(
+    #[case] text: &str,
+    #[case] expected: serde_json::Value,
+) {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/comment-before-error-tokens.yaml";
+    send(&mut service, did_open_notification(uri, text)).await;
+
+    let resp = send(&mut service, semantic_tokens_request(2, uri)).await;
+    let resp = resp.expect("semanticTokens/full should return a response");
+    let result = resp
+        .result()
+        .expect("semanticTokens/full should have result");
+
+    // Token type: comment = 6 (the legend's order).
+    assert_eq!(result["data"], expected);
+}

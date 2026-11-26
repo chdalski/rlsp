@@ -15,7 +15,7 @@ use rstest::rstest;
 use rlsp_yaml_parser::encoding::decode;
 use rlsp_yaml_parser::loader::{LoadError, LoaderBuilder};
 use rlsp_yaml_parser::node::Node;
-use rlsp_yaml_parser::{ErrorKind, Span};
+use rlsp_yaml_parser::{ErrorKind, Event, Span};
 use rlsp_yaml_parser::{load, parse_events};
 
 // ===========================================================================
@@ -1261,4 +1261,66 @@ fn nested_explicit_key_state_does_not_reach_the_next_document() {
             .collect();
         assert_eq!(keys, second_document_keys, "{input:?}");
     }
+}
+
+/// Guard, not a test of the fix: a dedent that closes hundreds of collections,
+/// followed by an error on the line it ends at: every end event comes before the error, which is the last
+/// item, and a load on a small stack returns it as a parse error.
+#[test]
+fn many_end_events_before_an_error_come_before_it() {
+    let depth = 200;
+    let input = format!("{}a\nk: # \x07\n", "- ".repeat(depth));
+    let (ends, last_is_error, after_error, load_result) = on_stack(TWO_MIB, move || {
+        let mut iter = parse_events(&input);
+        let mut ends = 0;
+        let mut last_is_error = false;
+        for item in iter.by_ref() {
+            match item {
+                Ok((Event::SequenceEnd, _)) => ends += 1,
+                Ok(_) => {}
+                Err(_) => {
+                    last_is_error = true;
+                    break;
+                }
+            }
+        }
+        let after_error = iter.next().is_some();
+        (
+            ends,
+            last_is_error,
+            after_error,
+            load(&input).map(|docs| docs.len()),
+        )
+    });
+    // The key at column 0 closes the sequences indented past it; the first
+    // sequence starts at column 0 and stays open.
+    assert_eq!(ends, depth - 1);
+    assert!(last_is_error);
+    assert!(!after_error, "nothing follows the error");
+    assert!(
+        matches!(load_result, Err(LoadError::Parse { .. })),
+        "{load_result:?}"
+    );
+}
+
+/// Guard, not a test of the fix: an alias bomb followed by a parse error: `load` ends with an error and
+/// does not expand more than its limit.
+#[test]
+fn alias_expansion_limit_still_holds_before_a_later_parse_error() {
+    let input = "\
+a: &a x
+b: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a]
+c: &c [*b, *b, *b, *b, *b, *b, *b, *b, *b, *b]
+d: &d [*c, *c, *c, *c, *c, *c, *c, *c, *c, *c]
+e: # \x07
+";
+    let result = LoaderBuilder::new()
+        .resolved()
+        .max_expanded_nodes(500)
+        .build()
+        .load(input);
+    assert!(
+        matches!(result, Err(LoadError::AliasExpansionLimitExceeded { .. })),
+        "{result:?}"
+    );
 }

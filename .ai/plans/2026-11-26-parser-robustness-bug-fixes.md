@@ -20,8 +20,8 @@ where they arise.
   root `CLAUDE.md`. Every task ends with build, tests, `cargo clippy --all-targets`, and fmt
   passing.
 - In the inputs of this plan, `\n`, `\r`, and `\t` stand for a line break, a carriage return, and
-  a tab, `\uFEFF` for the byte order mark (BOM), and `\x07` for the byte 0x07; every other
-  backslash is a backslash of the text. Spans are byte offsets `start..end`.
+  a tab, `\uFEFF` for the byte order mark (BOM), and `\x01` and `\x07` for the bytes 0x01 and 0x07;
+  every other backslash is a backslash of the text. Spans are byte offsets `start..end`.
 - The YAML 1.2.2 specification (root `CLAUDE.md` References) decides parser behavior; each task
   names the sections or productions it rests on.
 - `rlsp-yaml` loads every document in `LoadMode::Lossless` (`rlsp-yaml/src/parser.rs`), which keeps
@@ -40,7 +40,8 @@ where they arise.
 - [x] Clarify scope with the user
 - [x] Design review of the approach
 - [x] Task 1: A line that holds only a BOM is skipped between documents
-- [ ] Task 2: The events recognized before an error come before it
+- [x] Task 2: The events recognized before an error come before it
+- [ ] Task 10: The events of a flow collection come before an error inside it
 - [ ] Task 3: A double-quoted scalar of escapes is scanned in linear time
 - [ ] Task 4: `LineIndex::line_column` answers in bounded time on a long line
 - [ ] Task 5: A long flow line is tokenized with a running column
@@ -83,25 +84,65 @@ error is held until the queue is empty and then ends the stream. The inputs rest
 §6.6 (comments), §6.8.1 (the `%YAML` directive), and §7.1 (alias nodes); the specification does
 not say which events precede an error.
 
-- [ ] `parse_events` on `*a : # \x07\n` yields the block mapping start at 0..0, the alias `a` at
+- [x] `parse_events` on `*a : # \x07\n` yields the block mapping start at 0..0, the alias `a` at
       0..2, and then the error at line 1, column 7
-- [ ] `[x] : # \x07\n` yields the block mapping start, the flow sequence start at 0..0, the scalar
+- [x] `[x] : # \x07\n` yields the block mapping start, the flow sequence start at 0..0, the scalar
       `x` at 1..2, the sequence end at 2..2, and then the error at line 1, column 8;
       `{x: 1} : # \x07\n` yields the block mapping start, the flow mapping with `x` and `1`, and
       then the error
-- [ ] `# c\n%YAML 1.2\n%YAML 1.2\n---\n` yields the comment ` c` and then the error
-- [ ] The error is the last item of every stream, with the kind and the position it has before
+- [x] `# c\n%YAML 1.2\n%YAML 1.2\n---\n` yields the comment ` c` and then the error
+- [x] The error is the last item of every stream, with the kind and the position it has before
       this task; `- a # \x01\n- b # ok\n` ends with its error and holds no event of the second item
-- [ ] Every existing test passes with its assertions unchanged, except a test that asserts an
+- [x] Every existing test passes with its assertions unchanged, except a test that asserts an
       event queued before an error is missing; the review request names each such test and its
       new assertion
-- [ ] `load` in `LoadMode::Lossless` returns the same error as before this task for each of these
-      inputs
-- [ ] `docs/architecture.md` says, where it describes the event queue, that an error waits until
+- [x] `load` with the default options in `LoadMode::Lossless` returns the same error as before
+      this task for each of these inputs
+- [x] `docs/architecture.md` says, where it describes the event queue, that an error waits until
       the queue is empty, and `rlsp-yaml/docs/feature-log.md` records that comments before a parse
       error keep their highlighting
-- [ ] Through the server, the semantic tokens of `# c\n%YAML 1.2\n%YAML 1.2\n---\n` hold the
+- [x] Through the server, the semantic tokens of `# c\n%YAML 1.2\n%YAML 1.2\n---\n` hold the
       comment token of `# c` (`rlsp-yaml/tests/lsp_lifecycle/semantic_tokens.rs`)
+
+### Task 10: The events of a flow collection come before an error inside it
+
+This task runs after Task 2. `handle_flow_collection` (`src/event_iter/flow.rs`) collects its
+events in a local list and hands them to the queue only at its end, so every error return drops
+them: `[a, b # \x01\n]\n` yields its error without the sequence. The events read before the error
+reach the queue on every return, through one wrapper around the function's body. The inputs are
+the flow collections of YAML 1.2.2 §7.4; the specification does not say which events precede an
+error. Events are listed after the stream start and the document start.
+
+- [ ] `parse_events` on `[a, b # \x01\n]\n` yields the flow sequence start at 0..0, `a` at 1..2,
+      `b` at 4..5, and then the error at line 1, column 8
+- [ ] `[a, [b, c # \x01\n` yields the sequence start at 0..0, `a` at 1..2, the sequence start at
+      4..4, `b` at 5..6, `c` at 8..9, and then the error at line 1, column 12;
+      `{a: 1, b: # \x01\n}\n` yields the flow mapping start at 0..0, `a` at 1..2, `1` at 4..5, `b`
+      at 7..8, and then the error at line 1, column 12
+- [ ] `[a, # c\n b, \x01]\n` yields the sequence start, `a` at 1..2, the comment ` c` at 4..7, `b`
+      at 9..10, and then the error at line 2, column 4; `[a, b` yields the sequence start, `a`,
+      `b` at 4..5, and then the error at line 1, column 5
+- [ ] `k: [a, \x01]\n` yields the block mapping start at 0..0, `k` at 0..1, the sequence start at
+      3..3, `a` at 4..5, and then the error at line 1, column 7; `[a, b]]\n` yields the sequence
+      with its end at 5..5 and then the error at line 1, column 6
+- [ ] `[a\n b # \x01\n]\n` yields the sequence start, the scalar `a b` at 1..5, and then the error
+      at line 2, column 5; `[*a, \x01]\n` yields the sequence start, the alias `a` at 1..3, and
+      then the error at line 1, column 5
+- [ ] `[a: 1, b # \x01\n` yields the sequence start, a mapping start, `a` at 1..2, `1` at 4..5, a
+      mapping end, `b` at 7..8, and then the error at line 1, column 11; the test asserts the kind
+      of the mapping start and end, not their spans
+- [ ] The error is the last item of every stream, with the kind and the position it has before
+      this task, and every existing test passes with its assertions unchanged
+- [ ] `load` with the default options in `LoadMode::Lossless` returns
+      `NestingDepthLimitExceeded` at line 1, column 256 for `[` 300 times plus `a, \x01` and
+      `AnchorCountLimitExceeded` for a flow sequence of 10 001 anchored items that ends in
+      `, \x01]`, as the same shapes in block style do; the tests name the Decisions entry "Events
+      before an error"
+- [ ] Through the server, the semantic tokens of `[a, # c\n b, \x01]\n` hold the comment token of
+      `# c` (`rlsp-yaml/tests/lsp_lifecycle/semantic_tokens.rs`)
+- [ ] `rlsp-yaml/docs/feature-log.md` says that comments inside a flow collection before a parse
+      error keep their highlighting and that a document that passes a limit before a syntax error
+      gets the limit's diagnostic
 
 ### Task 3: A double-quoted scalar of escapes is scanned in linear time
 
@@ -233,9 +274,9 @@ limit. The task rests on YAML 1.2.2 §7.1 (alias nodes); the limit is the librar
 - **Found bugs:** a pre-existing bug found while fixing a task of this plan becomes a new task of
   this plan when it lies in the parser's robustness (a panic, a stack overflow, time with the
   square of the input, lost events) and goes to `.ai/backlog.md` otherwise; a bug found while
-  fixing such an added task goes to the backlog and gets no task here, so the plan ends. A fix
-  whose correct behavior is open, or that changes visible behavior beyond its bug, goes to the
-  backlog's Open decisions.
+  fixing such an added task (Task 10) goes to the backlog and gets no task here, so the plan
+  ends. A fix whose correct behavior is open, or that changes visible behavior beyond its bug,
+  goes to the backlog's Open decisions.
 - **Internal design:** the shape of each fix follows the design advisor's report: the BOM is
   stripped at the top of every pass of the blank-line loop
   (stripping once per gap would reject two BOM lines in a row, which [211] allows); the error is
@@ -247,8 +288,17 @@ limit. The task rests on YAML 1.2.2 §7.1 (alias nodes); the limit is the librar
   so in the server a document with a parse error keeps the comment tokens before the error. A
   fix for alias and flow events alone would need a rule of its own for the same cause. Comment
   folds stay empty for such a document, since `folding_ranges` returns nothing without a loaded
-  document. In `LoadMode::Resolved`, an event that now reaches the loader before the error can
-  raise the loader's own error first: `*a : # \x07\n` returns `UndefinedAlias`.
+  document. An event that now reaches the loader before the error can raise the loader's own
+  error first, so the first error in document order is reported, as block style already does: in
+  `LoadMode::Resolved`, `*a : # \x07\n` returns `UndefinedAlias`; with Task 10, a flow collection
+  deeper than `max_nesting_depth` or with more anchors than the limit returns the limit's error
+  where it returned the later syntax error, and the server shows that diagnostic.
+- **Flow events through a wrapper:** Task 10 wraps the body of `handle_flow_collection`, so no
+  return can drop its events; a flush before each of its error returns would edit the lines Task 5
+  rewrites and miss a return added later. Events are emitted as built at the error: a pair's
+  mapping start appears once its `:` was read, and the `?` of `[? a` yields no event. An anchor or
+  tag held for a collection from an earlier line (`a: &y\n[x, \x01]`, `a: !!seq\n[x, \x01]`)
+  reaches no event; this goes to the backlog's Open decisions.
 - **Keys without events:** `k : # \x07` and `"q" : # \x07` still yield no key before their error,
   from another cause: the key's comment is checked before the key's event is queued. The
   specification does not say which events precede an error, so this goes to the backlog's Open
@@ -282,7 +332,7 @@ limit. The task rests on YAML 1.2.2 §7.1 (alias nodes); the limit is the librar
 - A length cap on block plain scalars and on the first line of a flow plain scalar — hardening,
   which stays in `.ai/backlog.md`
 - The parser's conformance bugs, among them the three kept deviations (see Decisions)
-- The events of a key whose own comment is in error, comment folds for a document with a parse
-  error, and "Convert flow mapping to block" on a single pair — Open decisions in
-  `.ai/backlog.md`
+- The events of a key whose own comment is in error, an anchor or tag held for a flow collection
+  that an error leaves open, comment folds for a document with a parse error, and "Convert flow
+  mapping to block" on a single pair — Open decisions in `.ai/backlog.md`
 - A flow collection span that takes in the closing indicator

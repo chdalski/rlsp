@@ -2494,3 +2494,127 @@ fn flow_continuation_registers_no_anchor_and_makes_no_alias() {
     );
     assert_eq!(items[0].anchor(), Some("x"));
 }
+
+// ---------------------------------------------------------------------------
+// Group Q — Events queued before a parse error reach the loader
+//
+// The event stream holds a parse error until the events queued before it are
+// emitted, so the loader sees them first: the first problem in document order
+// is the one `load` reports.
+// ---------------------------------------------------------------------------
+
+fn parse_error_of(input: &str) -> rlsp_yaml_parser::Error {
+    rlsp_yaml_parser::parse_events(input)
+        .find_map(Result::err)
+        .expect("the input has a parse error")
+}
+
+/// With the default limits, `load` returns the parse error of the event
+/// stream, whatever events precede it.  `resolve` is false where an alias has
+/// no anchor, since a resolving load reports it first (tested apart below).
+#[rstest]
+#[case::alias_key("*a : # \x07\n", false)]
+#[case::flow_sequence_key("[x] : # \x07\n", true)]
+#[case::flow_mapping_key("{x: 1} : # \x07\n", true)]
+#[case::anchored_flow_key("&a [x] : # \x07\n", true)]
+#[case::comment_before_duplicate_directive("# c\n%YAML 1.2\n%YAML 1.2\n---\n", true)]
+#[case::bad_comment_after_scalar("- a # \x01\n- b # ok\n", true)]
+#[case::error_in_second_document("k: v\n---\n*a : # \x07\n", false)]
+fn load_returns_the_parse_error_after_events_queued_before_it(
+    #[case] input: &str,
+    #[case] resolve: bool,
+) {
+    let expected = parse_error_of(input);
+    let mut results = vec![load(input)];
+    if resolve {
+        results.push(LoaderBuilder::new().resolved().build().load(input));
+    }
+    for result in results {
+        let Err(LoadError::Parse {
+            pos, message, kind, ..
+        }) = result
+        else {
+            panic!("expected a parse error, got: {result:?}");
+        };
+        assert_eq!(pos, expected.pos);
+        assert_eq!(message, expected.message);
+        assert_eq!(kind, expected.kind);
+    }
+}
+
+/// The alias of `*a : # \x07` comes before the parse error and has no anchor,
+/// so a resolving load reports it first.
+#[test]
+fn resolved_load_reports_an_undefined_alias_before_a_later_parse_error() {
+    let result = LoaderBuilder::new()
+        .resolved()
+        .build()
+        .load("*a : # \x07\n");
+    let Err(LoadError::UndefinedAlias { name, pos }) = result else {
+        panic!("expected UndefinedAlias, got: {result:?}");
+    };
+    assert_eq!(name, "a");
+    assert_eq!((pos.line, pos.column), (1, 0));
+}
+
+/// A defined alias is no error, so the parse error that follows is reported.
+#[test]
+fn resolved_load_reports_the_parse_error_after_a_defined_alias() {
+    let result = LoaderBuilder::new()
+        .resolved()
+        .build()
+        .load("- &a x\n- *a : # \x07\n");
+    let Err(LoadError::Parse { pos, kind, .. }) = result else {
+        panic!("expected a parse error, got: {result:?}");
+    };
+    assert_eq!(kind, ErrorKind::InvalidCharacter);
+    assert_eq!((pos.line, pos.column), (2, 9));
+}
+
+/// A limit that an event before the parse error exceeds is reported before the
+/// parse error; with the default limit the parse error is.  This is the effect
+/// the plan's Decisions entry "Events before an error" names: an event released
+/// before the error can raise the loader's own error first.
+#[rstest]
+#[case::nesting_depth_flow_sequence(
+    "[x] : # \x07\n",
+    LoaderBuilder::new().max_nesting_depth(1),
+    1,
+)]
+#[case::nesting_depth_flow_mapping(
+    "{x: 1} : # \x07\n",
+    LoaderBuilder::new().max_nesting_depth(1),
+    1,
+)]
+#[case::anchor_count("&a [x] : # \x07\n", LoaderBuilder::new().max_anchors(0), 0)]
+fn load_limit_error_comes_before_a_later_parse_error(
+    #[case] input: &str,
+    #[case] builder: LoaderBuilder,
+    #[case] expected_limit: usize,
+) {
+    let result = builder.build().load(input);
+    let limit_pos = match result {
+        Err(LoadError::NestingDepthLimitExceeded { limit, pos })
+            if input.starts_with(['[', '{']) =>
+        {
+            (limit, pos)
+        }
+        Err(LoadError::AnchorCountLimitExceeded { limit, pos }) if input.starts_with('&') => {
+            (limit, pos)
+        }
+        other => panic!("expected the limit error of the input, got: {other:?}"),
+    };
+    assert_eq!(limit_pos.0, expected_limit);
+    assert_eq!((limit_pos.1.line, limit_pos.1.column), (1, 0));
+    assert!(
+        matches!(load(input), Err(LoadError::Parse { .. })),
+        "the default limits report the parse error"
+    );
+}
+
+/// `load` returns an error, never the documents that precede it.
+#[test]
+fn load_returns_no_documents_when_a_later_document_has_a_parse_error() {
+    let result = load("a: 1\n---\n[x] : # \x07\n");
+    assert!(matches!(result, Err(LoadError::Parse { .. })), "{result:?}");
+}

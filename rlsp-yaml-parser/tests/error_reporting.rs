@@ -249,31 +249,172 @@ fn error_position_at_stream_start_for_leading_invalid_input() {
 // Group D: Error stops the stream
 // ===========================================================================
 
-#[test]
-fn parse_events_stops_after_first_error() {
-    let input = "key: 'unterminated\n";
-    let items: Vec<_> = parse_events(input).collect();
-    let err_count = items.iter().filter(|r| r.is_err()).count();
-    assert_eq!(err_count, 1, "expected exactly one error, got: {err_count}");
-    // The error should be the last item — no Ok items follow it.
-    let last = items.last().expect("expected at least one item");
-    assert!(last.is_err(), "last item should be the error");
+/// One line per item of the event stream: the event kind (with its text for a
+/// scalar, alias, or comment), its span, and for an error its kind and its
+/// line and column.
+fn brief(input: &str) -> Vec<String> {
+    parse_events(input)
+        .map(|item| match item {
+            Ok((event, span)) => {
+                let name = match &event {
+                    Event::Scalar { value, .. } => format!("Scalar {value}"),
+                    Event::Alias { name } => format!("Alias {name}"),
+                    Event::Comment { text } => format!("Comment {text}"),
+                    Event::MappingStart { style, .. } => format!("MappingStart {style:?}"),
+                    Event::SequenceStart { style, .. } => format!("SequenceStart {style:?}"),
+                    Event::StreamStart => "StreamStart".to_owned(),
+                    Event::StreamEnd => "StreamEnd".to_owned(),
+                    Event::DocumentStart { .. } => "DocumentStart".to_owned(),
+                    Event::DocumentEnd { .. } => "DocumentEnd".to_owned(),
+                    Event::MappingEnd => "MappingEnd".to_owned(),
+                    Event::SequenceEnd => "SequenceEnd".to_owned(),
+                };
+                format!("{name} {}..{}", span.start, span.end)
+            }
+            Err(e) => format!("Err {:?} {}:{}", e.kind, e.pos.line, e.pos.column),
+        })
+        .collect()
 }
 
-#[test]
-fn parse_events_emits_stream_start_before_error() {
-    // Use unterminated quoted scalar — reliably produces an error.
-    let input = "'unterminated\n";
-    let items: Vec<_> = parse_events(input).collect();
-    assert!(!items.is_empty(), "expected at least one event");
+/// The error ends the stream: it is the only error and the last item, and the
+/// iterator stays at its end after it.  The events queued before the error come
+/// first, so the error is held until the queue is drained.
+#[rstest]
+#[case::unterminated_quoted_value("key: 'unterminated\n")]
+#[case::unterminated_quoted_root("'unterminated\n")]
+#[case::alias_key_with_bad_comment("*a : # \x07\n")]
+#[case::flow_sequence_key_with_bad_comment("[x] : # \x07\n")]
+#[case::flow_mapping_key_with_bad_comment("{x: 1} : # \x07\n")]
+#[case::anchored_flow_key_with_bad_comment("&a [x] : # \x07\n")]
+#[case::bad_trailing_comment_before_next_item("- a # \x01\n- b # ok\n")]
+#[case::duplicate_directive_after_comment("# c\n%YAML 1.2\n%YAML 1.2\n---\n")]
+#[case::duplicate_directive_after_two_comments("# one\n# two\n%YAML 1.2\n%YAML 1.1\n---\n")]
+#[case::bad_directive_after_comment("# one\n%FOO a\x01\n---\n")]
+#[case::duplicate_directive_in_later_document("a: 1\n...\n# c\n%YAML 1.2\n%YAML 1.2\n---\n")]
+#[case::alias_key_in_second_document("k: v\n---\n*a : # \x07\n")]
+#[case::flow_sequence_with_bad_comment("[a, b # \x01\n]\n")]
+#[case::nested_flow_sequence_with_bad_comment("[a, [b, c # \x01\n")]
+fn error_is_the_last_item_and_the_stream_stays_ended(#[case] input: &str) {
+    let mut iter = parse_events(input);
+    let mut items = Vec::new();
+    for item in iter.by_ref() {
+        let is_error = item.is_err();
+        items.push(item);
+        if is_error {
+            break;
+        }
+    }
     assert!(
-        matches!(&items[0], Ok((Event::StreamStart, _))),
-        "first event should be StreamStart, got: {:?}",
-        items[0]
+        matches!(items.first(), Some(Ok((Event::StreamStart, _)))),
+        "first item should be StreamStart, got: {:?}",
+        items.first()
     );
     assert!(
-        items.iter().any(Result::is_err),
-        "expected at least one error event"
+        matches!(items.last(), Some(Err(_))),
+        "the stream should end with its error, got: {:?}",
+        items.last()
+    );
+    assert_eq!(
+        items.iter().filter(|item| item.is_err()).count(),
+        1,
+        "the stream should hold exactly one error"
+    );
+    assert!(iter.next().is_none(), "nothing follows the error");
+    assert!(iter.next().is_none(), "the stream stays ended");
+    assert!(iter.next().is_none(), "the stream stays ended");
+}
+
+/// The events the parser queued before an error come before it (YAML 1.2.2
+/// §6.6 comments, §6.8.1 the `%YAML` directive, §7.1 alias nodes; the
+/// specification does not say which events precede an error).
+#[rstest]
+#[case::alias_key(
+    "*a : # \x07\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "MappingStart Block 0..0",
+        "Alias a 0..2",
+        "Err InvalidCharacter 1:7",
+    ],
+)]
+#[case::flow_sequence_key(
+    "[x] : # \x07\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "MappingStart Block 0..0",
+        "SequenceStart Flow 0..0",
+        "Scalar x 1..2",
+        "SequenceEnd 2..2",
+        "Err InvalidCharacter 1:8",
+    ],
+)]
+#[case::flow_mapping_key(
+    "{x: 1} : # \x07\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "MappingStart Block 0..0",
+        "MappingStart Flow 0..0",
+        "Scalar x 1..2",
+        "Scalar 1 4..5",
+        "MappingEnd 5..5",
+        "Err InvalidCharacter 1:11",
+    ],
+)]
+#[case::anchored_flow_sequence_key(
+    "&a [x] : # \x07\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "MappingStart Block 3..3",
+        "SequenceStart Flow 3..3",
+        "Scalar x 4..5",
+        "SequenceEnd 5..5",
+        "Err InvalidCharacter 1:11",
+    ],
+)]
+#[case::comment_before_duplicate_directive(
+    "# c\n%YAML 1.2\n%YAML 1.2\n---\n",
+    &["StreamStart 0..0", "Comment  c 0..3", "Err Syntax 3:0"],
+)]
+#[case::two_comments_before_duplicate_directive(
+    "# one\n# two\n%YAML 1.2\n%YAML 1.1\n---\n",
+    &["StreamStart 0..0", "Comment  one 0..5", "Comment  two 6..11", "Err Syntax 4:0"],
+)]
+#[case::comment_before_bad_directive(
+    "# one\n%FOO a\x01\n---\n",
+    &["StreamStart 0..0", "Comment  one 0..5", "Err InvalidCharacter 2:0"],
+)]
+#[case::bad_trailing_comment_keeps_its_scalar_and_drops_the_next_item(
+    "- a # \x01\n- b # ok\n",
+    &[
+        "StreamStart 0..0",
+        "DocumentStart 0..0",
+        "SequenceStart Block 0..0",
+        "Scalar a 2..3",
+        "Err InvalidCharacter 1:6",
+    ],
+)]
+fn events_queued_before_an_error_come_before_it(#[case] input: &str, #[case] expected: &[&str]) {
+    assert_eq!(brief(input), expected);
+}
+
+/// A comment longer than `MAX_COMMENT_LEN` is an error that ends the stream
+/// after the events before it.
+#[test]
+fn comment_over_the_limit_comes_after_the_events_before_it() {
+    let input = format!("k: v\n#{}\nz: 1\n", "x".repeat(MAX_COMMENT_LEN + 1));
+    let items = brief(&input);
+    assert_eq!(items.last().map(String::as_str), Some("Err Syntax 2:0"));
+    assert!(
+        items.iter().any(|item| item == "Scalar v 3..4"),
+        "the value before the comment is emitted: {items:?}"
+    );
+    assert!(
+        !items.iter().any(|item| item.starts_with("Scalar z")),
+        "nothing after the comment is emitted: {items:?}"
     );
 }
 

@@ -31,6 +31,15 @@ corresponding plan file under `.ai/plans/`.
 
 ---
 
+### Comments Before a Parse Error Keep Their Highlighting [completed]
+
+**Date:** 2026-11-26
+**Description:** In a document with a parse error, the comments that stand before the error lost their semantic highlighting: the parser dropped the comment events it had already recognized when it reached the error. They now keep it. `# c`, `%YAML 1.2`, `%YAML 1.2` (a duplicate directive is an error) and `---` gives the comment `# c` its comment token, as it does in a valid document. Folding ranges of comments are unchanged: a document with a parse error has none.
+**Complexity:** Low
+**Tier:** 2
+
+---
+
 ### The "Convert block to flow style" Action Is Disabled When a Block Scalar Is in the Collection [completed]
 
 **Date:** 2026-11-12

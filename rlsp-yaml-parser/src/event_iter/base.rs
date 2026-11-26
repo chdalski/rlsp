@@ -115,6 +115,7 @@ impl<'input> EventIter<'input> {
             input,
             state: IterState::BeforeStream,
             queue: VecDeque::new(),
+            pending_error: None,
             coll_stack: Vec::new(),
             pending_anchor: None,
             pending_tag: None,
@@ -493,6 +494,10 @@ impl<'input> Iterator for EventIter<'input> {
             if let Some(event) = self.queue.pop_front() {
                 return Some(Ok(event));
             }
+            // The queue is empty: the held error comes next, and ends the stream.
+            if let Some(error) = self.pending_error.take() {
+                return Some(Err(error));
+            }
 
             let step = match self.state {
                 IterState::BeforeStream => {
@@ -506,14 +511,12 @@ impl<'input> Iterator for EventIter<'input> {
 
             match step {
                 StepResult::Continue => {}
-                StepResult::Yield(result) => {
-                    // An error ends the stream: no event queued before it
-                    // follows it.
-                    if result.is_err() {
-                        self.queue.clear();
-                        self.state = IterState::Done;
-                    }
-                    return Some(result);
+                StepResult::Yield(Ok(event)) => return Some(Ok(event)),
+                // An error ends the stream, but the events queued before it
+                // come first: it is held until the queue is drained.
+                StepResult::Yield(Err(error)) => {
+                    self.pending_error = Some(error);
+                    self.state = IterState::Done;
                 }
             }
         }

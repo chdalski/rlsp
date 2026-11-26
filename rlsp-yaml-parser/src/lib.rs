@@ -77,6 +77,9 @@ struct EventIter<'input> {
     /// e.g. `SequenceStart` before the first item, or multiple close events
     /// when a dedent closes several nested collections at once.
     queue: VecDeque<(Event<'input>, Span)>,
+    /// The error that ends the stream, held until `queue` is drained: the
+    /// events queued before it come first, and it is the last item.
+    pending_error: Option<Error>,
     /// Stack of open block collections (sequences and mappings).
     ///
     /// Each entry records whether the open collection is a sequence or a
