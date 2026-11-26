@@ -34,7 +34,8 @@ impl<'input> EventIter<'input> {
     pub(crate) fn consume_preamble_between_docs(&mut self) -> Result<(), Error> {
         loop {
             // Skip blank lines first.
-            self.lexer.skip_blank_lines_between_docs();
+            self.lexer
+                .skip_blank_lines_between_docs(self.directive_scope.directive_count > 0);
 
             // Collect comment lines.
             while self.lexer.is_comment_line() {
@@ -45,7 +46,8 @@ impl<'input> EventIter<'input> {
                     Ok(None) => break,
                     Err(e) => return Err(e),
                 }
-                self.lexer.skip_blank_lines_between_docs();
+                self.lexer
+                    .skip_blank_lines_between_docs(self.directive_scope.directive_count > 0);
             }
 
             // Parse directive lines.
@@ -60,7 +62,8 @@ impl<'input> EventIter<'input> {
                 if let Some((text, span)) = comment {
                     self.queue.push_back((Event::Comment { text }, span));
                 }
-                self.lexer.skip_blank_lines_between_docs();
+                self.lexer
+                    .skip_blank_lines_between_docs(self.directive_scope.directive_count > 0);
             }
 
             // After parsing directives, there may be more blank lines or comments.

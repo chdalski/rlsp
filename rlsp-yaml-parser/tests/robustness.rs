@@ -912,6 +912,78 @@ fn marker_line_scalar_never_panics_on_marker_alphabet_strings() {
     }
 }
 
+/// Every string of at most `max_len` symbols over `alphabet`, shortest first.
+fn strings_over(alphabet: &[&str], max_len: usize) -> Vec<String> {
+    let mut layer = vec![String::new()];
+    let mut all = layer.clone();
+    for _ in 0..max_len {
+        layer = layer
+            .iter()
+            .flat_map(|prefix| {
+                alphabet
+                    .iter()
+                    .map(move |symbol| format!("{prefix}{symbol}"))
+            })
+            .collect();
+        all.extend(layer.iter().cloned());
+    }
+    all
+}
+
+#[test]
+fn bom_and_blank_lines_between_documents_never_panic_or_emit_an_empty_document() {
+    // The alphabet reaches the document prefix directly; the alphabet test
+    // above always starts with a marker line and never does.  When every BOM
+    // starts its line, the input is a document prefix and nothing else, so it
+    // must parse without an error and without a document.  A BOM after a
+    // blank or another BOM on the same line is outside that claim: one is
+    // content, the other an error.
+    for input in strings_over(&["\u{FEFF}", "\n", " ", "\t"], 7) {
+        let events = bounded_events(&input);
+        assert!(events.len() < 10_000, "no end in sight for {input:?}");
+        let load_result = load(&input);
+        let every_bom_starts_its_line = input.split('\n').all(|line| {
+            line.char_indices()
+                .all(|(index, character)| character != '\u{FEFF}' || index == 0)
+        });
+        if !every_bom_starts_its_line {
+            continue;
+        }
+        assert!(!events.contains(&Err(())), "an error for {input:?}");
+        let documents = parse_events(&input)
+            .flatten()
+            .filter(|(event, _)| matches!(event, rlsp_yaml_parser::Event::DocumentStart { .. }))
+            .count();
+        assert_eq!(documents, 0, "a document for {input:?}");
+        assert!(load_result.unwrap().is_empty(), "documents for {input:?}");
+    }
+}
+
+#[test]
+fn bom_between_documents_never_panics_on_prefix_alphabet_strings() {
+    let alphabet = ["\u{FEFF}", "\n", " ", "#", "-", ".", "%", "a"];
+    for input in strings_over(&alphabet, 6) {
+        let events = bounded_events(&input);
+        assert!(events.len() < 10_000, "no end in sight for {input:?}");
+        if let Some(position) = events.iter().position(Result::is_err) {
+            assert_eq!(
+                position + 1,
+                events.len(),
+                "events after an error: {input:?}"
+            );
+        }
+        for (_, span) in parse_events(&input).take(10_000).flatten() {
+            assert!(span.start <= span.end, "inverted span in {input:?}");
+            assert!(
+                span.end as usize <= input.len(),
+                "span past the end in {input:?}"
+            );
+            assert!(input.is_char_boundary(span.start as usize), "{input:?}");
+            assert!(input.is_char_boundary(span.end as usize), "{input:?}");
+        }
+    }
+}
+
 #[test]
 fn marker_line_scalar_with_many_continuation_lines_is_linear() {
     let input = format!("--- x\n{}", "  y\n".repeat(200_000));

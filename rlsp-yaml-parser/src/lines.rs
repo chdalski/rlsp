@@ -327,8 +327,10 @@ impl<'input> LineBuffer<'input> {
     /// Strip a leading BOM from the already-primed `next` line if present.
     ///
     /// This is the **sole BOM-strip site**.  It must be called at every document
-    /// prefix position — including stream start and each position after a `...`
-    /// document-end marker.  Per YAML 1.2 §5.2 / production [202]
+    /// prefix position — including stream start, each position after a `...`
+    /// document-end marker, and every line of a blank-line run between
+    /// documents, so that a line holding only a BOM is seen as blank.
+    /// Per YAML 1.2 §5.2 / production [202]
     /// `l-document-prefix = c-byte-order-mark? l-comment*`, a BOM is valid at
     /// the start of any document prefix.
     ///

@@ -353,6 +353,344 @@ fn parse_events_rejects_double_bom_at_inter_doc_regression() {
 }
 
 // ===========================================================================
+// BOM-only lines in a document prefix (YAML 1.2.2 [202], [211])
+// ===========================================================================
+//
+// [202] l-document-prefix = c-byte-order-mark? l-comment*, and a line of
+// optional blanks and a line break is an l-comment, so a line that holds only
+// a BOM (with or without blanks) is a complete prefix.  [211] l-yaml-stream
+// allows several prefixes in a row.
+
+/// One line per event: its kind, its content where it matters, and its span.
+fn events_with_spans(input: &str) -> Vec<String> {
+    parse_events(input)
+        .map(|item| {
+            let (event, span) = match item {
+                Ok(parsed) => parsed,
+                Err(error) => unreachable!("unexpected parse error: {error}"),
+            };
+            let text = match event {
+                Event::StreamStart => "StreamStart".to_owned(),
+                Event::StreamEnd => "StreamEnd".to_owned(),
+                Event::DocumentStart {
+                    explicit, version, ..
+                } => format!("DocumentStart explicit={explicit} version={version:?}"),
+                Event::DocumentEnd { explicit } => format!("DocumentEnd explicit={explicit}"),
+                Event::MappingStart { .. } => "MappingStart".to_owned(),
+                Event::MappingEnd => "MappingEnd".to_owned(),
+                Event::SequenceStart { .. } => "SequenceStart".to_owned(),
+                Event::SequenceEnd => "SequenceEnd".to_owned(),
+                Event::Scalar { value, .. } => format!("Scalar {value}"),
+                Event::Alias { name } => format!("Alias {name}"),
+                Event::Comment { text } => format!("Comment {text}"),
+            };
+            format!("{text} {}..{}", span.start, span.end)
+        })
+        .collect()
+}
+
+#[rstest]
+#[case::bom_only_no_line_break("\u{FEFF}", &["StreamStart 0..0", "StreamEnd 3..3"])]
+#[case::bom_only_line("\u{FEFF}\n", &["StreamStart 0..0", "StreamEnd 4..4"])]
+#[case::bom_and_spaces("\u{FEFF}  \n", &["StreamStart 0..0", "StreamEnd 6..6"])]
+#[case::bom_and_tab("\u{FEFF}\t\n", &["StreamStart 0..0", "StreamEnd 5..5"])]
+#[case::bom_line_crlf("\u{FEFF}\r\n", &["StreamStart 0..0", "StreamEnd 5..5"])]
+#[case::two_bom_lines("\u{FEFF}\n\u{FEFF}\n", &["StreamStart 0..0", "StreamEnd 8..8"])]
+#[case::bom_lines_around_a_blank_line("\u{FEFF}\n\n\u{FEFF}  \n", &["StreamStart 0..0", "StreamEnd 11..11"])]
+#[case::bom_line_then_comment_line("\u{FEFF}\n# only\n", &["StreamStart 0..0", "Comment  only 4..10", "StreamEnd 11..11"])]
+#[case::bom_line_after_document_end_marker_crlf("a\n...\n\u{FEFF}\r\n", &[
+    "StreamStart 0..0",
+    "DocumentStart explicit=false version=None 0..0",
+    "Scalar a 0..1",
+    "DocumentEnd explicit=true 2..5",
+    "StreamEnd 11..11",
+])]
+#[case::bom_line_after_document_end_marker_at_end_of_input("a\n...\n\u{FEFF}", &[
+    "StreamStart 0..0",
+    "DocumentStart explicit=false version=None 0..0",
+    "Scalar a 0..1",
+    "DocumentEnd explicit=true 2..5",
+    "StreamEnd 9..9",
+])]
+#[case::bom_line_before_a_bare_document("\u{FEFF}\nk: v\n", &[
+    "StreamStart 0..0",
+    "DocumentStart explicit=false version=None 4..4",
+    "MappingStart 4..4",
+    "Scalar k 4..5",
+    "Scalar v 7..8",
+    "MappingEnd 9..9",
+    "DocumentEnd explicit=false 9..9",
+    "StreamEnd 9..9",
+])]
+#[case::bom_line_crlf_before_a_bare_document("\u{FEFF}\r\nk: v\r\n", &[
+    "StreamStart 0..0",
+    "DocumentStart explicit=false version=None 5..5",
+    "MappingStart 5..5",
+    "Scalar k 5..6",
+    "Scalar v 8..9",
+    "MappingEnd 11..11",
+    "DocumentEnd explicit=false 11..11",
+    "StreamEnd 11..11",
+])]
+#[case::bom_and_spaces_line_before_a_bare_document("\u{FEFF}  \nk: v\n", &[
+    "StreamStart 0..0",
+    "DocumentStart explicit=false version=None 6..6",
+    "MappingStart 6..6",
+    "Scalar k 6..7",
+    "Scalar v 9..10",
+    "MappingEnd 11..11",
+    "DocumentEnd explicit=false 11..11",
+    "StreamEnd 11..11",
+])]
+#[case::two_bom_lines_before_a_bare_document("\u{FEFF}\n\u{FEFF}\nk: v\n", &[
+    "StreamStart 0..0",
+    "DocumentStart explicit=false version=None 8..8",
+    "MappingStart 8..8",
+    "Scalar k 8..9",
+    "Scalar v 11..12",
+    "MappingEnd 13..13",
+    "DocumentEnd explicit=false 13..13",
+    "StreamEnd 13..13",
+])]
+#[case::bom_line_then_comment_before_a_bare_document("\u{FEFF}\n# c\nk: v\n", &[
+    "StreamStart 0..0",
+    "Comment  c 4..7",
+    "DocumentStart explicit=false version=None 8..8",
+    "MappingStart 8..8",
+    "Scalar k 8..9",
+    "Scalar v 11..12",
+    "MappingEnd 13..13",
+    "DocumentEnd explicit=false 13..13",
+    "StreamEnd 13..13",
+])]
+#[case::comment_then_bom_line_before_a_bare_document("# c\n\u{FEFF}\nk: v\n", &[
+    "StreamStart 0..0",
+    "Comment  c 0..3",
+    "DocumentStart explicit=false version=None 8..8",
+    "MappingStart 8..8",
+    "Scalar k 8..9",
+    "Scalar v 11..12",
+    "MappingEnd 13..13",
+    "DocumentEnd explicit=false 13..13",
+    "StreamEnd 13..13",
+])]
+#[case::bom_line_before_directives_end_marker("\u{FEFF}\n---\nk: v\n", &[
+    "StreamStart 0..0",
+    "DocumentStart explicit=true version=None 4..7",
+    "MappingStart 8..8",
+    "Scalar k 8..9",
+    "Scalar v 11..12",
+    "MappingEnd 13..13",
+    "DocumentEnd explicit=false 13..13",
+    "StreamEnd 13..13",
+])]
+#[case::bom_line_before_a_directive("\u{FEFF}\n%YAML 1.2\n---\nk\n", &[
+    "StreamStart 0..0",
+    "DocumentStart explicit=true version=Some((1, 2)) 14..17",
+    "Scalar k 18..19",
+    "DocumentEnd explicit=false 20..20",
+    "StreamEnd 20..20",
+])]
+#[case::bom_line_between_documents("a: 1\n...\n\u{FEFF}\nb: 2\n", &[
+    "StreamStart 0..0",
+    "DocumentStart explicit=false version=None 0..0",
+    "MappingStart 0..0",
+    "Scalar a 0..1",
+    "Scalar 1 3..4",
+    "MappingEnd 5..5",
+    "DocumentEnd explicit=true 5..8",
+    "DocumentStart explicit=false version=None 13..13",
+    "MappingStart 13..13",
+    "Scalar b 13..14",
+    "Scalar 2 16..17",
+    "MappingEnd 18..18",
+    "DocumentEnd explicit=false 18..18",
+    "StreamEnd 18..18",
+])]
+#[case::bom_line_between_documents_before_directives_end_marker("a\n...\n\u{FEFF}\n---\nb\n", &[
+    "StreamStart 0..0",
+    "DocumentStart explicit=false version=None 0..0",
+    "Scalar a 0..1",
+    "DocumentEnd explicit=true 2..5",
+    "DocumentStart explicit=true version=None 10..13",
+    "Scalar b 14..15",
+    "DocumentEnd explicit=false 16..16",
+    "StreamEnd 16..16",
+])]
+#[case::two_bom_lines_between_documents("a\n...\n\u{FEFF}\n\u{FEFF}\nb\n", &[
+    "StreamStart 0..0",
+    "DocumentStart explicit=false version=None 0..0",
+    "Scalar a 0..1",
+    "DocumentEnd explicit=true 2..5",
+    "DocumentStart explicit=false version=None 14..14",
+    "Scalar b 14..15",
+    "DocumentEnd explicit=false 16..16",
+    "StreamEnd 16..16",
+])]
+#[case::comment_then_bom_line_between_documents("a\n...\n# c\n\u{FEFF}\nb\n", &[
+    "StreamStart 0..0",
+    "DocumentStart explicit=false version=None 0..0",
+    "Scalar a 0..1",
+    "DocumentEnd explicit=true 2..5",
+    "Comment  c 6..9",
+    "DocumentStart explicit=false version=None 14..14",
+    "Scalar b 14..15",
+    "DocumentEnd explicit=false 16..16",
+    "StreamEnd 16..16",
+])]
+fn parse_events_skips_a_line_that_holds_only_a_bom(#[case] input: &str, #[case] expected: &[&str]) {
+    assert_eq!(events_with_spans(input), expected, "input {input:?}");
+}
+
+#[test]
+fn parse_events_pins_bom_between_directive_and_directives_end_marker_as_kept_deviation() {
+    // [209] l-directive-document allows no l-document-prefix between the
+    // directive and `---`, so a BOM there is not valid YAML 1.2.2.  The parser
+    // accepts it today; the plan's Decisions entry "Kept deviations" keeps that
+    // behavior for a later plan of the parser's conformance bugs.
+    assert_eq!(
+        events_with_spans("%YAML 1.2\n\u{FEFF}---\nk\n"),
+        [
+            "StreamStart 0..0",
+            "DocumentStart explicit=true version=Some((1, 2)) 13..16",
+            "Scalar k 17..18",
+            "DocumentEnd explicit=false 19..19",
+            "StreamEnd 19..19",
+        ]
+    );
+}
+
+#[test]
+fn parse_events_pins_bom_only_line_after_directive_and_comment_as_kept_deviation() {
+    // Same deviation from [209] as above, reached through a comment line that
+    // follows the directive: the parser has always accepted it, and the plan's
+    // Decisions entry "Kept deviations" keeps that behavior.
+    assert_eq!(
+        events_with_spans("%YAML 1.2\n# c\n\u{FEFF}\n---\nk\n"),
+        [
+            "StreamStart 0..0",
+            "Comment  c 10..13",
+            "DocumentStart explicit=true version=Some((1, 2)) 18..21",
+            "Scalar k 22..23",
+            "DocumentEnd explicit=false 24..24",
+            "StreamEnd 24..24",
+        ]
+    );
+}
+
+#[test]
+fn parse_events_pins_bom_between_documents_without_end_marker_as_kept_deviation() {
+    // [211] l-yaml-stream allows a BOM there, but the plan's Decisions entry
+    // "Kept deviations" keeps the error for a later plan of the parser's
+    // conformance bugs.
+    assert!(has_parse_error("a\n\u{FEFF}\n---\nb\n"));
+}
+
+#[rstest]
+#[case::in_the_document_body("k: v\n\u{FEFF}\nz: 1\n")]
+#[case::after_the_directives_end_marker("---\n\u{FEFF}\nk: v\n")]
+#[case::two_boms_on_the_line_before_a_bare_document("a\n...\n\u{FEFF}\u{FEFF}\nb\n")]
+// [209] l-directive-document allows no l-document-prefix between a directive
+// and `---`, so a BOM-only line there is an error, as it was before the
+// BOM-only line was skipped in a prefix.
+#[case::after_a_yaml_directive("%YAML 1.2\n\u{FEFF}\n---\nk\n")]
+#[case::after_a_yaml_directive_and_blanks("%YAML 1.2\n\u{FEFF}  \n---\nk\n")]
+#[case::after_a_yaml_directive_and_a_blank_line("%YAML 1.2\n\n\u{FEFF}\n---\nk\n")]
+#[case::after_a_tag_directive("%TAG !e! tag:x,1:\n\u{FEFF}\n---\nk\n")]
+fn bom_only_line_that_is_not_in_a_document_prefix_stays_an_error(#[case] input: &str) {
+    assert!(has_parse_error(input), "events of {input:?}");
+    assert!(rlsp_yaml_parser::load(input).is_err(), "load of {input:?}");
+}
+
+#[test]
+fn bom_after_blanks_on_a_line_is_never_silently_dropped() {
+    // Only the start of a line is a document-prefix position, so the skip of
+    // a BOM-only line must not strip a BOM that follows blanks.  The BOM is no
+    // ns-char ([27] nb-char excludes c-byte-order-mark), so an error is the
+    // spec's answer; the test accepts an error and rejects a dropped BOM.
+    assert!(!scalar_values("\u{FEFF}\n  \u{FEFF}k: v\n").contains(&"k".to_owned()));
+}
+
+#[rstest]
+#[case::bom_only_no_line_break("\u{FEFF}")]
+#[case::bom_and_spaces("\u{FEFF}  \n")]
+#[case::bom_and_tab("\u{FEFF}\t\n")]
+#[case::two_bom_lines("\u{FEFF}\n\u{FEFF}\n")]
+fn load_returns_no_document_for_bom_only_lines(#[case] input: &str) {
+    let docs = rlsp_yaml_parser::load(input).expect("load must succeed");
+    assert!(docs.is_empty(), "documents of {input:?}: {docs:?}");
+}
+
+/// The spans of the single key and the single value of a one-entry mapping.
+fn key_and_value_spans(node: &rlsp_yaml_parser::Node) -> ((u32, u32), (u32, u32)) {
+    let rlsp_yaml_parser::Node::Mapping { entries, .. } = node else {
+        unreachable!("expected a mapping, got {node:?}");
+    };
+    let [(key, value)] = entries.as_slice() else {
+        unreachable!("expected one entry, got {entries:?}");
+    };
+    let span = |node: &rlsp_yaml_parser::Node| match node {
+        rlsp_yaml_parser::Node::Scalar { loc, .. } => (loc.start, loc.end),
+        other => unreachable!("expected a scalar, got {other:?}"),
+    };
+    (span(key), span(value))
+}
+
+#[rstest]
+#[case::bom_line("\u{FEFF}\nk: v\n", ((4, 5), (7, 8)))]
+#[case::bom_line_crlf("\u{FEFF}\r\nk: v\r\n", ((5, 6), (8, 9)))]
+#[case::two_bom_lines("\u{FEFF}\n\u{FEFF}\nk: v\n", ((8, 9), (11, 12)))]
+#[case::bom_line_then_comment("\u{FEFF}\n# c\nk: v\n", ((8, 9), (11, 12)))]
+#[case::bom_line_before_directives_end_marker("\u{FEFF}\n---\nk: v\n", ((8, 9), (11, 12)))]
+fn load_places_the_document_after_a_bom_only_line(
+    #[case] input: &str,
+    #[case] expected: ((u32, u32), (u32, u32)),
+) {
+    let docs = rlsp_yaml_parser::load(input).expect("load must succeed");
+    assert_eq!(docs.len(), 1, "documents of {input:?}");
+    assert_eq!(key_and_value_spans(&docs[0].root), expected, "{input:?}");
+}
+
+#[test]
+fn load_reads_the_directive_after_a_bom_only_line() {
+    let docs = rlsp_yaml_parser::load("\u{FEFF}\n%YAML 1.2\n---\nk\n").expect("load must succeed");
+    assert_eq!(docs.len(), 1);
+    assert_eq!(docs[0].version, Some((1, 2)));
+}
+
+#[test]
+fn load_reads_the_document_after_a_bom_only_line_between_documents() {
+    let docs = rlsp_yaml_parser::load("a: 1\n...\n\u{FEFF}\nb: 2\n").expect("load must succeed");
+    assert_eq!(docs.len(), 2);
+    assert_eq!(key_and_value_spans(&docs[0].root), ((0, 1), (3, 4)));
+    assert_eq!(key_and_value_spans(&docs[1].root), ((13, 14), (16, 17)));
+}
+
+#[test]
+fn load_reads_the_directive_of_the_next_document_after_a_bom_only_line() {
+    // The directive count of the first document must not leak into the prefix
+    // of the second one.
+    let docs = rlsp_yaml_parser::load("%YAML 1.2\n---\nk\n...\n\u{FEFF}\n%YAML 1.2\n---\nj\n")
+        .expect("load must succeed");
+    assert_eq!(docs.len(), 2);
+}
+
+#[test]
+fn load_ends_after_a_bom_only_line_that_follows_the_last_document_end_marker() {
+    let docs = rlsp_yaml_parser::load("a\n...\n\u{FEFF}").expect("load must succeed");
+    assert_eq!(docs.len(), 1);
+}
+
+#[rstest]
+#[case::bom_line_then_comment("\u{FEFF}\n# c\nk: v\n")]
+#[case::bom_line_before_directives_end_marker("\u{FEFF}\n---\nk: v\n")]
+#[case::bom_line_before_a_directive("\u{FEFF}\n%YAML 1.2\n---\nk\n")]
+fn load_returns_one_document_after_a_bom_only_line(#[case] input: &str) {
+    let docs = rlsp_yaml_parser::load(input).expect("load must succeed");
+    assert_eq!(docs.len(), 1, "documents of {input:?}");
+}
+
+// ===========================================================================
 // parse_events() — valid multibyte content
 // ===========================================================================
 

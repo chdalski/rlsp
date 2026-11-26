@@ -122,13 +122,27 @@ impl<'input> Lexer<'input> {
     /// Use this between documents (`BetweenDocs`) after directive and comment
     /// lines have already been consumed by the caller.
     ///
-    /// After consuming blank lines, strips a leading BOM from the primed next
-    /// line if present.  Per YAML 1.2 §5.2 / production [202]
-    /// `l-document-prefix = c-byte-order-mark? l-comment*`, a BOM is valid at
-    /// the start of any document prefix, which may follow blank lines or
-    /// comments that trail a `...` marker.
-    pub fn skip_blank_lines_between_docs(&mut self) -> Pos {
+    /// `after_directive` is `true` once a directive of the document was read.
+    ///
+    /// In a document prefix (`after_directive == false`) a BOM is stripped
+    /// from the primed next line at the top of every pass, before the blank
+    /// test, so a line that holds only a BOM (with or without blanks) is
+    /// skipped like any other blank line.  Per YAML 1.2 §5.2 / production
+    /// [202] `l-document-prefix = c-byte-order-mark? l-comment*`, a BOM is
+    /// valid at the start of any document prefix, and [211] `l-yaml-stream`
+    /// allows several prefixes in a row, so stripping once per gap would
+    /// reject two BOM lines in a row.
+    ///
+    /// After a directive, [209] `l-directive-document` allows no prefix before
+    /// `---`, so a BOM-only line there stays an error: the BOM is stripped only
+    /// after the blank lines, as the next line itself.  That keeps accepting a
+    /// BOM directly before `---` (`%YAML 1.2\n\u{FEFF}---`), a deviation the
+    /// parser keeps for a later plan of its conformance bugs.
+    pub fn skip_blank_lines_between_docs(&mut self, after_directive: bool) -> Pos {
         loop {
+            if !after_directive {
+                self.buf.signal_document_boundary();
+            }
             let skip = self
                 .buf
                 .peek_next()
@@ -138,7 +152,9 @@ impl<'input> Lexer<'input> {
                     self.current_pos = pos_after_line(&line);
                 }
             } else {
-                self.buf.signal_document_boundary();
+                if after_directive {
+                    self.buf.signal_document_boundary();
+                }
                 return self.current_pos;
             }
         }

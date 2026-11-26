@@ -39,7 +39,7 @@ where they arise.
 
 - [x] Clarify scope with the user
 - [x] Design review of the approach
-- [ ] Task 1: A line that holds only a BOM is skipped between documents
+- [x] Task 1: A line that holds only a BOM is skipped between documents
 - [ ] Task 2: The events recognized before an error come before it
 - [ ] Task 3: A double-quoted scalar of escapes is scanned in linear time
 - [ ] Task 4: `LineIndex::line_column` answers in bounded time on a long line
@@ -60,19 +60,20 @@ content: a debug build panics on the `debug_assert!` in `src/event_iter/directiv
 release build emits an empty document. YAML 1.2.2 [202] `l-document-prefix` is an optional BOM
 and comment lines, and [211] `l-yaml-stream` allows several prefixes in a row.
 
-- [ ] `parse_events` on `\uFEFF`, `\uFEFF  \n`, and `\uFEFF\t\n` yields the stream start and end and
+- [x] `parse_events` on `\uFEFF`, `\uFEFF  \n`, and `\uFEFF\t\n` yields the stream start and end and
       no document, and `load` returns no document
-- [ ] `\uFEFF\nk: v\n` yields one document whose start is at 4..4 with the key `k` at 4..5 and the
+- [x] `\uFEFF\nk: v\n` yields one document whose start is at 4..4 with the key `k` at 4..5 and the
       value `v` at 7..8; `\uFEFF\r\nk: v\r\n` yields one document whose start is at 5..5
-- [ ] `a: 1\n...\n\uFEFF\nb: 2\n` yields two documents, the second starting at 13..13, and
+- [x] `a: 1\n...\n\uFEFF\nb: 2\n` yields two documents, the second starting at 13..13, and
       `a\n...\n\uFEFF` yields one document and ends the stream at 9..9
-- [ ] `\uFEFF\n\uFEFF\nk: v\n`, `\uFEFF\n# c\nk: v\n`, `\uFEFF\n---\nk: v\n`, and
+- [x] `\uFEFF\n\uFEFF\nk: v\n`, `\uFEFF\n# c\nk: v\n`, `\uFEFF\n---\nk: v\n`, and
       `\uFEFF\n%YAML 1.2\n---\nk\n` each load one document
-- [ ] The BOM tests of `src/lines.rs`, `tests/smoke/documents.rs`, `tests/robustness.rs`, and
+- [x] The BOM tests of `src/lines.rs`, `tests/smoke/documents.rs`, `tests/robustness.rs`, and
       `tests/encoding.rs` pass with their assertions unchanged; two BOMs on one line stay the
       error they are
-- [ ] `%YAML 1.2\n\uFEFF---\nk\n` loads as it does before this task, and the test that pins it
+- [x] `%YAML 1.2\n\uFEFF---\nk\n` loads as it does before this task, and the test that pins it
       names [209] and the Decisions entry "Kept deviations"
+- [x] `%YAML 1.2\n\uFEFF\n---\nk\n` stays the error it is (gate demand, see Decisions)
 
 ### Task 2: The events recognized before an error come before it
 
@@ -266,6 +267,8 @@ limit. The task rests on YAML 1.2.2 §7.1 (alias nodes); the limit is the librar
   nothing but a BOM); a BOM between documents without `...` is rejected, though [211] allows it;
   an empty line after an escaped line break in a double-quoted scalar is dropped, though [112]
   reads it as a line feed.
+- **Gate demand on Task 1:** a line that holds only a BOM stays an error after a directive, as
+  [209] requires; skipping it there would add a deviation, not keep one.
 - **Flow collection spans:** a flow collection's span ends at its closing indicator, without it;
   `flow_style.rs` and the folding tests of `rlsp-yaml` rely on that, so only the node docs change.
 - **`deletion_range` in this plan:** the quick fix lies in `rlsp-yaml`, and its backlog entry is
