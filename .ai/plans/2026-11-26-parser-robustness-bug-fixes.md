@@ -43,7 +43,7 @@ where they arise.
 - [x] Task 2: The events recognized before an error come before it
 - [x] Task 10: The events of a flow collection come before an error inside it
 - [x] Task 3: A double-quoted scalar of escapes is scanned in linear time
-- [ ] Task 4: `LineIndex::line_column` answers in bounded time on a long line
+- [x] Task 4: `LineIndex::line_column` answers in bounded time on a long line
 - [ ] Task 5: A long flow line is tokenized with a running column
 - [ ] Task 6: A plain scalar in a flow collection is scanned to its own end
 - [ ] Task 7: The "Delete unused anchor" quick fix reads only the blanks before its anchor
@@ -165,16 +165,16 @@ and the loader calls it once per node, so `load` and every per-match lookup of `
 time with the square of a long line's length. The index keeps a count of the characters before
 every fixed step of bytes, so a call counts a bounded stretch.
 
-- [ ] For every text and every offset from 0 to one past the text's length, `line_column` returns
+- [x] For every text and every offset from 0 to one past the text's length, `line_column` returns
       what it returns before this task: a property test compares it with a copy of the old
       counting in the test module, over texts that mix ASCII, multi-byte characters, `\n`, `\r`,
       and `\r\n`, with offsets inside a character and between `\r` and `\n` included
-- [ ] A time test: 400 000 calls at the end of a 1 MiB line of ASCII end within the bound; the
+- [x] A time test: 400 000 calls at the end of a 1 MiB line of ASCII end within the bound; the
       same number of calls at the end of that line with a leading `é` also ends within the bound
       (this second case need not take five times the bound before the task)
-- [ ] The tests of `src/pos.rs`, `tests/unicode_positions.rs`, and `tests/loader_spans.rs` pass
+- [x] The tests of `src/pos.rs`, `tests/unicode_positions.rs`, and `tests/loader_spans.rs` pass
       with their assertions unchanged
-- [ ] For a 1 MiB text, the memory the index adds is at most 64 KiB, and the review request
+- [x] For a 1 MiB text, the memory the index adds is at most 64 KiB, and the review request
       reports the measured size
 
 ### Task 5: A long flow line is tokenized with a running column

@@ -15,7 +15,7 @@ use rstest::rstest;
 use rlsp_yaml_parser::encoding::decode;
 use rlsp_yaml_parser::loader::{LoadError, LoaderBuilder};
 use rlsp_yaml_parser::node::Node;
-use rlsp_yaml_parser::{ErrorKind, Event, Pos, Span};
+use rlsp_yaml_parser::{ErrorKind, Event, LineIndex, Pos, Span};
 use rlsp_yaml_parser::{load, parse_events};
 
 // ===========================================================================
@@ -670,6 +670,62 @@ fn very_long_line_does_not_panic() {
     let input = "key: ".to_string() + &"x".repeat(100_000) + "\n";
     let start = Instant::now();
     let _result = load(&input);
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed < Duration::from_secs(30),
+        "took {elapsed:?}, expected < 30s"
+    );
+}
+
+/// Resolve `calls` offsets that lie at the end of the single-line `text`,
+/// going down one byte per call, and return how long that took. Offsets inside
+/// a multi-byte character answer column 0; the timing is what matters here.
+fn time_line_column_calls_at_the_end(text: &str, calls: u32) -> Duration {
+    let start = Instant::now();
+    let index = LineIndex::new(text);
+    let end = u32::try_from(text.len()).unwrap();
+    for back in 0..calls {
+        let (line, _) = std::hint::black_box(index.line_column(end - back));
+        assert_eq!(line, 1);
+    }
+    start.elapsed()
+}
+
+#[rstest]
+#[case::ascii_line("x".repeat(1024 * 1024))]
+#[case::ascii_line_after_a_two_byte_character(format!("\u{e9}{}", "x".repeat(1024 * 1024 - 2)))]
+#[case::two_byte_characters("\u{e9}".repeat(512 * 1024))]
+#[case::four_byte_characters("\u{1f600}".repeat(256 * 1024))]
+fn line_column_at_the_end_of_a_one_mib_line_does_not_stall(#[case] text: String) {
+    let elapsed = time_line_column_calls_at_the_end(&text, 400_000);
+    assert!(
+        elapsed < Duration::from_secs(30),
+        "took {elapsed:?}, expected < 30s"
+    );
+}
+
+#[rstest]
+#[case::ascii_line("x".repeat(1024 * 1024))]
+#[case::ascii_line_after_a_two_byte_character(format!("\u{e9}{}", "x".repeat(1024 * 1024 - 2)))]
+#[case::two_byte_characters("\u{e9}".repeat(512 * 1024))]
+#[case::four_byte_characters("\u{1f600}".repeat(256 * 1024))]
+fn line_column_at_the_end_of_a_one_mib_line_counts_its_characters(#[case] text: String) {
+    let end = u32::try_from(text.len()).unwrap();
+    let characters = u32::try_from(text.chars().count()).unwrap();
+    let index = LineIndex::new(&text);
+    assert_eq!(index.line_column(end), (1, characters));
+}
+
+#[test]
+fn line_column_over_many_short_lines_does_not_stall() {
+    let text = "a\u{e9}\r\n".repeat(256 * 1024);
+    let index = LineIndex::new(&text);
+    let start = Instant::now();
+    let end = u32::try_from(text.len()).unwrap();
+    for offset in (0..end).step_by(3) {
+        let (_, column) = index.line_column(offset);
+        assert!(column <= 3, "column {column} at {offset}");
+    }
     let elapsed = start.elapsed();
     assert!(
         elapsed < Duration::from_secs(30),

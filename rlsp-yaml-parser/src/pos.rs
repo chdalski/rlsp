@@ -76,12 +76,22 @@ pub fn advance_within_line(pos: Pos, content: &str) -> Pos {
 // LineIndex
 // ---------------------------------------------------------------------------
 
+/// Bytes between two entries of the character-count table of a [`LineIndex`].
+///
+/// The table costs `4 / CHECKPOINT_STEP` bytes per source byte, and a column
+/// lookup counts at most this many bytes per end of the range.
+const CHECKPOINT_STEP: usize = 128;
+
 /// An index over a document's byte offsets that resolves byte offsets to
 /// `(line, column)` pairs on demand.
 ///
 /// Constructed once per document from the source `&str`. Stores the byte
-/// offset of each line terminator (`\n`, `\r`, or `\r\n`) in sorted order.
-/// Line/column are resolved via binary search in O(log n) time.
+/// offset of each line terminator (`\n`, `\r`, or `\r\n`) in sorted order, and
+/// the number of characters before every [`CHECKPOINT_STEP`]-th byte.
+/// The line is found by binary search; the column is the difference of two
+/// character counts, each taken from the nearest checkpoint plus a count over
+/// fewer than [`CHECKPOINT_STEP`] bytes. A lookup therefore takes
+/// O(log n + [`CHECKPOINT_STEP`]) time however long the line is.
 ///
 /// Line numbers are 1-based; column numbers are 0-based codepoint counts.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,14 +99,34 @@ pub struct LineIndex {
     /// Sorted byte offsets of newline characters in the source.
     /// For `\r\n` pairs, stores the offset of the `\r`.
     newlines: Vec<u32>,
+    /// `checkpoints[i]` is the number of characters that start before byte
+    /// `i * step`. Holds `source.len() / step + 1` entries.
+    checkpoints: Vec<u32>,
+    /// Bytes between two checkpoints; at least 1.
+    step: usize,
     /// Full source kept for codepoint-column computation.
     source: String,
+}
+
+/// Number of characters that start within `bytes` (every byte that is not a
+/// UTF-8 continuation byte starts one). Defined for any byte range, also one
+/// that starts or ends inside a character.
+fn count_char_starts(bytes: &[u8]) -> u32 {
+    let count = bytes.iter().filter(|&&b| b & 0xC0 != 0x80).count();
+    u32::try_from(count).unwrap_or(u32::MAX)
 }
 
 impl LineIndex {
     /// Build a `LineIndex` from the document source string.
     #[must_use]
     pub fn new(source: &str) -> Self {
+        Self::with_step(source, CHECKPOINT_STEP)
+    }
+
+    /// Build a `LineIndex` with a checkpoint every `step` bytes (at least 1).
+    /// Tests use a small step to reach the checkpoint logic with short texts.
+    fn with_step(source: &str, step: usize) -> Self {
+        let step = step.max(1);
         let mut newlines = Vec::new();
         let mut chars = source.char_indices().peekable();
         while let Some((i, ch)) = chars.next() {
@@ -122,10 +152,35 @@ impl LineIndex {
                 _ => {}
             }
         }
+        let mut checkpoints = Vec::with_capacity(source.len() / step + 1);
+        checkpoints.push(0u32);
+        let mut total = 0u32;
+        for chunk in source.as_bytes().chunks_exact(step) {
+            total = total.saturating_add(count_char_starts(chunk));
+            checkpoints.push(total);
+        }
         Self {
             newlines,
+            checkpoints,
+            step,
             source: source.to_owned(),
         }
+    }
+
+    /// Number of characters that start before `byte`, which must not exceed
+    /// the source length.
+    fn chars_before(&self, byte: usize) -> u32 {
+        let slot = byte / self.step;
+        // `slot <= source.len() / step`, so the table holds it, and
+        // `slot * step <= byte <= source.len()`, so the range is in bounds;
+        // the fallbacks are unreachable.
+        let base = self.checkpoints.get(slot).copied().unwrap_or(0);
+        let tail = self
+            .source
+            .as_bytes()
+            .get(slot * self.step..byte)
+            .unwrap_or_default();
+        base.saturating_add(count_char_starts(tail))
     }
 
     /// Resolve a byte offset to a `(line, column)` pair.
@@ -133,7 +188,9 @@ impl LineIndex {
     /// `line` is 1-based; `column` is the 0-based codepoint count from the
     /// start of the line.
     ///
-    /// The offset must be a valid byte boundary within the source string.
+    /// The offset must be a valid byte boundary within the source string; for
+    /// any other offset (inside a character, past the end, between the `\r` and
+    /// the `\n` of a line break) the column is 0.
     #[must_use]
     pub fn line_column(&self, offset: u32) -> (u32, u32) {
         // Binary-search for the number of newlines before `offset`.
@@ -173,18 +230,12 @@ impl LineIndex {
         };
 
         // Count codepoints from line start to the requested offset.
-        let col_prefix = self
-            .source
-            .get(line_start_byte..offset as usize)
-            .unwrap_or("");
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "column fits u32 for any realistic line"
-        )]
-        let column = if col_prefix.is_ascii() {
-            col_prefix.len() as u32
+        let offset = offset as usize;
+        let column = if line_start_byte <= offset && self.source.is_char_boundary(offset) {
+            self.chars_before(offset)
+                .saturating_sub(self.chars_before(line_start_byte))
         } else {
-            col_prefix.chars().count() as u32
+            0
         };
 
         (line, column)
@@ -586,5 +637,158 @@ mod tests {
                 offset += ch.len_utf8();
             }
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // CP-*: checkpoint table — results equal the per-call counting it replaced
+    // -----------------------------------------------------------------------
+
+    /// Reference: the implementation before the checkpoint table, which counts
+    /// the code points from the line start on every call. Kept as the oracle
+    /// for the results the table must preserve, edge cases included.
+    fn old_line_column(idx: &LineIndex, offset: u32) -> (u32, u32) {
+        let source = &idx.source;
+        let newline_idx = idx.newlines.partition_point(|&nl| nl < offset);
+        let line = u32::try_from(newline_idx).unwrap() + 1;
+        let line_start_byte = if newline_idx == 0 {
+            0usize
+        } else {
+            let nl_byte = idx.newlines[newline_idx - 1] as usize;
+            let nl_char = source
+                .get(nl_byte..)
+                .and_then(|s| s.chars().next())
+                .unwrap_or('\n');
+            if nl_char == '\r' && source.get(nl_byte + 1..nl_byte + 2) == Some("\n") {
+                nl_byte + 2
+            } else {
+                nl_byte + 1
+            }
+        };
+        let col_prefix = source.get(line_start_byte..offset as usize).unwrap_or("");
+        (line, u32::try_from(col_prefix.chars().count()).unwrap())
+    }
+
+    /// Assert that `idx` answers like the oracle at every offset from 0 to one
+    /// past the end, and at `u32::MAX`.
+    fn assert_matches_old(idx: &LineIndex) {
+        let len = u32::try_from(idx.source.len()).unwrap();
+        for offset in (0..=len + 1).chain([u32::MAX]) {
+            assert_eq!(
+                idx.line_column(offset),
+                old_line_column(idx, offset),
+                "offset {offset} in {:?} with step {}",
+                idx.source,
+                idx.step
+            );
+        }
+    }
+
+    #[rstest]
+    #[case::empty_text("")]
+    #[case::ascii_line("abcdefghijklmnop")]
+    #[case::two_byte_char_over_a_checkpoint("abc\u{e9}def")]
+    #[case::three_byte_char_over_a_checkpoint("ab\u{20ac}cdef")]
+    #[case::four_byte_char_over_a_checkpoint("a\u{1f600}bcdef")]
+    #[case::mixed_widths("a\u{e9}\u{20ac}\u{1f600}a\u{e9}\u{20ac}\u{1f600}")]
+    #[case::crlf_across_a_checkpoint("abc\r\ndef\r\nghi")]
+    #[case::cr_on_a_checkpoint("abcd\r\nefgh")]
+    #[case::lf_on_a_checkpoint("abcd\nefgh")]
+    #[case::line_start_inside_the_previous_char("ab\u{e9}\nxy\u{e9}z")]
+    #[case::text_ending_in_cr("abc\r")]
+    #[case::text_ending_in_crlf("abc\r\n")]
+    #[case::lone_crs_and_empty_lines("a\rb\r\rc\n\n\r\n\r\nd")]
+    #[case::long_line_then_short_line("abcdefghijklmnopqrstuvwxyz\nab")]
+    #[case::bom("\u{feff}a\nb")]
+    fn line_column_matches_the_per_call_count_at_every_offset(
+        #[case] text: &str,
+        #[values(1, 2, 3, 4, 5, 8, 64)] step: usize,
+    ) {
+        assert_matches_old(&LineIndex::with_step(text, step));
+        assert_matches_old(&LineIndex::new(text));
+    }
+
+    #[rstest]
+    #[case::before_the_end("abc", 2, (1, 2))]
+    #[case::at_the_end("abc", 3, (1, 3))]
+    #[case::past_the_end("abc", 4, (1, 0))]
+    #[case::at_u32_max("abc", u32::MAX, (1, 0))]
+    #[case::past_the_end_on_a_later_line("a\nbc", 100, (2, 0))]
+    #[case::inside_a_two_byte_char("a\u{e9}", 2, (1, 0))]
+    #[case::inside_a_four_byte_char_on_a_later_line("\u{e9}\n\u{1f600}", 5, (2, 0))]
+    #[case::between_cr_and_lf("a\r\nb", 2, (2, 0))]
+    #[case::after_crlf("a\r\nb", 3, (2, 0))]
+    #[case::after_cr_at_the_end("a\r", 2, (2, 0))]
+    #[case::mixed_breaks_second_line("ab\ncd\r\nef\rgh", 4, (2, 1))]
+    #[case::mixed_breaks_third_line("ab\ncd\r\nef\rgh", 8, (3, 1))]
+    #[case::mixed_breaks_fourth_line("ab\ncd\r\nef\rgh", 11, (4, 1))]
+    fn line_column_of_edge_offsets(
+        #[case] text: &str,
+        #[case] offset: u32,
+        #[case] expected: (u32, u32),
+    ) {
+        assert_eq!(LineIndex::new(text).line_column(offset), expected);
+        assert_eq!(LineIndex::with_step(text, 2).line_column(offset), expected);
+    }
+
+    fn text_from(parts: &[&str]) -> String {
+        parts.concat()
+    }
+
+    proptest! {
+        // CP-1: small steps put checkpoints inside short texts.
+        #[test]
+        fn line_column_matches_the_per_call_count_for_small_steps(
+            parts in proptest::collection::vec(
+                prop_oneof![
+                    3 => Just("a"),
+                    1 => Just(" "),
+                    2 => Just("\n"),
+                    2 => Just("\r"),
+                    2 => Just("\r\n"),
+                    2 => Just("\u{e9}"),
+                    1 => Just("\u{20ac}"),
+                    1 => Just("\u{1f600}"),
+                ],
+                0..40,
+            ),
+            step in prop_oneof![Just(1usize), Just(2), Just(3), Just(4), Just(5), Just(8), Just(64)],
+        ) {
+            assert_matches_old(&LineIndex::with_step(&text_from(&parts), step));
+        }
+
+        // CP-2: texts several checkpoints long with the real step.
+        #[test]
+        fn line_column_matches_the_per_call_count_for_long_texts(
+            parts in proptest::collection::vec(
+                prop_oneof![
+                    8 => Just("abcdefgh"),
+                    1 => Just("\n"),
+                    1 => Just("\r\n"),
+                    3 => Just("\u{e9}"),
+                    2 => Just("\u{20ac}"),
+                    2 => Just("\u{1f600}"),
+                ],
+                0..300,
+            ),
+        ) {
+            assert_matches_old(&LineIndex::new(&text_from(&parts)));
+        }
+    }
+
+    #[rstest]
+    #[case::ascii("a")]
+    #[case::two_byte("\u{e9}")]
+    #[case::four_byte("\u{1f600}")]
+    fn checkpoint_table_of_one_mib_text_takes_at_most_64_kib(#[case] unit: &str) {
+        let text = unit.repeat(1024 * 1024 / unit.len());
+        let idx = LineIndex::new(&text);
+        let bytes = idx.checkpoints.capacity() * size_of::<u32>();
+        assert!(bytes <= 64 * 1024, "table takes {bytes} bytes");
+    }
+
+    #[test]
+    fn checkpoint_table_of_equal_texts_is_equal() {
+        assert_eq!(LineIndex::new("a\u{e9}\nb"), LineIndex::new("a\u{e9}\nb"));
+        assert_ne!(LineIndex::new("a\u{e9}\nb"), LineIndex::new("a\u{e9}\nc"));
     }
 }
