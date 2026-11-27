@@ -47,7 +47,7 @@ where they arise.
 - [x] Task 5: A long flow line is tokenized with a running column
 - [x] Task 6: A plain scalar in a flow collection is scanned to its own end
 - [x] Task 7: The "Delete unused anchor" quick fix reads only the blanks before its anchor
-- [ ] Task 8: A single pair in a flow sequence spans its key and its value
+- [x] Task 8: A single pair in a flow sequence spans its key and its value
 - [ ] Task 9: Alias expansion keeps to the nesting depth limit
 - [ ] Push to `main` and confirm the full CI matrix is green
 
@@ -236,20 +236,25 @@ validator (`src/validation/validators/flow_style.rs`), the "Convert flow mapping
 (`src/editing/code_actions/flow_to_block.rs`), selection ranges, document symbols, and folding read
 this span.
 
-- [ ] The mapping start event has the start and the mapping end event has the end of these spans,
+- [x] The mapping start event has the start and the mapping end event has the end of these spans,
       and the loaded mapping has the span: `[a: 1, b: 2]` 1..5 and 7..11, `[a: 1 , b]` 1..6,
       `[&x a: 1]` 4..8, `[: v, b]` 1..4, `[[x]: 1, b]` 1..7, `["a": 1]` 1..7,
       `[a:\n  1,\n b]` 1..7, `[? a, b]` 1..4, and `[? a : 1, b]` 1..8
-- [ ] The spans of flow sequences, flow mappings, and their scalars stay as they are, the empty
+- [x] The spans of flow sequences, flow mappings, and their scalars stay as they are, the empty
       scalars of `[&a , b]` and `{a: , b: 1}` included, and the yaml-test-suite runs for events
       and for the loader pass
-- [ ] The docs of `Node::Mapping` and `Node::Sequence` (`src/node.rs`) say that a flow
+- [x] The docs of `Node::Mapping` and `Node::Sequence` (`src/node.rs`) say that a flow
       collection's span ends at its closing indicator, without it, and
       `docs/conformance/bnf-§7.md` says where the events of a single pair stand
-- [ ] Through the server, `[a: 1, b: 2]` gets its two `flowMap` diagnostics at (0,1)-(0,6) and
+- [x] Through the server, `[a: 1, b: 2]` gets its two `flowMap` diagnostics at (0,1)-(0,6) and
       (0,7)-(0,12), each the pair's span with the end one column past it, as for flow collections
       (`rlsp-yaml/tests/lsp_lifecycle/`)
-- [ ] The tests of `rlsp-yaml` pass with their assertions unchanged
+- [x] The tests of `rlsp-yaml` pass with their assertions unchanged
+- [x] In `[? a, # c\n b]` the comment is the pair's trailing comment, as for every other entry of
+      a flow sequence
+- [x] The empty key or value of a single pair is zero-width at the `,` or `]` that ends the pair,
+      and the selection chain of every position in `[a: , b]`, `[a:, b]`, and `[? a, b]` is nested
+- [x] No position in a single pair gets the same range twice in a row in its selection chain
 
 ### Task 9: Alias expansion keeps to the nesting depth limit
 
@@ -333,6 +338,13 @@ limit. The task rests on YAML 1.2.2 §7.1 (alias nodes); the limit is the librar
   rest back after a quoted scalar. The lexer now keeps the last counted rest and its character
   count, and a rest that is a suffix of it costs only the skipped part; this needs no assumption
   about the positions of synthetic lines, which a cached end position would.
+- **Gate demands on Task 8:** the review and the test advisor demanded three criteria beyond the
+  approved ones. The comment of `[? a, # c\n b]` went to the next entry only because the pair's
+  span had no width. The empty key or value of a pair moves to the pair's end, so the pair holds
+  it; empty scalars outside a pair stay. `collect_ancestor_spans`
+  (`rlsp-yaml/src/analysis/selection.rs`) skips a range equal to the one before it in three
+  places a pair reaches; the skips also drop the repeated range of key-only and empty entries
+  outside pairs (`{a}`, `{? }`, `? a` at the end of the text). No existing assertion changed.
 - **Flow collection spans:** a flow collection's span ends at its closing indicator, without it;
   `flow_style.rs` and the folding tests of `rlsp-yaml` rely on that, so only the node docs change.
 - **`deletion_range` in this plan:** the quick fix lies in `rlsp-yaml`, and its backlog entry is

@@ -625,3 +625,25 @@ fn comment_of_the_maximum_length_is_stored() {
     };
     assert_eq!(entries[0].1.trailing_comment(), Some(comment.as_str()));
 }
+
+/// A comment after the `,` of a single pair in a flow sequence, on the pair's
+/// line, is the pair's trailing comment, whether the pair is implicit or
+/// explicit without a `:`.  The specification assigns no comments to nodes: the
+/// rule follows from the pair's span, which reaches the `,` on that line (a
+/// span with no width holds no comment, so the comment went to the next node).
+#[rstest]
+#[case::implicit_pair("[a: 1, # c\n b]\n")]
+#[case::explicit_pair_with_a_value("[? a : 1, # c\n b]\n")]
+#[case::explicit_pair_without_a_colon("[? a, # c\n b]\n")]
+fn comment_after_the_comma_of_a_flow_pair_is_the_pairs_trailing_comment(#[case] input: &str) {
+    let docs = load(input).unwrap();
+    let Node::Sequence { items, .. } = &docs[0].root else {
+        panic!("expected Sequence");
+    };
+    let [pair, next] = items.as_slice() else {
+        panic!("expected a pair and a scalar, got {items:?}");
+    };
+    assert!(matches!(pair, Node::Mapping { .. }), "{pair:?}");
+    assert_eq!(pair.trailing_comment(), Some("# c"), "{input:?}");
+    assert!(next.leading_comments().is_empty(), "{input:?}");
+}

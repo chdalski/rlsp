@@ -208,7 +208,11 @@ pub enum Node<Loc = Span> {
         style: CollectionStyle,
         /// Tag applied to this mapping (e.g. `!!map`), if any.
         tag: Option<Cow<'static, str>>,
-        /// Source span from the opening indicator to the last entry.
+        /// Source span of the mapping.  A block mapping spans from its first
+        /// key to its last entry.  A flow mapping `{...}` spans from its `{` to
+        /// its `}`, the `}` not included.  A single pair in a flow sequence
+        /// (`a: 1` in `[a: 1, b]`) spans from its key, or from its `?`, to
+        /// the `,` or `]` that ends it, the `,` or `]` not included.
         loc: Loc,
         /// Rare fields: `anchor`, `anchor_loc`, `tag_loc`, `leading_comments`, `trailing_comment`.
         /// `None` for the common case where none of these are set.
@@ -222,7 +226,9 @@ pub enum Node<Loc = Span> {
         style: CollectionStyle,
         /// Tag applied to this sequence (e.g. `!!seq`), if any.
         tag: Option<Cow<'static, str>>,
-        /// Source span from the opening indicator to the last item.
+        /// Source span of the sequence.  A block sequence spans from its first
+        /// `-` to its last item.  A flow sequence `[...]` spans from its `[` to
+        /// its `]`, the `]` not included.
         loc: Loc,
         /// Rare fields: `anchor`, `anchor_loc`, `tag_loc`, `leading_comments`, `trailing_comment`.
         /// `None` for the common case where none of these are set.

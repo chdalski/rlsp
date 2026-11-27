@@ -571,3 +571,161 @@ fn loader_multiline_quoted_scalar_keeps_comments_and_value() {
     assert_eq!(entries[0].1.trailing_comment(), Some("# c"));
     assert_eq!(entries[1].0.leading_comments(), ["# d"]);
 }
+
+// ---------------------------------------------------------------------------
+// Group: the single pair of a flow sequence
+// ---------------------------------------------------------------------------
+
+/// The `loc` of every mapping that is an item of a flow sequence, in document
+/// order, with the `loc` of every node inside it checked to lie within the
+/// pair's: a pair spans its key and its value, the empty ones included.
+fn flow_pair_locs(node: &Node, pairs: &mut Vec<(u32, u32)>) {
+    fn within(node: &Node, start: u32, end: u32) {
+        let (Node::Scalar { loc, .. }
+        | Node::Alias { loc, .. }
+        | Node::Mapping { loc, .. }
+        | Node::Sequence { loc, .. }) = node;
+        assert!(
+            start <= loc.start && loc.end <= end,
+            "{start}..{end} must hold {}..{}",
+            loc.start,
+            loc.end
+        );
+        match node {
+            Node::Mapping { entries, .. } => {
+                for (key, value) in entries {
+                    within(key, start, end);
+                    within(value, start, end);
+                }
+            }
+            Node::Sequence { items, .. } => {
+                for item in items {
+                    within(item, start, end);
+                }
+            }
+            Node::Scalar { .. } | Node::Alias { .. } => {}
+        }
+    }
+    match node {
+        Node::Sequence { items, style, .. } => {
+            for item in items {
+                if *style == rlsp_yaml_parser::CollectionStyle::Flow
+                    && let Node::Mapping { loc, .. } = item
+                {
+                    pairs.push((loc.start, loc.end));
+                    within(item, loc.start, loc.end);
+                }
+                flow_pair_locs(item, pairs);
+            }
+        }
+        Node::Mapping { entries, .. } => {
+            for (key, value) in entries {
+                flow_pair_locs(key, pairs);
+                flow_pair_locs(value, pairs);
+            }
+        }
+        Node::Scalar { .. } | Node::Alias { .. } => {}
+    }
+}
+
+/// A single pair spans from its key, or its `?`, to the `,` or `]` that ends it
+/// (YAML 1.2.2 [150] `ns-flow-pair`; the specification defines no spans).  The
+/// pairs are listed in document order.
+#[rstest]
+#[case::two_pairs("[a: 1, b: 2]", &[(1, 5), (7, 11)])]
+#[case::blank_before_the_comma("[a: 1 , b]", &[(1, 6)])]
+#[case::anchored_key("[&x a: 1]", &[(4, 8)])]
+#[case::empty_key("[: v, b]", &[(1, 4)])]
+#[case::flow_sequence_key("[[x]: 1, b]", &[(1, 7)])]
+#[case::double_quoted_key("[\"a\": 1]", &[(1, 7)])]
+#[case::value_on_the_next_line("[a:\n  1,\n b]", &[(1, 7)])]
+#[case::explicit_key_without_value("[? a, b]", &[(1, 4)])]
+#[case::explicit_pair("[? a : 1, b]", &[(1, 8)])]
+#[case::pair_in_a_pair("[a: [b: 1]]", &[(1, 10), (5, 9)])]
+#[case::pair_in_a_block_key("[a: 1]: v\n", &[(1, 5)])]
+#[case::multibyte_keys_and_values("[é: ü, 日本: 語]", &[(1, 7), (9, 20)])]
+#[case::explicit_key_over_two_lines("[? a\n b : c]", &[(1, 11)])]
+#[case::empty_value_before_a_comma("[a: , b]", &[(1, 4)])]
+#[case::empty_value_without_a_blank("[a:, b]", &[(1, 3)])]
+#[case::explicit_pair_with_an_empty_value("[? a : , b]", &[(1, 7)])]
+#[case::explicit_pair_without_a_key("[? , b]", &[(1, 3)])]
+#[case::properties_as_the_value("[a: &x , b]", &[(1, 7)])]
+fn loader_flow_single_pair_spans_its_key_and_value(
+    #[case] input: &str,
+    #[case] expected: &[(u32, u32)],
+) {
+    let docs = load(input).unwrap();
+    let mut pairs = Vec::new();
+    flow_pair_locs(&docs[0].root, &mut pairs);
+    assert_eq!(pairs, expected, "{input:?}");
+}
+
+/// The nodes around a single pair keep their `loc`.
+#[test]
+fn loader_flow_single_pair_leaves_the_other_locs_unchanged() {
+    let docs = load("[a: 1, b: 2]").unwrap();
+    let Node::Sequence { items, loc, .. } = &docs[0].root else {
+        panic!("expected Sequence");
+    };
+    assert_eq!((loc.start, loc.end), (0, 11));
+    let locs: Vec<(u32, u32)> = items
+        .iter()
+        .flat_map(|item| {
+            let Node::Mapping { entries, .. } = item else {
+                panic!("expected Mapping, got {item:?}");
+            };
+            entries.iter().flat_map(|(key, value)| [key, value])
+        })
+        .map(|node| match node {
+            Node::Scalar { loc, .. } => (loc.start, loc.end),
+            other @ (Node::Mapping { .. } | Node::Sequence { .. } | Node::Alias { .. }) => {
+                panic!("expected Scalar, got {other:?}")
+            }
+        })
+        .collect();
+    assert_eq!(locs, [(1, 2), (4, 5), (7, 8), (10, 11)]);
+}
+
+/// A flow sequence that holds a pair, inside a block collection: the block
+/// mapping and the sequence keep their `loc`.
+#[rstest]
+#[case::block_key("[a: 1]: v\n", (0, 9), None)]
+#[case::block_value("k: [a: 1, b]\n", (0, 13), Some((3, 11)))]
+fn loader_flow_single_pair_leaves_the_block_locs_unchanged(
+    #[case] input: &str,
+    #[case] mapping: (u32, u32),
+    #[case] sequence: Option<(u32, u32)>,
+) {
+    let docs = load(input).unwrap();
+    let Node::Mapping { entries, loc, .. } = &docs[0].root else {
+        panic!("expected Mapping");
+    };
+    assert_eq!((loc.start, loc.end), mapping);
+    if let Some(expected) = sequence {
+        let Node::Sequence { loc, .. } = &entries[0].1 else {
+            panic!("expected Sequence");
+        };
+        assert_eq!((loc.start, loc.end), expected);
+    }
+}
+
+/// The line index counts columns in characters at the start of a pair after
+/// multibyte text.
+#[test]
+fn loader_flow_single_pair_start_has_a_character_column() {
+    let docs = load("[é: ü, 日本: 語]").unwrap();
+    let Node::Sequence { items, .. } = &docs[0].root else {
+        panic!("expected Sequence");
+    };
+    let line_index = docs[0].line_index();
+    let columns: Vec<(u32, u32)> = items
+        .iter()
+        .map(|item| {
+            let Node::Mapping { loc, .. } = item else {
+                panic!("expected Mapping, got {item:?}");
+            };
+            line_index.line_column(loc.start)
+        })
+        .collect();
+    assert_eq!(columns, [(1, 1), (1, 7)]);
+}

@@ -270,3 +270,34 @@ async fn selection_range_with_no_positions_returns_null() {
     let result = resp.result().expect("selectionRange should have a result");
     assert!(result.is_null(), "got {result}");
 }
+
+#[tokio::test]
+async fn selection_range_on_a_key_of_a_flow_single_pair_grows_through_the_pair() {
+    let (mut service, socket) = LspService::new(Backend::new);
+    tokio::spawn(socket.for_each(|_| async {}));
+
+    send(&mut service, initialize_request(1)).await;
+    send(&mut service, initialized_notification()).await;
+
+    let uri = "file:///test/selection_flow_pair.yaml";
+    send(&mut service, did_open_notification(uri, "[a: 1, b: 2]\n")).await;
+
+    let resp = send(&mut service, selection_range_request(2, uri, 0, 1)).await;
+    let resp = resp.expect("selectionRange should return a response");
+    let result = resp.result().expect("selectionRange should have a result");
+
+    // The chain from the key outwards, each range as (start, end) columns on line 0.
+    let mut chain = Vec::new();
+    let mut node = &result[0];
+    loop {
+        chain.push((
+            node["range"]["start"]["character"].as_u64().unwrap(),
+            node["range"]["end"]["character"].as_u64().unwrap(),
+        ));
+        match node.get("parent") {
+            Some(parent) => node = parent,
+            None => break,
+        }
+    }
+    assert_eq!(chain, [(1, 2), (1, 5), (0, 11)]);
+}

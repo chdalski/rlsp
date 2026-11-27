@@ -697,40 +697,19 @@ fn events_queued_before_an_error_come_before_it(#[case] input: &str, #[case] exp
     assert_eq!(brief(input), expected);
 }
 
-/// Like `brief`, without the spans of the mapping starts and ends and of empty
-/// scalars: those of a flow pair are inserted where the pair turns out to be
-/// one, and the cases that use this helper pin which events exist, not where
-/// they sit.
-fn brief_without_pair_spans(input: &str) -> Vec<String> {
-    brief(input)
-        .into_iter()
-        .map(|item| {
-            if item.starts_with("MappingStart")
-                || item.starts_with("MappingEnd")
-                || item.starts_with("Scalar  ")
-            {
-                item.rsplit_once(' ')
-                    .map_or_else(|| item.clone(), |(kind, _)| kind.to_owned())
-            } else {
-                item
-            }
-        })
-        .collect()
-}
-
 /// A pair of a flow sequence that an error interrupts keeps the events built
-/// until then: its mapping start appears once its `:` was read, and a `?` alone
-/// yields no event (YAML 1.2.2 [150] `ns-flow-pair`, [151]; the specification
-/// does not say which events precede an error).
+/// until then: its mapping start, at its key, appears once its `:` was read, and
+/// a `?` alone yields no event (YAML 1.2.2 [150] `ns-flow-pair`, [151]; the
+/// specification does not say which events precede an error).
 #[rstest]
 #[case::pair_then_error_in_the_next_entry(
     "[a: 1, b # \x01\n",
     &[
         "SequenceStart Flow 0..0",
-        "MappingStart Flow",
+        "MappingStart Flow 1..1",
         "Scalar a 1..2",
         "Scalar 1 4..5",
-        "MappingEnd",
+        "MappingEnd 5..5",
         "Scalar b 7..8",
         "Err InvalidCharacter 1:11",
     ],
@@ -739,7 +718,7 @@ fn brief_without_pair_spans(input: &str) -> Vec<String> {
     "[a: 1 # \x01\n]\n",
     &[
         "SequenceStart Flow 0..0",
-        "MappingStart Flow",
+        "MappingStart Flow 1..1",
         "Scalar a 1..2",
         "Scalar 1 4..5",
         "Err InvalidCharacter 1:8",
@@ -749,7 +728,7 @@ fn brief_without_pair_spans(input: &str) -> Vec<String> {
     "[a: # \x01\n]\n",
     &[
         "SequenceStart Flow 0..0",
-        "MappingStart Flow",
+        "MappingStart Flow 1..1",
         "Scalar a 1..2",
         "Err InvalidCharacter 1:6",
     ],
@@ -762,12 +741,36 @@ fn brief_without_pair_spans(input: &str) -> Vec<String> {
     "[? a, \x01]\n",
     &[
         "SequenceStart Flow 0..0",
-        "MappingStart Flow",
+        "MappingStart Flow 1..1",
         "Scalar a 3..4",
-        "Scalar ",
-        "MappingEnd",
+        "Scalar  4..4",
+        "MappingEnd 4..4",
         "Err Syntax 1:6",
     ],
+)]
+#[case::pair_then_a_second_comma(
+    "[a: 1,, b]",
+    &[
+        "SequenceStart Flow 0..0",
+        "MappingStart Flow 1..1",
+        "Scalar a 1..2",
+        "Scalar 1 4..5",
+        "Err Syntax 1:6",
+    ],
+)]
+#[case::pair_then_a_second_colon(
+    "[a: b: c]",
+    &[
+        "SequenceStart Flow 0..0",
+        "MappingStart Flow 1..1",
+        "Scalar a 1..2",
+        "Scalar b 4..5",
+        "Err Syntax 1:5",
+    ],
+)]
+#[case::implicit_key_over_a_line_break_has_no_mapping_start(
+    "[a\n: 1]",
+    &["SequenceStart Flow 0..0", "Scalar a 1..2", "Err Syntax 2:0"],
 )]
 fn flow_pair_events_before_an_error(#[case] input: &str, #[case] expected: &[&str]) {
     let mut items = vec![
@@ -775,7 +778,7 @@ fn flow_pair_events_before_an_error(#[case] input: &str, #[case] expected: &[&st
         "DocumentStart 0..0".to_owned(),
     ];
     items.extend(expected.iter().map(|item| (*item).to_owned()));
-    assert_eq!(brief_without_pair_spans(input), items);
+    assert_eq!(brief(input), items);
 }
 
 /// Nesting deeper than `MAX_COLLECTION_DEPTH` is an error after the events of

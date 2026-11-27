@@ -26,32 +26,31 @@ use crate::{EventIter, empty_scalar_event, zero_span};
 /// What an entry of a flow sequence has become when its `,` or the closing `]`
 /// arrives (see `FlowFrame::Sequence`).
 #[derive(Clone, Copy)]
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "a copy of the independent flags of `FlowFrame::Sequence`, passed on together"
-)]
 struct SequenceEntry {
     has_value: bool,
     after_colon: bool,
     in_implicit_map: bool,
-    explicit_pair: bool,
+    explicit_pair: Option<Pos>,
     key_start_idx: usize,
 }
 
-/// End the entry of a flow sequence at `at`, the `,` or `]` that follows it.
-/// `pending` is the scalar that the properties still pending stand for, if any.
+/// End the entry of a flow sequence.  `end` is the `,` or `]` that follows it:
+/// a pair ends there, and so do its empty nodes, so that the pair spans its
+/// key and its value.  `pending` is the scalar that the properties still
+/// pending stand for, if any.
 ///
 /// - A pair whose `:` has come (`[ a: ]`, `[ !t : ]`) gets its value, which is
 ///   `pending` when there is one, then its `MappingEnd`.
 /// - An explicit entry without a `:` (`[ ? ]`, `[ ? a ]`) is a single pair with
 ///   an empty value: `pending` is its key when it has none, its value otherwise
 ///   (YAML 1.2.2 [150] `ns-flow-pair`, [151]).
-/// - Any other entry that has pending properties holds a node of them alone.
+/// - Any other entry that has pending properties holds a node of them alone,
+///   at the position its caller gave it.
 fn finish_sequence_entry<'a>(
     events: &mut Vec<(Event<'a>, Span)>,
     entry: SequenceEntry,
     pending: Option<(Event<'a>, Span)>,
-    at: Span,
+    end: Span,
 ) {
     let SequenceEntry {
         has_value,
@@ -60,20 +59,21 @@ fn finish_sequence_entry<'a>(
         explicit_pair,
         key_start_idx,
     } = entry;
-    let node_or_empty =
-        |pending: Option<(Event<'a>, Span)>| pending.unwrap_or_else(|| (empty_scalar_event(), at));
+    let node_or_empty = |pending: Option<(Event<'a>, Span)>| {
+        pending.map_or_else(|| (empty_scalar_event(), end), |(event, _)| (event, end))
+    };
     if in_implicit_map {
         if after_colon {
             events.push(node_or_empty(pending));
         } else {
-            events.extend(pending);
+            events.extend(pending.map(|(event, _)| (event, end)));
         }
-        events.push((Event::MappingEnd, at));
-    } else if explicit_pair {
+        events.push((Event::MappingEnd, end));
+    } else if let Some(question_mark) = explicit_pair {
         let (key, value) = if has_value {
             (None, node_or_empty(pending))
         } else {
-            (Some(node_or_empty(pending)), (empty_scalar_event(), at))
+            (Some(node_or_empty(pending)), (empty_scalar_event(), end))
         };
         events.extend(key);
         events.insert(
@@ -83,11 +83,11 @@ fn finish_sequence_entry<'a>(
                     style: CollectionStyle::Flow,
                     meta: None,
                 },
-                at,
+                zero_span(question_mark),
             ),
         );
         events.push(value);
-        events.push((Event::MappingEnd, at));
+        events.push((Event::MappingEnd, end));
     } else {
         events.extend(pending);
     }
@@ -173,17 +173,19 @@ impl<'input> EventIter<'input> {
             /// key scalar/collection starts. When `:` arrives, `MappingStart`
             /// is inserted at this position.
             ///
-            /// `explicit_pair` is `true` after a `?` in the current entry and
-            /// before its `:`: the entry is a single pair even when the `,` or
-            /// `]` comes first (`[ ? a ]` is the pair `a: null`), and its
-            /// `MappingStart` is inserted there (YAML 1.2.2 [150], [151]).
+            /// `explicit_pair` is the position of the `?` after a `?` in the
+            /// current entry and before its `:`: the entry is a single pair
+            /// even when the `,` or `]` comes first (`[ ? a ]` is the pair
+            /// `a: null`), and its `MappingStart` is inserted at
+            /// `key_start_idx`, at the span of the `?` (YAML 1.2.2 [150],
+            /// [151]).
             Sequence {
                 has_value: bool,
                 after_colon: bool,
                 last_was_plain: bool,
                 in_implicit_map: bool,
                 key_start_idx: usize,
-                explicit_pair: bool,
+                explicit_pair: Option<Pos>,
             },
             /// An open `{...}` mapping.
             ///
@@ -649,7 +651,7 @@ impl<'input> EventIter<'input> {
                         last_was_plain: false,
                         in_implicit_map: false,
                         key_start_idx: events.len(),
-                        explicit_pair: false,
+                        explicit_pair: None,
                     });
                 } else {
                     flow_stack.push(FlowFrame::Mapping {
@@ -929,7 +931,7 @@ impl<'input> EventIter<'input> {
                         ..
                     }) => {
                         !has_value
-                            && !explicit_pair
+                            && explicit_pair.is_none()
                             && pending_flow_tag.is_none()
                             && pending_flow_anchor.is_none()
                     }
@@ -954,6 +956,7 @@ impl<'input> EventIter<'input> {
                     )));
                 }
 
+                let comma_span = zero_span(abs_pos(cur_base_pos, cur_content, pos_in_line));
                 pos_in_line += 1;
 
                 // Skip whitespace after comma.
@@ -1012,7 +1015,7 @@ impl<'input> EventIter<'input> {
                             key_start_idx,
                         },
                         pending,
-                        zero_span(comma_pos),
+                        comma_span,
                     );
                 }
 
@@ -1131,7 +1134,7 @@ impl<'input> EventIter<'input> {
                             *last_was_plain = false;
                             *in_implicit_map = false;
                             *key_start_idx = events.len();
-                            *explicit_pair = false;
+                            *explicit_pair = None;
                         }
                         FlowFrame::Mapping {
                             phase,
@@ -1444,7 +1447,7 @@ impl<'input> EventIter<'input> {
                                 last_was_plain: false,
                                 ..
                             } | FlowFrame::Sequence {
-                                explicit_pair: true,
+                                explicit_pair: Some(_),
                                 ..
                             }
                         )
@@ -1488,7 +1491,7 @@ impl<'input> EventIter<'input> {
                     // check is suppressed for the corresponding `:` separator.
                     if let Some(FlowFrame::Sequence { explicit_pair, .. }) = flow_stack.last_mut() {
                         explicit_key_in_seq = true;
-                        *explicit_pair = true;
+                        *explicit_pair = Some(abs_pos(cur_base_pos, cur_content, pos_in_line));
                     }
                     // In a flow mapping, record that an explicit-key indicator was
                     // seen so that a trailing `?` with no content (e.g. `{..., ?}`)
@@ -1727,7 +1730,27 @@ impl<'input> EventIter<'input> {
                                     ));
                                     *has_value = true;
                                 }
-                                *explicit_pair = false;
+                                // The pair starts at its `?`, or else at its key, after
+                                // the properties of the key (as a block mapping does).  A
+                                // comment before the key is not the key.
+                                let pair_start = explicit_pair.take().map_or_else(
+                                    || {
+                                        events
+                                            .iter()
+                                            .skip(*key_start_idx)
+                                            .find(|(event, _)| {
+                                                !matches!(event, Event::Comment { .. })
+                                            })
+                                            .map_or_else(
+                                                || zero_span(colon_pos),
+                                                |(_, span)| Span {
+                                                    start: span.start,
+                                                    end: span.start,
+                                                },
+                                            )
+                                    },
+                                    zero_span,
+                                );
                                 events.insert(
                                     *key_start_idx,
                                     (
@@ -1735,7 +1758,7 @@ impl<'input> EventIter<'input> {
                                             style: CollectionStyle::Flow,
                                             meta: None,
                                         },
-                                        zero_span(colon_pos),
+                                        pair_start,
                                     ),
                                 );
                                 *in_implicit_map = true;

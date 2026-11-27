@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use rlsp_yaml_parser::node::{Document, Node};
-use rlsp_yaml_parser::{LineIndex, Span};
+use rlsp_yaml_parser::{CollectionStyle, LineIndex, Span};
 use tower_lsp::lsp_types::{Position, Range, SelectionRange};
 
 use crate::lsp_util::span_to_lsp;
@@ -173,10 +173,15 @@ fn collect_ancestor_spans(
                 // Recurse into value first (innermost wins)
                 collect_ancestor_spans(value, line, col, ancestor_spans, idx);
                 if ancestor_spans.len() > depth_before {
-                    ancestor_spans.push(Span {
+                    let entry_span = Span {
                         start: key_span.start,
                         end: val_end,
-                    });
+                    };
+                    // An entry whose key is empty at the end of its value has
+                    // the range of the value, which is pushed already.
+                    if ancestor_spans.last() != Some(&entry_span) {
+                        ancestor_spans.push(entry_span);
+                    }
                     break;
                 }
 
@@ -185,10 +190,15 @@ fn collect_ancestor_spans(
                 let key_end_col = idx.line_column(key_span.end).1 as usize;
                 if key_line_0 == line && col >= key_start_col && col <= key_end_col {
                     ancestor_spans.push(key_span);
-                    ancestor_spans.push(Span {
+                    let entry_span = Span {
                         start: key_span.start,
                         end: val_end,
-                    });
+                    };
+                    // An entry whose value is empty at the end of its key has
+                    // the range of the key, which is pushed already.
+                    if entry_span != key_span {
+                        ancestor_spans.push(entry_span);
+                    }
                     break;
                 }
 
@@ -215,7 +225,18 @@ fn collect_ancestor_spans(
 
                 collect_ancestor_spans(item, line, col, ancestor_spans, idx);
                 if ancestor_spans.len() > depth_before {
-                    ancestor_spans.push(item_span);
+                    // A single pair of a flow sequence has the range of its
+                    // entry, which the walk of the mapping pushed already.
+                    let repeats_the_entry = matches!(
+                        item,
+                        Node::Mapping {
+                            style: CollectionStyle::Flow,
+                            ..
+                        }
+                    ) && ancestor_spans.last() == Some(&item_span);
+                    if !repeats_the_entry {
+                        ancestor_spans.push(item_span);
+                    }
                     break;
                 }
 
@@ -988,6 +1009,49 @@ mod tests {
         "{? a : b, ? c : d}", pos(0, 16),
         vec![r((0, 16), (0, 17)), r((0, 12), (0, 17)), r((0, 0), (0, 17))]
     )]
+    #[case::flow_single_pair_key(
+        "[a: 1, b: 2]", pos(0, 1),
+        vec![r((0, 1), (0, 2)), r((0, 1), (0, 5)), r((0, 0), (0, 11))]
+    )]
+    #[case::flow_single_pair_value(
+        "[a: 1, b: 2]", pos(0, 4),
+        vec![r((0, 4), (0, 5)), r((0, 1), (0, 5)), r((0, 0), (0, 11))]
+    )]
+    #[case::flow_second_single_pair_value(
+        "[a: 1, b: 2]", pos(0, 10),
+        vec![r((0, 10), (0, 11)), r((0, 7), (0, 11)), r((0, 0), (0, 11))]
+    )]
+    #[case::flow_single_pair_empty_value(
+        "[a: , b]", pos(0, 4),
+        vec![r((0, 4), (0, 4)), r((0, 1), (0, 4)), r((0, 0), (0, 7))]
+    )]
+    #[case::flow_single_pair_explicit_key_without_value(
+        "[? a, b]", pos(0, 3),
+        vec![r((0, 3), (0, 4)), r((0, 1), (0, 4)), r((0, 0), (0, 7))]
+    )]
+    #[case::flow_mapping_explicit_key_without_value(
+        "x: {? a}\n", pos(0, 6),
+        vec![r((0, 6), (0, 7)), r((0, 0), (0, 7)), r((0, 0), (1, 0))]
+    )]
+    #[case::flow_single_pair_without_key_and_value(
+        "[? , b]", pos(0, 3),
+        vec![r((0, 3), (0, 3)), r((0, 1), (0, 3)), r((0, 0), (0, 6))]
+    )]
+    #[case::flow_mapping_without_key_and_value(
+        "{? }", pos(0, 3), vec![r((0, 3), (0, 3)), r((0, 0), (0, 3))]
+    )]
+    #[case::block_explicit_key_without_value_at_the_end_of_the_text(
+        "? a", pos(0, 2),
+        vec![r((0, 2), (0, 3)), r((0, 0), (0, 3))]
+    )]
+    #[case::flow_mapping_item_keeps_its_own_range(
+        "[{a: 1}, b]", pos(0, 5),
+        vec![r((0, 5), (0, 6)), r((0, 2), (0, 6)), r((0, 1), (0, 6)), r((0, 0), (0, 10))]
+    )]
+    #[case::flow_single_pair_in_a_block_sequence(
+        "- [a: 1]\n", pos(0, 3),
+        vec![r((0, 3), (0, 4)), r((0, 3), (0, 7)), r((0, 2), (0, 7)), r((0, 0), (1, 0))]
+    )]
     #[case::crlf_entry_after_sequence_value(
         "a:\r\n- k: 1\r\nb: 2\r\n", pos(2, 3),
         vec![r((2, 3), (2, 4)), r((2, 0), (2, 4)), r((0, 0), (3, 0))]
@@ -1309,6 +1373,12 @@ mod tests {
     #[case::flow_mapping_without_space("{a: 1,b: 2}")]
     #[case::flow_mapping_empty_value("{a: , b: 2}")]
     #[case::flow_explicit_keys("{? a : b, ? c : d}")]
+    #[case::flow_single_pairs("[a: 1, b: 2]")]
+    #[case::flow_single_pair_empty_value_before_a_comma("[a: , b]")]
+    #[case::flow_single_pair_empty_value_without_blank("[a:, b]")]
+    #[case::flow_single_pair_explicit_key_only("[? a, b]")]
+    #[case::flow_single_pair_without_key_and_value("[? , b]")]
+    #[case::flow_single_pair_value_on_the_next_line("[a:\n  1,\n b]")]
     #[case::nested_flow_across_lines_grid("a:\n  b: [x, {y: 1,\n   z: 2}]\n  c: 3\n")]
     #[case::entry_after_sequence_value("a:\n- k: 1\nb: 2\n")]
     #[case::entry_after_sequence_value_crlf("a:\r\n- k: 1\r\nb: 2\r\n")]

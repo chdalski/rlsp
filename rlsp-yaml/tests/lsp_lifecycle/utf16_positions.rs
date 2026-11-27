@@ -267,6 +267,28 @@ async fn the_unused_anchor_diagnostic_is_published_at_utf16_columns(
     assert_eq!(ranges_of(&diagnostics, "unusedAnchor"), expected);
 }
 
+/// The `flowMap` diagnostic of a single pair in a flow sequence covers the
+/// pair, from its key to the `,` or `]` that ends it, and one column more, as
+/// for a flow collection.
+#[rstest]
+#[case::two_pairs("[a: 1, b: 2]", &[((0, 1), (0, 6)), ((0, 7), (0, 12))])]
+#[case::astral_key("[{A}: 1, b]", &[((0, 1), (0, 7))])]
+#[case::astral_before_the_pair("[{A}, a: 1]", &[((0, 5), (0, 10))])]
+#[tokio::test]
+async fn the_flow_map_diagnostic_of_a_single_pair_is_published_at_utf16_columns(
+    #[case] template: &str,
+    #[case] expected: &[Span],
+) {
+    let uri = "file:///test/utf16-flow-single-pair.yaml";
+    let (_service, mut published) =
+        open_collecting(&template.replace("{A}", ASTRAL), uri, None).await;
+
+    let diagnostics = first_publication(&mut published, uri).await;
+
+    let expected: Vec<Value> = expected.iter().map(|&(s, e)| range(s, e)).collect();
+    assert_eq!(ranges_of(&diagnostics, "flowMap"), expected);
+}
+
 #[rstest]
 #[case::ascii_multiline("\"a b\": 1\n? \"a\n  b\"\n: 2\n", ((1, 2), (2, 4)))]
 #[case::ascii_single_line("a: 1\na: 2\n", ((1, 0), (1, 1)))]

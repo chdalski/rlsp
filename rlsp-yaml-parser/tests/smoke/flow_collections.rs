@@ -1098,6 +1098,330 @@ fn scalar_on_continuation_line_has_correct_span() {
 }
 
 // -----------------------------------------------------------------------
+// Spans of a single pair in a flow sequence
+// -----------------------------------------------------------------------
+
+/// The mapping starts and ends of `input` as `(start, end)` pairs in the order
+/// the pairs close, each checked against where YAML 1.2.2 [150] `ns-flow-pair`
+/// puts it: the start is zero-width at the first event of the key, or at the
+/// `?` of an explicit pair, and the end is zero-width at the `,` or `]` that
+/// ends the pair.  The specification defines no spans: the rule is the plan's.
+fn pair_spans(input: &str) -> Vec<(u32, u32)> {
+    let items = parse_to_vec(input);
+    // One entry per open collection: the start of a pair, or `None` for any
+    // other collection.  A mapping directly in a flow sequence is a pair.
+    let mut open: Vec<Option<u32>> = Vec::new();
+    let mut in_flow_sequence = Vec::new();
+    let mut pairs = Vec::new();
+    for (index, item) in items.iter().enumerate() {
+        match item {
+            Ok((Event::SequenceStart { style, .. }, _)) => {
+                in_flow_sequence.push(*style == CollectionStyle::Flow);
+                open.push(None);
+            }
+            Ok((Event::MappingStart { .. }, span)) => {
+                let is_pair = in_flow_sequence.last() == Some(&true);
+                in_flow_sequence.push(false);
+                if !is_pair {
+                    open.push(None);
+                    continue;
+                }
+                assert_eq!(span.start, span.end, "{input:?}: a start is zero-width");
+                let at = span.start as usize;
+                if input.as_bytes().get(at) != Some(&b'?') {
+                    let key = items.iter().skip(index + 1).find_map(|next| match next {
+                        Ok((Event::Comment { .. }, _)) | Err(_) => None,
+                        Ok((_, key_span)) => Some(key_span.start),
+                    });
+                    assert_eq!(
+                        key,
+                        Some(span.start),
+                        "{input:?}: an implicit pair starts at its key"
+                    );
+                }
+                open.push(Some(span.start));
+            }
+            Ok((Event::SequenceEnd | Event::MappingEnd, span)) => {
+                in_flow_sequence.pop();
+                if let Some(Some(start)) = open.pop() {
+                    assert_eq!(span.start, span.end, "{input:?}: an end is zero-width");
+                    assert!(
+                        matches!(input.as_bytes().get(span.end as usize), Some(b',' | b']')),
+                        "{input:?}: a pair ends at its `,` or `]`"
+                    );
+                    pairs.push((start, span.end));
+                }
+            }
+            Ok(_) | Err(_) => {}
+        }
+    }
+    pairs
+}
+
+#[rstest]
+#[case::two_pairs("[a: 1, b: 2]", &[(1, 5), (7, 11)])]
+#[case::blank_before_the_comma("[a: 1 , b]", &[(1, 6)])]
+#[case::blanks_around_the_pair("[ a : 1 ]", &[(2, 8)])]
+#[case::anchored_key("[&x a: 1]", &[(4, 8)])]
+#[case::properties_after_a_pair("[a: 1, &y b: 2]", &[(1, 5), (10, 14)])]
+#[case::properties_on_the_line_before_the_key("[&x\n a: 1]", &[(5, 9)])]
+#[case::empty_key("[: v, b]", &[(1, 4)])]
+#[case::tagged_empty_key("[!t : a]", &[(4, 7)])]
+#[case::flow_sequence_key("[[x]: 1, b]", &[(1, 7)])]
+#[case::anchored_flow_sequence_key("[&x [a]: 1]", &[(4, 10)])]
+#[case::double_quoted_key("[\"a\": 1]", &[(1, 7)])]
+#[case::alias_key("[&a x, *a : 1]", &[(7, 13)])]
+#[case::value_on_the_next_line("[a:\n  1,\n b]", &[(1, 7)])]
+#[case::comma_on_the_next_line("[a: 1\n, b: 2]", &[(1, 6), (8, 12)])]
+#[case::trailing_comma_then_the_close("[a: 1,\n]", &[(1, 5)])]
+#[case::close_on_the_next_line("[a: 1\n]", &[(1, 6)])]
+#[case::empty_value_before_the_close("[a:]", &[(1, 3)])]
+#[case::blank_value_before_the_close("[a: ]", &[(1, 4)])]
+#[case::empty_value_before_a_comma("[a: , b]", &[(1, 4)])]
+#[case::pair_in_a_pair("[a: [b: 1]]", &[(5, 9), (1, 10)])]
+#[case::pair_in_an_inner_sequence("[x, [a: 1], y]", &[(5, 9)])]
+#[case::pair_in_a_flow_mapping_value("{k: [a: 1]}", &[(5, 9)])]
+#[case::pair_in_a_block_mapping_value("k: [a: 1, b]\n", &[(4, 8)])]
+#[case::pair_in_a_block_sequence("- [a: 1]\n", &[(3, 7)])]
+#[case::pair_in_a_block_key("[a: 1]: v\n", &[(1, 5)])]
+#[case::pair_in_the_key_of_a_flow_mapping("{[a: 1]: v}", &[(2, 6)])]
+#[case::implicit_and_explicit_pairs("[a: 1, ? b : 2, ? c]", &[(1, 5), (7, 14), (16, 19)])]
+#[case::multibyte_keys_and_values("[é: ü, 日本: 語]", &[(1, 7), (9, 20)])]
+#[case::four_byte_key("[😀: 1, b]", &[(1, 8)])]
+#[case::explicit_key_without_value("[? a, b]", &[(1, 4)])]
+#[case::explicit_pair("[? a : 1, b]", &[(1, 8)])]
+#[case::explicit_key_before_the_close("[? a]", &[(1, 4)])]
+#[case::explicit_empty_key("[? ]", &[(1, 3)])]
+#[case::explicit_key_over_two_lines("[? a\n b : c]", &[(1, 11)])]
+#[case::explicit_colon_on_the_next_line("[? a\n : c, d]", &[(1, 9)])]
+#[case::explicit_key_with_properties("[? &x b : c]", &[(1, 11)])]
+fn flow_pair_spans(#[case] input: &str, #[case] expected: &[(u32, u32)]) {
+    assert_eq!(pair_spans(input), expected, "{input:?}");
+}
+
+/// A key of 1024 characters is the longest implicit key; the pair's span counts
+/// bytes, not characters.
+#[test]
+fn flow_pair_with_the_longest_implicit_key_spans_it_in_bytes() {
+    let input = format!("[{}: 1]", "é".repeat(1024));
+    assert_eq!(pair_spans(&input), [(1, 2052)]);
+}
+
+/// One line per event of `input` after the stream and document starts: the kind
+/// with its text for a scalar or comment, and its span.
+fn spans_of_events(input: &str) -> Vec<String> {
+    parse_to_vec(input)
+        .into_iter()
+        .filter_map(|item| {
+            let Ok((event, span)) = item else {
+                unreachable!("{input:?} parses")
+            };
+            let name = match event {
+                Event::Scalar { value, .. } => format!("Scalar {value}"),
+                Event::Comment { text } => format!("Comment {text:?}"),
+                Event::MappingStart { .. } => "MappingStart".to_owned(),
+                Event::MappingEnd => "MappingEnd".to_owned(),
+                Event::SequenceStart { .. } => "SequenceStart".to_owned(),
+                Event::SequenceEnd => "SequenceEnd".to_owned(),
+                Event::StreamStart
+                | Event::StreamEnd
+                | Event::DocumentStart { .. }
+                | Event::DocumentEnd { .. } => return None,
+                Event::Alias { .. } => unreachable!("no alias in these inputs"),
+            };
+            Some(format!("{name} {}..{}", span.start, span.end))
+        })
+        .collect()
+}
+
+/// The empty value (or key) of a single pair stands at the pair's end, the `,`
+/// or `]`, so that the pair spans its key and its value.  An empty node that
+/// is no part of a pair stays where the next entry starts, after the `,` and
+/// its blanks.
+#[rstest]
+#[case::empty_value_before_a_comma(
+    "[a: , b]",
+    &[
+        "SequenceStart 0..0",
+        "MappingStart 1..1",
+        "Scalar a 1..2",
+        "Scalar  4..4",
+        "MappingEnd 4..4",
+        "Scalar b 6..7",
+        "SequenceEnd 7..7",
+    ],
+)]
+#[case::empty_value_without_a_blank(
+    "[a:, b]",
+    &[
+        "SequenceStart 0..0",
+        "MappingStart 1..1",
+        "Scalar a 1..2",
+        "Scalar  3..3",
+        "MappingEnd 3..3",
+        "Scalar b 5..6",
+        "SequenceEnd 6..6",
+    ],
+)]
+#[case::empty_value_before_the_close(
+    "[a: ]",
+    &[
+        "SequenceStart 0..0",
+        "MappingStart 1..1",
+        "Scalar a 1..2",
+        "Scalar  4..4",
+        "MappingEnd 4..4",
+        "SequenceEnd 4..4",
+    ],
+)]
+#[case::explicit_key_without_a_value(
+    "[? a, b]",
+    &[
+        "SequenceStart 0..0",
+        "MappingStart 1..1",
+        "Scalar a 3..4",
+        "Scalar  4..4",
+        "MappingEnd 4..4",
+        "Scalar b 6..7",
+        "SequenceEnd 7..7",
+    ],
+)]
+#[case::explicit_pair_with_an_empty_value(
+    "[? a : , b]",
+    &[
+        "SequenceStart 0..0",
+        "MappingStart 1..1",
+        "Scalar a 3..4",
+        "Scalar  7..7",
+        "MappingEnd 7..7",
+        "Scalar b 9..10",
+        "SequenceEnd 10..10",
+    ],
+)]
+#[case::explicit_pair_without_a_key(
+    "[? , b]",
+    &[
+        "SequenceStart 0..0",
+        "MappingStart 1..1",
+        "Scalar  3..3",
+        "Scalar  3..3",
+        "MappingEnd 3..3",
+        "Scalar b 5..6",
+        "SequenceEnd 6..6",
+    ],
+)]
+#[case::properties_as_the_value(
+    "[a: &x , b]",
+    &[
+        "SequenceStart 0..0",
+        "MappingStart 1..1",
+        "Scalar a 1..2",
+        "Scalar  7..7",
+        "MappingEnd 7..7",
+        "Scalar b 9..10",
+        "SequenceEnd 10..10",
+    ],
+)]
+#[case::empty_key(
+    "[: v, b]",
+    &[
+        "SequenceStart 0..0",
+        "MappingStart 1..1",
+        "Scalar  1..1",
+        "Scalar v 3..4",
+        "MappingEnd 4..4",
+        "Scalar b 6..7",
+        "SequenceEnd 7..7",
+    ],
+)]
+#[case::properties_alone_are_no_pair(
+    "[&a , b]",
+    &[
+        "SequenceStart 0..0",
+        "Scalar  6..6",
+        "Scalar b 6..7",
+        "SequenceEnd 7..7",
+    ],
+)]
+fn flow_pair_empty_nodes_stand_at_the_end_of_the_pair(
+    #[case] input: &str,
+    #[case] expected: &[&str],
+) {
+    assert_eq!(spans_of_events(input), expected, "{input:?}");
+}
+
+/// The comments of a pair stay where they stood in the event stream; only the
+/// spans of the mapping events changed.  A comment before the key is not the
+/// key: the pair starts at the key, so its start span lies after the comment.
+#[rstest]
+#[case::comment_before_the_comma(
+    "[a: 1 # c\n , b]",
+    &[
+        "SequenceStart 0..0",
+        "MappingStart 1..1",
+        "Scalar a 1..2",
+        "Scalar 1 4..5",
+        "Comment \" c\" 6..9",
+        "MappingEnd 11..11",
+        "Scalar b 13..14",
+        "SequenceEnd 14..14",
+    ],
+)]
+#[case::comment_in_an_explicit_pair(
+    "[? a # c\n : 1]",
+    &[
+        "SequenceStart 0..0",
+        "MappingStart 1..1",
+        "Scalar a 3..4",
+        "Comment \" c\" 5..8",
+        "Scalar 1 12..13",
+        "MappingEnd 13..13",
+        "SequenceEnd 13..13",
+    ],
+)]
+#[case::comment_after_the_comma(
+    "[a: 1, # c\n b]",
+    &[
+        "SequenceStart 0..0",
+        "MappingStart 1..1",
+        "Scalar a 1..2",
+        "Scalar 1 4..5",
+        "MappingEnd 5..5",
+        "Comment \" c\" 7..10",
+        "Scalar b 12..13",
+        "SequenceEnd 13..13",
+    ],
+)]
+#[case::comment_before_the_first_key(
+    "[ # c\n a: 1]",
+    &[
+        "SequenceStart 0..0",
+        "MappingStart 7..7",
+        "Comment \" c\" 2..5",
+        "Scalar a 7..8",
+        "Scalar 1 10..11",
+        "MappingEnd 11..11",
+        "SequenceEnd 11..11",
+    ],
+)]
+#[case::comment_before_a_later_key(
+    "[x, # c\n a: 1]",
+    &[
+        "SequenceStart 0..0",
+        "Scalar x 1..2",
+        "MappingStart 9..9",
+        "Comment \" c\" 4..7",
+        "Scalar a 9..10",
+        "Scalar 1 12..13",
+        "MappingEnd 13..13",
+        "SequenceEnd 13..13",
+    ],
+)]
+fn flow_pair_events_around_comments(#[case] input: &str, #[case] expected: &[&str]) {
+    assert_eq!(spans_of_events(input), expected, "{input:?}");
+}
+
+// -----------------------------------------------------------------------
 // Group Q: Coverage gap tests — verbatim tag separation inside flow
 // collections (YAML 1.2 §6.9.1: s-separate(n,c) required before node
 // content)
