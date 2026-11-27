@@ -6,6 +6,7 @@
 #![expect(clippy::unwrap_used, missing_docs, reason = "test code")]
 
 mod support;
+mod tree_support;
 
 use std::fmt::Write;
 use std::time::{Duration, Instant};
@@ -221,6 +222,7 @@ fn nesting_depth_one_over_limit_is_rejected() {
 // aborts the whole test binary.
 
 const TWO_MIB: usize = 2 * 1024 * 1024;
+const SIXTEEN_MIB: usize = 16 * 1024 * 1024;
 
 /// Runs `f` on a thread with a fixed stack size, so the stack budget does not
 /// depend on the test runner's thread or `RUST_MIN_STACK`.
@@ -424,6 +426,190 @@ fn an_alias_of_a_deep_anchored_collection_expands_on_a_two_mib_stack() {
     });
     assert_eq!(anchored, (255, "v".to_owned()));
     assert_eq!(expanded, anchored);
+}
+
+/// What a chain's anchor `a0` is: a scalar, or a sequence of one level.
+#[derive(Debug, Clone, Copy)]
+enum ChainBase {
+    Scalar,
+    Sequence,
+}
+
+impl ChainBase {
+    const fn levels(self) -> usize {
+        match self {
+            Self::Scalar => 0,
+            Self::Sequence => 1,
+        }
+    }
+}
+
+/// How each link of an alias chain holds the alias of the one before.
+#[derive(Debug, Clone, Copy)]
+enum ChainLink {
+    FlowSequence,
+    FlowMapping,
+    BlockSequence,
+}
+
+/// A mapping of `links + 1` entries: `a0` is the base, and entry `a<k>` is an
+/// anchored collection that holds the alias `*a<k-1>`, so it is one level
+/// deeper than the entry before.  Returns the input and the byte offset of the
+/// alias on each line, by `k` (the offset of `k = 0` is unused).
+fn alias_chain(links: usize, base: ChainBase, link: ChainLink) -> (String, Vec<usize>) {
+    let mut input = match base {
+        ChainBase::Scalar => "a0: &a0 v\n".to_owned(),
+        ChainBase::Sequence => "a0: &a0 [v]\n".to_owned(),
+    };
+    let mut aliases = vec![0];
+    for k in 1..=links {
+        match link {
+            ChainLink::FlowSequence => write!(input, "a{k}: &a{k} [").unwrap(),
+            ChainLink::FlowMapping => write!(input, "a{k}: &a{k} {{x: ").unwrap(),
+            ChainLink::BlockSequence => write!(input, "a{k}: &a{k}\n  - ").unwrap(),
+        }
+        aliases.push(input.len());
+        write!(input, "*a{}", k - 1).unwrap();
+        input.push_str(match link {
+            ChainLink::FlowSequence => "]\n",
+            ChainLink::FlowMapping => "}\n",
+            ChainLink::BlockSequence => "\n",
+        });
+    }
+    (input, aliases)
+}
+
+/// Loads `input` in resolved mode on a thread with `stack` bytes, and answers
+/// the depth of the tree or the position the nesting error names.  Only
+/// numbers cross the thread boundary.
+#[expect(clippy::panic, reason = "test helper")]
+fn load_chain(
+    input: String,
+    limit: Option<usize>,
+    stack: usize,
+) -> Result<usize, (usize, usize, usize)> {
+    on_stack(stack, move || {
+        let mut builder = LoaderBuilder::new().resolved();
+        if let Some(limit) = limit {
+            builder = builder.max_nesting_depth(limit);
+        }
+        match builder.build().load(&input) {
+            Ok(docs) => {
+                let [doc] = docs.as_slice() else {
+                    panic!("expected 1 document, got {}", docs.len());
+                };
+                Ok(tree_support::tree_depth(&doc.root))
+            }
+            Err(LoadError::NestingDepthLimitExceeded {
+                limit: reported,
+                pos,
+            }) => {
+                assert_eq!(reported, limit.unwrap_or(256));
+                Err((pos.byte_offset, pos.line, pos.column))
+            }
+            Err(other) => panic!("expected a depth or NestingDepthLimitExceeded, got {other:?}"),
+        }
+    })
+}
+
+// The mapping is the first level and each link adds one, so the last of `n`
+// links reaches `n + 1` levels (one fewer with a scalar base than with a
+// sequence base, which is a level itself).  The limit is the default, 256.
+#[rstest]
+fn a_chain_of_aliases_that_reaches_the_default_limit_loads_on_a_two_mib_stack(
+    #[values(ChainBase::Scalar, ChainBase::Sequence)] base: ChainBase,
+    #[values(
+        ChainLink::FlowSequence,
+        ChainLink::FlowMapping,
+        ChainLink::BlockSequence
+    )]
+    link: ChainLink,
+) {
+    let (input, _) = alias_chain(255 - base.levels(), base, link);
+    assert_eq!(load_chain(input, None, TWO_MIB), Ok(256));
+}
+
+#[rstest]
+fn a_chain_of_aliases_that_passes_the_default_limit_is_an_error_at_its_last_alias(
+    #[values(ChainBase::Scalar, ChainBase::Sequence)] base: ChainBase,
+    #[values(
+        ChainLink::FlowSequence,
+        ChainLink::FlowMapping,
+        ChainLink::BlockSequence
+    )]
+    link: ChainLink,
+) {
+    let (input, aliases) = alias_chain(256 - base.levels(), base, link);
+    let last = tree_support::position_at(&input, aliases[aliases.len() - 1]);
+    assert_eq!(load_chain(input, None, TWO_MIB), Err(last));
+}
+
+// The expansion stops at the first alias that passes the limit: the one on the
+// line that reaches level 257, not the last of the thousand.
+#[rstest]
+fn a_chain_of_a_thousand_aliases_is_an_error_at_the_alias_that_passes_the_limit_on_a_two_mib_stack(
+    #[values(
+        ChainLink::FlowSequence,
+        ChainLink::FlowMapping,
+        ChainLink::BlockSequence
+    )]
+    link: ChainLink,
+) {
+    let (input, aliases) = alias_chain(1000, ChainBase::Scalar, link);
+    let first_over = tree_support::position_at(&input, aliases[256]);
+    assert!(input[aliases[256]..].starts_with("*a255"));
+    assert_eq!(load_chain(input, None, TWO_MIB), Err(first_over));
+}
+
+// A raised limit needs a stack to match; the thread has 16 MiB.
+#[rstest]
+fn a_chain_of_aliases_holds_a_raised_limit_on_a_sixteen_mib_stack(
+    #[values(ChainLink::FlowSequence, ChainLink::FlowMapping)] link: ChainLink,
+) {
+    let (input, _) = alias_chain(511, ChainBase::Scalar, link);
+    assert_eq!(load_chain(input, Some(512), SIXTEEN_MIB), Ok(512));
+    let (input, aliases) = alias_chain(512, ChainBase::Scalar, link);
+    let last = tree_support::position_at(&input, aliases[512]);
+    assert_eq!(load_chain(input, Some(512), SIXTEEN_MIB), Err(last));
+}
+
+#[test]
+fn an_alias_of_a_collection_in_a_collection_passes_the_limit_by_the_collections_around_it() {
+    let input = format!("x: &a {0}v{1}\ny: [*a]\n", "[".repeat(255), "]".repeat(255));
+    let at_alias = tree_support::position_at(&input, input.find("*a").unwrap());
+    assert_eq!(load_chain(input, Some(256), TWO_MIB), Err(at_alias));
+}
+
+#[test]
+fn a_chain_of_aliases_is_not_expanded_in_lossless_mode() {
+    let (input, _) = alias_chain(1000, ChainBase::Scalar, ChainLink::FlowSequence);
+    let last_item = on_stack(TWO_MIB, move || {
+        let docs = load(&input).unwrap();
+        assert_eq!(docs.len(), 1);
+        let Node::Mapping { entries, .. } = &docs[0].root else {
+            panic!("expected a mapping");
+        };
+        let Node::Sequence { items, .. } = &entries.last().unwrap().1 else {
+            panic!("expected a sequence");
+        };
+        match &items[0] {
+            Node::Alias { name, .. } => name.clone(),
+            other @ (Node::Mapping { .. } | Node::Sequence { .. } | Node::Scalar { .. }) => {
+                panic!("expected an alias, got {other:?}")
+            }
+        }
+    });
+    assert_eq!(last_item, "a999");
+}
+
+#[test]
+fn a_chain_of_aliases_leaves_the_event_stream_as_it_was() {
+    let (input, _) = alias_chain(1000, ChainBase::Scalar, ChainLink::FlowSequence);
+    let alias_events = parse_events(&input)
+        .map(Result::unwrap)
+        .filter(|(event, _)| matches!(event, Event::Alias { .. }))
+        .count();
+    assert_eq!(alias_events, 1000);
 }
 
 #[rstest]

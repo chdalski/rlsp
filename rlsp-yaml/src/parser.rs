@@ -390,6 +390,33 @@ mod tests {
         })
     }
 
+    /// The server loads without alias expansion, so a chain of aliases, each
+    /// in an anchor that the next holds, is as deep as the lines that write it
+    /// down, not as deep as an expansion would be: it loads without a
+    /// diagnostic, and the limit counts the parsed depth only.
+    #[rstest]
+    #[case::default_limit(DEFAULT_MAX_NESTING_DEPTH)]
+    #[case::the_depth_of_the_text(2)]
+    fn parse_yaml_with_limit_loads_a_thousand_line_alias_chain_without_a_diagnostic(
+        #[case] limit: usize,
+    ) {
+        let result = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || {
+                let mut text = String::from("a0: &a0 v\n");
+                for k in 1..=1000 {
+                    writeln!(text, "a{k}: &a{k} [*a{}]", k - 1).unwrap();
+                }
+                parse_yaml_with_limit(&text, limit)
+            })
+            .expect("thread spawn")
+            .join()
+            .expect("thread join");
+
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.documents.len(), 1);
+    }
+
     #[rstest]
     #[case::least(1)]
     #[case::small(2)]

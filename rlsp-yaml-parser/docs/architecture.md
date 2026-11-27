@@ -408,7 +408,8 @@ stream skip it.
   nodes. No expansion occurs. Safe for untrusted input without any expansion
   limit because no tree growth happens.
 - **Resolved**: aliases are expanded inline by deep-cloning the anchor's
-  subtree into the alias site. Subject to the `max_expanded_nodes` limit. The
+  subtree into the alias site. Subject to the `max_expanded_nodes` limit and
+  to `max_nesting_depth`, counted from the depth of the alias site. The
 expansion carries none of the anchor's comments: `register_anchor` stores a
 deep copy without comments (`clone_without_comments`) in `anchor_map`, so the
 definition site keeps them and an expansion neither copies them nor costs more
@@ -649,7 +650,7 @@ separate per-type limit would allow nesting 512 sequences inside 512 mappings
 
 | Option | Default | Guards against |
 |--------|---------|----------------|
-| `max_nesting_depth` | 256 | Stack exhaustion from deeply nested collections when loading without alias expansion |
+| `max_nesting_depth` | 256 | Stack exhaustion from deeply nested collections, including the tree that alias expansion builds in resolved mode |
 | `max_anchors` | 10 000 | Unbounded anchor-map memory growth |
 | `max_expanded_nodes` | 1 000 000 | Alias bombs (Billion Laughs); resolved mode only |
 
@@ -710,12 +711,14 @@ is bounded by `max_nesting_depth`. Each level holds the small frames of
 `#[inline(never)]` helpers that return before the recursion goes deeper, so a
 debug build, the build with the largest frames, loads the default
 `max_nesting_depth` (256) on a 2 MiB stack. A higher limit needs a stack to
-match, and `MAX_COLLECTION_DEPTH` holds whatever the limit. The limit guards
-the stack when loading without alias expansion: in resolved mode alias
-expansion can build trees deeper than the limit, and it does not bound code
-that walks the loaded tree. The one recursion outside that bound is the
-`Comment` arm of `begin_node`, which adds at most one level per value position
-because it drains the whole comment run before recursing.
+match, and `MAX_COLLECTION_DEPTH` holds whatever the limit. The limit bounds the
+tree that alias expansion builds in resolved mode too: `expand_node` carries the
+depth of the alias site, counts one more per collection it enters, and returns
+`NestingDepthLimitExceeded` at the alias when the expansion would pass the
+limit. The limit does not bound code that walks the loaded tree. The one
+recursion outside that bound is the `Comment` arm of `begin_node`, which adds at
+most one level per value position because it drains the whole comment run
+before recursing.
 
 ### Lossless mode as the default
 

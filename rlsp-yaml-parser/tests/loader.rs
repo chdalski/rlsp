@@ -18,6 +18,8 @@ use rlsp_yaml_parser::ScalarStyle;
 use rlsp_yaml_parser::loader::{LoadError, LoaderBuilder, load};
 use rlsp_yaml_parser::node::Node;
 
+mod tree_support;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -2693,4 +2695,139 @@ fn flow_anchor_limit_error_comes_before_a_later_parse_error(
 fn load_returns_no_documents_when_a_later_document_has_a_parse_error() {
     let result = load("a: 1\n---\n[x] : # \x07\n");
     assert!(matches!(result, Err(LoadError::Parse { .. })), "{result:?}");
+}
+
+// ---------------------------------------------------------------------------
+// Alias expansion keeps to `max_nesting_depth`
+// ---------------------------------------------------------------------------
+
+/// The outcome of loading `input` in resolved mode with the nesting `limit`:
+/// the depth of the tree, or the source position that the nesting error names.
+fn resolved_depth_or_error_pos(input: &str, limit: usize) -> Result<usize, (usize, usize, usize)> {
+    let result = LoaderBuilder::new()
+        .resolved()
+        .max_nesting_depth(limit)
+        .build()
+        .load(input);
+    match result {
+        Ok(docs) => {
+            let [doc] = docs.as_slice() else {
+                panic!("expected 1 document, got {}", docs.len());
+            };
+            Ok(tree_support::tree_depth(&doc.root))
+        }
+        Err(LoadError::NestingDepthLimitExceeded {
+            limit: reported,
+            pos,
+        }) => {
+            assert_eq!(reported, limit);
+            Err((pos.byte_offset, pos.line, pos.column))
+        }
+        Err(other) => panic!("expected a depth or NestingDepthLimitExceeded, got: {other:?}"),
+    }
+}
+
+/// Where the last `marker` stands in `input`: byte offset, line (from 1), and
+/// column (from 0).
+fn position_of_last(input: &str, marker: &str) -> (usize, usize, usize) {
+    tree_support::position_at(input, input.rfind(marker).unwrap())
+}
+
+/// An alias that stands in `n` collections and expands to `m` levels reaches
+/// `n + m`: it loads up to the limit and is an error at the alias beyond it.
+/// Every row has the anchor `&a [[v]]` (two levels) on line 1, and the limit
+/// is 4.  The role of the alias (item, value, key; block, flow) does not
+/// matter, only the collections around it.
+#[rstest]
+#[case::flow_sequence_item("- &a [[v]]\n- [*a]\n", Ok(4))]
+#[case::flow_mapping_value("- &a [[v]]\n- {k: *a}\n", Ok(4))]
+#[case::flow_mapping_key("- &a [[v]]\n- {*a : v}\n", Ok(4))]
+#[case::block_sequence_item("- &a [[v]]\n- - *a\n", Ok(4))]
+#[case::block_mapping_value("- &a [[v]]\n- k: *a\n", Ok(4))]
+#[case::explicit_key("- &a [[v]]\n- ? *a\n  : v\n", Ok(4))]
+#[case::flow_sequence_item_too_deep("- &a [[v]]\n- [[*a]]\n", Err("*a"))]
+#[case::flow_mapping_value_too_deep("- &a [[v]]\n- {k: {k: *a}}\n", Err("*a"))]
+#[case::flow_mapping_key_too_deep("- &a [[v]]\n- {{*a : v}: w}\n", Err("*a"))]
+#[case::block_sequence_item_too_deep("- &a [[v]]\n- - - *a\n", Err("*a"))]
+#[case::block_mapping_value_too_deep("- &a [[v]]\n- k:\n    j: *a\n", Err("*a"))]
+#[case::explicit_key_too_deep("- &a [[v]]\n- ? - *a\n  : v\n", Err("*a"))]
+#[case::a_scalar_anchor_adds_no_level("- &s v\n- [[[*s]]]\n", Ok(4))]
+#[case::an_empty_flow_sequence_is_a_level("- &e []\n- [[*e]]\n", Ok(4))]
+#[case::an_empty_flow_sequence_is_a_level_too_deep("- &e []\n- [[[*e]]]\n", Err("*e"))]
+#[case::an_empty_flow_mapping_is_a_level("- &e {}\n- [[*e]]\n", Ok(4))]
+#[case::an_empty_flow_mapping_is_a_level_too_deep("- &e {}\n- [[[*e]]]\n", Err("*e"))]
+#[case::siblings_do_not_add_up("- &a [[[v]], [[v]], [[v]]]\n- *a\n", Ok(4))]
+#[case::a_key_and_a_value_alias_do_not_add_up("- &a [[v]]\n- {*a : *a}\n", Ok(4))]
+#[case::the_second_alias_is_judged_on_its_own("- &s [v]\n- &t [[[v]]]\n- [*s, *t]\n", Err("*t"))]
+#[case::the_deeper_alias_is_named_first("- &s [v]\n- &t [[[v]]]\n- [*t, *s]\n", Err("*t"))]
+#[case::an_alias_at_the_limit_leaves_no_depth_behind(
+    "- &a [[v]]\n- [*a]\n- [*a]\n- [[*a]]\n",
+    Err("*a")
+)]
+fn alias_expansion_keeps_to_the_nesting_limit(
+    #[case] input: &str,
+    #[case] expected: Result<usize, &str>,
+) {
+    let expected = expected.map_err(|marker| position_of_last(input, marker));
+    assert_eq!(resolved_depth_or_error_pos(input, 4), expected);
+}
+
+/// Lossless mode keeps the alias as a node, so the limit counts the parsed
+/// tree only.
+#[test]
+fn lossless_mode_loads_what_resolved_mode_rejects_for_depth() {
+    let docs = load("- &a [[v]]\n- [[*a]]\n").unwrap();
+    assert_eq!(docs.len(), 1);
+    assert_eq!(tree_support::tree_depth(&docs[0].root), 3);
+}
+
+/// An alias stands for the node it names (YAML 1.2.2 §3.2.2.2), so an
+/// expansion is judged like the same text written out in its place.
+#[rstest]
+#[case::flow_sequence("[", "]")]
+#[case::flow_mapping_value("{k: ", "}")]
+#[case::flow_mapping_key("{", " : v}")]
+fn an_alias_is_judged_like_the_text_it_stands_for(
+    #[case] open: &str,
+    #[case] close: &str,
+    #[values(1, 2)] wrappers: usize,
+) {
+    let around = |inner: &str| {
+        format!(
+            "- {}{inner}{}",
+            open.repeat(wrappers),
+            close.repeat(wrappers)
+        )
+    };
+    let with_alias = format!("- &a [[v]]\n{}\n", around("*a"));
+    let written_out = format!("{}\n", around("[[v]]"));
+    let from_alias = resolved_depth_or_error_pos(&with_alias, 4).map_err(|_| ());
+    let from_text = resolved_depth_or_error_pos(&written_out, 4).map_err(|_| ());
+    assert_eq!(from_alias, from_text);
+    assert_eq!(from_alias.is_ok(), wrappers == 1);
+}
+
+/// A rejected document leaves no state behind in the loader.
+#[test]
+fn a_loader_loads_a_document_after_one_that_the_depth_limit_rejected() {
+    let loader = LoaderBuilder::new().resolved().max_nesting_depth(4).build();
+    let rejected = loader.load("- &a [[v]]\n- [[*a]]\n");
+    assert!(
+        matches!(rejected, Err(LoadError::NestingDepthLimitExceeded { .. })),
+        "{rejected:?}"
+    );
+    let docs = loader.load("- &a [[v]]\n- [*a]\n").unwrap();
+    assert_eq!(tree_support::tree_depth(&docs[0].root), 4);
+}
+
+/// A limit that nothing can reach does not overflow the depth count.
+#[test]
+fn an_unbounded_nesting_limit_loads_an_alias() {
+    let docs = LoaderBuilder::new()
+        .resolved()
+        .max_nesting_depth(usize::MAX)
+        .build()
+        .load("- &a [[v]]\n- [*a]\n")
+        .unwrap();
+    assert_eq!(tree_support::tree_depth(&docs[0].root), 4);
 }

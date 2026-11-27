@@ -18,8 +18,11 @@ with existing infrastructure.
 nesting, where the limit was 512: a document of 257 levels returns
 `NestingDepthLimitExceeded`. `DEFAULT_MAX_NESTING_DEPTH` exports the value, and
 `max_nesting_depth` sets another limit, up to `MAX_COLLECTION_DEPTH` (512), which
-the event parser holds whatever the limit. The limit guards the stack when loading
-without alias expansion; the default loads on a 2 MiB thread in a debug build.
+the event parser holds whatever the limit. The limit guards the stack, and in
+resolved mode it bounds the tree that alias expansion builds: a document whose
+expansion is deeper than the limit returns `NestingDepthLimitExceeded` at the
+alias, where it loaded before on a stack large enough for it. The default loads
+on a 2 MiB thread in a debug build.
 **Complexity:** Low
 **Comment:** One constant gives the default to the loader and to the callers that
 default their own limit, so that they cannot disagree.

@@ -15,8 +15,8 @@
 //!
 //! Security controls (all active in both modes unless noted):
 //! - `max_nesting_depth` — caps sequence/mapping nesting, which bounds the
-//!   recursion of loading without alias expansion (default
-//!   [`DEFAULT_MAX_NESTING_DEPTH`], 256).
+//!   recursion of loading, in resolved mode the tree that alias expansion
+//!   builds included (default [`DEFAULT_MAX_NESTING_DEPTH`], 256).
 //! - `max_anchors` — caps distinct anchor registrations to bound anchor-map
 //!   memory (default 10 000).
 //! - `max_expanded_nodes` — caps total nodes produced by alias expansion in
@@ -198,13 +198,15 @@ pub struct LoaderOptions {
     /// [`LoadError::NestingDepthLimitExceeded`] (default:
     /// [`DEFAULT_MAX_NESTING_DEPTH`], 256).
     ///
-    /// The loader recurses once per level, so the limit guards the stack when
-    /// loading without alias expansion: the default loads on a 2 MiB thread in
-    /// a debug build, the build with the largest frames.  A higher value needs
-    /// a stack to match, and the event parser's own cap
-    /// ([`crate::MAX_COLLECTION_DEPTH`]) holds whatever this value.  The limit
-    /// does not bound the tree that alias expansion builds in
-    /// [`LoadMode::Resolved`], nor code that walks the loaded tree.
+    /// The loader recurses once per level, so the limit guards the stack: the
+    /// default loads on a 2 MiB thread in a debug build, the build with the
+    /// largest frames.  A higher value needs a stack to match, and the event
+    /// parser's own cap ([`crate::MAX_COLLECTION_DEPTH`]) holds whatever this
+    /// value.  The limit bounds the tree that alias expansion builds in
+    /// [`LoadMode::Resolved`] too: an alias that stands in `n` collections and
+    /// expands to `m` levels reaches `n + m`, and a document that reaches more
+    /// than the limit returns the error at that alias.  It does not bound code
+    /// that walks the loaded tree.
     pub max_nesting_depth: usize,
     /// Maximum number of distinct anchor names per document before returning
     /// [`LoadError::AnchorCountLimitExceeded`] (default: 10 000).
@@ -1075,7 +1077,7 @@ impl<'opt> LoadState<'opt> {
                     }
                 })?;
                 let mut in_progress: HashSet<String> = HashSet::new();
-                let expanded = self.expand_node(anchored, &mut in_progress, loc)?;
+                let expanded = self.expand_node(anchored, &mut in_progress, loc, self.depth)?;
                 // The node stands at the alias site, so a comment on its line
                 // is found there, not on the anchor's line.
                 Ok(reloc(expanded, loc))
@@ -1087,13 +1089,21 @@ impl<'opt> LoadState<'opt> {
     /// expansion limit and checking for cycles via `in_progress`.
     ///
     /// `alias_loc` is the span of the alias site that triggered this expansion
-    /// chain; it is used for error positions when the limit or a cycle is
+    /// chain; it is used for error positions when a limit or a cycle is
     /// detected inside expanded content.
+    ///
+    /// `depth` is the number of collections that enclose `node` in the
+    /// document being loaded: the depth of the alias site at the top of the
+    /// expansion, one more per collection the expansion enters.  A collection
+    /// that would pass `max_nesting_depth` levels is an error, like one the
+    /// parser meets, so no tree that the loader builds, drops, or clones is
+    /// deeper than the limit.
     fn expand_node(
         &mut self,
         node: Node<Span>,
         in_progress: &mut HashSet<String>,
         alias_loc: Span,
+        depth: usize,
     ) -> Result<Node<Span>> {
         // Increment at the top — before child recursion — so every node
         // (including non-alias nodes inside expanded trees) counts against the
@@ -1123,7 +1133,7 @@ impl<'opt> LoadState<'opt> {
                 })?;
                 in_progress.insert(name.clone());
                 // Pass the inner alias loc as the new alias_loc for deeper expansion.
-                let expanded = self.expand_node(target, in_progress, loc)?;
+                let expanded = self.expand_node(target, in_progress, loc, depth)?;
                 in_progress.remove(name);
                 // Re-stamp with the alias site's location.
                 Ok(reloc(expanded, loc))
@@ -1135,10 +1145,11 @@ impl<'opt> LoadState<'opt> {
                 loc,
                 meta,
             } => {
+                let depth = self.enter_expanded_collection(depth, alias_loc)?;
                 let mut expanded_entries = Vec::with_capacity(entries.len());
                 for (k, v) in entries {
-                    let ek = self.expand_node(k, in_progress, alias_loc)?;
-                    let ev = self.expand_node(v, in_progress, alias_loc)?;
+                    let ek = self.expand_node(k, in_progress, alias_loc, depth)?;
+                    let ev = self.expand_node(v, in_progress, alias_loc, depth)?;
                     expanded_entries.push((ek, ev));
                 }
                 Ok(Node::Mapping {
@@ -1156,9 +1167,10 @@ impl<'opt> LoadState<'opt> {
                 loc,
                 meta,
             } => {
+                let depth = self.enter_expanded_collection(depth, alias_loc)?;
                 let mut expanded_items = Vec::with_capacity(items.len());
                 for item in items {
-                    expanded_items.push(self.expand_node(item, in_progress, alias_loc)?);
+                    expanded_items.push(self.expand_node(item, in_progress, alias_loc, depth)?);
                 }
                 Ok(Node::Sequence {
                     items: expanded_items,
@@ -1171,6 +1183,20 @@ impl<'opt> LoadState<'opt> {
             // Scalars and already-resolved nodes — pass through.
             scalar @ Node::Scalar { .. } => Ok(scalar),
         }
+    }
+
+    /// The depth of the content of a collection that an expansion enters at
+    /// `depth`, or the nesting error at the alias site when that is deeper than
+    /// the limit.
+    fn enter_expanded_collection(&self, depth: usize, alias_loc: Span) -> Result<usize> {
+        let depth = depth.saturating_add(1);
+        if depth > self.options.max_nesting_depth {
+            return Err(LoadError::NestingDepthLimitExceeded {
+                limit: self.options.max_nesting_depth,
+                pos: span_start_to_pos(alias_loc.start, &self.line_index),
+            });
+        }
+        Ok(depth)
     }
 }
 
@@ -1967,7 +1993,7 @@ mod tests {
         state.anchor_map.insert("a".to_owned(), alias_node.clone());
         let mut in_progress = HashSet::new();
         let alias_loc = Span { start: 0, end: 0 };
-        let result = state.expand_node(alias_node, &mut in_progress, alias_loc);
+        let result = state.expand_node(alias_node, &mut in_progress, alias_loc, 0);
         assert!(
             matches!(result, Err(LoadError::CircularAlias { .. })),
             "expected CircularAlias, got: {result:?}"

@@ -48,7 +48,7 @@ where they arise.
 - [x] Task 6: A plain scalar in a flow collection is scanned to its own end
 - [x] Task 7: The "Delete unused anchor" quick fix reads only the blanks before its anchor
 - [x] Task 8: A single pair in a flow sequence spans its key and its value
-- [ ] Task 9: Alias expansion keeps to the nesting depth limit
+- [x] Task 9: Alias expansion keeps to the nesting depth limit
 - [ ] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
@@ -264,20 +264,20 @@ expanded, so a chain `a1: &a1 [*a0]`, `a2: &a2 [*a1]`, … deepens the tree by o
 of its alias and returns `NestingDepthLimitExceeded` at the alias when the tree would pass the
 limit. The task rests on YAML 1.2.2 §7.1 (alias nodes); the limit is the library's own.
 
-- [ ] On a 2 MiB thread in a debug build with the default options in `LoadMode::Resolved`, a chain
+- [x] On a 2 MiB thread in a debug build with the default options in `LoadMode::Resolved`, a chain
       whose expansion reaches 256 levels loads, and one that reaches 257 levels returns
       `NestingDepthLimitExceeded` at the position of its alias
-- [ ] The chain of 1 000 lines returns that error on that thread
-- [ ] With `max_nesting_depth(512)` on a 16 MiB thread in a debug build, an expansion of 512
+- [x] The chain of 1 000 lines returns that error on that thread
+- [x] With `max_nesting_depth(512)` on a 16 MiB thread in a debug build, an expansion of 512
       levels loads and one of 513 levels returns the error
-- [ ] The nesting, alias-bomb, and deep-anchor tests of `tests/robustness.rs` and the resolved-mode
+- [x] The nesting, alias-bomb, and deep-anchor tests of `tests/robustness.rs` and the resolved-mode
       tests of `tests/loader.rs` and `tests/loader_comments.rs` pass with their assertions
       unchanged
-- [ ] Every place that says what `max_nesting_depth` bounds says that it bounds the tree alias
+- [x] Every place that says what `max_nesting_depth` bounds says that it bounds the tree alias
       expansion builds: the docs in `src/loader.rs`, `README.md`, `docs/architecture.md`, and the
       nesting-limit entry of `docs/feature-log.md`, which also records that an expansion deeper
       than the limit is an error
-- [ ] `rlsp-yaml` loads the 1 000-line chain as before this task, without a diagnostic
+- [x] `rlsp-yaml` loads the 1 000-line chain as before this task, without a diagnostic
 
 ## Decisions
 
