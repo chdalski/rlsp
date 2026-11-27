@@ -1,5 +1,5 @@
 **Repository:** root
-**Status:** InProgress
+**Status:** Completed (2026-11-27)
 **Created:** 2026-11-26
 
 # Parser Robustness Bug Fixes
@@ -49,7 +49,7 @@ where they arise.
 - [x] Task 7: The "Delete unused anchor" quick fix reads only the blanks before its anchor
 - [x] Task 8: A single pair in a flow sequence spans its key and its value
 - [x] Task 9: Alias expansion keeps to the nesting depth limit
-- [ ] Push to `main` and confirm the full CI matrix is green
+- [x] Push to `main` and confirm the full CI matrix is green
 
 ## Tasks
 
